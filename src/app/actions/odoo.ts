@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { OdooClient } from '@/lib/odoo-client'
+import { encrypt, decrypt } from '@/lib/crypto'
 
 async function getOrCreateDbUser() {
   const { userId } = await auth()
@@ -110,6 +111,9 @@ export async function saveOdooConnection(data: {
       throw new Error(testResult.error || 'فشل اختبار الاتصال بالخادم (Connection test failed)')
     }
 
+    // Encrypt apiKey before saving
+    const encryptedKey = encrypt(data.apiKey.trim())
+
     // Check if connection already exists for this workspace
     const existingRes = await getActiveWorkspaceOdooConnection()
     const existing = existingRes.success ? existingRes.connection : null
@@ -124,7 +128,7 @@ export async function saveOdooConnection(data: {
           url: formattedUrl,
           db_name: data.dbName.trim(),
           username: data.username.trim(),
-          password: data.apiKey.trim(), // stored in password column
+          password: encryptedKey, // stored in password column encrypted
           status: 'connected',
           updated_at: new Date().toISOString(),
         })
@@ -145,7 +149,7 @@ export async function saveOdooConnection(data: {
             url: formattedUrl,
             db_name: data.dbName.trim(),
             username: data.username.trim(),
-            password: data.apiKey.trim(),
+            password: encryptedKey,
             status: 'connected',
           },
         ])
@@ -203,12 +207,13 @@ export async function getOdooModels() {
     }
 
     const { url, db_name, username, password } = connRes.connection
+    const decryptedPassword = decrypt(password)
 
     const client = new OdooClient({
       url,
       db: db_name || '',
       username,
-      apiKey: password,
+      apiKey: decryptedPassword,
     })
 
     // Fetch models from ir.model
@@ -244,12 +249,13 @@ export async function getOdooModelFields(modelName: string) {
     }
 
     const { url, db_name, username, password } = connRes.connection
+    const decryptedPassword = decrypt(password)
 
     const client = new OdooClient({
       url,
       db: db_name || '',
       username,
-      apiKey: password,
+      apiKey: decryptedPassword,
     })
 
     // Fetch fields directly from ir.model.fields database table via search_read
@@ -295,11 +301,12 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
     }
 
     const { url, db_name, username, password } = connRes.connection
+    const decryptedPassword = decrypt(password)
     const client = new OdooClient({
       url,
       db: db_name || '',
       username,
-      apiKey: password,
+      apiKey: decryptedPassword,
     })
 
     const fieldsMeta = await client.execute<Record<string, {

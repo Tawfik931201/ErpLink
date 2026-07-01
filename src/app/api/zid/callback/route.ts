@@ -6,12 +6,12 @@ import { getZidConfig } from '@/lib/zid/config'
 import { exchangeAuthorizationCodeForResponse, toStoredTokens } from '@/lib/zid/token'
 import { ZidOAuthError } from '@/lib/zid/types'
 
-function redirectToIntegrations(request: NextRequest, params: Record<string, string>) {
+function redirectToConnectZid(request: NextRequest, params: Record<string, string>) {
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
     process.env.NEXTAUTH_URL?.replace(/\/$/, '') ??
     request.nextUrl.origin
-  const url = new URL('/dashboard/integrations', appUrl)
+  const url = new URL('/dashboard/connect-zid', appUrl)
 
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value)
@@ -154,13 +154,13 @@ export async function GET(request: NextRequest) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'zid_denied', message: 'Merchant denied authorization' }, { status: 400 })
     }
-    return redirectToIntegrations(request, { error: 'zid_denied' })
+    return redirectToConnectZid(request, { error: 'zid_denied' })
   }
 
   if (!state || !storedState || state !== storedState) {
     console.warn('[Zid OAuth] Callback state validation failed')
     if (process.env.ZID_CALLBACK_RESPONSE !== 'json') {
-      return redirectToIntegrations(request, { error: 'invalid_state' })
+      return redirectToConnectZid(request, { error: 'invalid_state' })
     }
   }
 
@@ -169,7 +169,7 @@ export async function GET(request: NextRequest) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'zid_missing_code', message: 'Callback missing authorization code' }, { status: 400 })
     }
-    return redirectToIntegrations(request, { error: 'zid_missing_code' })
+    return redirectToConnectZid(request, { error: 'zid_missing_code' })
   }
 
   try {
@@ -234,7 +234,10 @@ export async function GET(request: NextRequest) {
 
     // 5. Save the token mapped to the real store ID and workspace ID
     if (merchantId) {
-      const tokenData = {
+      const storeUsername = storeData.username ?? null
+      const finalUsername = managerName ?? storeUsername ?? managerUsername
+
+      const tokenData: any = {
         merchant_id: merchantId,
         access_token: tokens.accessToken,
         refresh_token: tokens.refreshToken,
@@ -246,45 +249,118 @@ export async function GET(request: NextRequest) {
         workspace_id: workspaceId,
         name: storeName ?? managerName,
         email: managerEmail,
-        username: managerUsername,
+        username: finalUsername,
         uuid: storeData.uuid ?? userData.uuid ?? null,
         old_id: storeId ? Number(storeId) : null,
       }
 
-      const { data: existingToken, error: findError } = await supabase
+      let existingToken: any = null
+      
+      const { data: byMerchant, error: findErrorMerchant } = await supabase
         .from('merchant_tokens')
-        .select('merchant_id')
+        .select('*')
         .eq('merchant_id', merchantId)
         .maybeSingle()
 
-      if (findError) {
+      if (findErrorMerchant) {
         throw new ZidOAuthError({
           code: 'token_storage_failed',
-          message: 'Could not check existing Zid merchant token in Supabase.',
-          details: findError,
+          message: 'Could not check existing Zid merchant token by merchant_id in Supabase.',
+          details: findErrorMerchant,
         })
       }
 
-      if (existingToken) {
-        const { error: updateError } = await supabase
+      existingToken = byMerchant
+
+      if (!existingToken && workspaceId) {
+        const { data: byWorkspace, error: findErrorWorkspace } = await supabase
           .from('merchant_tokens')
-          .update(tokenData)
-          .eq('merchant_id', merchantId)
-        if (updateError) {
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .maybeSingle()
+
+        if (findErrorWorkspace) {
           throw new ZidOAuthError({
             code: 'token_storage_failed',
-            message: 'Could not update Zid merchant token in Supabase.',
-            details: updateError,
+            message: 'Could not check existing Zid merchant token by workspace_id in Supabase.',
+            details: findErrorWorkspace,
           })
         }
+        existingToken = byWorkspace
+      }
+
+      if (existingToken) {
+        // If workspace_id was not resolved in this flow but exists in the DB, preserve it
+        if (!tokenData.workspace_id && existingToken.workspace_id) {
+          tokenData.workspace_id = existingToken.workspace_id
+        }
+
+        if (existingToken.merchant_id === merchantId) {
+          // Same merchant ID: perform inline update
+          const { error: updateError } = await supabase
+            .from('merchant_tokens')
+            .update(tokenData)
+            .eq('merchant_id', merchantId)
+          if (updateError) {
+            throw new ZidOAuthError({
+              code: 'token_storage_failed',
+              message: 'Could not update Zid merchant token in Supabase.',
+              details: updateError,
+            })
+          }
+        } else {
+          // Different merchant ID for the same workspace/store: migrate mappings & settings
+          console.info(`[Zid OAuth] Migrating token from ${existingToken.merchant_id} to ${merchantId}`)
+          
+          // Migrate field mappings
+          if (tokenData.workspace_id) {
+            const { error: migrationError } = await supabase
+              .from('field_mappings')
+              .update({ merchant_id: merchantId })
+              .eq('workspace_id', tokenData.workspace_id)
+              .eq('merchant_id', existingToken.merchant_id)
+            if (migrationError) {
+              console.error('[Zid OAuth] Mappings migration failed:', migrationError)
+            }
+          }
+
+          // Preserve existing sync settings
+          tokenData.sync_settings = existingToken.sync_settings ?? {}
+
+          // Delete old token
+          const { error: deleteError } = await supabase
+            .from('merchant_tokens')
+            .delete()
+            .eq('merchant_id', existingToken.merchant_id)
+          if (deleteError) {
+            throw new ZidOAuthError({
+              code: 'token_storage_failed',
+              message: 'Could not delete old Zid merchant token in Supabase.',
+              details: deleteError,
+            })
+          }
+
+          // Insert new token
+          const { error: insertError } = await supabase
+            .from('merchant_tokens')
+            .insert([tokenData])
+          if (insertError) {
+            throw new ZidOAuthError({
+              code: 'token_storage_failed',
+              message: 'Could not insert new Zid merchant token in Supabase.',
+              details: insertError,
+            })
+          }
+        }
       } else {
+        // Create new connection
         const { error: insertError } = await supabase
           .from('merchant_tokens')
           .insert([tokenData])
         if (insertError) {
           throw new ZidOAuthError({
             code: 'token_storage_failed',
-            message: 'Could not insert Zid merchant token in Supabase.',
+            message: 'Could not insert new Zid merchant token in Supabase.',
             details: insertError,
           })
         }
@@ -308,7 +384,7 @@ export async function GET(request: NextRequest) {
       return response
     }
 
-    const response = redirectToIntegrations(request, { 
+    const response = redirectToConnectZid(request, { 
       success: 'zid_connected',
       store: storeName ? encodeURIComponent(storeName) : (storeId ?? '')
     })
@@ -330,7 +406,7 @@ export async function GET(request: NextRequest) {
       }, { status })
     }
 
-    return redirectToIntegrations(request, {
+    return redirectToConnectZid(request, {
       error: error instanceof ZidOAuthError ? error.code : 'zid_token_exchange_failed',
     })
   }

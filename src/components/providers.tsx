@@ -6,8 +6,16 @@ import { ThemeProvider } from 'next-themes'
 import { useState } from 'react'
 
 import { Toaster } from '@/components/ui/toaster'
+import { LanguageProvider } from '@/components/language-provider'
+import { Language } from '@/lib/translations'
 
-export default function Providers({ children }: { children: React.ReactNode }) {
+export default function Providers({ 
+  children,
+  initialLang,
+}: { 
+  children: React.ReactNode 
+  initialLang: Language
+}) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -22,12 +30,14 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ClerkProvider>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-          {children}
-          <Toaster />
-        </ThemeProvider>
-      </QueryClientProvider>
+      <LanguageProvider initialLang={initialLang}>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+            {children}
+            <Toaster />
+          </ThemeProvider>
+        </QueryClientProvider>
+      </LanguageProvider>
     </ClerkProvider>
   )
 }

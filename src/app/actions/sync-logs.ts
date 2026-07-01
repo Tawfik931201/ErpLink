@@ -1,0 +1,189 @@
+'use server'
+
+import { auth } from '@clerk/nextjs/server'
+import { revalidatePath } from 'next/cache'
+import { supabase } from '@/lib/supabase'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
+import { processSingleMapping, cleanupExpiredLogs } from '@/lib/sync-engine'
+
+async function getOrCreateDbUser() {
+  console.log('[sync-logs action] Calling Clerk auth()...')
+  const { userId } = await auth()
+  console.log('[sync-logs action] Clerk userId:', userId)
+  if (!userId) throw new Error('Unauthorized')
+  
+  console.log('[sync-logs action] Calling ensureDbUser...')
+  const dbUser = await ensureDbUser(userId)
+  console.log('[sync-logs action] dbUser resolved with active_workspace_id:', dbUser?.active_workspace_id)
+  return dbUser
+}
+
+export async function getSyncLogs(params: {
+  mappingId?: string
+  status?: string
+  limit?: number
+  offset?: number
+}) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: true, logs: [], totalCount: 0 }
+    }
+
+    // Purge expired logs in background
+    cleanupExpiredLogs().catch(err => console.error('[getSyncLogs] Background cleanup failed:', err))
+
+    console.log('[getSyncLogs] Querying sync_logs table for workspace:', user.active_workspace_id)
+    
+    // We want to fetch the logs and join with field_mappings if possible to get mapping names.
+    // If field_mappings table has name, we can select it.
+    let query = supabase
+      .from('sync_logs')
+      .select('*, field_mappings(name)', { count: 'exact' })
+      .eq('workspace_id', user.active_workspace_id)
+      .order('created_at', { ascending: false })
+
+    if (params.mappingId && params.mappingId !== 'all') {
+      const mappingIds = params.mappingId.split(',')
+      if (mappingIds.length > 0) {
+        query = query.in('field_mapping_id', mappingIds)
+      }
+    }
+    
+    if (params.status && params.status !== 'all') {
+      const selectedTypes = params.status.split(',')
+      const clauses: string[] = []
+
+      if (selectedTypes.includes('success') && selectedTypes.includes('manual')) {
+        clauses.push("status.eq.success")
+      } else if (selectedTypes.includes('success')) {
+        clauses.push("and(status.eq.success,or(error_message.is.null,error_message.not.ilike.%Resolved manually%))")
+      } else if (selectedTypes.includes('manual')) {
+        clauses.push("and(status.eq.success,error_message.ilike.%Resolved manually%)")
+      }
+
+      if (selectedTypes.includes('failed')) {
+        clauses.push("status.eq.failed")
+      }
+      if (selectedTypes.includes('skipped')) {
+        clauses.push("status.eq.skipped")
+      }
+
+      if (clauses.length > 0 && clauses.length < 4) {
+        query = query.or(clauses.join(','))
+      } else if (clauses.length === 0) {
+        // If nothing is selected, force query to return no results
+        query = query.eq('id', '00000000-0000-0000-0000-000000000000')
+      }
+    }
+
+    const limit = params.limit || 20
+    const offset = params.offset || 0
+    query = query.range(offset, offset + limit - 1)
+
+    const { data: logs, count, error } = await query
+
+    if (error) throw new Error('Failed to query sync logs: ' + error.message)
+
+    return {
+      success: true,
+      logs: logs || [],
+      totalCount: count || 0
+    }
+  } catch (error: any) {
+    console.error('[Sync Logs Action] getSyncLogs failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch sync logs' }
+  }
+}
+
+export async function retrySyncLog(logId: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    console.log('[retrySyncLog] Fetching log by ID:', logId)
+    // 1. Fetch log
+    const { data: log, error: logErr } = await supabase
+      .from('sync_logs')
+      .select('*')
+      .eq('id', logId)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+
+    if (logErr) throw new Error('Failed to fetch log: ' + logErr.message)
+    if (!log) throw new Error('Sync log not found')
+
+    console.log('[retrySyncLog] Fetching mapping by ID:', log.field_mapping_id)
+    // 2. Fetch field mapping
+    const { data: mapping, error: mapErr } = await supabase
+      .from('field_mappings')
+      .select('*')
+      .eq('id', log.field_mapping_id)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+
+    if (mapErr) throw new Error('Failed to fetch field mapping: ' + mapErr.message)
+    if (!mapping) throw new Error('المطابقة الخاصة بهذا السجل تم حذفها ولا يمكن إعادة إرسالها (Associated field mapping was deleted)')
+
+    console.log('[retrySyncLog] Re-running sync processing for mapping:', mapping.name)
+    // 3. Re-run mapping
+    const result = await processSingleMapping(
+      mapping,
+      log.event,
+      log.store_id,
+      log.payload || {},
+      'manual', // triggerType
+      logId // existingLogId
+    )
+
+    revalidatePath('/dashboard/field-mapping')
+
+    return {
+      success: true,
+      status: result.status,
+      message: result.message || 'تمت إعادة معالجة المزامنة بنجاح (Sync retry completed)'
+    }
+  } catch (error: any) {
+    console.error('[Sync Logs Action] retrySyncLog failed:', error)
+    return { success: false, error: error.message || 'Failed to retry sync' }
+  }
+}
+
+export async function resolveLogManually(logId: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    console.log('[resolveLogManually] Updating log ID to success (manual resolve):', logId)
+    
+    const { data: updated, error } = await supabase
+      .from('sync_logs')
+      .update({
+        status: 'success',
+        error_message: 'Resolved manually in Odoo / تم الحل يدويًا في أودو',
+        trigger_type: 'manual'
+      })
+      .eq('id', logId)
+      .eq('workspace_id', user.active_workspace_id)
+      .select()
+      .maybeSingle()
+
+    if (error) {
+      throw new Error('Failed to resolve log: ' + error.message)
+    }
+
+    revalidatePath('/dashboard/field-mapping')
+
+    return {
+      success: true,
+      message: 'تم تعيين السجل كمحلول يدويًا بنجاح (Log marked as manually resolved)'
+    }
+  } catch (error: any) {
+    console.error('[Sync Logs Action] resolveLogManually failed:', error)
+    return { success: false, error: error.message || 'Failed to resolve log manually' }
+  }
+}

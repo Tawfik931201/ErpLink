@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Check, ChevronsUpDown, Search, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
+import { useLanguage } from '@/components/language-provider'
+import { formatFieldLabel } from '@/lib/translations'
 
 interface Option {
   value: string
@@ -27,7 +29,7 @@ export default function SearchableSelect({
   options = [],
   value,
   onChange,
-  placeholder = 'Search...',
+  placeholder,
   className,
   disabled = false,
   variant = 'default',
@@ -37,6 +39,10 @@ export default function SearchableSelect({
   const [searchQuery, setSearchQuery] = useState('')
   const [focusedIndex, setFocusedIndex] = useState(-1)
   const [dropdownDirection, setDropdownDirection] = useState<'down' | 'up'>('down')
+  const { lang, dir } = useLanguage()
+
+  const defaultPlaceholder = lang === 'ar' ? 'بحث...' : 'Search...'
+  const finalPlaceholder = placeholder || defaultPlaceholder
   
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -67,10 +73,13 @@ export default function SearchableSelect({
   const filteredOptions = options.filter((opt) => {
     const query = searchQuery.toLowerCase().trim()
     if (!query) return true
+    const cleanLabelStr = formatFieldLabel(opt.label, lang).toLowerCase()
+    const cleanGroupStr = opt.group ? formatFieldLabel(opt.group, lang).toLowerCase() : ''
     return (
-      opt.label.toLowerCase().includes(query) ||
+      cleanLabelStr.includes(query) ||
       opt.value.toLowerCase().includes(query) ||
-      (opt.desc && opt.desc.toLowerCase().includes(query))
+      (opt.desc && opt.desc.toLowerCase().includes(query)) ||
+      cleanGroupStr.includes(query)
     )
   })
 
@@ -163,11 +172,11 @@ export default function SearchableSelect({
     if (isOpen) {
       return searchQuery
     }
-    return selectedOption ? selectedOption.label : ''
+    return selectedOption ? formatFieldLabel(selectedOption.label, lang) : ''
   }
 
   return (
-    <div ref={containerRef} className={cn('relative w-full', className)}>
+    <div ref={containerRef} className={cn('relative w-full', className)} dir={dir}>
       <div
         className={cn(
           'flex w-full items-center justify-between rounded-md text-sm ring-offset-background transition-all',
@@ -181,7 +190,7 @@ export default function SearchableSelect({
       >
         <div className="flex-1 flex flex-wrap items-center gap-1.5">
           {/* Search Icon */}
-          {!multiple && isOpen && <Search className="h-4 w-4 text-muted-foreground mr-1.5 shrink-0" />}
+          {!multiple && isOpen && <Search className={cn("h-4 w-4 text-muted-foreground shrink-0", dir === 'ar' ? "ml-1.5" : "mr-1.5")} />}
           
           {/* Multi-select Badges */}
           {multiple && Array.isArray(value) && value.map((val) => {
@@ -192,7 +201,7 @@ export default function SearchableSelect({
                 key={val}
                 className="inline-flex items-center gap-1 bg-[#00878a]/10 text-[#00878a] text-xs font-semibold px-2 py-0.5 rounded-md border border-[#00878a]/20 animate-in zoom-in-95 duration-150"
               >
-                {opt.label.split(' (')[0]}
+                {formatFieldLabel(opt.label, lang)}
                 <button
                   type="button"
                   onClick={(e) => {
@@ -212,7 +221,7 @@ export default function SearchableSelect({
             ref={inputRef}
             type="text"
             disabled={disabled}
-            placeholder={multiple && Array.isArray(value) && value.length > 0 ? '' : placeholder}
+            placeholder={multiple && Array.isArray(value) && value.length > 0 ? '' : finalPlaceholder}
             value={getDisplayText()}
             onChange={(e) => {
               setSearchQuery(e.target.value)
@@ -295,7 +304,7 @@ export default function SearchableSelect({
                     return Object.entries(grouped).map(([groupName, groupOptions]) => (
                       <div key={groupName} className="py-1">
                         <div className="px-3 py-1 text-xs font-extrabold text-muted-foreground/80 bg-muted/20 select-none tracking-wider rounded-sm mb-1 uppercase">
-                          {groupName}
+                          {formatFieldLabel(groupName, lang)}
                         </div>
                         <div className="space-y-0.5 px-1">
                           {groupOptions.map((opt) => {
@@ -319,7 +328,7 @@ export default function SearchableSelect({
                                 )}
                               >
                                 <div className="flex flex-col">
-                                  <span className="truncate">{opt.label}</span>
+                                  <span className="truncate">{formatFieldLabel(opt.label, lang)}</span>
                                   {opt.desc && (
                                     <span className="text-xs text-muted-foreground/75 mt-0.5 truncate max-w-md">
                                       {opt.desc}
@@ -359,7 +368,7 @@ export default function SearchableSelect({
                           )}
                         >
                           <div className="flex flex-col">
-                            <span className="truncate">{opt.label}</span>
+                            <span className="truncate">{formatFieldLabel(opt.label, lang)}</span>
                             {opt.desc && (
                               <span className="text-xs text-muted-foreground/75 mt-0.5 truncate max-w-md">
                                 {opt.desc}
@@ -377,7 +386,7 @@ export default function SearchableSelect({
                 )
               ) : (
                 <div className="py-6 text-center text-sm text-muted-foreground italic">
-                  No matches found
+                  {lang === 'ar' ? 'لم يتم العثور على نتائج' : 'No matches found'}
                 </div>
               )}
             </div>

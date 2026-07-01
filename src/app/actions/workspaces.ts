@@ -20,13 +20,13 @@ export async function getWorkspaces() {
     
     const { data: ownedWorkspaces, error: err1 } = await supabase
       .from('workspaces')
-      .select('*, merchant_tokens(merchant_id), odoo_connections(id)')
+      .select('*, merchant_tokens(merchant_id, name), odoo_connections(id)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
     const { data: membershipData, error: err2 } = await supabase
       .from('workspace_members')
-      .select('*, workspaces(*, merchant_tokens(merchant_id), odoo_connections(id))')
+      .select('*, workspaces(*, merchant_tokens(merchant_id, name), odoo_connections(id))')
       .eq('user_id', user.id)
 
     if (err1 || err2) throw new Error('Failed to fetch workspaces from database')

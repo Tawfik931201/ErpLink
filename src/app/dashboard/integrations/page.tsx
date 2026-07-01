@@ -134,12 +134,12 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   إدارة الربط (Manage)
                 </Link>
               ) : (
-                <Link
+                <a
                   href="/api/zid/connect"
                   className="gradient-brand inline-flex h-9 items-center justify-center rounded-xl px-4 text-sm font-medium text-white shadow-md transition-colors hover:opacity-90 active:opacity-80"
                 >
                   ربط متجر زد (Connect Zid)
-                </Link>
+                </a>
               )}
             </div>
           </CardContent>

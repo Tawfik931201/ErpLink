@@ -11,13 +11,17 @@ import {
   Layers, 
   Calendar,
   AlertTriangle,
-  Loader2
+  Loader2,
+  History
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ZID_EVENTS } from './field-mapping-form'
 import FieldMappingForm from './field-mapping-form'
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
+import { useLanguage } from '@/components/language-provider'
+import { formatFieldLabel } from '@/lib/translations'
+import SyncLogModal from './sync-log-modal'
 
 interface FieldMappingClientProps {
   initialModels: Array<{ model: string; name: string }>
@@ -36,10 +40,16 @@ export default function FieldMappingClient({
   const [mappings, setMappings] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedMapping, setSelectedMapping] = useState<any>(null)
+  const { t, lang, dir } = useLanguage()
   
   // Delete confirm state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Logs state
+  const [isLogOpen, setIsLogOpen] = useState(false)
+  const [logMappingId, setLogMappingId] = useState<string | undefined>(undefined)
+  const [logMappingName, setLogMappingName] = useState<string | undefined>(undefined)
 
   // Load mappings on mount
   const loadMappings = async () => {
@@ -93,7 +103,7 @@ export default function FieldMappingClient({
 
   const getEventName = (eventId: string) => {
     const found = ZID_EVENTS.find(e => e.id === eventId)
-    return found ? found.name : eventId
+    return found ? formatFieldLabel(found.name, lang) : eventId
   }
 
   // Count total fields in all mappings nested object
@@ -110,14 +120,14 @@ export default function FieldMappingClient({
 
   if (view === 'create') {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" dir={dir}>
         <Button 
           variant="ghost" 
           onClick={() => setView('list')} 
           className="gap-2 text-muted-foreground hover:text-foreground text-sm font-semibold rounded-lg mb-2"
         >
-          <ArrowRight className="h-4 w-4" />
-          العودة للقائمة (Back to List)
+          <ArrowRight className={cn("h-4 w-4", lang === 'ar' ? "rotate-0" : "rotate-180")} />
+          {lang === 'ar' ? 'العودة للقائمة' : 'Back to List'}
         </Button>
         <FieldMappingForm
           initialModels={initialModels}
@@ -141,7 +151,7 @@ export default function FieldMappingClient({
     const initialRelated = allModelKeys.filter(k => k !== primaryModel)
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" dir={dir}>
         <Button 
           variant="ghost" 
           onClick={() => {
@@ -150,8 +160,8 @@ export default function FieldMappingClient({
           }} 
           className="gap-2 text-muted-foreground hover:text-foreground text-sm font-semibold rounded-lg mb-2"
         >
-          <ArrowRight className="h-4 w-4" />
-          العودة للقائمة (Back to List)
+          <ArrowRight className={cn("h-4 w-4", lang === 'ar' ? "rotate-0" : "rotate-180")} />
+          {lang === 'ar' ? 'العودة للقائمة' : 'Back to List'}
         </Button>
         <FieldMappingForm
           initialModels={initialModels}
@@ -182,217 +192,203 @@ export default function FieldMappingClient({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-4xl mx-auto space-y-4 font-sans" dir={dir}>
       
       {/* Top Header Row */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-[#00878a] to-purple-600 bg-clip-text text-transparent">
-            ربط الحقول (Field Mapping)
+          <h1 className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+            {t('nav.fieldMapping')}
           </h1>
-          <p className="mt-2 text-muted-foreground text-sm">
-            تخصيص ومطابقة الحقول بين نظام أودو ERP ومتجر زد لضمان دقة مزامنة البيانات والمنتجات تلقائياً.
+          <p className="mt-1 text-muted-foreground text-[11px]">
+            {t('map.desc')}
           </p>
         </div>
-        <Button 
-          onClick={() => setView('create')}
-          className="bg-[#00878a] hover:bg-[#007073] text-white gap-2 font-medium rounded-xl shadow-lg shadow-[#00878a]/10 transition-all self-start sm:self-center"
-        >
-          <Plus className="h-4 w-4" />
-          إضافة ربط جديد
-        </Button>
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setLogMappingId(undefined)
+              setLogMappingName(undefined)
+              setIsLogOpen(true)
+            }}
+            className="border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800 gap-1.5 font-medium rounded-lg h-9 text-xs shadow-sm"
+          >
+            <History className="h-3.5 w-3.5 text-muted-foreground" />
+            {lang === 'ar' ? 'سجل المزامنة العام' : 'Global Sync Log'}
+          </Button>
+          <Button 
+            onClick={() => setView('create')}
+            className="gradient-brand text-white gap-1.5 font-medium rounded-lg h-9 text-xs shadow-sm hover:scale-[1.01] transition-transform duration-200"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {lang === 'ar' ? 'إضافة ربط جديد' : 'Add New Mapping'}
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center min-h-[300px] bg-card rounded-2xl border border-border/60 p-12">
-          <Loader2 className="h-10 w-10 text-[#00878a] animate-spin mb-4" />
-          <p className="text-sm text-muted-foreground font-medium">جاري تحميل إعدادات الربط...</p>
+        <div className="flex flex-col items-center justify-center min-h-[200px] bg-white border border-slate-200/80 rounded-xl p-8">
+          <Loader2 className="h-8 w-8 text-primary animate-spin mb-3" />
+          <p className="text-xs text-muted-foreground font-medium">{lang === 'ar' ? 'جاري تحميل إعدادات الربط...' : 'Loading field mappings...'}</p>
         </div>
       ) : mappings.length === 0 ? (
-        <div className="flex flex-col items-center justify-center text-center min-h-[350px] bg-card rounded-2xl border border-border/60 p-8 md:p-12 shadow-sm font-sans">
-          <div className="h-16 w-16 rounded-full bg-gradient-to-br from-[#00878a]/10 to-purple-500/10 flex items-center justify-center mb-6">
-            <SlidersHorizontal className="h-8 w-8 text-[#00878a]" />
+        <div className="flex flex-col items-center justify-center text-center min-h-[250px] bg-white rounded-xl border border-slate-200/80 p-6 shadow-sm">
+          <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary/10 to-purple-500/10 flex items-center justify-center mb-4">
+            <SlidersHorizontal className="h-6 w-6 text-primary" />
           </div>
-          <h3 className="text-lg font-bold text-foreground mb-2">لا يوجد ربط حقول حالياً (No Mappings Found)</h3>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto mb-6 leading-relaxed">
-            قم بربط وتخصيص كيفية انتقال الحقول بين منصتي زد وأودو لإيقاف المزامنة اليدوية وبدء المزامنة التلقائية.
+          <h3 className="text-sm font-bold text-foreground mb-1">{lang === 'ar' ? 'لا يوجد ربط حقول حالياً' : 'No Field Mappings Found'}</h3>
+          <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4 leading-relaxed">
+            {lang === 'ar' 
+              ? 'قم بربط وتخصيص كيفية انتقال الحقول بين منصتي زد وأودو لإيقاف المزامنة اليدوية وبدء المزامنة التلقائية.' 
+              : 'Map and customize how fields flow between Zid and Odoo to automate data synchronization.'}
           </p>
           <Button 
             onClick={() => setView('create')}
-            className="bg-[#00878a] hover:bg-[#007073] text-white gap-2 font-semibold rounded-xl"
+            className="gradient-brand text-white gap-1.5 font-semibold rounded-lg h-9 text-xs shadow-sm hover:scale-[1.01] transition-transform duration-200"
           >
-            <Plus className="h-4 w-4" />
-            ابدأ ربط الحقول الآن
+            <Plus className="h-3.5 w-3.5" />
+            {lang === 'ar' ? 'ابدأ ربط الحقول الآن' : 'Start Mapping Fields'}
           </Button>
         </div>
       ) : (
-        <div className="bg-card rounded-2xl border border-border shadow-md overflow-hidden font-sans">
-          <div className="overflow-x-auto">
-            <table className="w-full text-right border-collapse">
-              <thead>
-                <tr className="border-b border-border/80 bg-muted/30 text-muted-foreground text-xs font-bold uppercase tracking-wider">
-                  <th className="py-4 px-6">الاسم (Name)</th>
-                  <th className="py-4 px-6">الحدث (Zid Event)</th>
-                  <th className="py-4 px-6 text-center">عملية أودو</th>
-                  <th className="py-4 px-6 text-center">الموديل الأساسي (Odoo Model)</th>
-                  <th className="py-4 px-6 text-center">مفتاح المطابقة</th>
-                  <th className="py-4 px-6">الموديلات المرتبطة وحقولها (Mapped Tables)</th>
-                  <th className="py-4 px-6 text-center">تاريخ الإنشاء (Created At)</th>
-                  <th className="py-4 px-6 text-center">العمليات (Actions)</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {mappings.map((item) => {
-                  const totalFields = countTotalMappedFields(item.mappings)
-                  const relatedKeys = Object.keys(item.mappings || {})
-                  const formattedDate = item.created_at 
-                    ? new Date(item.created_at).toLocaleString('ar-EG', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })
-                    : '-'
+        <div className="bg-white border border-slate-200/80 shadow-sm rounded-xl overflow-hidden divide-y divide-border/60">
+          {mappings.map((item) => {
+            const totalFields = countTotalMappedFields(item.mappings)
+            const formattedDate = item.created_at 
+              ? new Date(item.created_at).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })
+              : '-'
 
-                  return (
-                    <tr 
-                      key={item.id} 
-                      className="hover:bg-muted/10 transition-colors group"
-                    >
-                      {/* Name */}
-                      <td className="py-4 px-6 font-semibold text-sm text-foreground">
-                        {item.name || 'ربط حقول غير مسمى'}
-                      </td>
+            return (
+              <div 
+                key={item.id} 
+                className="p-4 hover:bg-muted/5 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
+                {/* Details */}
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary mt-0.5">
+                    <SlidersHorizontal className="h-4.5 w-4.5" />
+                  </div>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-xs text-foreground break-all">
+                        {item.name || (lang === 'ar' ? 'ربط حقول غير مسمى' : 'Unnamed field mapping')}
+                      </span>
+                      <span className={cn(
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold",
+                        getEventBadgeStyles(item.action)
+                      )}>
+                        {getEventName(item.action)}
+                      </span>
+                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold border bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20">
+                        {item.odoo_operation === 'delete'
+                          ? t('map.operationDelete')
+                          : item.odoo_operation === 'update'
+                            ? t('map.operationUpdate')
+                            : t('map.operationCreate')}
+                      </span>
+                    </div>
 
-                      {/* Zid Event */}
-                      <td className="py-4 px-6">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold border",
-                            getEventBadgeStyles(item.action)
-                          )}>
-                            {getEventName(item.action)}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Odoo Operation */}
-                      <td className="py-4 px-6 text-center">
-                        <span className="inline-flex items-center rounded-lg px-2.5 py-1 text-xs font-semibold border bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-500/20">
-                          {item.odoo_operation === 'delete'
-                            ? 'حذف'
-                            : item.odoo_operation === 'update'
-                              ? 'تعديل'
-                              : 'إنشاء'}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Database className="h-3 w-3 text-muted-foreground" />
+                        <span>{lang === 'ar' ? 'نموذج أودو: ' : 'Odoo Model: '}<span className="font-mono text-foreground font-semibold">{item.odoo_model}</span></span>
+                      </span>
+                      {(item.odoo_operation === 'update' || item.odoo_operation === 'delete') && (item.odoo_match_field || item.zid_match_field) && (
+                        <span className="flex items-center gap-1">
+                          <Layers className="h-3 w-3 text-muted-foreground" />
+                          <span>{lang === 'ar' ? 'مطابقة: ' : 'Matching: '}<span className="font-mono text-foreground font-semibold">{item.odoo_match_field || '-'} ⇄ {item.zid_match_field || '-'}</span></span>
                         </span>
-                      </td>
+                      )}
+                      <span className="flex items-center gap-1">
+                        <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
+                        <span>{lang === 'ar' ? 'الحقول المربوطة: ' : 'Mapped fields: '}<span className="font-semibold text-foreground">{totalFields}</span></span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-                      {/* Primary Odoo Model */}
-                      <td className="py-4 px-6 text-center">
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-500/5 border border-zinc-500/10 text-sm font-medium text-foreground">
-                          <Database className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="font-mono text-xs">{item.odoo_model}</span>
-                        </div>
-                      </td>
-
-                      {/* Mapped Sub-tables details */}
-                      <td className="py-4 px-6 text-center">
-                        {item.odoo_operation === 'update' || item.odoo_operation === 'delete' ? (
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {item.odoo_match_field || '-'} = {item.zid_match_field || '-'}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">-</span>
-                        )}
-                      </td>
-
-                      {/* Mapped Sub-tables details */}
-                      <td className="py-4 px-6">
-                        <div className="flex flex-col gap-1.5">
-                          {relatedKeys.map((modelName) => {
-                            const count = item.mappings[modelName]?.length || 0
-                            return (
-                              <div key={modelName} className="flex items-center gap-2 text-xs">
-                                <span className="font-mono text-muted-foreground">{modelName}</span>
-                                <span className="h-1.5 w-1.5 rounded-full bg-border" />
-                                <span className="font-semibold text-foreground/80">{count} حقول</span>
-                              </div>
-                            )
-                          })}
-                          {relatedKeys.length === 0 && (
-                            <span className="text-xs text-muted-foreground italic">لا توجد حقول مربوطة</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Created At */}
-                      <td className="py-4 px-6 text-center text-xs text-muted-foreground font-medium">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Calendar className="h-3.5 w-3.5 text-muted-foreground/60" />
-                          <span>{formattedDate}</span>
-                        </div>
-                      </td>
-
-                      {/* Operations */}
-                      <td className="py-4 px-6 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          {deleteConfirmId === item.id ? (
-                            <div className="flex items-center gap-1 bg-destructive/10 border border-destructive/20 rounded-lg p-1 animate-in fade-in zoom-in duration-200">
-                              <span className="text-[10px] font-semibold text-destructive px-1.5">هل أنت متأكد؟</span>
-                              <Button 
-                                size="sm" 
-                                variant="destructive" 
-                                disabled={isDeleting}
-                                onClick={() => handleDelete(item.id)}
-                                className="h-6 px-2 text-xs font-semibold rounded-md"
-                              >
-                                {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'حذف'}
-                              </Button>
-                              <Button 
-                                size="sm" 
-                                variant="ghost" 
-                                onClick={() => setDeleteConfirmId(null)}
-                                className="h-6 px-2 text-xs font-semibold text-muted-foreground rounded-md hover:bg-muted"
-                              >
-                                إلغاء
-                              </Button>
-                            </div>
-                          ) : (
-                            <>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => {
-                                  setSelectedMapping(item)
-                                  setView('edit')
-                                }}
-                                className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted"
-                                title="تعديل"
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => setDeleteConfirmId(item.id)}
-                                className="h-8 w-8 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10"
-                                title="حذف"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                {/* Operations */}
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {deleteConfirmId === item.id ? (
+                    <div className="flex items-center gap-1 bg-destructive/10 border border-destructive/20 rounded-lg p-1 animate-in fade-in zoom-in duration-200">
+                      <span className="text-[10px] font-semibold text-destructive px-1.5">{lang === 'ar' ? 'تأكيد؟' : 'Confirm?'}</span>
+                      <Button 
+                        size="sm" 
+                        variant="destructive" 
+                        disabled={isDeleting}
+                        onClick={() => handleDelete(item.id)}
+                        className="h-6 px-2 text-xs font-semibold rounded-md"
+                      >
+                        {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : t('ws.deleteBtn')}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="h-6 px-2 text-xs font-semibold text-muted-foreground rounded-md hover:bg-muted"
+                      >
+                        {t('ws.cancelBtn')}
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setLogMappingId(item.id)
+                          setLogMappingName(item.name)
+                          setIsLogOpen(true)
+                        }}
+                        className="h-8 w-8 text-muted-foreground hover:text-primary rounded-lg hover:bg-primary/5"
+                        title={lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
+                      >
+                        <History className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedMapping(item)
+                          setView('edit')
+                        }}
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted"
+                        title={t('ws.editBtn')}
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setDeleteConfirmId(item.id)}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10"
+                        title={t('ws.deleteBtn')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
+      
+      <SyncLogModal 
+        isOpen={isLogOpen}
+        onClose={() => setIsLogOpen(false)}
+        mappingId={logMappingId}
+        mappingName={logMappingName}
+        mappingsList={mappings.map(m => ({ id: m.id, name: m.name }))}
+      />
     </div>
   )
 }

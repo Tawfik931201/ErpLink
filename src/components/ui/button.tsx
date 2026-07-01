@@ -4,24 +4,34 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-semibold ring-offset-background transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 gap-2',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        default:
+          'bg-primary text-primary-foreground hover:bg-primary/90 shadow-primary hover:shadow-lg hover:opacity-90',
+        destructive:
+          'bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-sm',
+        outline:
+          'border border-border bg-card text-foreground/80 hover:bg-secondary hover:text-foreground shadow-sm',
+        secondary:
+          'bg-secondary text-foreground/90 hover:bg-secondary/80',
+        ghost:
+          'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        link:
+          'text-primary underline-offset-4 hover:underline p-0 h-auto',
         brand:
-          'gradient-brand text-white shadow-lg hover:opacity-90 active:opacity-80',
+          'gradient-brand text-white shadow-primary hover:shadow-lg hover:opacity-90 active:opacity-80',
+        success:
+          'bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm dark:bg-emerald-500 dark:hover:bg-emerald-400',
       },
       size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 rounded-md px-3',
-        lg: 'h-11 rounded-md px-8',
-        icon: 'h-10 w-10',
+        default: 'h-10 px-5 py-2',
+        sm: 'h-8 px-3.5 text-xs rounded-lg',
+        lg: 'h-12 px-7 text-base',
+        xl: 'h-14 px-8 text-base',
+        icon: 'h-10 w-10 rounded-xl',
+        'icon-sm': 'h-8 w-8 rounded-lg',
       },
     },
     defaultVariants: {
@@ -38,14 +48,12 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const { children, ...buttonProps } = props
-
+  ({ className, variant, size, asChild = false, children, ...props }, ref) => {
     if (asChild && React.isValidElement(children)) {
       const child = React.Children.only(children)
 
       return React.cloneElement(child, {
-        ...buttonProps,
+        ...props,
         className: cn(
           buttonVariants({ variant, size, className }),
           child.props.className
@@ -58,8 +66,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        {...buttonProps}
-      />
+        {...props}
+      >
+        {children}
+      </button>
     )
   }
 )

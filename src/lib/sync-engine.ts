@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { OdooClient } from '@/lib/odoo-client'
+import { decrypt } from '@/lib/crypto'
 
 // ─── Supabase admin client (bypasses RLS) ────────────────────────────────────
 // Webhook requests have NO Clerk auth session, so the standard supabase client
@@ -23,7 +24,7 @@ const supabaseAdmin = createClient(
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface FieldMappingRow {
+export interface FieldMappingRow {
   id: string
   workspace_id: string
   odoo_connection_id: string | null
@@ -78,7 +79,7 @@ export interface SyncEngineResult {
 
 // ─── Helper: resolve a nested path like "name.ar" from a plain object ─────────
 
-function resolvePath(obj: Record<string, unknown>, path: string): unknown {
+export function resolvePath(obj: Record<string, unknown>, path: string): unknown {
   const value = path.split('.').reduce<unknown>((acc, key) => {
     if (acc && typeof acc === 'object' && !Array.isArray(acc)) {
       return (acc as Record<string, unknown>)[key]
@@ -96,7 +97,7 @@ function resolvePath(obj: Record<string, unknown>, path: string): unknown {
 
 // ─── Helper: extract a display name from a raw value ──────────────────────────
 
-function toNameString(v: unknown): string {
+export function toNameString(v: unknown): string {
   if (typeof v === 'string') return v.trim()
   if (typeof v === 'number') return String(v)
   if (v && typeof v === 'object') {
@@ -108,7 +109,7 @@ function toNameString(v: unknown): string {
 
 // ─── Helper: fetch Odoo field metadata (ttype + relation) for a model ─────────
 
-async function fetchFieldMeta(
+export async function fetchFieldMeta(
   client: OdooClient,
   model: string,
   fieldNames: string[]
@@ -155,7 +156,7 @@ async function resolveMany2oneId(
 
 // ─── Helper: build the Odoo values dict from Zid data + field meta ────────────
 
-async function buildOdooValues(
+export async function buildOdooValues(
   client: OdooClient,
   mappingItems: FieldMappingItem[],
   zidData: Record<string, unknown>,
@@ -259,6 +260,7 @@ async function buildOdooValues(
 // ─── Log a sync attempt ───────────────────────────────────────────────────────
 
 async function logSync(entry: {
+  id?: string
   workspace_id: string
   field_mapping_id: string
   event: string
@@ -269,10 +271,11 @@ async function logSync(entry: {
   status: 'success' | 'failed' | 'skipped'
   error_message?: string
   payload: Record<string, unknown>
+  trigger_type?: string
 }) {
-  console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}"`)
+  console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}" trigger_type="${entry.trigger_type || 'automatic'}" id="${entry.id || 'new'}"`)
   try {
-    const { error: logErr } = await supabaseAdmin.from('sync_logs').insert([{
+    const logData: Record<string, any> = {
       workspace_id: entry.workspace_id,
       field_mapping_id: entry.field_mapping_id,
       event: entry.event,
@@ -283,11 +286,70 @@ async function logSync(entry: {
       status: entry.status,
       error_message: entry.error_message ?? null,
       payload: entry.payload,
-    }])
-    if (logErr) {
-      console.error('[SyncEngine] sync_logs insert error:', logErr)
+      trigger_type: entry.trigger_type || 'automatic',
+    }
+
+    let query
+    if (entry.id) {
+      // Fetch current status to check precedence
+      const { data: currentLog } = await supabaseAdmin
+        .from('sync_logs')
+        .select('status, odoo_record_id, error_message, field_mapping_id')
+        .eq('id', entry.id)
+        .maybeSingle()
+
+      if (currentLog) {
+        let finalStatus = entry.status
+        let finalRecordId = entry.odoo_record_id || currentLog.odoo_record_id
+        let finalError = entry.error_message ?? null
+        let finalMappingId = entry.field_mapping_id
+
+        // Status & Mapping ID precedence logic:
+        if (currentLog.status === 'success' && entry.status === 'failed') {
+          finalStatus = 'failed'
+          finalError = entry.error_message ?? null
+          finalMappingId = currentLog.field_mapping_id
+        } else if (currentLog.status === 'failed' && entry.status === 'success') {
+          finalStatus = 'success'
+          finalError = null
+          finalMappingId = entry.field_mapping_id
+        } else if (currentLog.status === 'success' && ['skipped', 'processing'].includes(entry.status)) {
+          finalStatus = 'success'
+          finalError = null
+          finalMappingId = currentLog.field_mapping_id
+        } else if (currentLog.status === 'failed' && ['skipped', 'processing'].includes(entry.status)) {
+          finalStatus = 'failed'
+          finalError = currentLog.error_message ?? null
+          finalMappingId = currentLog.field_mapping_id
+        } else if (currentLog.status === 'skipped' && entry.status === 'success') {
+          finalStatus = 'success'
+          finalError = null
+          finalMappingId = entry.field_mapping_id
+        } else if (currentLog.status === 'skipped' && entry.status === 'failed') {
+          finalStatus = 'failed'
+          finalError = entry.error_message ?? null
+          finalMappingId = entry.field_mapping_id
+        } else if (currentLog.status === 'skipped' && ['skipped', 'processing'].includes(entry.status)) {
+          finalStatus = 'skipped'
+          finalMappingId = currentLog.field_mapping_id
+        }
+
+        logData.status = finalStatus
+        logData.odoo_record_id = finalRecordId
+        logData.error_message = finalError
+        logData.field_mapping_id = finalMappingId
+      }
+
+      query = supabaseAdmin.from('sync_logs').update(logData).eq('id', entry.id)
     } else {
-      console.info('[SyncEngine] sync_log written ✅')
+      query = supabaseAdmin.from('sync_logs').insert([logData])
+    }
+
+    const { error: logErr } = await query
+    if (logErr) {
+      console.error('[SyncEngine] sync_logs write error:', logErr)
+    } else {
+      console.info(`[SyncEngine] sync_log ${entry.id ? 'updated' : 'written'} ✅`)
     }
   } catch (err) {
     console.error('[SyncEngine] Failed to write sync_log (exception):', err)
@@ -367,6 +429,9 @@ export async function processWebhookEvent(
   console.info(`[SyncEngine] ===== processWebhookEvent START =====`)
   console.info(`[SyncEngine] event="${event}" normalized="${normalizedEvent}" storeId="${storeIdStr}"`)
 
+  // Run cleanup of expired logs in the background
+  cleanupExpiredLogs().catch(err => console.error('[SyncEngine] Background cleanup failed:', err))
+
   // 1. Find all field_mappings matching this store + event
   console.info(`[SyncEngine] Querying field_mappings...`)
   const { data: mappingRows, error: mappingErr } = await supabaseAdmin
@@ -404,17 +469,96 @@ export async function processWebhookEvent(
 
 // ─── Process one field_mapping ────────────────────────────────────────────────
 
-async function processSingleMapping(
+export async function processSingleMapping(
   mapping: FieldMappingRow,
   event: string,
   storeId: string,
-  zidData: Record<string, unknown>
+  zidData: Record<string, unknown>,
+  triggerType: 'automatic' | 'manual' = 'automatic',
+  existingLogId?: string
 ): Promise<SyncEngineResult['records'][number]> {
   const zidEntityId = String(zidData.id ?? '')
   const odooModel = mapping.odoo_model
   const odooOperation = normalizeOdooOperation(mapping.odoo_operation, event)
 
-  console.info(`[SyncEngine] Processing mapping "${mapping.name}" → model="${odooModel}" operation="${odooOperation}"`)
+  console.info(`[SyncEngine] Processing mapping "${mapping.name}" → model="${odooModel}" operation="${odooOperation}" triggerType="${triggerType}" existingLogId="${existingLogId || 'none'}"`)
+
+  // ── Create or Update Initial Log Entry (status: processing) ─────────────────
+  let logId = existingLogId
+
+  if (!logId && zidEntityId && event) {
+    try {
+      const tenSecondsAgo = new Date(Date.now() - 10000).toISOString()
+      const { data: recentLog } = await supabaseAdmin
+        .from('sync_logs')
+        .select('id')
+        .eq('workspace_id', mapping.workspace_id)
+        .eq('store_id', storeId)
+        .eq('zid_entity_id', zidEntityId)
+        .eq('event', event)
+        .gt('created_at', tenSecondsAgo)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (recentLog) {
+        logId = recentLog.id
+        console.info(`[SyncEngine] Found recent log ID="${logId}" for entity "${zidEntityId}" - reusing it`)
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Failed to check for recent logs:', err)
+    }
+  }
+
+  try {
+    const logData = {
+      workspace_id: mapping.workspace_id,
+      field_mapping_id: mapping.id,
+      event,
+      store_id: storeId,
+      zid_entity_id: zidEntityId,
+      odoo_model: odooModel,
+      status: 'processing',
+      payload: zidData,
+      trigger_type: triggerType,
+      error_message: null,
+      odoo_record_id: null
+    }
+
+    if (logId) {
+      console.info(`[SyncEngine] Updating log to processing ID="${logId}"`)
+      // Fetch the current status first to avoid overwriting success/failed statuses prematurely
+      const { data: currentLog } = await supabaseAdmin
+        .from('sync_logs')
+        .select('status')
+        .eq('id', logId)
+        .maybeSingle()
+
+      if (!currentLog || !['success', 'failed'].includes(currentLog.status)) {
+        await supabaseAdmin.from('sync_logs').update(logData).eq('id', logId)
+      } else {
+        console.info(`[SyncEngine] Log ID="${logId}" has status "${currentLog.status}" - skipping initial processing update`)
+      }
+    } else {
+      console.info(`[SyncEngine] Creating initial processing log`)
+      const { data: newLog, error: initialLogErr } = await supabaseAdmin
+        .from('sync_logs')
+        .insert([{
+          ...logData,
+          created_at: new Date().toISOString()
+        }])
+        .select('id')
+        .maybeSingle()
+
+      if (initialLogErr) {
+        console.error('[SyncEngine] Failed to write initial sync_log:', initialLogErr)
+      } else if (newLog) {
+        logId = newLog.id
+      }
+    }
+  } catch (err) {
+    console.error('[SyncEngine] Exception during initial log creation:', err)
+  }
 
   // ── 1. Resolve Odoo connection ──────────────────────────────────────────────
   let odooConn: OdooConnectionRow | null = null
@@ -442,7 +586,7 @@ async function processSingleMapping(
   if (!odooConn) {
     const errMsg = `No Odoo connection found for mapping "${mapping.name}"`
     console.warn(`[SyncEngine] ${errMsg}`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'failed', error_message: errMsg, payload: zidData })
+    await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'failed', error_message: errMsg, payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'failed', message: errMsg }
   }
 
@@ -451,16 +595,17 @@ async function processSingleMapping(
 
   if (mappingItems.length === 0 && odooOperation !== 'delete') {
     console.warn(`[SyncEngine] No field items configured for model "${odooModel}"`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'No field mapping items configured', payload: zidData })
+    await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'No field mapping items configured', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'No field mapping items configured' }
   }
 
   // ── 3. Create OdooClient ────────────────────────────────────────────────────
+  const decryptedPassword = decrypt(odooConn.password)
   const client = new OdooClient({
     url: odooConn.url,
     db: odooConn.db_name || '',
     username: odooConn.username,
-    apiKey: odooConn.password,
+    apiKey: decryptedPassword,
   })
 
   // ── 4. Fetch field metadata (ttype + relation) for all mapped fields ─────────
@@ -472,7 +617,7 @@ async function processSingleMapping(
 
   if (Object.keys(odooValues).length === 0 && odooOperation !== 'delete') {
     console.warn(`[SyncEngine] No values extracted from Zid data for mapping "${mapping.name}"`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'All mapped Zid fields were empty or missing', payload: zidData })
+    await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'All mapped Zid fields were empty or missing', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'All mapped Zid fields were empty or missing' }
   }
 
@@ -490,11 +635,13 @@ async function processSingleMapping(
       odooModel,
       odooOperation,
       odooValues,
+      triggerType,
+      existingLogId: logId,
     })
   } catch (err: any) {
     const errMsg = err?.message ?? String(err)
     console.error(`[SyncEngine] ❌ Failed to ${odooOperation} ${odooModel} in Odoo:`, errMsg)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'failed', error_message: errMsg, payload: zidData })
+    await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'failed', error_message: errMsg, payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'failed', message: errMsg }
   }
 }
@@ -509,6 +656,8 @@ async function executeOdooOperation(params: {
   odooModel: string
   odooOperation: OdooOperation
   odooValues: Record<string, unknown>
+  triggerType?: 'automatic' | 'manual'
+  existingLogId?: string
 }): Promise<SyncEngineResult['records'][number]> {
   const {
     client,
@@ -520,6 +669,8 @@ async function executeOdooOperation(params: {
     odooModel,
     odooOperation,
     odooValues,
+    triggerType,
+    existingLogId,
   } = params
 
   if (odooOperation === 'create') {
@@ -527,13 +678,13 @@ async function executeOdooOperation(params: {
     if (duplicateId !== null) {
       const msg = `Matching ${odooModel} #${duplicateId} already exists in Odoo; create skipped`
       console.info(`[SyncEngine] ${msg}`)
-      await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: duplicateId, status: 'skipped', error_message: msg, payload: zidData })
+      await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: duplicateId, status: 'skipped', error_message: msg, payload: zidData, trigger_type: triggerType })
       return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', odooRecordId: duplicateId, message: msg }
     }
 
     const newId = await client.create(odooModel, odooValues)
     console.info(`[SyncEngine] ✅ Created ${odooModel} #${newId} in Odoo (zid_id="${zidEntityId}")`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: newId, status: 'success', payload: zidData })
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: newId, status: 'success', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: newId }
   }
 
@@ -541,7 +692,7 @@ async function executeOdooOperation(params: {
   if (existingId === null) {
     const msg = `No matching ${odooModel} record found in Odoo for ${odooOperation}`
     console.warn(`[SyncEngine] ${msg}`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: msg, payload: zidData })
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: msg, payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: msg }
   }
 
@@ -549,23 +700,23 @@ async function executeOdooOperation(params: {
     const ok = await client.write(odooModel, [existingId], odooValues)
     if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${existingId}`)
     console.info(`[SyncEngine] ✅ Updated ${odooModel} #${existingId} in Odoo (zid_id="${zidEntityId}")`)
-    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData })
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: existingId }
   }
 
   const ok = await client.unlink(odooModel, [existingId])
   if (!ok) throw new Error(`Odoo unlink returned false for ${odooModel} #${existingId}`)
   console.info(`[SyncEngine] ✅ Deleted ${odooModel} #${existingId} from Odoo (zid_id="${zidEntityId}")`)
-  await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData })
+  await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
   return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: existingId }
 }
 
-async function findExistingOdooRecord(
+export async function findExistingOdooRecord(
   client: OdooClient,
   model: string,
   zidData: Record<string, unknown>,
   odooValues: Record<string, unknown>,
-  mapping?: Pick<FieldMappingRow, 'odoo_match_field' | 'zid_match_field'>
+  mapping?: Pick<any, 'odoo_match_field' | 'zid_match_field'>
 ): Promise<number | null> {
   const sku = toNameString(zidData.sku || odooValues.default_code)
   const barcode = toNameString(zidData.barcode || odooValues.barcode)
@@ -609,4 +760,33 @@ async function findExistingOdooRecord(
   }
 
   return null
+}
+
+export async function cleanupExpiredLogs() {
+  console.info('[SyncEngine] Running cleanupExpiredLogs...')
+  try {
+    const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString()
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
+    // 1. Delete successful logs older than 72 hours
+    const { error: err1 } = await supabaseAdmin
+      .from('sync_logs')
+      .delete()
+      .eq('status', 'success')
+      .lt('created_at', seventyTwoHoursAgo)
+
+    // 2. Delete all other logs older than 7 days
+    const { error: err2 } = await supabaseAdmin
+      .from('sync_logs')
+      .delete()
+      .lt('created_at', sevenDaysAgo)
+
+    if (err1 || err2) {
+      console.error('[SyncEngine] Failed to delete expired logs:', err1 || err2)
+    } else {
+      console.info('[SyncEngine] Expired sync logs purged successfully.')
+    }
+  } catch (err) {
+    console.error('[SyncEngine] Exception during log purge:', err)
+  }
 }

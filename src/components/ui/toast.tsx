@@ -6,7 +6,11 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-const ToastProvider = ToastPrimitives.Provider
+const ToastProvider = ({ duration = 3000, ...props }: React.ComponentPropsWithoutRef<typeof ToastPrimitives.Provider>) => (
+  <ToastPrimitives.Provider duration={duration} {...props}>
+    {props.children}
+  </ToastPrimitives.Provider>
+)
 
 const ToastViewport = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Viewport>,
@@ -15,7 +19,7 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      'fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]',
+      'fixed top-0 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:top-0 sm:right-0 sm:bottom-auto sm:flex-col md:max-w-[380px]',
       className
     )}
     {...props}
@@ -33,16 +37,27 @@ const Toast = React.forwardRef<
     <ToastPrimitives.Root
       ref={ref}
       className={cn(
-        'group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-md border p-6 pr-8 shadow-lg transition-all',
+        'group pointer-events-auto relative flex w-full items-center justify-between space-x-4 overflow-hidden rounded-xl border p-3 px-4 pb-4 shadow-md transition-all',
         'data-[swipe=cancel]:translate-x-0 data-[swipe=end]:translate-x-[var(--radix-toast-swipe-end-x)] data-[swipe=move]:translate-x-[var(--radix-toast-swipe-move-x)] data-[swipe=move]:transition-none',
-        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full data-[state=open]:sm:slide-in-from-bottom-full',
-        variant === 'default' && 'border-border bg-card text-card-foreground',
+        'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-80 data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-top-full',
+        variant === 'default' && 'border-border/80 bg-background/95 backdrop-blur-sm text-foreground',
         variant === 'destructive' &&
           'destructive group border-destructive bg-destructive text-destructive-foreground',
         className
       )}
       {...props}
-    />
+    >
+      {props.children}
+      <div 
+        className={cn(
+          "absolute bottom-0 left-0 right-0 h-0.5 bg-primary/80 animate-toast-progress",
+          variant === 'destructive' && "bg-destructive-foreground/70"
+        )}
+        style={{
+          animationDuration: '3000ms'
+        }}
+      />
+    </ToastPrimitives.Root>
   )
 })
 Toast.displayName = ToastPrimitives.Root.displayName

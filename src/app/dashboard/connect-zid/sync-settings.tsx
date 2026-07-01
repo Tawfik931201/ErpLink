@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, Fragment } from 'react'
-import { Save, Loader2, CheckSquare } from 'lucide-react'
+import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { updateZidSyncSettings } from '@/app/actions/workspaces'
+import { useLanguage } from '@/components/language-provider'
+import { cn } from '@/lib/utils'
 
 const SYNC_GROUPS = [
   {
@@ -78,6 +80,9 @@ interface SyncSettingsTableProps {
 export default function SyncSettingsTable({ merchantId, initialSettings }: SyncSettingsTableProps) {
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [isMainOpen, setIsMainOpen] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const { t, lang, dir } = useLanguage()
 
   const [settings, setSettings] = useState<Record<string, { odoo2zid: boolean; zid2odoo: boolean }>>(() => {
     const initial = {} as any
@@ -96,6 +101,13 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
     return initial
   })
 
+  const toggleGroup = (title: string) => {
+    setOpenGroups(prev => ({
+      ...prev,
+      [title]: !prev[title]
+    }))
+  }
+
   const handleCheckboxChange = (key: string, field: 'odoo2zid' | 'zid2odoo', value: boolean) => {
     setSettings(prev => ({
       ...prev,
@@ -113,95 +125,122 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
 
     if (res.success) {
       toast({
-        title: 'تم الحفظ بنجاح',
-        description: 'تم تحديث خيارات المزامنة بين أودو وزد بنجاح.',
+        title: t('zid.settingsSaved'),
+        description: lang === 'ar' ? 'تم تحديث خيارات المزامنة بين أودو وزد بنجاح.' : 'Sync options updated between Odoo and Zid successfully.',
       })
     } else {
       toast({
-        title: 'خطأ في الحفظ',
-        description: res.error || 'فشل حفظ الإعدادات، يرجى المحاولة لاحقاً.',
+        title: t('zid.settingsFailed'),
+        description: res.error || (lang === 'ar' ? 'فشل حفظ الإعدادات، يرجى المحاولة لاحقاً.' : 'Failed to save settings, please try again later.'),
         variant: 'destructive',
       })
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between border-b border-border/60 pb-3">
-        <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-          <CheckSquare className="h-5 w-5 text-primary" />
-          خيارات مزامنة البيانات (Sync Settings Options)
+    <div className="space-y-6" dir={dir}>
+      {/* Main Accordion Trigger Header */}
+      <button 
+        onClick={() => setIsMainOpen(!isMainOpen)}
+        className="w-full flex items-center justify-between border-b border-border/60 pb-3 hover:opacity-80 transition-opacity"
+      >
+        <h3 className="text-lg font-bold text-foreground flex items-center gap-2.5">
+          <CheckSquare className="h-5 w-5 text-primary animate-pulse" />
+          <span>{t('zid.syncSettings')}</span>
         </h3>
-      </div>
+        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-secondary text-muted-foreground">
+          {isMainOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+        </div>
+      </button>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse border-none text-right">
-          <thead>
-            <tr className="border-b border-border/40">
-              <th className="py-3 px-4 font-bold text-foreground text-right w-1/2">
-                الحدث (Event)
-              </th>
-              <th className="py-3 px-4 font-bold text-foreground text-center w-1/4">
-                odoo2zid
-              </th>
-              <th className="py-3 px-4 font-bold text-foreground text-center w-1/4">
-                zid2odoo
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {SYNC_GROUPS.map((group) => (
-              <Fragment key={group.title}>
-                {/* Category Header Row */}
-                <tr className="bg-muted/40 border-y border-border/40">
-                  <td colSpan={3} className="py-2 px-4 font-extrabold text-sm text-primary text-right select-none">
-                    {group.title}
-                  </td>
+      {isMainOpen && (
+        <div className="space-y-4 animate-in fade-in-50 duration-200">
+          <div className="overflow-x-auto rounded-2xl border border-border shadow-sm bg-card">
+            <table className="w-full border-collapse text-start">
+              <thead>
+                <tr className="border-b border-border bg-secondary/50">
+                  <th className="py-3.5 px-6 font-bold text-foreground/90 text-start w-1/2 text-sm">
+                    {t('zid.event')}
+                  </th>
+                  <th className="py-3.5 px-4 font-bold text-center w-1/4 text-sm">
+                    <span className="text-violet-600 font-mono tracking-tight block dark:text-violet-400">
+                      {lang === 'ar' ? 'من أودو إلى زد (تحديث)' : 'Odoo to Zid (Sync)'}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono lowercase block mt-0.5">(erp2store)</span>
+                  </th>
+                  <th className="py-3.5 px-4 font-bold text-center w-1/4 text-sm">
+                    <span className="text-blue-600 font-mono tracking-tight block dark:text-blue-400">
+                      {lang === 'ar' ? 'من زد إلى أودو (استقبال)' : 'Zid to Odoo (Sync)'}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono lowercase block mt-0.5">(store2erp)</span>
+                  </th>
                 </tr>
-                {/* Options in Category */}
-                {group.options.map((opt) => (
-                  <tr key={opt.key} className="hover:bg-muted/30 transition-colors border-none">
-                    <td className="py-2.5 px-8 text-sm font-medium text-foreground text-right select-none">
-                      {opt.label}
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <input
-                        type="checkbox"
-                        checked={settings[opt.key]?.odoo2zid || false}
-                        onChange={(e) => handleCheckboxChange(opt.key, 'odoo2zid', e.target.checked)}
-                        className="h-5 w-5 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-emerald-500 focus:ring-2 focus:ring-emerald-500 accent-emerald-500 cursor-pointer transition-all"
-                      />
-                    </td>
-                    <td className="py-2.5 px-4 text-center">
-                      <input
-                        type="checkbox"
-                        checked={settings[opt.key]?.zid2odoo || false}
-                        onChange={(e) => handleCheckboxChange(opt.key, 'zid2odoo', e.target.checked)}
-                        className="h-5 w-5 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-emerald-500 focus:ring-2 focus:ring-emerald-500 accent-emerald-500 cursor-pointer transition-all"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {SYNC_GROUPS.map((group) => {
+                  const isOpen = !!openGroups[group.title]
+                  return (
+                    <Fragment key={group.title}>
+                      {/* Category Header Row (Sub-accordion Trigger) */}
+                      <tr 
+                        onClick={() => toggleGroup(group.title)}
+                        className="bg-secondary/40 hover:bg-secondary/60 transition-colors border-b border-border cursor-pointer select-none"
+                      >
+                        <td colSpan={3} className="py-3 px-6 font-bold text-sm text-foreground/90 text-start flex items-center gap-2">
+                          <span className="flex h-5 w-5 items-center justify-center rounded bg-card border border-border text-muted-foreground shrink-0">
+                            {isOpen ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+                          </span>
+                          <span>{group.title}</span>
+                        </td>
+                      </tr>
 
-      <div className="flex justify-end pt-4 border-t border-border/40">
-        <Button 
-          onClick={handleSave} 
-          disabled={loading}
-          className="gradient-brand text-white flex items-center gap-2 px-6 py-5 rounded-xl shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-300"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          حفظ إعدادات المزامنة (Save Sync Options)
-        </Button>
-      </div>
+                      {/* Options in Category - Only visible when sub-accordion group is open */}
+                      {isOpen && group.options.map((opt) => (
+                        <tr key={opt.key} className="hover:bg-secondary/20 transition-colors border-b border-border/60 last:border-b-0 animate-in slide-in-from-top-1 duration-150">
+                          <td className="py-3 px-12 text-sm font-medium text-muted-foreground text-start select-none">
+                            {opt.label}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={settings[opt.key]?.odoo2zid || false}
+                              onChange={(e) => handleCheckboxChange(opt.key, 'odoo2zid', e.target.checked)}
+                              className="h-5 w-5 rounded-none border border-border bg-card text-[#008080] focus:ring-0 focus:ring-offset-0 accent-[#008080] cursor-pointer transition-all"
+                            />
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <input
+                              type="checkbox"
+                              checked={settings[opt.key]?.zid2odoo || false}
+                              onChange={(e) => handleCheckboxChange(opt.key, 'zid2odoo', e.target.checked)}
+                              className="h-5 w-5 rounded-none border border-border bg-card text-[#008080] focus:ring-0 focus:ring-offset-0 accent-[#008080] cursor-pointer transition-all"
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-end pt-4 border-t border-border">
+            <Button 
+              onClick={handleSave} 
+              disabled={loading}
+              className="gradient-brand text-white flex items-center gap-2 px-6 py-5 rounded-xl shadow-primary hover:shadow-lg hover:scale-[1.02] transition-all duration-300 font-bold"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              {t('zid.saveSettings')}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

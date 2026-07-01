@@ -1,16 +1,18 @@
-import { UserButton } from '@clerk/nextjs'
-import { auth } from '@clerk/nextjs/server'
-import { LayoutDashboard, Store, Database, Briefcase, GitCompare } from 'lucide-react'
+import { auth, currentUser } from '@clerk/nextjs/server'
+import { Layers } from 'lucide-react'
 import type { Metadata } from 'next'
-import { headers } from 'next/headers'
+import { headers, cookies } from 'next/headers'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getWorkspaces } from '@/app/actions/workspaces'
+import SidebarNav from '@/components/sidebar-nav'
+import UserMenu from '@/components/user-menu'
+import { Language, translations } from '@/lib/translations'
 
 export const metadata: Metadata = {
-  title: 'Dashboard',
-  description: 'Manage your Zid and Odoo integrations',
+  title: 'لوحة التحكم',
+  description: 'إدارة ربط زد وأودو من مكان واحد',
 }
 
 async function ensureWorkspaceAccess() {
@@ -22,77 +24,76 @@ async function ensureWorkspaceAccess() {
     const workspacesCount = res.workspaces?.length ?? 0
     if (workspacesCount === 0) {
       const pathname = headers().get('x-pathname') || ''
-      if (pathname !== '/dashboard/workspace') {
-        redirect('/dashboard/workspace')
+      if (pathname !== '/dashboard/settings/workspace') {
+        redirect('/dashboard/settings/workspace')
       }
     }
   }
 }
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  await ensureWorkspaceAccess()
+  try {
+    await ensureWorkspaceAccess()
+  } catch (err) {
+    console.error("Failed to verify workspace access:", err)
+  }
+
+  let user = null
+  try {
+    user = await currentUser()
+  } catch (err) {
+    console.error("Failed to fetch Clerk user:", err)
+  }
+  
+  const cookieStore = cookies()
+  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const dir = lang === 'ar' ? 'rtl' : 'ltr'
+  const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
+
+  const displayName = user 
+    ? (user.firstName || user.lastName ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : (user.username || user.emailAddresses[0]?.emailAddress))
+    : t('user.defaultName')
+
+  const navItems = [
+    { href: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
+    { href: '/dashboard/connect-zid', icon: 'store', label: t('nav.connectZid') },
+    { href: '/dashboard/connect-odoo', icon: 'database', label: t('nav.connectOdoo') },
+    { href: '/dashboard/field-mapping', icon: 'mapping', label: t('nav.fieldMapping') },
+    { href: '/dashboard/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
+    { href: '/dashboard/settings', icon: 'settings', label: t('nav.settings') },
+  ]
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen bg-background text-foreground font-sans" dir={dir}>
 
-      {/* Top nav */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur">
-        <div className="flex h-14 items-center justify-between px-6">
-          <Link href="/" className="gradient-brand-text text-xl font-bold">
-            ZidLink
-          </Link>
-          <div className="flex items-center gap-4">
-            <UserButton afterSignOutUrl="/" />
+      {/* ── Body Layout with Fixed Sidebar ─────────────────── */}
+      <div className="flex flex-1 min-h-0 relative">
+
+        <aside className={`w-[200px] shrink-0 ${dir === 'ar' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none sticky top-0 h-screen overflow-y-auto`}>
+          {/* Logo inside sidebar top */}
+          <div className="p-4 pb-3 flex items-center gap-2.5 border-b border-border">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-primary to-purple-600 text-white shadow-lg shadow-primary/20 ring-4 ring-primary/5">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-black tracking-tight text-foreground leading-none">ERP Link</span>
+              <span className="text-[10px] text-muted-foreground font-bold mt-1">Zid & Odoo Sync</span>
+            </div>
           </div>
-        </div>
-      </header>
 
-      {/* Main Content Area with Sidebar */}
-      <div className="flex flex-1">
-        {/* Sidebar */}
-        <aside className="w-64 border-r border-border bg-card hidden md:block">
-          <nav className="flex flex-col gap-1 p-4 text-sm font-medium text-muted-foreground">
-            <Link
-              href="/dashboard"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 text-foreground hover:bg-accent hover:text-foreground transition-all"
-            >
-              <LayoutDashboard className="h-4 w-4 text-primary" />
-              Dashboard
-            </Link>
-            <Link
-              href="/dashboard/connect-zid"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent hover:text-foreground transition-all"
-            >
-              <Store className="h-4 w-4 text-zid-500" />
-              الربط مع زد
-            </Link>
-            <Link
-              href="/dashboard/connect-odoo"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent hover:text-foreground transition-all"
-            >
-              <Database className="h-4 w-4 text-odoo-500" />
-              الربط مع أودو
-            </Link>
-            <Link
-              href="/dashboard/workspace"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent hover:text-foreground transition-all"
-            >
-              <Briefcase className="h-4 w-4" />
-              workspace
-            </Link>
-            <Link
-              href="/dashboard/field-mapping"
-              className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-accent hover:text-foreground transition-all"
-            >
-              <GitCompare className="h-4 w-4" />
-              ربط الحقول
-            </Link>
-          </nav>
+
+          {/* Nav links */}
+          <SidebarNav items={navItems} />
+
+          {/* User Menu popover container at sidebar bottom */}
+          <div className="p-4 mt-auto border-t border-border bg-secondary/10 flex flex-col">
+            <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} />
+          </div>
         </aside>
 
-        {/* Dynamic Page Content */}
-        <main className="flex-1 p-8 overflow-y-auto">
-          <div className="max-w-5xl mx-auto">
+        {/* ── Main Content ─────────────────────────────────── */}
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-6 md:p-8 max-w-5xl mx-auto">
             {children}
           </div>
         </main>

@@ -1,18 +1,23 @@
 import type { Metadata } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { Tajawal, JetBrains_Mono } from 'next/font/google'
+import { cookies } from 'next/headers'
+import { Language } from '@/lib/translations'
 
 import Providers from '@/components/providers'
 
 import './globals.css'
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
+const tajawal = Tajawal({
+  subsets: ['arabic'],
+  weight: ['300', '400', '500', '700', '800', '900'],
+  variable: '--font-tajawal',
+  display: 'swap',
 })
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   variable: '--font-jetbrains-mono',
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
@@ -32,10 +37,14 @@ export const metadata: Metadata = {
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = cookies()
+  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const dir = lang === 'ar' ? 'rtl' : 'ltr'
+
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <Providers>{children}</Providers>
+    <html lang={lang} dir={dir} suppressHydrationWarning>
+      <body className={`${tajawal.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+        <Providers initialLang={lang}>{children}</Providers>
       </body>
     </html>
   )
