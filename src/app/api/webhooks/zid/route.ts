@@ -308,7 +308,7 @@ async function handleProductEvent(
 
   // Trigger sync engine directly — it reads field_mappings by store_id internally
   console.info('[Zid Webhook] Calling processWebhookEvent...')
-  const result = await processWebhookEvent(event, storeId, data)
+  const result = await processWebhookEvent(event, storeId, data, 'zid')
   if (result.success > 0) {
     const syncedRecords = result.records
       .filter(record => record.status === 'success')

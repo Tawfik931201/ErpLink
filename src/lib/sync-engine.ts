@@ -673,7 +673,8 @@ export async function processSingleMapping(
   storeId: string,
   zidData: Record<string, unknown>,
   triggerType: 'automatic' | 'manual' = 'automatic',
-  existingLogId?: string
+  existingLogId?: string,
+  platformHint?: 'zid' | 'salla'
 ): Promise<SyncEngineResult['records'][number]> {
   const zidEntityId = String(
     zidData.id ??
