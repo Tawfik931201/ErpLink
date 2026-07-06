@@ -1,0 +1,19 @@
+stages:
+  - test
+
+# ─── GitLab Security Scanning ─────────────────────────────────────
+# SAST: static analysis of TypeScript/TSX source code
+# Secret Detection: scans for leaked credentials/tokens
+# Dependency Scanning: scans package-lock.json for vulnerable packages
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+
+variables:
+  # Scan the full git history for leaked secrets on the first run.
+  # After the first successful pipeline, set this back to "false"
+  # to keep pipelines fast (subsequent runs only scan new commits).
+  SECRET_DETECTION_HISTORIC_SCAN: "true"
+  # Exclude build artifacts and dependencies from SAST
+  SAST_EXCLUDED_PATHS: "node_modules, .next, out, build, dist, coverage"
