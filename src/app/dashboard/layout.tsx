@@ -54,13 +54,25 @@ export default async function DashboardLayout({ children }: { children: React.Re
     ? (user.firstName || user.lastName ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : (user.username || user.emailAddresses[0]?.emailAddress))
     : t('user.defaultName')
 
-  const navItems = [
-    { href: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
-    { href: '/dashboard/connect-zid', icon: 'store', label: t('nav.connectZid') },
-    { href: '/dashboard/connect-odoo', icon: 'database', label: t('nav.connectOdoo') },
-    { href: '/dashboard/field-mapping', icon: 'mapping', label: t('nav.fieldMapping') },
-    { href: '/dashboard/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
-    { href: '/dashboard/settings', icon: 'settings', label: t('nav.settings') },
+  const navSections = [
+    {
+      items: [
+        { href: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
+      ]
+    },
+    {
+      items: [
+        { href: '/dashboard/connect-zid', icon: 'store', label: t('nav.connectZid') },
+        { href: '/dashboard/connect-odoo', icon: 'database', label: t('nav.connectOdoo') },
+        { href: '/dashboard/field-mapping', icon: 'mapping', label: t('nav.fieldMapping') },
+        { href: '/dashboard/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
+      ]
+    },
+    {
+      items: [
+        { href: '/dashboard/settings', icon: 'settings', label: t('nav.settings') },
+      ]
+    }
   ]
 
   return (
@@ -69,24 +81,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
       {/* ── Body Layout with Fixed Sidebar ─────────────────── */}
       <div className="flex flex-1 min-h-0 relative">
 
-        <aside className={`w-[200px] shrink-0 ${dir === 'ar' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none sticky top-0 h-screen overflow-y-auto`}>
+        <aside className={`w-[200px] shrink-0 ${dir === 'rtl' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none sticky top-0 h-screen overflow-visible z-40`}>
           {/* Logo inside sidebar top */}
-          <div className="p-4 pb-3 flex items-center gap-2.5 border-b border-border">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-primary to-purple-600 text-white shadow-lg shadow-primary/20 ring-4 ring-primary/5">
-              <Layers className="h-5 w-5" />
+          <div className="p-4 pb-2 pt-5 flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0089FF] text-white shadow-sm shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-[18px] w-[18px]">
+                <path d="M6 6H18V9H9V11H17V14H9V16H18V19H6V6Z" fill="currentColor" />
+              </svg>
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-black tracking-tight text-foreground leading-none">ERP Link</span>
-              <span className="text-[10px] text-muted-foreground font-bold mt-1">Zid & Odoo Sync</span>
-            </div>
+            <span className="text-lg font-bold tracking-tight text-gray-900 dark:text-white leading-none">ERP Link</span>
           </div>
 
-
           {/* Nav links */}
-          <SidebarNav items={navItems} />
+          <div className="flex-1 overflow-y-auto">
+            <SidebarNav sections={navSections} />
+          </div>
 
           {/* User Menu popover container at sidebar bottom */}
-          <div className="p-4 mt-auto border-t border-border bg-secondary/10 flex flex-col">
+          <div className="p-4 mt-auto border-t border-border bg-secondary/10 flex flex-col overflow-visible">
             <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} />
           </div>
         </aside>

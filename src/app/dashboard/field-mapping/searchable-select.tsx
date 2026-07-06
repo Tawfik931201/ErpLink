@@ -23,6 +23,7 @@ interface SearchableSelectProps {
   disabled?: boolean
   variant?: 'default' | 'cell'
   multiple?: boolean
+  collapseTags?: boolean
 }
 
 export default function SearchableSelect({
@@ -34,6 +35,7 @@ export default function SearchableSelect({
   disabled = false,
   variant = 'default',
   multiple = false,
+  collapseTags = false,
 }: SearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -167,7 +169,19 @@ export default function SearchableSelect({
   // Determine what text to display in the input
   const getDisplayText = () => {
     if (multiple) {
-      return searchQuery
+      if (isOpen) {
+        return searchQuery
+      }
+      if (collapseTags && Array.isArray(value) && value.length > 0) {
+        if (value.length === 1) {
+          const opt = options.find((o) => o.value === value[0])
+          return opt ? formatFieldLabel(opt.label, lang) : ''
+        }
+        return lang === 'ar' 
+          ? `تم تحديد (${value.length})` 
+          : `${value.length} selected`
+      }
+      return ''
     }
     if (isOpen) {
       return searchQuery
@@ -183,23 +197,23 @@ export default function SearchableSelect({
           variant === 'cell'
             ? 'border border-transparent bg-transparent hover:bg-muted/30 hover:border-input'
             : 'border border-input bg-background',
-          multiple ? 'min-h-[36px] flex-wrap p-1.5 gap-1.5' : 'h-9 pl-3 pr-2',
+          multiple && !collapseTags ? 'min-h-[36px] flex-wrap p-1.5 gap-1.5' : 'h-9 pl-3 pr-2',
           isOpen && 'border-[#00878a] ring-1 ring-[#00878a] bg-background',
           disabled && 'cursor-not-allowed opacity-50 bg-muted/40'
         )}
       >
-        <div className="flex-1 flex flex-wrap items-center gap-1.5">
+        <div className={cn("flex-1 flex items-center", multiple && !collapseTags ? "flex-wrap gap-1.5" : "gap-1.5 overflow-hidden")}>
           {/* Search Icon */}
-          {!multiple && isOpen && <Search className={cn("h-4 w-4 text-muted-foreground shrink-0", dir === 'ar' ? "ml-1.5" : "mr-1.5")} />}
+          {!multiple && isOpen && <Search className={cn("h-4 w-4 text-muted-foreground shrink-0", dir === 'rtl' ? "ml-1.5" : "mr-1.5")} />}
           
           {/* Multi-select Badges */}
-          {multiple && Array.isArray(value) && value.map((val) => {
+          {multiple && !collapseTags && Array.isArray(value) && value.map((val) => {
             const opt = options.find((o) => o.value === val)
             if (!opt) return null
             return (
               <span
                 key={val}
-                className="inline-flex items-center gap-1 bg-[#00878a]/10 text-[#00878a] text-xs font-semibold px-2 py-0.5 rounded-md border border-[#00878a]/20 animate-in zoom-in-95 duration-150"
+                className="inline-flex items-center gap-1 bg-[#00878a]/10 text-[#00878a] text-xs font-semibold px-2 py-0.5 rounded-md border border-[#00878a]/20 animate-in zoom-in-95 duration-150 whitespace-normal break-words"
               >
                 {formatFieldLabel(opt.label, lang)}
                 <button
@@ -221,7 +235,7 @@ export default function SearchableSelect({
             ref={inputRef}
             type="text"
             disabled={disabled}
-            placeholder={multiple && Array.isArray(value) && value.length > 0 ? '' : finalPlaceholder}
+            placeholder={multiple && !collapseTags && Array.isArray(value) && value.length > 0 ? '' : finalPlaceholder}
             value={getDisplayText()}
             onChange={(e) => {
               setSearchQuery(e.target.value)
@@ -327,10 +341,10 @@ export default function SearchableSelect({
                                   isSelected && 'bg-[#00878a]/10 text-[#00878a] font-semibold'
                                 )}
                               >
-                                <div className="flex flex-col">
-                                  <span className="truncate">{formatFieldLabel(opt.label, lang)}</span>
+                                <div className="flex flex-col min-w-0">
+                                  <span className="whitespace-normal break-words">{formatFieldLabel(opt.label, lang)}</span>
                                   {opt.desc && (
-                                    <span className="text-xs text-muted-foreground/75 mt-0.5 truncate max-w-md">
+                                    <span className="text-xs text-muted-foreground/75 mt-0.5 whitespace-normal break-words max-w-md">
                                       {opt.desc}
                                     </span>
                                   )}
@@ -367,10 +381,10 @@ export default function SearchableSelect({
                             isSelected && 'bg-[#00878a]/10 text-[#00878a] font-semibold'
                           )}
                         >
-                          <div className="flex flex-col">
-                            <span className="truncate">{formatFieldLabel(opt.label, lang)}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className="whitespace-normal break-words">{formatFieldLabel(opt.label, lang)}</span>
                             {opt.desc && (
-                              <span className="text-xs text-muted-foreground/75 mt-0.5 truncate max-w-md">
+                              <span className="text-xs text-muted-foreground/75 mt-0.5 whitespace-normal break-words max-w-md">
                                 {opt.desc}
                               </span>
                             )}

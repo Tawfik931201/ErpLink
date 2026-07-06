@@ -19,7 +19,7 @@ interface Workspace {
   name: string
   created_at: string
   merchant_tokens?: { merchant_id: string; name?: string | null }[]
-  odoo_connections?: { id: string }[]
+  erp_connections?: { id: string }[]
 }
 
 export default function WorkspacePage() {
@@ -213,7 +213,7 @@ export default function WorkspacePage() {
           {workspaces.map((ws) => {
             const isActive = ws.id === activeId
             const zidConnected = (ws.merchant_tokens?.length ?? 0) > 0
-            const odooConnected = (ws.odoo_connections?.length ?? 0) > 0
+            const erpConnected = (ws.erp_connections?.length ?? 0) > 0
             const zidStoreName = ws.merchant_tokens?.[0]?.name
             
             return (
@@ -303,15 +303,15 @@ export default function WorkspacePage() {
                       <span>Zid: {zidConnected ? (zidStoreName || t('db.connected')) : t('db.disconnected')}</span>
                     </div>
 
-                    {/* Odoo Connection */}
+                    {/* ERP Connection */}
                     <div className={cn(
                       "flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-bold",
-                      odooConnected 
+                      erpConnected 
                         ? 'bg-indigo-500/[0.03] border-indigo-500/20 text-indigo-600 dark:text-indigo-400' 
                         : 'bg-secondary/40 border-border/50 text-muted-foreground'
                     )}>
                       <Database className="h-3.5 w-3.5" />
-                      <span>Odoo: {odooConnected ? t('db.connected') : t('db.disconnected')}</span>
+                      <span>ERP: {erpConnected ? t('db.connected') : t('db.disconnected')}</span>
                     </div>
                   </div>
                 </div>

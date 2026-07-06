@@ -37,7 +37,7 @@ export default function UserMenu({
   const { openUserProfile, signOut } = useClerk()
   const { user } = useUser()
   const { theme, setTheme } = useTheme()
-  const { lang, setLang } = useLanguage()
+  const { lang, setLang, dir } = useLanguage()
 
   // Close when clicking outside
   useEffect(() => {
@@ -99,7 +99,9 @@ export default function UserMenu({
   const handleProfileClick = (e: React.MouseEvent) => {
     e.stopPropagation()
     setIsOpen(false)
-    openUserProfile()
+    if (user) {
+      openUserProfile()
+    }
   }
 
   const handleSignOutClick = (e: React.MouseEvent) => {
@@ -111,19 +113,22 @@ export default function UserMenu({
 
   return (
     <div className="relative w-full select-none" ref={menuRef}>
-      {/* Floating Menu Popover */}
+      {/* Floating Menu Popover - Side Flyout layout */}
       {isOpen && (
         <div className={cn(
-          "absolute bottom-full mb-2 left-0 right-0 z-50 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 slide-in-from-bottom-2 duration-200"
+          "absolute bottom-0 z-50 w-56 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 slide-in-from-bottom-2 duration-200",
+          dir === 'rtl' ? "right-full mr-6" : "left-full ml-6"
         )}>
           {/* Option 1: Profile Details */}
-          <button
-            onClick={handleProfileClick}
-            className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all text-start"
-          >
-            <User className="h-4 w-4 text-muted-foreground shrink-0" />
-            <span>{lang === 'ar' ? 'الملف الشخصي' : 'My Profile'}</span>
-          </button>
+          {user && (
+            <button
+              onClick={handleProfileClick}
+              className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all text-start"
+            >
+              <User className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span>{lang === 'ar' ? 'الملف الشخصي' : 'My Profile'}</span>
+            </button>
+          )}
 
           {/* Option 2: Quick Language Switcher */}
           <button
@@ -159,24 +164,33 @@ export default function UserMenu({
             </span>
           </button>
 
-          {/* Option 4: Workspace Selector (Collapsible) */}
-          <div className="flex flex-col">
+          {/* Option 4: Workspace Selector (Collapsible flyout to the side) */}
+          <div className="relative">
             <button
               onClick={(e) => { e.stopPropagation(); setIsWorkspaceOpen(!isWorkspaceOpen) }}
-              className="flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all"
+              className={cn(
+                "flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all",
+                isWorkspaceOpen && "bg-secondary/60"
+              )}
             >
               <div className="flex items-center gap-2.5 text-start min-w-0">
                 <Briefcase className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span className="truncate">{lang === 'ar' ? 'مساحة العمل' : 'Workspace'}</span>
               </div>
               <div className="flex items-center gap-1 min-w-0 text-muted-foreground font-bold">
-                <span className="text-[10px] truncate max-w-[70px]">{activeWorkspaceName}</span>
-                <ChevronDown className={cn("h-3 w-3 shrink-0 transition-transform duration-200", isWorkspaceOpen && "rotate-180")} />
+                <span className="text-[10px] truncate max-w-[65px]">{activeWorkspaceName}</span>
+                <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200", isWorkspaceOpen ? "rotate-180" : (dir === 'rtl' ? "rotate-90" : "-rotate-90"))} />
               </div>
             </button>
 
             {isWorkspaceOpen && (
-              <div className="flex flex-col gap-0.5 pl-4 pr-4 py-1 mt-0.5 border-l border-r border-border/40 bg-secondary/15 rounded-lg max-h-40 overflow-y-auto">
+              <div className={cn(
+                "absolute top-0 z-50 w-52 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5 max-h-60 overflow-y-auto animate-in fade-in-50 slide-in-from-left-2 duration-150",
+                dir === 'rtl' ? "right-full mr-2" : "left-full ml-2"
+              )}>
+                <div className="px-2 py-1 border-b border-border/40 text-[9px] font-extrabold text-muted-foreground uppercase mb-1">
+                  {lang === 'ar' ? 'اختر مساحة العمل' : 'Select Workspace'}
+                </div>
                 {workspaces.map((ws) => {
                   const isActive = ws.id === activeWSId
                   const isSwitching = switchingId === ws.id
@@ -187,11 +201,11 @@ export default function UserMenu({
                       className={cn(
                         "flex items-center justify-between w-full rounded-md px-2 py-1.5 text-[10px] font-bold transition-all text-start",
                         isActive
-                          ? "bg-card text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-card/50"
+                          ? "bg-primary/5 text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
                       )}
                     >
-                      <span className="truncate pr-2 pl-2">{ws.name}</span>
+                      <span className="truncate pr-1 pl-1">{ws.name}</span>
                       {isSwitching ? (
                         <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
                       ) : isActive ? (
@@ -217,24 +231,47 @@ export default function UserMenu({
         </div>
       )}
 
-      {/* Main Trigger Card */}
+      {/* Main Trigger Card - Completely Redesigned Premium Style */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between gap-2.5 w-full bg-card p-2 rounded-lg border border-border shadow-sm hover:border-border/80 hover:bg-secondary/20 transition-all duration-300 outline-none select-none text-start"
+        className={cn(
+          "flex items-center gap-2.5 w-full p-2 rounded-xl transition-all duration-300 outline-none select-none text-start",
+          isOpen 
+            ? "bg-slate-100/80 dark:bg-slate-800/80" 
+            : "bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/30"
+        )}
       >
-        <div className="flex flex-col min-w-0 flex-1">
-          <span className="text-[10px] font-bold text-foreground/90 truncate leading-none">
+        {/* User Avatar */}
+        {user?.imageUrl ? (
+          <img 
+            src={user.imageUrl} 
+            alt="User Avatar" 
+            className="h-8 w-8 rounded-full border border-slate-200/60 dark:border-slate-800 object-cover shrink-0" 
+          />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600 text-white font-extrabold text-xs shrink-0 shadow-sm">
+            {(user?.fullName || displayName || 'U').charAt(0).toUpperCase()}
+          </div>
+        )}
+
+        {/* Name & Details */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center">
+          <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200 truncate leading-snug">
             {user?.fullName || displayName}
           </span>
-          <span className="text-[8px] text-muted-foreground font-bold mt-1.5 truncate leading-none">
+          <span className="text-[8px] text-muted-foreground/80 font-medium truncate leading-none mt-1">
             {user?.primaryEmailAddress?.emailAddress || adminLabel}
           </span>
         </div>
-        {isOpen ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        ) : (
-          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        )}
+
+        {/* Chevron status */}
+        <div className="text-muted-foreground/60 transition-transform duration-200 shrink-0">
+          {dir === 'rtl' ? (
+            <ChevronUp className={cn("h-3 w-3 rotate-90 transition-transform duration-200", isOpen && "rotate-[270deg]")} />
+          ) : (
+            <ChevronUp className={cn("h-3 w-3 -rotate-90 transition-transform duration-200", isOpen && "rotate-90")} />
+          )}
+        </div>
       </button>
     </div>
   )

@@ -36,13 +36,13 @@ const FALLBACK_RELATIONS: Record<string, Array<{ model: string; label: string; f
 }
 
 // Sample fallback data for Odoo Models and their fields
-const ODOO_MODELS = [
+export const ODOO_MODELS = [
   { id: 'product.template', name: 'Product (product.template)', desc: 'بيانات المنتجات والسلع' },
   { id: 'res.partner', name: 'Customer (res.partner)', desc: 'بيانات العملاء والعناوين' },
   { id: 'sale.order', name: 'Order (sale.order)', desc: 'بيانات طلبات المبيعات وبنودها' },
 ]
 
-const ODOO_FIELDS: Record<string, { value: string; label: string; desc?: string; type: string; relation?: string }[]> = {
+export const ODOO_FIELDS: Record<string, { value: string; label: string; desc?: string; type: string; relation?: string }[]> = {
   'product.template': [
     { value: 'name', label: 'Name (الاسم)', desc: 'name', type: 'char' },
     { value: 'list_price', label: 'Sales Price (سعر البيع)', desc: 'list_price', type: 'float' },
@@ -112,6 +112,90 @@ export const ZID_EVENTS = [
   { id: 'cart.abandoned', name: 'Cart Abandoned (سلة متروكة)', targetModel: 'sale.order', group: 'Carts (السلات المتروكة)' },
 ]
 
+// Comprehensive data for Salla Webhook Events organized by category/group
+// Full list of 78 subscribable store events from the official Salla Partners API
+// NOTE: App lifecycle events (app.installed, app.store.authorize, app.updated, app.uninstalled, app.trial.*, app.subscription.*)
+// are AUTO-DELIVERED to the app webhook_url — they are kept here for visibility only (display purposes)
+export const SALLA_EVENTS = [
+  // ─── Products ───────────────────────────────────────────────────────────────
+  { id: 'product.created',          name: 'Product Created (إنشاء منتج)',                    targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.updated',          name: 'Product Updated (تحديث منتج)',                    targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.deleted',          name: 'Product Deleted (حذف منتج)',                      targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.available',        name: 'Product Available (توفر المخزون)',                targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.quantity.low',     name: 'Product Quantity Low (انخفاض المخزون)',            targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.channels.changed', name: 'Product Channels Changed (تغيير قنوات المنتج)',   targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.review.added',     name: 'Product Review Added (إضافة مراجعة منتج)',        targetModel: 'product.template',  group: 'Products (المنتجات)' },
+  { id: 'product.review.updated',   name: 'Product Review Updated (تحديث مراجعة منتج)',      targetModel: 'product.template',  group: 'Products (المنتجات)' },
+
+  // ─── Orders ─────────────────────────────────────────────────────────────────
+  { id: 'order.created',                    name: 'Order Created (إنشاء طلب)',                               targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.updated',                    name: 'Order Updated (تحديث طلب)',                               targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.status.updated',             name: 'Order Status Updated (تحديث حالة الطلب)',                 targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.cancelled',                  name: 'Order Cancelled (إلغاء طلب)',                             targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.refunded',                   name: 'Order Refunded (استرجاع طلب)',                            targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.deleted',                    name: 'Order Deleted (حذف طلب)',                                 targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.payment.updated',            name: 'Order Payment Updated (تحديث الدفع)',                     targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.coupon.updated',             name: 'Order Coupon Updated (تحديث الكوبون)',                    targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.total.price.updated',        name: 'Order Total Price Updated (تحديث السعر الإجمالي)',        targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.products.updated',           name: 'Order Products Updated (تحديث منتجات الطلب)',             targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.customer.updated',           name: 'Order Customer Updated (تحديث بيانات مستلم الطلب)',       targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.shipping.address.updated',   name: 'Order Shipping Address Updated (تحديث عنوان الشحن)',      targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+
+  // ─── Order Shipments ─────────────────────────────────────────────────────────
+  { id: 'order.shipment.creating',          name: 'Order Shipment Creating (جاري إنشاء الشحنة)',             targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+  { id: 'order.shipment.created',           name: 'Order Shipment Created (إنشاء الشحنة)',                   targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+  { id: 'order.shipment.cancelled',         name: 'Order Shipment Cancelled (إلغاء الشحنة)',                 targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+  { id: 'order.shipment.return.creating',   name: 'Order Shipment Return Creating (جاري إنشاء مرتجع الشحنة)', targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+  { id: 'order.shipment.return.created',    name: 'Order Shipment Return Created (إنشاء مرتجع شحنة)',        targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+  { id: 'order.shipment.return.cancelled',  name: 'Order Shipment Return Cancelled (إلغاء مرتجع الشحنة)',    targetModel: 'sale.order', group: 'Shipments (الشحنات)' },
+
+  // ─── Customers ───────────────────────────────────────────────────────────────
+  { id: 'customer.created',   name: 'Customer Registered (تسجيل عميل جديد)',          targetModel: 'res.partner', group: 'Customers (العملاء)' },
+  { id: 'customer.updated',   name: 'Customer Profile Updated (تحديث بيانات عميل)',   targetModel: 'res.partner', group: 'Customers (العملاء)' },
+  { id: 'customer.login',     name: 'Customer Login (تسجيل دخول عميل)',               targetModel: 'res.partner', group: 'Customers (العملاء)' },
+
+  // ─── Categories ──────────────────────────────────────────────────────────────
+  { id: 'category.created',  name: 'Category Created (إنشاء تصنيف)',   targetModel: 'product.category', group: 'Categories (التصنيفات)' },
+  { id: 'category.updated',  name: 'Category Updated (تحديث تصنيف)',   targetModel: 'product.category', group: 'Categories (التصنيفات)' },
+  { id: 'category.deleted',  name: 'Category Deleted (حذف تصنيف)',     targetModel: 'product.category', group: 'Categories (التصنيفات)' },
+
+  // ─── Branches ────────────────────────────────────────────────────────────────
+  { id: 'store.branch.created',  name: 'Branch Created (إنشاء فرع)',   targetModel: 'res.partner', group: 'Branches (الفروع)' },
+  { id: 'store.branch.updated',  name: 'Branch Updated (تحديث فرع)',   targetModel: 'res.partner', group: 'Branches (الفروع)' },
+  { id: 'store.branch.deleted',  name: 'Branch Deleted (حذف فرع)',     targetModel: 'res.partner', group: 'Branches (الفروع)' },
+
+  // ─── Abandoned Carts ─────────────────────────────────────────────────────────
+  { id: 'abandoned.cart',           name: 'Cart Abandoned (سلة متروكة)',            targetModel: 'sale.order', group: 'Carts (السلات المتروكة)' },
+  { id: 'abandoned.cart.update',    name: 'Abandoned Cart Updated (تحديث سلة متروكة)', targetModel: 'sale.order', group: 'Carts (السلات المتروكة)' },
+  { id: 'abandoned.cart.purchased', name: 'Abandoned Cart Purchased (شراء سلة متروكة)', targetModel: 'sale.order', group: 'Carts (السلات المتروكة)' },
+
+  // ─── Coupons ─────────────────────────────────────────────────────────────────
+  { id: 'coupon.applied',   name: 'Coupon Applied (تطبيق كوبون)',     targetModel: 'sale.order', group: 'Coupons (الكوبونات)' },
+  { id: 'coupon.applied.v2', name: 'Coupon Applied V2 (تطبيق كوبون V2)', targetModel: 'sale.order', group: 'Coupons (الكوبونات)' },
+
+  // ─── Brands ──────────────────────────────────────────────────────────────────
+  { id: 'brand.created',  name: 'Brand Created (إنشاء علامة تجارية)',   targetModel: 'res.partner', group: 'Brands (العلامات التجارية)' },
+  { id: 'brand.updated',  name: 'Brand Updated (تحديث علامة تجارية)',   targetModel: 'res.partner', group: 'Brands (العلامات التجارية)' },
+  { id: 'brand.deleted',  name: 'Brand Deleted (حذف علامة تجارية)',     targetModel: 'res.partner', group: 'Brands (العلامات التجارية)' },
+
+  // ─── Misc / Store ─────────────────────────────────────────────────────────────
+  { id: 'store.settings.updated',   name: 'Store Settings Updated (تحديث إعدادات المتجر)', targetModel: 'res.company', group: 'Store (المتجر)' },
+  { id: 'special.offer.created',    name: 'Special Offer Created (إنشاء عرض خاص)',         targetModel: 'sale.order',  group: 'Store (المتجر)' },
+  { id: 'special.offer.updated',    name: 'Special Offer Updated (تحديث عرض خاص)',         targetModel: 'sale.order',  group: 'Store (المتجر)' },
+  { id: 'special.offer.deleted',    name: 'Special Offer Deleted (حذف عرض خاص)',           targetModel: 'sale.order',  group: 'Store (المتجر)' },
+
+  // ─── App Lifecycle (auto-delivered, informational only) ───────────────────────
+  { id: 'app.installed',              name: 'App Installed (تثبيت التطبيق)',               targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.updated',                name: 'App Updated (تحديث التطبيق)',                 targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.uninstalled',            name: 'App Uninstalled (إلغاء تثبيت التطبيق)',       targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.store.authorize',        name: 'App Store Authorize (تفويض المتجر)',          targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.trial.started',          name: 'App Trial Started (بدء التجربة المجانية)',     targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.trial.expired',          name: 'App Trial Expired (انتهاء التجربة المجانية)', targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.subscription.started',   name: 'App Subscription Started (بدء الاشتراك)',      targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+  { id: 'app.settings.updated',       name: 'App Settings Updated (تحديث إعدادات التطبيق)', targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
+]
+
+
 const ODOO_OPERATIONS = [
   { value: 'create', label: 'Create (إنشاء)' },
   { value: 'update', label: 'Update (تعديل)' },
@@ -127,7 +211,7 @@ type MappingLine = {
   staticValue?: string | string[] | number | boolean
 }
 
-const ZID_FIELDS: Record<string, { value: string; label: string; type: string }[]> = {
+export const ZID_FIELDS: Record<string, { value: string; label: string; type: string }[]> = {
   'product.template': [
     // 1. Basic properties
     { value: 'id', label: 'Product ID (id)', type: 'string' },
@@ -375,9 +459,352 @@ const ZID_FIELDS: Record<string, { value: string; label: string; type: string }[
   ]
 }
 
+export const SALLA_FIELDS: Record<string, { value: string; label: string; type: string }[]> = {
+  // Salla Events (Products Group)
+  'product.created': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'subtitle', label: 'Product Subtitle (subtitle)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'barcode', label: 'Barcode (barcode)', type: 'string' },
+    { value: 'price', label: 'Price Root (price)', type: 'number' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Price Currency (price.currency)', type: 'string' },
+    { value: 'sale_price', label: 'Sale Price Root (sale_price)', type: 'number' },
+    { value: 'sale_price.amount', label: 'Sale Price Amount (sale_price.amount)', type: 'number' },
+    { value: 'cost_price', label: 'Cost Price Root (cost_price)', type: 'number' },
+    { value: 'cost_price.amount', label: 'Cost Price Amount (cost_price.amount)', type: 'number' },
+    { value: 'regular_price.amount', label: 'Regular Price (regular_price.amount)', type: 'number' },
+    { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+    { value: 'unlimited_quantity', label: 'Unlimited Stock (unlimited_quantity)', type: 'boolean' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product_type', label: 'Product Type (product_type)', type: 'string' },
+    { value: 'weight', label: 'Weight (weight)', type: 'number' },
+    { value: 'weight_type', label: 'Weight Type (weight_type)', type: 'string' },
+    { value: 'description', label: 'Full Description (description)', type: 'string' },
+    { value: 'short_description', label: 'Short Description (short_description)', type: 'string' },
+    { value: 'main_image', label: 'Main Image URL (main_image)', type: 'string' },
+    { value: 'url', label: 'Storefront URL (url)', type: 'string' },
+    { value: 'brand_id', label: 'Brand ID Root (brand_id)', type: 'number' },
+    { value: 'brand.id', label: 'Brand ID (brand.id)', type: 'string' },
+    { value: 'brand.name', label: 'Brand Name (brand.name)', type: 'string' },
+    { value: 'categories', label: 'Categories IDs/Array (categories)', type: 'array' },
+    { value: 'tags', label: 'Tags IDs/Array (tags)', type: 'array' },
+    { value: 'images', label: 'Images Array (images)', type: 'array' },
+    { value: 'options', label: 'Options/Variants (options)', type: 'array' },
+    { value: 'require_shipping', label: 'Require Shipping (require_shipping)', type: 'boolean' },
+    { value: 'maximum_quantity_per_order', label: 'Max Qty Per Order (maximum_quantity_per_order)', type: 'number' },
+    { value: 'min_amount_donating', label: 'Min Amount Donating (min_amount_donating)', type: 'number' },
+    { value: 'max_amount_donating', label: 'Max Amount Donating (max_amount_donating)', type: 'number' },
+    { value: 'sale_end', label: 'Sale End Date (sale_end)', type: 'string' },
+    { value: 'mpn', label: 'MPN (mpn)', type: 'string' },
+    { value: 'gtin', label: 'GTIN (gtin)', type: 'string' },
+    { value: 'hide_quantity', label: 'Hide Quantity (hide_quantity)', type: 'boolean' },
+    { value: 'enable_upload_image', label: 'Enable Upload Image (enable_upload_image)', type: 'boolean' },
+    { value: 'enable_note', label: 'Enable Note (enable_note)', type: 'boolean' },
+    { value: 'pinned', label: 'Pinned (pinned)', type: 'boolean' },
+    { value: 'active_advance', label: 'Active Advance (active_advance)', type: 'boolean' },
+    { value: 'promotion_title', label: 'Promotion Title (promotion_title)', type: 'string' },
+    { value: 'metadata_title', label: 'SEO Metadata Title (metadata_title)', type: 'string' },
+    { value: 'metadata_description', label: 'SEO Metadata Desc (metadata_description)', type: 'string' },
+    { value: 'booking_details.location', label: 'Booking Location (booking_details.location)', type: 'string' },
+    { value: 'booking_details.type', label: 'Booking Type (booking_details.type)', type: 'string' },
+    { value: 'booking_details.time_strict_value', label: 'Booking Time Strict Value (booking_details.time_strict_value)', type: 'number' },
+    { value: 'booking_details.time_strict_type', label: 'Booking Time Strict Type (booking_details.time_strict_type)', type: 'string' },
+    { value: 'booking_details.sessions_count', label: 'Booking Sessions Count (booking_details.sessions_count)', type: 'number' },
+    { value: 'booking_details.session_gap', label: 'Booking Session Gap (booking_details.session_gap)', type: 'number' },
+    { value: 'booking_details.session_duration', label: 'Booking Session Duration (booking_details.session_duration)', type: 'number' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' },
+    { value: 'updated_at', label: 'Updated At (updated_at)', type: 'string' }
+  ],
+  'product.updated': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'subtitle', label: 'Product Subtitle (subtitle)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'barcode', label: 'Barcode (barcode)', type: 'string' },
+    { value: 'price', label: 'Price Root (price)', type: 'number' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Price Currency (price.currency)', type: 'string' },
+    { value: 'sale_price', label: 'Sale Price Root (sale_price)', type: 'number' },
+    { value: 'sale_price.amount', label: 'Sale Price Amount (sale_price.amount)', type: 'number' },
+    { value: 'cost_price', label: 'Cost Price Root (cost_price)', type: 'number' },
+    { value: 'cost_price.amount', label: 'Cost Price Amount (cost_price.amount)', type: 'number' },
+    { value: 'regular_price.amount', label: 'Regular Price (regular_price.amount)', type: 'number' },
+    { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+    { value: 'unlimited_quantity', label: 'Unlimited Stock (unlimited_quantity)', type: 'boolean' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product_type', label: 'Product Type (product_type)', type: 'string' },
+    { value: 'weight', label: 'Weight (weight)', type: 'number' },
+    { value: 'weight_type', label: 'Weight Type (weight_type)', type: 'string' },
+    { value: 'description', label: 'Full Description (description)', type: 'string' },
+    { value: 'short_description', label: 'Short Description (short_description)', type: 'string' },
+    { value: 'main_image', label: 'Main Image URL (main_image)', type: 'string' },
+    { value: 'url', label: 'Storefront URL (url)', type: 'string' },
+    { value: 'brand_id', label: 'Brand ID Root (brand_id)', type: 'number' },
+    { value: 'brand.id', label: 'Brand ID (brand.id)', type: 'string' },
+    { value: 'brand.name', label: 'Brand Name (brand.name)', type: 'string' },
+    { value: 'categories', label: 'Categories IDs/Array (categories)', type: 'array' },
+    { value: 'tags', label: 'Tags IDs/Array (tags)', type: 'array' },
+    { value: 'images', label: 'Images Array (images)', type: 'array' },
+    { value: 'options', label: 'Options/Variants (options)', type: 'array' },
+    { value: 'require_shipping', label: 'Require Shipping (require_shipping)', type: 'boolean' },
+    { value: 'maximum_quantity_per_order', label: 'Max Qty Per Order (maximum_quantity_per_order)', type: 'number' },
+    { value: 'min_amount_donating', label: 'Min Amount Donating (min_amount_donating)', type: 'number' },
+    { value: 'max_amount_donating', label: 'Max Amount Donating (max_amount_donating)', type: 'number' },
+    { value: 'sale_end', label: 'Sale End Date (sale_end)', type: 'string' },
+    { value: 'mpn', label: 'MPN (mpn)', type: 'string' },
+    { value: 'gtin', label: 'GTIN (gtin)', type: 'string' },
+    { value: 'hide_quantity', label: 'Hide Quantity (hide_quantity)', type: 'boolean' },
+    { value: 'enable_upload_image', label: 'Enable Upload Image (enable_upload_image)', type: 'boolean' },
+    { value: 'enable_note', label: 'Enable Note (enable_note)', type: 'boolean' },
+    { value: 'pinned', label: 'Pinned (pinned)', type: 'boolean' },
+    { value: 'active_advance', label: 'Active Advance (active_advance)', type: 'boolean' },
+    { value: 'promotion_title', label: 'Promotion Title (promotion_title)', type: 'string' },
+    { value: 'metadata_title', label: 'SEO Metadata Title (metadata_title)', type: 'string' },
+    { value: 'metadata_description', label: 'SEO Metadata Desc (metadata_description)', type: 'string' },
+    { value: 'booking_details.location', label: 'Booking Location (booking_details.location)', type: 'string' },
+    { value: 'booking_details.type', label: 'Booking Type (booking_details.type)', type: 'string' },
+    { value: 'booking_details.time_strict_value', label: 'Booking Time Strict Value (booking_details.time_strict_value)', type: 'number' },
+    { value: 'booking_details.time_strict_type', label: 'Booking Time Strict Type (booking_details.time_strict_type)', type: 'string' },
+    { value: 'booking_details.sessions_count', label: 'Booking Sessions Count (booking_details.sessions_count)', type: 'number' },
+    { value: 'booking_details.session_gap', label: 'Booking Session Gap (booking_details.session_gap)', type: 'number' },
+    { value: 'booking_details.session_duration', label: 'Booking Session Duration (booking_details.session_duration)', type: 'number' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' },
+    { value: 'updated_at', label: 'Updated At (updated_at)', type: 'string' }
+  ],
+  'product.deleted': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'deleted_at', label: 'Deleted At (deleted_at)', type: 'string' }
+  ],
+  'product.available': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Price Currency (price.currency)', type: 'string' },
+    { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'url', label: 'Storefront URL (url)', type: 'string' }
+  ],
+  'product.quantity.low': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Price Currency (price.currency)', type: 'string' },
+    { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+    { value: 'status', label: 'Status (status)', type: 'string' }
+  ],
+  'product.channels.changed': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'channels', label: 'Sales Channels (channels)', type: 'array' }
+  ],
+  'product.review.added': [
+    { value: 'id', label: 'Review ID (id)', type: 'string' },
+    { value: 'rating', label: 'Rating (rating)', type: 'number' },
+    { value: 'comment', label: 'Comment (comment)', type: 'string' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product.id', label: 'Product ID (product.id)', type: 'string' },
+    { value: 'product.name', label: 'Product Name (product.name)', type: 'string' },
+    { value: 'product.sku', label: 'Product SKU (product.sku)', type: 'string' },
+    { value: 'customer.id', label: 'Customer ID (customer.id)', type: 'string' },
+    { value: 'customer.first_name', label: 'Customer First Name (customer.first_name)', type: 'string' },
+    { value: 'customer.last_name', label: 'Customer Last Name (customer.last_name)', type: 'string' },
+    { value: 'customer.email', label: 'Customer Email (customer.email)', type: 'string' }
+  ],
+  'product.review.updated': [
+    { value: 'id', label: 'Review ID (id)', type: 'string' },
+    { value: 'rating', label: 'Rating (rating)', type: 'number' },
+    { value: 'comment', label: 'Comment (comment)', type: 'string' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product.id', label: 'Product ID (product.id)', type: 'string' },
+    { value: 'product.name', label: 'Product Name (product.name)', type: 'string' },
+    { value: 'product.sku', label: 'Product SKU (product.sku)', type: 'string' },
+    { value: 'customer.id', label: 'Customer ID (customer.id)', type: 'string' },
+    { value: 'customer.first_name', label: 'Customer First Name (customer.first_name)', type: 'string' },
+    { value: 'customer.last_name', label: 'Customer Last Name (customer.last_name)', type: 'string' },
+    { value: 'customer.email', label: 'Customer Email (customer.email)', type: 'string' }
+  ],
+
+  // Fallbacks for other generic options
+  'product.template': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'subtitle', label: 'Product Subtitle (subtitle)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'barcode', label: 'Barcode (barcode)', type: 'string' },
+    { value: 'price', label: 'Price Root (price)', type: 'number' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Currency (price.currency)', type: 'string' },
+    { value: 'sale_price', label: 'Sale Price Root (sale_price)', type: 'number' },
+    { value: 'sale_price.amount', label: 'Sale Price Amount (sale_price.amount)', type: 'number' },
+    { value: 'cost_price', label: 'Cost Price Root (cost_price)', type: 'number' },
+    { value: 'cost_price.amount', label: 'Cost Price Amount (cost_price.amount)', type: 'number' },
+    { value: 'regular_price.amount', label: 'Regular Price (regular_price.amount)', type: 'number' },
+    { value: 'quantity', label: 'Quantity (quantity)', type: 'number' },
+    { value: 'unlimited_quantity', label: 'Unlimited Stock (unlimited_quantity)', type: 'boolean' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product_type', label: 'Product Type (product_type)', type: 'string' },
+    { value: 'weight', label: 'Weight (weight)', type: 'number' },
+    { value: 'weight_type', label: 'Weight Type (weight_type)', type: 'string' },
+    { value: 'description', label: 'Description (description)', type: 'string' },
+    { value: 'short_description', label: 'Short Description (short_description)', type: 'string' },
+    { value: 'main_image', label: 'Main Image URL (main_image)', type: 'string' },
+    { value: 'url', label: 'Storefront URL (url)', type: 'string' },
+    { value: 'brand_id', label: 'Brand ID Root (brand_id)', type: 'number' },
+    { value: 'brand.id', label: 'Brand ID (brand.id)', type: 'string' },
+    { value: 'brand.name', label: 'Brand Name (brand.name)', type: 'string' },
+    { value: 'categories', label: 'Categories IDs/Array (categories)', type: 'array' },
+    { value: 'tags', label: 'Tags IDs/Array (tags)', type: 'array' },
+    { value: 'images', label: 'Images Array (images)', type: 'array' },
+    { value: 'options', label: 'Options/Variants (options)', type: 'array' },
+    { value: 'require_shipping', label: 'Require Shipping (require_shipping)', type: 'boolean' },
+    { value: 'maximum_quantity_per_order', label: 'Max Qty Per Order (maximum_quantity_per_order)', type: 'number' },
+    { value: 'min_amount_donating', label: 'Min Amount Donating (min_amount_donating)', type: 'number' },
+    { value: 'max_amount_donating', label: 'Max Amount Donating (max_amount_donating)', type: 'number' },
+    { value: 'sale_end', label: 'Sale End Date (sale_end)', type: 'string' },
+    { value: 'mpn', label: 'MPN (mpn)', type: 'string' },
+    { value: 'gtin', label: 'GTIN (gtin)', type: 'string' },
+    { value: 'hide_quantity', label: 'Hide Quantity (hide_quantity)', type: 'boolean' },
+    { value: 'enable_upload_image', label: 'Enable Upload Image (enable_upload_image)', type: 'boolean' },
+    { value: 'enable_note', label: 'Enable Note (enable_note)', type: 'boolean' },
+    { value: 'pinned', label: 'Pinned (pinned)', type: 'boolean' },
+    { value: 'active_advance', label: 'Active Advance (active_advance)', type: 'boolean' },
+    { value: 'promotion_title', label: 'Promotion Title (promotion_title)', type: 'string' },
+    { value: 'metadata_title', label: 'SEO Metadata Title (metadata_title)', type: 'string' },
+    { value: 'metadata_description', label: 'SEO Metadata Desc (metadata_description)', type: 'string' },
+    { value: 'booking_details.location', label: 'Booking Location (booking_details.location)', type: 'string' },
+    { value: 'booking_details.type', label: 'Booking Type (booking_details.type)', type: 'string' },
+    { value: 'booking_details.time_strict_value', label: 'Booking Time Strict Value (booking_details.time_strict_value)', type: 'number' },
+    { value: 'booking_details.time_strict_type', label: 'Booking Time Strict Type (booking_details.time_strict_type)', type: 'string' },
+    { value: 'booking_details.sessions_count', label: 'Booking Sessions Count (booking_details.sessions_count)', type: 'number' },
+    { value: 'booking_details.session_gap', label: 'Booking Session Gap (booking_details.session_gap)', type: 'number' },
+    { value: 'booking_details.session_duration', label: 'Booking Session Duration (booking_details.session_duration)', type: 'number' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' },
+    { value: 'updated_at', label: 'Updated At (updated_at)', type: 'string' }
+  ],
+  'product.update': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'name', label: 'Product Name (name)', type: 'string' },
+    { value: 'subtitle', label: 'Product Subtitle (subtitle)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' },
+    { value: 'barcode', label: 'Barcode (barcode)', type: 'string' },
+    { value: 'price', label: 'Price Root (price)', type: 'number' },
+    { value: 'price.amount', label: 'Price Amount (price.amount)', type: 'number' },
+    { value: 'price.currency', label: 'Price Currency (price.currency)', type: 'string' },
+    { value: 'sale_price', label: 'Sale Price Root (sale_price)', type: 'number' },
+    { value: 'sale_price.amount', label: 'Sale Price Amount (sale_price.amount)', type: 'number' },
+    { value: 'cost_price', label: 'Cost Price Root (cost_price)', type: 'number' },
+    { value: 'cost_price.amount', label: 'Cost Price Amount (cost_price.amount)', type: 'number' },
+    { value: 'regular_price.amount', label: 'Regular Price (regular_price.amount)', type: 'number' },
+    { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+    { value: 'unlimited_quantity', label: 'Unlimited Stock (unlimited_quantity)', type: 'boolean' },
+    { value: 'status', label: 'Status (status)', type: 'string' },
+    { value: 'product_type', label: 'Product Type (product_type)', type: 'string' },
+    { value: 'weight', label: 'Weight (weight)', type: 'number' },
+    { value: 'weight_type', label: 'Weight Type (weight_type)', type: 'string' },
+    { value: 'description', label: 'Full Description (description)', type: 'string' },
+    { value: 'short_description', label: 'Short Description (short_description)', type: 'string' },
+    { value: 'main_image', label: 'Main Image URL (main_image)', type: 'string' },
+    { value: 'url', label: 'Storefront URL (url)', type: 'string' },
+    { value: 'brand_id', label: 'Brand ID Root (brand_id)', type: 'number' },
+    { value: 'brand.id', label: 'Brand ID (brand.id)', type: 'string' },
+    { value: 'brand.name', label: 'Brand Name (brand.name)', type: 'string' },
+    { value: 'categories', label: 'Categories IDs/Array (categories)', type: 'array' },
+    { value: 'tags', label: 'Tags IDs/Array (tags)', type: 'array' },
+    { value: 'images', label: 'Images Array (images)', type: 'array' },
+    { value: 'options', label: 'Options/Variants (options)', type: 'array' },
+    { value: 'require_shipping', label: 'Require Shipping (require_shipping)', type: 'boolean' },
+    { value: 'maximum_quantity_per_order', label: 'Max Qty Per Order (maximum_quantity_per_order)', type: 'number' },
+    { value: 'min_amount_donating', label: 'Min Amount Donating (min_amount_donating)', type: 'number' },
+    { value: 'max_amount_donating', label: 'Max Amount Donating (max_amount_donating)', type: 'number' },
+    { value: 'sale_end', label: 'Sale End Date (sale_end)', type: 'string' },
+    { value: 'mpn', label: 'MPN (mpn)', type: 'string' },
+    { value: 'gtin', label: 'GTIN (gtin)', type: 'string' },
+    { value: 'hide_quantity', label: 'Hide Quantity (hide_quantity)', type: 'boolean' },
+    { value: 'enable_upload_image', label: 'Enable Upload Image (enable_upload_image)', type: 'boolean' },
+    { value: 'enable_note', label: 'Enable Note (enable_note)', type: 'boolean' },
+    { value: 'pinned', label: 'Pinned (pinned)', type: 'boolean' },
+    { value: 'active_advance', label: 'Active Advance (active_advance)', type: 'boolean' },
+    { value: 'promotion_title', label: 'Promotion Title (promotion_title)', type: 'string' },
+    { value: 'metadata_title', label: 'SEO Metadata Title (metadata_title)', type: 'string' },
+    { value: 'metadata_description', label: 'SEO Metadata Desc (metadata_description)', type: 'string' },
+    { value: 'booking_details.location', label: 'Booking Location (booking_details.location)', type: 'string' },
+    { value: 'booking_details.type', label: 'Booking Type (booking_details.type)', type: 'string' },
+    { value: 'booking_details.time_strict_value', label: 'Booking Time Strict Value (booking_details.time_strict_value)', type: 'number' },
+    { value: 'booking_details.time_strict_type', label: 'Booking Time Strict Type (booking_details.time_strict_type)', type: 'string' },
+    { value: 'booking_details.sessions_count', label: 'Booking Sessions Count (booking_details.sessions_count)', type: 'number' },
+    { value: 'booking_details.session_gap', label: 'Booking Session Gap (booking_details.session_gap)', type: 'number' },
+    { value: 'booking_details.session_duration', label: 'Booking Session Duration (booking_details.session_duration)', type: 'number' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' },
+    { value: 'updated_at', label: 'Updated At (updated_at)', type: 'string' }
+  ],
+  'product.delete': [
+    { value: 'id', label: 'Product ID (id)', type: 'string' },
+    { value: 'sku', label: 'SKU (sku)', type: 'string' }
+  ],
+  'product.product': [
+    { value: 'variants.id', label: 'Variant ID (variants.id)', type: 'string' },
+    { value: 'variants.sku', label: 'Variant SKU (variants.sku)', type: 'string' },
+    { value: 'variants.price', label: 'Variant Price (variants.price)', type: 'number' },
+    { value: 'variants.barcode', label: 'Variant Barcode (variants.barcode)', type: 'string' },
+    { value: 'variants.quantity', label: 'Variant Quantity (variants.quantity)', type: 'number' },
+  ],
+  'res.partner': [
+    { value: 'id', label: 'Customer ID (id)', type: 'number' },
+    { value: 'first_name', label: 'First Name (first_name)', type: 'string' },
+    { value: 'last_name', label: 'Last Name (last_name)', type: 'string' },
+    { value: 'email', label: 'Email (email)', type: 'string' },
+    { value: 'mobile', label: 'Mobile (mobile)', type: 'string' },
+    { value: 'gender', label: 'Gender (gender)', type: 'string' },
+    { value: 'birthday', label: 'Birthday (birthday)', type: 'string' },
+    { value: 'city', label: 'City (city)', type: 'string' },
+    { value: 'country', label: 'Country (country)', type: 'string' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' }
+  ],
+  'sale.order': [
+    { value: 'id', label: 'Order ID (id)', type: 'number' },
+    { value: 'reference_id', label: 'Reference ID (reference_id)', type: 'number' },
+    { value: 'payment_method', label: 'Payment Method (payment_method)', type: 'string' },
+    { value: 'currency', label: 'Currency (currency)', type: 'string' },
+    { value: 'status.name', label: 'Status Name (status.name)', type: 'string' },
+    { value: 'amounts.total.amount', label: 'Total Amount (amounts.total.amount)', type: 'number' },
+    { value: 'amounts.sub_total.amount', label: 'Subtotal Amount (amounts.sub_total.amount)', type: 'number' },
+    { value: 'amounts.tax.amount', label: 'Tax Amount (amounts.tax.amount)', type: 'number' },
+    { value: 'amounts.shipping_cost.amount', label: 'Shipping Cost (amounts.shipping_cost.amount)', type: 'number' },
+    { value: 'shipping.address.formatted', label: 'Shipping Address (shipping.address.formatted)', type: 'string' },
+    { value: 'customer.id', label: 'Customer ID (customer.id)', type: 'number' },
+    { value: 'customer.first_name', label: 'Customer First Name (customer.first_name)', type: 'string' },
+    { value: 'customer.last_name', label: 'Customer Last Name (customer.last_name)', type: 'string' },
+    { value: 'customer.email', label: 'Customer Email (customer.email)', type: 'string' },
+    { value: 'customer.mobile', label: 'Customer Mobile (customer.mobile)', type: 'string' },
+    { value: 'created_at', label: 'Created At (created_at)', type: 'string' }
+  ],
+  'sale.order.line': [
+    { value: 'items.id', label: 'Line ID (items.id)', type: 'string' },
+    { value: 'items.product_id', label: 'Product ID (items.product_id)', type: 'string' },
+    { value: 'items.name', label: 'Product Name (items.name)', type: 'string' },
+    { value: 'items.sku', label: 'Product SKU (items.sku)', type: 'string' },
+    { value: 'items.quantity', label: 'Quantity (items.quantity)', type: 'number' },
+    { value: 'items.price', label: 'Unit Price (items.price)', type: 'number' },
+    { value: 'items.total', label: 'Line Total (items.total)', type: 'number' }
+  ],
+  'product.category': [
+    { value: 'id', label: 'Category ID (id)', type: 'number' },
+    { value: 'name', label: 'Category Name (name)', type: 'string' },
+    { value: 'parent_id', label: 'Parent ID (parent_id)', type: 'number' },
+    { value: 'status', label: 'Status (status)', type: 'string' }
+  ]
+}
+
 export default function FieldMappingForm({
   initialModels = [],
   hasOdooConnection = false,
+  erpType = 'odoo',
   preloadedModel = '',
   preloadedFields = [],
   editingId,
@@ -389,11 +816,16 @@ export default function FieldMappingForm({
   initialMappings,
   initialRelatedModels,
   initialName,
+  isZidConnected = false,
+  isSallaConnected = false,
   onCancel,
   onSuccess,
+  fixedMappings = [],
+  initialSyncDirection
 }: {
   initialModels?: Array<{ model: string; name: string }>
   hasOdooConnection?: boolean
+  erpType?: string
   preloadedModel?: string
   preloadedFields?: Array<{ value: string; label: string; desc?: string; type: string; relation?: string }>
   editingId?: string
@@ -405,11 +837,60 @@ export default function FieldMappingForm({
   initialMappings?: any
   initialRelatedModels?: string[]
   initialName?: string
+  isZidConnected?: boolean
+  isSallaConnected?: boolean
   onCancel?: () => void
   onSuccess?: () => void
+  fixedMappings?: any[]
+  initialSyncDirection?: string
 }) {
   const { t, lang, dir } = useLanguage()
   const [name, setName] = useState(initialName || '')
+
+  // Determine starting platform dynamically
+  const [platform, setPlatform] = useState<'zid' | 'salla'>(() => {
+    if (initialAction) {
+      const isSallaEvent = SALLA_EVENTS.some(e => e.id === initialAction)
+      const isZidEvent = ZID_EVENTS.some(e => e.id === initialAction)
+      if (isSallaEvent && !isZidEvent) return 'salla'
+      if (isZidEvent && !isSallaEvent) return 'zid'
+    }
+    return isSallaConnected && !isZidConnected ? 'salla' : 'zid'
+  })
+
+  const getErpName = (type: string) => {
+    if (type === 'odoo') return 'أودو'
+    if (type === 'zoho') return 'زوهو'
+    if (type === 'erpnext') return 'ERPNext'
+    return 'أودو'
+  }
+  const getErpNameEn = (type: string) => {
+    if (type === 'odoo') return 'Odoo'
+    if (type === 'zoho') return 'Zoho'
+    if (type === 'erpnext') return 'ERPNext'
+    return 'Odoo'
+  }
+
+  const SYNC_DIRECTIONS = [
+    {
+      value: 'store_to_erp',
+      label: platform === 'salla'
+        ? (lang === 'ar' ? `من سلة إلى ${getErpName(erpType)} (Store ➔ ERP)` : `Salla to ${getErpNameEn(erpType)} (Store ➔ ERP)`)
+        : (lang === 'ar' ? `من زد إلى ${getErpName(erpType)} (Store ➔ ERP)` : `Zid to ${getErpNameEn(erpType)} (Store ➔ ERP)`),
+      desc: lang === 'ar'
+        ? `مزامنة وتحديث البيانات من متجرك الإلكتروني إلى نظام ${getErpName(erpType)}.`
+        : `Sync and update data from your e-commerce store into ${getErpNameEn(erpType)}.`
+    },
+    {
+      value: 'erp_to_store',
+      label: platform === 'salla'
+        ? (lang === 'ar' ? `من ${getErpName(erpType)} إلى سلة (ERP ➔ Store)` : `${getErpNameEn(erpType)} to Salla (ERP ➔ Store)`)
+        : (lang === 'ar' ? `من ${getErpName(erpType)} إلى زد (ERP ➔ Store)` : `${getErpNameEn(erpType)} to Zid (ERP ➔ Store)`),
+      desc: lang === 'ar'
+        ? `مزامنة وتحديث البيانات من نظام ${getErpName(erpType)} إلى متجرك الإلكتروني.`
+        : `Sync and update data from ${getErpNameEn(erpType)} into your e-commerce store.`
+    }
+  ]
 
   // Set default model state
   const defaultModel = hasOdooConnection && initialModels.length > 0
@@ -420,7 +901,8 @@ export default function FieldMappingForm({
   const [odooOperation, setOdooOperation] = useState<'create' | 'update' | 'delete'>(initialOdooOperation || 'create')
   const [odooMatchField, setOdooMatchField] = useState(initialOdooMatchField || '')
   const [zidMatchField, setZidMatchField] = useState(initialZidMatchField || '')
-  const [zidEvent, setZidEvent] = useState(initialAction || 'product.create')
+  const [syncDirection, setSyncDirection] = useState<string>(initialSyncDirection || 'store_to_erp')
+  const [zidEvent, setZidEvent] = useState(initialAction || (isSallaConnected && !isZidConnected ? 'product.created' : 'product.create'))
 
   // Selected related models array (chips/tags state)
   const [relatedOdooModels, setRelatedOdooModels] = useState<string[]>(initialRelatedModels || [])
@@ -474,6 +956,43 @@ export default function FieldMappingForm({
       setRelatedOdooModels([])
     }
   }, [odooModel, editingId])
+
+  // Apply Fixed Mappings automatically
+  useEffect(() => {
+    if (!fixedMappings || fixedMappings.length === 0) return
+
+    const fm = fixedMappings.find(
+      m => m.platform === platform && m.odoo_model === odooModel && m.action === zidEvent
+    )
+    if (!fm) return
+
+    // 1. Auto-inject the line in mappings state if not present
+    setMappings(prev => {
+      const currentLines = prev[odooModel] || []
+      const alreadyHasField = currentLines.some(l => l.erpField === fm.odoo_field)
+      if (alreadyHasField) return prev
+
+      const newLine: MappingLine = {
+        id: Math.random().toString(36).substring(2, 9),
+        erpField: fm.odoo_field,
+        zidField: fm.platform_field,
+        staticValue: ''
+      }
+      return {
+        ...prev,
+        [odooModel]: [...currentLines, newLine]
+      }
+    })
+
+    // 2. Set the match fields automatically for update/delete operations
+    if (odooOperation === 'update' || odooOperation === 'delete') {
+      setOdooMatchField(fm.odoo_field)
+      setZidMatchField(fm.platform_field)
+    } else {
+      setOdooMatchField(prev => prev || fm.odoo_field)
+      setZidMatchField(prev => prev || fm.platform_field)
+    }
+  }, [platform, odooModel, zidEvent, odooOperation, fixedMappings])
 
   // Get available related models for the primary odooModel
   const primaryFields = modelFields[odooModel] || ODOO_FIELDS[odooModel] || []
@@ -533,17 +1052,21 @@ export default function FieldMappingForm({
     })
   }, [odooModel, relatedOdooModels, hasOdooConnection])
 
-  // Automatically align Zid Event when Odoo model changes
+  // Automatically align Event when Odoo model changes
   useEffect(() => {
     // If we are editing and the model hasn't changed from the initial saved model, do not auto-align
     if (editingId && odooModel === initialOdooModel) {
       return
     }
-    const event = ZID_EVENTS.find(e => e.targetModel === odooModel || (odooModel.includes('product') && e.targetModel === 'product.template'))
+    const eventsList = platform === 'salla' ? SALLA_EVENTS : ZID_EVENTS
+    const fallbackEvent = platform === 'salla' ? 'product.created' : 'product.create'
+    const event = eventsList.find(e => e.targetModel === odooModel || (odooModel.includes('product') && e.targetModel === 'product.template'))
     if (event) {
       setZidEvent(event.id)
+    } else {
+      setZidEvent(fallbackEvent)
     }
-  }, [odooModel, initialOdooModel, editingId])
+  }, [odooModel, initialOdooModel, editingId, platform])
 
   // Get current active tab properties
   const isModelTab = activeTab === odooModel || activeRelatedModels.some(m => m.model === activeTab)
@@ -553,45 +1076,74 @@ export default function FieldMappingForm({
   const currentErpFields = modelFields[currentModelKey] || ODOO_FIELDS[currentModelKey] || []
   const currentZidFields = (() => {
     const activeTabLower = currentModelKey.toLowerCase()
+    const activeFields = platform === 'salla' ? SALLA_FIELDS : ZID_FIELDS
 
     // 1. If we are on a child lines/variants tab, resolve child fields
     if (activeTabLower.includes('line')) {
-      return ZID_FIELDS['sale.order.line'] || []
+      return activeFields['sale.order.line'] || []
     }
     if (activeTabLower.includes('product.product') || activeTabLower === 'product.product') {
-      return ZID_FIELDS['product.product'] || []
+      return activeFields['product.product'] || []
     }
 
-    // 2. Otherwise, resolve base model fields depending on the selected Zid Event
-    if (zidEvent === 'product.delete') {
-      return ZID_FIELDS['product.delete'] || []
-    }
-    if (zidEvent === 'product.update' || zidEvent === 'product.publish') {
-      return ZID_FIELDS['product.update'] || []
-    }
-    if (zidEvent === 'category.delete') {
-      return ZID_FIELDS['product.category.delete'] || []
-    }
-    if (zidEvent.startsWith('product') || zidEvent.startsWith('category')) {
-      if (activeTabLower.includes('category')) {
-        return ZID_FIELDS['product.category'] || []
+    // 2. Otherwise, resolve base model fields depending on the selected Event
+    if (platform === 'salla') {
+      if (SALLA_FIELDS[zidEvent]) {
+        return SALLA_FIELDS[zidEvent]
       }
-      return ZID_FIELDS['product.template'] || []
-    }
-    if (zidEvent === 'cart.abandoned') {
-      return ZID_FIELDS['cart.abandoned'] || []
-    }
-    if (zidEvent.startsWith('order')) {
-      return ZID_FIELDS['sale.order'] || []
-    }
-    if (zidEvent.startsWith('customer')) {
-      return ZID_FIELDS['res.partner'] || []
+      if (zidEvent === 'product.deleted') {
+        return SALLA_FIELDS['product.delete'] || []
+      }
+      if (zidEvent === 'product.updated' || zidEvent === 'product.publish' || zidEvent === 'product.available' || zidEvent === 'product.quantity.low') {
+        return SALLA_FIELDS['product.update'] || []
+      }
+      if (zidEvent.startsWith('product')) {
+        return SALLA_FIELDS['product.template'] || []
+      }
+      if (zidEvent.startsWith('order') || zidEvent.startsWith('abandoned.cart')) {
+        return SALLA_FIELDS['sale.order'] || []
+      }
+      if (zidEvent.startsWith('customer') || zidEvent.startsWith('store.branch')) {
+        return SALLA_FIELDS['res.partner'] || []
+      }
+      if (zidEvent.startsWith('category')) {
+        return SALLA_FIELDS['product.category'] || []
+      }
+    } else {
+      if (ZID_FIELDS[zidEvent]) {
+        return ZID_FIELDS[zidEvent]
+      }
+      if (zidEvent === 'product.delete') {
+        return ZID_FIELDS['product.delete'] || []
+      }
+      if (zidEvent === 'product.update' || zidEvent === 'product.publish') {
+        return ZID_FIELDS['product.update'] || []
+      }
+      if (zidEvent === 'category.delete') {
+        return ZID_FIELDS['product.category.delete'] || []
+      }
+      if (zidEvent.startsWith('product') || zidEvent.startsWith('category')) {
+        if (activeTabLower.includes('category') || activeTabLower.includes('group') || (activeTab === odooModel && zidEvent.startsWith('category'))) {
+          return ZID_FIELDS['product.category'] || []
+        }
+        return ZID_FIELDS['product.template'] || []
+      }
+      if (zidEvent === 'cart.abandoned') {
+        return ZID_FIELDS['cart.abandoned'] || []
+      }
+      if (zidEvent.startsWith('order')) {
+        return ZID_FIELDS['sale.order'] || []
+      }
+      if (zidEvent.startsWith('customer')) {
+        return ZID_FIELDS['res.partner'] || []
+      }
     }
 
     // Fallback based on model namespace
-    if (activeTabLower.includes('partner') || activeTabLower.includes('customer')) return ZID_FIELDS['res.partner'] || []
-    if (activeTabLower.includes('order')) return ZID_FIELDS['sale.order'] || []
-    return ZID_FIELDS['product.template'] || []
+    if (activeTabLower.includes('partner') || activeTabLower.includes('customer')) return activeFields['res.partner'] || []
+    if (activeTabLower.includes('order')) return activeFields['sale.order'] || []
+    if (activeTabLower.includes('category') || activeTabLower.includes('group') || (activeTab === odooModel && zidEvent.startsWith('category'))) return activeFields['product.category'] || []
+    return activeFields['product.template'] || []
   })()
 
   const getFieldMeta = (modelKey: string, fieldName: string) => {
@@ -630,13 +1182,27 @@ export default function FieldMappingForm({
 
   const primaryMatchErpFields = modelFields[odooModel] || ODOO_FIELDS[odooModel] || []
   const primaryMatchZidFields = (() => {
-    if (zidEvent === 'product.delete') return ZID_FIELDS['product.delete'] || []
-    if (zidEvent === 'product.update' || zidEvent === 'product.publish') return ZID_FIELDS['product.update'] || []
-    if (zidEvent.startsWith('product')) return ZID_FIELDS['product.template'] || []
-    if (zidEvent.startsWith('order')) return ZID_FIELDS['sale.order'] || []
-    if (zidEvent.startsWith('customer')) return ZID_FIELDS['res.partner'] || []
-    if (zidEvent === 'cart.abandoned') return ZID_FIELDS['cart.abandoned'] || []
-    return currentZidFields
+    const activeFields = platform === 'salla' ? SALLA_FIELDS : ZID_FIELDS
+    if (platform === 'salla') {
+      if (SALLA_FIELDS[zidEvent]) return SALLA_FIELDS[zidEvent]
+      if (zidEvent === 'product.deleted') return SALLA_FIELDS['product.delete'] || []
+      if (zidEvent === 'product.updated' || zidEvent === 'product.publish' || zidEvent === 'product.available' || zidEvent === 'product.quantity.low') return SALLA_FIELDS['product.update'] || []
+      if (zidEvent.startsWith('product')) return SALLA_FIELDS['product.template'] || []
+      if (zidEvent.startsWith('order') || zidEvent.startsWith('abandoned.cart')) return SALLA_FIELDS['sale.order'] || []
+      if (zidEvent.startsWith('customer') || zidEvent.startsWith('store.branch')) return SALLA_FIELDS['res.partner'] || []
+      if (zidEvent.startsWith('category')) return SALLA_FIELDS['product.category'] || []
+    } else {
+      if (ZID_FIELDS[zidEvent]) return ZID_FIELDS[zidEvent]
+      if (zidEvent === 'product.delete') return ZID_FIELDS['product.delete'] || []
+      if (zidEvent === 'product.update' || zidEvent === 'product.publish') return ZID_FIELDS['product.update'] || []
+      if (zidEvent.startsWith('product')) return ZID_FIELDS['product.template'] || []
+      if (zidEvent.startsWith('order')) return ZID_FIELDS['sale.order'] || []
+      if (zidEvent.startsWith('customer')) return ZID_FIELDS['res.partner'] || []
+      if (zidEvent === 'category.delete') return ZID_FIELDS['product.category.delete'] || []
+      if (zidEvent.startsWith('category')) return ZID_FIELDS['product.category'] || []
+      if (zidEvent === 'cart.abandoned') return ZID_FIELDS['cart.abandoned'] || []
+    }
+    return activeFields['product.template'] || []
   })()
 
   useEffect(() => {
@@ -866,8 +1432,8 @@ export default function FieldMappingForm({
       return
     }
 
-    if ((odooOperation === 'update' || odooOperation === 'delete') && (!odooMatchField || !zidMatchField)) {
-      setErrorMessage(lang === 'ar' ? 'اختر حقلي المطابقة في أودو وزد للتعديل أو الحذف.' : 'Matching reference fields are required for update/delete.')
+    if (((odooOperation === 'update' || odooOperation === 'delete') || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (!odooMatchField || !zidMatchField)) {
+      setErrorMessage(lang === 'ar' ? 'اختر حقلي المطابقة في أودو والمنصة الإلكترونية للربط.' : 'Matching reference fields are required for this sync configuration.')
       setIsSaving(false)
       return
     }
@@ -881,7 +1447,9 @@ export default function FieldMappingForm({
         odooOperation,
         odooMatchField,
         zidMatchField,
-        mappings: mappings
+        mappings: mappings,
+        platform,
+        syncDirection
       })
 
       if (res.success) {
@@ -1011,162 +1579,260 @@ export default function FieldMappingForm({
 
         {/* Master Details Block */}
         <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 max-w-5xl mb-6 text-xs">
-          {/* Operation Selector */}
-          <div className="space-y-1.5 sm:col-span-2">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              {t('map.operationLabel')}
-            </label>
-            <SearchableSelect
-              value={odooOperation}
-              onChange={(val) => {
-                if (val === 'create' || val === 'update' || val === 'delete') {
-                  setOdooOperation(val)
-                  setIsSaved(false)
-                }
-              }}
-              options={ODOO_OPERATIONS.map(opt => ({
-                value: opt.value,
-                label: formatFieldLabel(opt.label, lang)
-              }))}
-              placeholder={t('map.selectEventPlaceholder')}
-            />
-            <p className="text-[11px] text-slate-500 font-medium leading-normal">
-              {lang === 'ar' ? 'العملية التي ينفذها المحرك تلقائياً داخل أودو لهذا الربط.' : 'The operation executed automatically by the sync engine in Odoo for this mapping.'}
-            </p>
-          </div>
-
-          {/* Odoo Model Selector */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              {lang === 'ar' ? 'نموذج أودو' : 'Odoo Model'}
-            </label>
-            <SearchableSelect
-              value={odooModel}
-              onChange={(val) => {
-                setOdooModel(val)
-                setIsSaved(false)
-              }}
-              options={
-                hasOdooConnection && initialModels.length > 0
-                  ? initialModels.map(model => ({
-                    value: model.model,
-                    label: model.name ? `${formatFieldLabel(model.name, lang)} (${model.model})` : model.model,
-                    desc: model.model
-                  }))
-                  : ODOO_MODELS.map(model => ({
-                    value: model.id,
-                    label: formatFieldLabel(model.name, lang),
-                    desc: model.desc
-                  }))
-              }
-              placeholder={lang === 'ar' ? 'ابحث أو اختر نموذج أودو...' : 'Search or select Odoo model...'}
-            />
-            <p className="text-[11px] text-slate-500 font-medium leading-normal">
-              {lang === 'ar' ? 'النموذج الأساسي الذي يمثل البيانات في نظام أودو ERP.' : 'The primary model class representing data in Odoo ERP.'}
-            </p>
-          </div>
-
-          {/* Zid Event Selector */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              {lang === 'ar' ? 'حدث زد' : 'Zid Event'}
-            </label>
-            <SearchableSelect
-              value={zidEvent}
-              onChange={(val) => {
-                setZidEvent(val)
-                setIsSaved(false)
-              }}
-              options={ZID_EVENTS.map(event => ({
-                value: event.id,
-                label: formatFieldLabel(event.name, lang),
-              }))}
-              placeholder={t('map.selectEventPlaceholder')}
-            />
-            <p className="text-[11px] text-slate-500 font-medium leading-normal">
-              {lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة زد.' : 'The trigger event on Zid ecommerce platform.'}
-            </p>
-          </div>
-
-          {/* Related Odoo Model Selector (Below Odoo Model Selector) */}
-          {(odooOperation === 'update' || odooOperation === 'delete') && (
-            <>
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  {lang === 'ar' ? 'حقل أودو المرجعي للمطابقة' : 'Odoo Reference Field'}
-                </label>
-                <SearchableSelect
-                  value={odooMatchField}
-                  onChange={(val) => {
-                    setOdooMatchField(val)
+          
+          {/* Store Platform (always first, full width) */}
+          {isZidConnected && isSallaConnected && !editingId ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
+              </label>
+              <div className="flex gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200/50 max-w-sm">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setPlatform('zid')
+                    setZidEvent('product.create')
                     setIsSaved(false)
                   }}
-                  options={primaryMatchErpFields.map(opt => ({
-                    ...opt,
-                    label: formatFieldLabel(opt.label, lang)
-                  }))}
-                  placeholder={t('map.selectField')}
-                />
-                <p className="text-[11px] text-slate-500 font-medium leading-normal">
-                  {lang === 'ar' ? 'الحقل الذي سيتم البحث به داخل نموذج أودو المختار للمطابقة.' : 'The field used to search and match records inside the selected Odoo model.'}
+                  className={cn(
+                    "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                    platform === 'zid' 
+                      ? "bg-white text-slate-800 border border-slate-200 shadow-sm" 
+                      : "text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  {lang === 'ar' ? 'زد (Zid)' : 'Zid'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setPlatform('salla')
+                    setZidEvent('product.created')
+                    setIsSaved(false)
+                  }}
+                  className={cn(
+                    "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                    platform === 'salla' 
+                      ? "bg-white text-slate-800 border border-slate-200 shadow-sm" 
+                      : "text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  {lang === 'ar' ? 'سلة (Salla)' : 'Salla'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
+              </label>
+              <div className="flex h-9 items-center px-3 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700 capitalize dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 w-fit">
+                {platform === 'salla' ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla') : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
+              </div>
+            </div>
+          )}
+
+          {/* Sync Direction Block */}
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+              {lang === 'ar' ? 'اتجاه المزامنة' : 'Sync Direction'}
+            </label>
+            <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+              <SearchableSelect
+                multiple={true}
+                value={syncDirection ? syncDirection.split(',').filter(Boolean) : []}
+                onChange={(vals: string[]) => {
+                  setSyncDirection(vals.join(','))
+                  setIsSaved(false)
+                }}
+                options={SYNC_DIRECTIONS}
+                placeholder={lang === 'ar' ? 'اختر اتجاه المزامنة...' : 'Select sync direction...'}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+              {lang === 'ar'
+                ? 'حدد اتجاهات المزامنة المفعلة لقاعدة الربط هذه.'
+                : 'Determine the enabled synchronization directions for this mapping.'}
+            </p>
+          </div>
+
+          {/* Core Sync Operation */}
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+              {t('map.operationLabel')}
+            </label>
+            <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+              <SearchableSelect
+                value={odooOperation}
+                onChange={(val) => {
+                  if (val === 'create' || val === 'update' || val === 'delete') {
+                    setOdooOperation(val)
+                    setIsSaved(false)
+                  }
+                }}
+                options={ODOO_OPERATIONS.map(opt => ({
+                  value: opt.value,
+                  label: formatFieldLabel(opt.label, lang)
+                }))}
+                placeholder={t('map.selectEventPlaceholder')}
+              />
+            </div>            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+              {lang === 'ar' ? `العملية التي ينفذها المحرك تلقائياً داخل ${getErpName(erpType)} لهذا الربط.` : `The operation executed automatically by the sync engine in ${getErpNameEn(erpType)} for this mapping.`}
+            </p>
+          </div>
+
+          {/* ERP Model & Store Event (side-by-side) */}
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+              {lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} Model`}
+            </label>
+            <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+              <SearchableSelect
+                value={odooModel}
+                onChange={(val) => {
+                  setOdooModel(val)
+                  setIsSaved(false)
+                }}
+                options={
+                  hasOdooConnection && initialModels.length > 0
+                    ? initialModels.map(model => ({
+                      value: model.model,
+                      label: model.name ? `${formatFieldLabel(model.name, lang)} (${model.model})` : model.model,
+                      desc: model.model
+                    }))
+                    : ODOO_MODELS.map(model => ({
+                      value: model.id,
+                      label: formatFieldLabel(model.name, lang),
+                      desc: model.desc
+                    }))
+                }
+                placeholder={lang === 'ar' ? `ابحث أو اختر نموذج ${getErpName(erpType)}...` : `Search or select ${getErpNameEn(erpType)} model...`}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+              {lang === 'ar' ? `النموذج الأساسي الذي يمثل البيانات في نظام ${getErpName(erpType)} ERP.` : `The primary model class representing data in ${getErpNameEn(erpType)} ERP.`}
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+              {platform === 'salla' 
+                ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event') 
+                : (lang === 'ar' ? 'حدث زد' : 'Zid Event')}
+            </label>
+            <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+              <SearchableSelect
+                value={zidEvent}
+                onChange={(val) => {
+                  setZidEvent(val)
+                  setIsSaved(false)
+                }}
+                options={(platform === 'salla' ? SALLA_EVENTS : ZID_EVENTS).map(event => ({
+                  value: event.id,
+                  label: formatFieldLabel(event.name, lang),
+                }))}
+                placeholder={t('map.selectEventPlaceholder')}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+              {platform === 'salla'
+                ? (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة سلة.' : 'The trigger event on Salla ecommerce platform.')
+                : (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة زد.' : 'The trigger event on Zid ecommerce platform.')}
+            </p>
+          </div>
+
+          {/* Reference Field & Store Reference Field (conditional, side-by-side) */}
+          {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
+            <>
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+                  {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي للمطابقة` : `${getErpNameEn(erpType)} Reference Field`}
+                </label>
+                <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+                  <SearchableSelect
+                    value={odooMatchField}
+                    onChange={(val) => {
+                      setOdooMatchField(val)
+                      setIsSaved(false)
+                    }}
+                    options={primaryMatchErpFields.map(opt => ({
+                      ...opt,
+                      label: formatFieldLabel(opt.label, lang)
+                    }))}
+                    placeholder={t('map.selectField')}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                  {lang === 'ar' ? `الحقل الذي سيتم البحث به داخل نموذج ${getErpName(erpType)} المختار للمطابقة.` : `The field used to search and match records inside the selected ${getErpNameEn(erpType)} model.`}
                 </p>
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  {lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field'}
+                <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+                  {platform === 'salla'
+                    ? (lang === 'ar' ? 'حقل سلة المرجعي للمطابقة' : 'Salla Reference Field')
+                    : (lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field')}
                 </label>
-                <SearchableSelect
-                  value={zidMatchField}
-                  onChange={(val) => {
-                    setZidMatchField(val)
-                    setIsSaved(false)
-                  }}
-                  options={primaryMatchZidFields.map(opt => ({
-                    ...opt,
-                    label: formatFieldLabel(opt.label, lang)
-                  }))}
-                  placeholder={t('map.selectField')}
-                />
-                <p className="text-[11px] text-slate-500 font-medium leading-normal">
-                  {lang === 'ar' ? 'قيمة هذا الحقل من الويب هوك الخاص بزد ستُطابق حقل أودو المرجعي.' : 'The value from this Zid webhook field will be matched against the Odoo reference field.'}
+                <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+                  <SearchableSelect
+                    value={zidMatchField}
+                    onChange={(val) => {
+                      setZidMatchField(val)
+                      setIsSaved(false)
+                    }}
+                    options={primaryMatchZidFields.map(opt => ({
+                      ...opt,
+                      label: formatFieldLabel(opt.label, lang)
+                    }))}
+                    placeholder={t('map.selectField')}
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
+                  {platform === 'salla'
+                    ? (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بسلة ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Salla webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)
+                    : (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بزد ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Zid webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)}
                 </p>
               </div>
             </>
           )}
 
-          {/* Related Odoo Model Selector (Below Odoo Model Selector) */}
+          {/* Related Models & Mapping Tip (side-by-side) */}
           <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : 'Related Odoo Models'}
+            <label className="block text-[11px] font-bold text-slate-400 dark:text-slate-300">
+              {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} Models`}
             </label>
-            <SearchableSelect
-              value={relatedOdooModels}
-              onChange={handleRelatedModelsChange}
-              multiple={true}
-              options={
-                hasOdooConnection && initialModels.length > 0
-                  ? initialModels.map(model => ({
-                    value: model.model,
-                    label: model.name ? `${formatFieldLabel(model.name, lang)} (${model.model})` : model.model,
-                    desc: model.model
-                  }))
-                  : ODOO_MODELS.map(model => ({
-                    value: model.id,
-                    label: formatFieldLabel(model.name, lang),
-                    desc: model.desc
-                  }))
-              }
-              placeholder={lang === 'ar' ? 'ابحث واختر نماذج فرعية مرتبطة...' : 'Search and select related models...'}
-            />
-            <p className="text-[11px] text-slate-500 font-medium leading-normal">
+            <div className="rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 p-0.5">
+              <SearchableSelect
+                value={relatedOdooModels}
+                onChange={handleRelatedModelsChange}
+                multiple={true}
+                options={
+                  hasOdooConnection && initialModels.length > 0
+                    ? initialModels.map(model => ({
+                      value: model.model,
+                      label: model.name ? `${formatFieldLabel(model.name, lang)} (${model.model})` : model.model,
+                      desc: model.model
+                    }))
+                    : ODOO_MODELS.map(model => ({
+                      value: model.id,
+                      label: formatFieldLabel(model.name, lang),
+                      desc: model.desc
+                    }))
+                }
+                placeholder={lang === 'ar' ? 'ابحث واختر نماذج فرعية مرتبطة...' : `Search and select related ${getErpNameEn(erpType)} models...`}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">
               {lang === 'ar' ? 'يمكنك كتابة واختيار أكثر من نموذج فرعي مرتبط في نفس الوقت لربط البيانات المتداخلة كأجزاء من النموذج الرئيسي.' : 'You can search and select multiple related child models to map nested structures as parts of the primary model.'}
             </p>
           </div>
 
-          {/* Helpful Tips Card */}
-          <div className="rounded-lg border border-muted-foreground/10 bg-muted/20 p-3 flex flex-col justify-center text-[10px] leading-relaxed text-muted-foreground space-y-0.5 min-h-[85px] h-auto">
-            <span className="font-semibold text-foreground flex items-center gap-1">{lang === 'ar' ? '💡 نصيحة مطابقة الحقول' : '💡 Mapping Tip'}</span>
+          <div className="rounded-xl border border-slate-200/20 dark:border-slate-800 bg-slate-500/5 dark:bg-slate-950/40 p-4 flex flex-col justify-center text-[11px] leading-relaxed text-slate-400 space-y-1 min-h-[90px] h-auto">
+            <span className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+              💡 {lang === 'ar' ? 'نصيحة مطابقة الحقول' : 'Mapping Tip'}
+            </span>
             <span>
               {lang === 'ar' 
                 ? 'يمكنك مطابقة النماذج الفرعية ديناميكياً. اختر النموذج الرئيسي أولاً (مثل أمر البيع)، ثم اختر الجداول الفرعية التابعة له (مثل بند الطلب) لإنشاء ربط متكامل.' 
@@ -1304,7 +1970,7 @@ export default function FieldMappingForm({
                                     type="button"
                                     onClick={() => handleFieldChange(mapping.id, 'zidField', '')}
                                     className="rounded p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-                                    title={lang === 'ar' ? 'إزالة حقل زد' : 'Clear Zid field'}
+                                    title={lang === 'ar' ? 'إزالة حقل المتجر' : 'Clear store field'}
                                   >
                                     <X className="h-3.5 w-3.5" />
                                   </button>
@@ -1392,7 +2058,7 @@ export default function FieldMappingForm({
                     <input type="checkbox" id="sync-delete" className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary" />
                     <div>
                       <label htmlFor="sync-delete" className="font-semibold block text-foreground">{lang === 'ar' ? 'مزامنة عمليات الحذف' : 'Sync Deletions'}</label>
-                      <span className="text-xs text-muted-foreground">{lang === 'ar' ? 'حذف المنتج من متجر زد تلقائياً عند أرشفته أو حذفه في نظام أودو ERP.' : 'Delete product on Zid when it is archived/deleted in Odoo ERP.'}</span>
+                      <span className="text-xs text-muted-foreground">{lang === 'ar' ? `حذف المنتج من متجر زد تلقائياً عند أرشفته أو حذفه في نظام ${getErpName(erpType)}.` : `Delete product on Zid when it is archived/deleted in ${getErpNameEn(erpType)}.`}</span>
                     </div>
                   </div>
                 </div>

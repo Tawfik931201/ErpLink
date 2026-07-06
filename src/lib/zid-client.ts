@@ -416,6 +416,12 @@ export const ZidAPI = {
         headers: buildZidHeaders(creds),
       }),
 
+    /** POST /v1/products/ — create product */
+    create: (creds: ZidCredentials, data: any) =>
+      zidClient.post('/v1/products/', { product_class: 'standalone', ...data }, {
+        headers: buildZidHeaders(creds),
+      }),
+
     /** PATCH /v1/products/{product_id}/ — update product */
     update: (creds: ZidCredentials, productId: string, data: Partial<ZidProduct>) =>
       zidClient.patch(`/v1/products/${productId}/`, data, {

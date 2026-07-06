@@ -38,6 +38,7 @@ interface MerchantAuthHeaders {
   'X-Manager-Token': string
   Accept: string
   'Content-Type': string
+  [key: string]: string
 }
 
 /** Fetch merchant auth headers using getAccessToken to ensure automatic refresh */

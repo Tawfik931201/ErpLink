@@ -23,6 +23,7 @@ export async function getSyncLogs(params: {
   status?: string
   limit?: number
   offset?: number
+  platform?: 'all' | 'zid' | 'salla' | 'none'
 }) {
   try {
     const user = await getOrCreateDbUser()
@@ -47,6 +48,57 @@ export async function getSyncLogs(params: {
       const mappingIds = params.mappingId.split(',')
       if (mappingIds.length > 0) {
         query = query.in('field_mapping_id', mappingIds)
+      }
+    }
+
+    if (params.platform && params.platform !== 'all') {
+      const sallaEvents = [
+        // Products
+        'product.created', 'product.updated', 'product.deleted', 'product.available',
+        'product.quantity.low', 'product.channels.changed', 'product.review.added', 'product.review.updated',
+        // Orders
+        'order.created', 'order.updated', 'order.status.updated', 'order.cancelled',
+        'order.refunded', 'order.deleted', 'order.payment.updated', 'order.coupon.updated',
+        'order.total.price.updated', 'order.products.updated', 'order.customer.updated',
+        'order.shipping.address.updated',
+        // Shipments
+        'order.shipment.creating', 'order.shipment.created', 'order.shipment.cancelled',
+        'order.shipment.return.creating', 'order.shipment.return.created', 'order.shipment.return.cancelled',
+        // Customers
+        'customer.created', 'customer.updated', 'customer.login',
+        // Categories
+        'category.created', 'category.updated', 'category.deleted',
+        // Branches
+        'store.branch.created', 'store.branch.updated', 'store.branch.deleted',
+        // Store
+        'store.settings.updated',
+        // Carts
+        'abandoned.cart', 'abandoned.cart.update', 'abandoned.cart.purchased',
+        // Coupons
+        'coupon.applied', 'coupon.applied.v2',
+        // Brands
+        'brand.created', 'brand.updated', 'brand.deleted',
+        // Special Offers
+        'special.offer.created', 'special.offer.updated', 'special.offer.deleted',
+        // App events
+        'app.installed', 'app.updated', 'app.uninstalled', 'app.store.authorize',
+        'app.trial.started', 'app.trial.expired', 'app.subscription.started', 'app.settings.updated',
+      ]
+
+      const zidEvents = [
+        'product.create', 'product.update', 'product.delete', 'product.publish',
+        'order.create', 'order.status.update', 'order.payment_status.update',
+        'customer.create', 'customer.update', 'customer.merchant.update',
+        'category.create', 'category.update', 'category.delete',
+        'cart.abandoned'
+      ]
+
+      if (params.platform === 'salla') {
+        query = query.in('event', sallaEvents)
+      } else if (params.platform === 'zid') {
+        query = query.in('event', zidEvents)
+      } else if (params.platform === 'none') {
+        query = query.eq('id', '00000000-0000-0000-0000-000000000000')
       }
     }
     

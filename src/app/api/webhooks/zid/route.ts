@@ -114,6 +114,11 @@ export async function POST(req: NextRequest) {
       p.store?.id ??
       p.store?.store_id ??
       p.merchant?.store_id ??
+      req.nextUrl.searchParams.get('store_id') ??
+      req.nextUrl.searchParams.get('storeId') ??
+      headersList.get('x-store-id') ??
+      headersList.get('store-id') ??
+      headersList.get('store_id') ??
       0
 
     const parsed = Number(rawStoreId)
@@ -123,12 +128,42 @@ export async function POST(req: NextRequest) {
   const event: string = queryEvent || headerEvent || inferEventFromPayload(payload)
 
   // ── Extract store_id and product data ─────────────────────────────────────
-  const store_id = extractStoreId(payload)
+  let store_id = extractStoreId(payload)
+
+  if (store_id === 0) {
+    try {
+      const { data: tokens } = await supabase
+        .from('merchant_tokens')
+        .select('store_id')
+      if (tokens && tokens.length > 0) {
+        if (tokens.length === 1) {
+          store_id = Number(tokens[0].store_id)
+          console.info(`[Zid Webhook] Resolved store_id=${store_id} from single merchant token database fallback`)
+        } else {
+          const { data: latestToken } = await supabase
+            .from('merchant_tokens')
+            .select('store_id')
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          if (latestToken) {
+            store_id = Number(latestToken.store_id)
+            console.info(`[Zid Webhook] Resolved store_id=${store_id} from latest merchant token database fallback`)
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Zid Webhook] Failed to resolve fallback store_id from merchant_tokens:', err)
+    }
+  }
+
   // Zid sends product data at the TOP LEVEL (not nested in a "data" field)
   const data: Record<string, unknown> = payload
 
+  const entityId = payload.id ?? payload.category_id ?? payload.category_uuid ?? payload.customer_id ?? payload.order_id ?? 'undefined'
   console.info(`[Zid Webhook] Event resolved → "${event}" (from: ${queryEvent ? 'query' : headerEvent ? 'header' : 'inference'})`)
-  console.info(`[Zid Webhook] store_id=${store_id} | product_id=${payload.id} | sku=${payload.sku}`)
+  console.info(`[Zid Webhook] store_id=${store_id} | entity_id=${entityId} | sku=${payload.sku ?? 'none'}`)
   if (!store_id) {
     console.warn('[Zid Webhook] ⚠️  store_id was not found in payload; field_mappings lookup may not match.')
   }
@@ -201,6 +236,21 @@ export async function POST(req: NextRequest) {
         await handleCustomerEvent(event, store_id, data)
         break
 
+      case 'category.create':
+      case 'category.created':
+      case 'category_create':
+      case 'category_created':
+      case 'category.update':
+      case 'category.updated':
+      case 'category_update':
+      case 'category_updated':
+      case 'category.delete':
+      case 'category.deleted':
+      case 'category_delete':
+      case 'category_deleted':
+        await handleCategoryEvent(event, store_id, data)
+        break
+
       default:
         // Log clearly so we know the exact event name Zid is sending
         console.warn(`[Zid Webhook] ⚠️  UNHANDLED event="${event}" — not matched in switch. Full payload:`)
@@ -264,12 +314,12 @@ async function handleProductEvent(
       .filter(record => record.status === 'success')
       .map(record => `${record.model}#${record.odooRecordId}`)
       .join(', ')
-    console.info(`[Zid Webhook] ✅ Odoo sync completed: ${syncedRecords}`)
+    console.info(`[Zid Webhook] ✅ ERP sync completed: ${syncedRecords}`)
   } else if (result.processed === 0) {
     console.warn(`[Zid Webhook] ⚠️  No matching Field Mapping found for event="${event}" store_id=${storeId}`)
   } else {
     console.warn(
-      `[Zid Webhook] ⚠️  Odoo sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
+      `[Zid Webhook] ⚠️  ERP sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
     )
   }
   console.info('[Zid Webhook] ===== handleProductEvent END =====')
@@ -293,4 +343,32 @@ async function handleCustomerEvent(
 
   console.info('[Zid Webhook] Customer event — triggering sync engine', { event, storeId, customerId: data.id })
   await processWebhookEvent(event, storeId, data)
+}
+
+async function handleCategoryEvent(
+  event: string,
+  storeId: number,
+  data: Record<string, unknown>
+) {
+  console.info('[Zid Webhook] ===== handleCategoryEvent START =====')
+  console.info('[Zid Webhook] event:', event, '| storeId:', storeId)
+  console.info('[Zid Webhook] data keys:', Object.keys(data))
+
+  // Trigger sync engine directly — it reads field_mappings by store_id internally
+  console.info('[Zid Webhook] Calling processWebhookEvent...')
+  const result = await processWebhookEvent(event, storeId, data)
+  if (result.success > 0) {
+    const syncedRecords = result.records
+      .filter(record => record.status === 'success')
+      .map(record => `${record.model}#${record.odooRecordId}`)
+      .join(', ')
+    console.info(`[Zid Webhook] ✅ ERP sync completed: ${syncedRecords}`)
+  } else if (result.processed === 0) {
+    console.warn(`[Zid Webhook] ⚠️  No matching Field Mapping found for event="${event}" store_id=${storeId}`)
+  } else {
+    console.warn(
+      `[Zid Webhook] ⚠️  ERP sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
+    )
+  }
+  console.info('[Zid Webhook] ===== handleCategoryEvent END =====')
 }

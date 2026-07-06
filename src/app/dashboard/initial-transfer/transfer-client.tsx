@@ -500,8 +500,8 @@ export default function TransferClient({
 
       const res = await startInitialTransfer({
         name: transferName,
-        dataType,
-        direction: directionState,
+        dataType: dataType as any,
+        direction: directionState as any,
         odooModel,
         mappings: payloadMappings
       })

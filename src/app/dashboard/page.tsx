@@ -1,5 +1,5 @@
 import { getActiveWorkspaceZidToken } from '@/app/actions/workspaces'
-import { getActiveWorkspaceOdooConnection } from '@/app/actions/odoo'
+import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getFieldMappings } from '@/app/actions/field-mappings'
 import {
   Store,
@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 
 export default async function DashboardHome() {
   const zidTokenRes = await getActiveWorkspaceZidToken()
-  const odooConnRes = await getActiveWorkspaceOdooConnection()
+  const odooConnRes = await getActiveWorkspaceErpConnection()
   const mappingsRes = await getFieldMappings()
 
   const isZidConnected = !!zidTokenRes.success && !!zidTokenRes.token

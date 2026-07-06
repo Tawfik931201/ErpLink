@@ -20,13 +20,13 @@ export async function getWorkspaces() {
     
     const { data: ownedWorkspaces, error: err1 } = await supabase
       .from('workspaces')
-      .select('*, merchant_tokens(merchant_id, name), odoo_connections(id)')
+      .select('*, merchant_tokens(merchant_id, name), erp_connections(id)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
     const { data: membershipData, error: err2 } = await supabase
       .from('workspace_members')
-      .select('*, workspaces(*, merchant_tokens(merchant_id, name), odoo_connections(id))')
+      .select('*, workspaces(*, merchant_tokens(merchant_id, name), erp_connections(id))')
       .eq('user_id', user.id)
 
     if (err1 || err2) throw new Error('Failed to fetch workspaces from database')
@@ -265,5 +265,77 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
     return { success: false, error: error.message || 'Failed to update sync settings' }
   }
 }
+
+export async function getActiveWorkspaceSallaToken() {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: true, token: null }
+    }
+
+    const { data: token, error } = await supabase
+      .from('salla_tokens')
+      .select('*')
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+
+    if (error) throw new Error('Failed to query Salla token: ' + error.message)
+
+    return { success: true, token }
+  } catch (error: any) {
+    console.error('Failed to get Salla token:', error)
+    return { success: false, error: error.message || 'Failed to fetch Salla token' }
+  }
+}
+
+export async function disconnectSallaStore(merchantId: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    const { error } = await supabase
+      .from('salla_tokens')
+      .delete()
+      .eq('merchant_id', merchantId)
+      .eq('workspace_id', user.active_workspace_id)
+
+    if (error) throw new Error('Failed to disconnect Salla store: ' + error.message)
+
+    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/workspace')
+    revalidatePath('/dashboard/integrations')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Failed to disconnect Salla store:', error)
+    return { success: false, error: error.message || 'Failed to disconnect Salla store' }
+  }
+}
+
+export async function updateSallaSyncSettings(merchantId: string, settings: any) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    // Save new settings to DB
+    const { error } = await supabase
+      .from('salla_tokens')
+      .update({ sync_settings: settings })
+      .eq('merchant_id', merchantId)
+      .eq('workspace_id', user.active_workspace_id)
+
+    if (error) throw new Error('Failed to update Salla sync settings: ' + error.message)
+
+    revalidatePath('/dashboard/connect-zid')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Failed to update Salla sync settings:', error)
+    return { success: false, error: error.message || 'Failed to update Salla sync settings' }
+  }
+}
+
 
 

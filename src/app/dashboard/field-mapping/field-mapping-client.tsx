@@ -12,36 +12,66 @@ import {
   Calendar,
   AlertTriangle,
   Loader2,
-  History
+  History,
+  Puzzle,
+  ArrowRightLeft
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { ZID_EVENTS } from './field-mapping-form'
+import { ZID_EVENTS, SALLA_EVENTS } from './field-mapping-form'
 import FieldMappingForm from './field-mapping-form'
+import SearchableSelect from './searchable-select'
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
 import { useLanguage } from '@/components/language-provider'
 import { formatFieldLabel } from '@/lib/translations'
 import SyncLogModal from './sync-log-modal'
+import { motion, AnimatePresence } from 'framer-motion'
+import AddCustomFieldForm from './add-custom-field-form'
+import FixedMappingsTab from './fixed-mappings-tab'
 
 interface FieldMappingClientProps {
   initialModels: Array<{ model: string; name: string }>
   hasOdooConnection: boolean
+  erpType?: string
   preloadedModel: string
   preloadedFields: any[]
+  isZidConnected: boolean
+  isSallaConnected: boolean
+  zidStoreName?: string | null
+  sallaStoreName?: string | null
+  initialFixedMappings?: any[]
 }
 
 export default function FieldMappingClient({
   initialModels,
   hasOdooConnection,
+  erpType = 'odoo',
   preloadedModel,
-  preloadedFields
+  preloadedFields,
+  isZidConnected,
+  isSallaConnected,
+  zidStoreName,
+  sallaStoreName,
+  initialFixedMappings = []
 }: FieldMappingClientProps) {
   const [view, setView] = useState<'list' | 'create' | 'edit'>('list')
   const [mappings, setMappings] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedMapping, setSelectedMapping] = useState<any>(null)
   const { t, lang, dir } = useLanguage()
+
+  // Page-level tab: 'mapping' | 'addfield' | 'fixedmapping'
+  const [pageTab, setPageTab] = useState<'mapping' | 'addfield' | 'fixedmapping'>('mapping')
+  const [fixedMappings, setFixedMappings] = useState<any[]>(initialFixedMappings)
   
+  // Filter tab state: 'all' | 'zid' | 'salla'
+  const [platformFilter, setPlatformFilter] = useState<string[]>([])
+
+  // Advanced Filter states
+  const [searchQuery, setSearchQuery] = useState('')
+  const [directionFilter, setDirectionFilter] = useState<string[]>([])
+  const [operationFilter, setOperationFilter] = useState<string[]>([])
+
   // Delete confirm state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -102,8 +132,23 @@ export default function FieldMappingClient({
   }
 
   const getEventName = (eventId: string) => {
-    const found = ZID_EVENTS.find(e => e.id === eventId)
+    const found = ZID_EVENTS.find(e => e.id === eventId) || SALLA_EVENTS.find(e => e.id === eventId)
     return found ? formatFieldLabel(found.name, lang) : eventId
+  }
+
+  // Detect if action belongs to Zid or Salla
+  const getPlatformSource = (action: string): 'zid' | 'salla' => {
+    if (SALLA_EVENTS.find(e => e.id === action)) return 'salla'
+    return 'zid'
+  }
+
+  const getActionGroup = (action: string) => {
+    const act = action.toLowerCase()
+    if (act.includes('product') || act.includes('item') || act.includes('stock')) return 'products'
+    if (act.includes('order') || act.includes('cart') || act.includes('shipment') || act.includes('abandoned')) return 'orders'
+    if (act.includes('customer') || act.includes('branch') || act.includes('brand') || act.includes('partner')) return 'customers'
+    if (act.includes('category')) return 'categories'
+    return 'other'
   }
 
   // Count total fields in all mappings nested object
@@ -117,6 +162,43 @@ export default function FieldMappingClient({
     })
     return total
   }
+
+  // Filtered mappings based on selected filters
+  const filteredMappings = mappings.filter(item => {
+    // 1. Platform Filter (Store Filter)
+    if (platformFilter.length > 0) {
+      if (!platformFilter.includes(getPlatformSource(item.action))) return false
+    }
+
+    // 2. Search Query (Name, Model, Event Name)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      const nameMatch = (item.name || '').toLowerCase().includes(q)
+      const modelMatch = (item.odoo_model || '').toLowerCase().includes(q)
+      const eventMatch = getEventName(item.action).toLowerCase().includes(q)
+      if (!nameMatch && !modelMatch && !eventMatch) return false
+    }
+
+    // 3. Direction Filter
+    if (directionFilter.length > 0) {
+      const dirs = (item.sync_direction || 'store_to_erp').split(',').map((s: string) => s.trim())
+      const hasMatch = directionFilter.some(dir => {
+        if (dir === 'both') {
+          return dirs.includes('store_to_erp') && dirs.includes('erp_to_store')
+        }
+        return dirs.includes(dir)
+      })
+      if (!hasMatch) return false
+    }
+
+    // 4. Operation Filter
+    if (operationFilter.length > 0) {
+      if (!operationFilter.includes(item.odoo_operation)) return false
+    }
+
+    return true
+  })
+
 
   if (view === 'create') {
     return (
@@ -132,8 +214,12 @@ export default function FieldMappingClient({
         <FieldMappingForm
           initialModels={initialModels}
           hasOdooConnection={hasOdooConnection}
+          erpType={erpType}
           preloadedModel={preloadedModel}
           preloadedFields={preloadedFields}
+          isZidConnected={isZidConnected}
+          isSallaConnected={isSallaConnected}
+          fixedMappings={fixedMappings}
           onCancel={() => setView('list')}
           onSuccess={() => {
             loadMappings()
@@ -166,8 +252,11 @@ export default function FieldMappingClient({
         <FieldMappingForm
           initialModels={initialModels}
           hasOdooConnection={hasOdooConnection}
+          erpType={erpType}
           preloadedModel={preloadedModel}
           preloadedFields={preloadedFields}
+          isZidConnected={isZidConnected}
+          isSallaConnected={isSallaConnected}
           editingId={selectedMapping.id}
           initialName={selectedMapping.name}
           initialAction={selectedMapping.action}
@@ -177,6 +266,8 @@ export default function FieldMappingClient({
           initialZidMatchField={selectedMapping.zid_match_field || ''}
           initialMappings={selectedMapping.mappings}
           initialRelatedModels={initialRelated}
+          fixedMappings={fixedMappings}
+          initialSyncDirection={selectedMapping.sync_direction || 'store_to_erp'}
           onCancel={() => {
             setSelectedMapping(null)
             setView('list')
@@ -191,9 +282,133 @@ export default function FieldMappingClient({
     )
   }
 
+  const storeOptions = [
+    ...(isZidConnected ? [{ value: 'zid', label: zidStoreName || (lang === 'ar' ? 'متجر زد (Zid)' : 'Zid Store') }] : []),
+    ...(isSallaConnected ? [{ value: 'salla', label: sallaStoreName || (lang === 'ar' ? 'متجر سلة (Salla)' : 'Salla Store') }] : [])
+  ]
+
+  const getErpLabel = (type: string) => {
+    if (type === 'odoo') return lang === 'ar' ? 'لأودو' : 'Odoo'
+    if (type === 'zoho') return lang === 'ar' ? 'لزهو' : 'Zoho'
+    if (type === 'erpnext') return lang === 'ar' ? 'لـ ERPNext' : 'ERPNext'
+    return lang === 'ar' ? 'لأودو' : 'Odoo'
+  }
+  const getErpFromLabel = (type: string) => {
+    if (type === 'odoo') return lang === 'ar' ? 'أودو' : 'Odoo'
+    if (type === 'zoho') return lang === 'ar' ? 'زوهو' : 'Zoho'
+    if (type === 'erpnext') return lang === 'ar' ? 'ERPNext' : 'ERPNext'
+    return lang === 'ar' ? 'أودو' : 'Odoo'
+  }
+
+  const directionOptions = [
+    { value: 'store_to_erp', label: lang === 'ar' ? `من المتجر ${getErpLabel(erpType)}` : `Store to ${getErpFromLabel(erpType)}` },
+    { value: 'erp_to_store', label: lang === 'ar' ? `من ${getErpFromLabel(erpType)} للمتجر` : `${getErpFromLabel(erpType)} to Store` },
+    { value: 'both', label: lang === 'ar' ? 'كلا الاتجاهين (مزدوج)' : 'Both Directions (Dual)' }
+  ]
+
+  const operationOptions = [
+    { value: 'create', label: lang === 'ar' ? 'إنشاء (Create)' : 'Create' },
+    { value: 'update', label: lang === 'ar' ? 'تعديل (Update)' : 'Update' },
+    { value: 'delete', label: lang === 'ar' ? 'حذف (Delete)' : 'Delete' }
+  ]
+
   return (
     <div className="max-w-4xl mx-auto space-y-4 font-sans" dir={dir}>
-      
+
+      {/* ── Page-Level Animated Tabs ───────────────────────────────────── */}
+      <div className="flex items-center gap-1 bg-slate-100/80 dark:bg-slate-800/50 rounded-2xl p-1 w-fit shadow-inner">
+        {[
+          {
+            key: 'mapping',
+            labelAr: 'ربط الحقول',
+            labelEn: 'Field Mapping',
+            icon: <SlidersHorizontal className="h-3.5 w-3.5" />
+          },
+          ...(erpType === 'odoo' || erpType === 'erpnext' ? [{
+            key: 'addfield',
+            labelAr: 'إضافة حقل',
+            labelEn: 'Add Field',
+            icon: <Puzzle className="h-3.5 w-3.5" />
+          }] : []),
+          {
+            key: 'fixedmapping',
+            labelAr: 'الربط الثابت',
+            labelEn: 'Fixed Mapping',
+            icon: <ArrowRightLeft className="h-3.5 w-3.5" />
+          },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setPageTab(tab.key as 'mapping' | 'addfield' | 'fixedmapping')}
+            className={cn(
+              'relative flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-colors duration-200 z-10',
+              pageTab === tab.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {pageTab === tab.key && (
+              <motion.span
+                layoutId="page-tab-pill"
+                className={cn(
+                  'absolute inset-0 rounded-xl shadow-sm',
+                  tab.key === 'addfield'
+                    ? 'bg-gradient-to-br from-violet-500/10 to-purple-500/10 border border-violet-400/25'
+                    : tab.key === 'fixedmapping'
+                    ? 'bg-gradient-to-br from-indigo-500/10 to-blue-500/10 border border-indigo-400/25'
+                    : 'bg-white dark:bg-slate-700 border border-slate-200/80 dark:border-slate-600'
+                )}
+                transition={{ type: 'spring', stiffness: 450, damping: 38 }}
+              />
+            )}
+            <span className="relative z-10 flex items-center gap-1.5">
+              {tab.icon}
+              {lang === 'ar' ? tab.labelAr : tab.labelEn}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence mode="wait">
+      {pageTab === 'fixedmapping' ? (
+        <motion.div
+          key="fixedmapping-tab"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2 }}
+        >
+          <FixedMappingsTab
+            initialModels={initialModels}
+            hasOdooConnection={hasOdooConnection}
+            isZidConnected={isZidConnected}
+            isSallaConnected={isSallaConnected}
+            fixedMappings={fixedMappings}
+            onFixedMappingsChange={setFixedMappings}
+            erpType={erpType}
+          />
+        </motion.div>
+      ) : pageTab === 'addfield' ? (
+        <motion.div
+          key="addfield-tab"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2 }}
+        >
+          <AddCustomFieldForm
+            initialModels={initialModels}
+            hasOdooConnection={hasOdooConnection}
+            erpType={erpType}
+          />
+        </motion.div>
+      ) : (
+      <motion.div
+        key="mapping-tab"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -8 }}
+        transition={{ duration: 0.2 }}
+        className="space-y-4"
+      >
       {/* Top Header Row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -240,8 +455,8 @@ export default function FieldMappingClient({
           <h3 className="text-sm font-bold text-foreground mb-1">{lang === 'ar' ? 'لا يوجد ربط حقول حالياً' : 'No Field Mappings Found'}</h3>
           <p className="text-xs text-muted-foreground max-w-sm mx-auto mb-4 leading-relaxed">
             {lang === 'ar' 
-              ? 'قم بربط وتخصيص كيفية انتقال الحقول بين منصتي زد وأودو لإيقاف المزامنة اليدوية وبدء المزامنة التلقائية.' 
-              : 'Map and customize how fields flow between Zid and Odoo to automate data synchronization.'}
+              ? `قم بربط وتخصيص كيفية انتقال الحقول بين متجرك ونظام ${getErpFromLabel(erpType)} لإيقاف المزامنة اليدوية وبدء المزامنة التلقائية.` 
+              : `Map and customize how fields flow between your store and ${getErpFromLabel(erpType)} to automate data synchronization.`}
           </p>
           <Button 
             onClick={() => setView('create')}
@@ -252,8 +467,67 @@ export default function FieldMappingClient({
           </Button>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200/80 shadow-sm rounded-xl overflow-hidden divide-y divide-border/60">
-          {mappings.map((item) => {
+        <div className="space-y-3">
+          {/* Advanced Filter Bar */}
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 p-4 bg-slate-50/50 dark:bg-slate-900/40 rounded-xl border border-slate-200/60 dark:border-slate-800">
+            {/* Search Input */}
+            <div className="sm:col-span-2 md:col-span-1">
+              <input
+                type="text"
+                placeholder={lang === 'ar' ? 'بحث باسم الربط، النموذج...' : 'Search mapping, model...'}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full text-xs h-9 px-3 rounded-lg border border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary outline-none dark:border-slate-800 dark:bg-slate-900 text-foreground placeholder:text-muted-foreground/60 shadow-sm"
+              />
+            </div>
+
+            {/* Store Filter */}
+            <div className="bg-white dark:bg-slate-900 rounded-lg">
+              <SearchableSelect
+                multiple={true}
+                collapseTags={true}
+                value={platformFilter}
+                onChange={setPlatformFilter}
+                options={storeOptions}
+                placeholder={lang === 'ar' ? 'كل المتاجر المتصلة' : 'All Connected Stores'}
+              />
+            </div>
+
+            {/* Sync Direction Filter */}
+            <div className="bg-white dark:bg-slate-900 rounded-lg">
+              <SearchableSelect
+                multiple={true}
+                collapseTags={true}
+                value={directionFilter}
+                onChange={setDirectionFilter}
+                options={directionOptions}
+                placeholder={lang === 'ar' ? 'كل الاتجاهات' : 'All Directions'}
+              />
+            </div>
+
+            {/* Odoo Operation Filter */}
+            <div className="bg-white dark:bg-slate-900 rounded-lg">
+              <SearchableSelect
+                multiple={true}
+                collapseTags={true}
+                value={operationFilter}
+                onChange={setOperationFilter}
+                options={operationOptions}
+                placeholder={lang === 'ar' ? 'جميع العمليات' : 'All Operations'}
+              />
+            </div>
+          </div>
+
+          {/* Mappings List */}
+          <AnimatePresence mode="popLayout">
+          <div className="bg-white border border-slate-200/80 shadow-sm rounded-xl overflow-hidden divide-y divide-border/60">
+          {filteredMappings.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center min-h-[120px] p-6">
+              <p className="text-xs text-muted-foreground font-medium">
+                {lang === 'ar' ? 'لا توجد روابط لهذه المنصة' : 'No mappings for this platform'}
+              </p>
+            </div>
+          ) : filteredMappings.map((item) => {
             const totalFields = countTotalMappedFields(item.mappings)
             const formattedDate = item.created_at 
               ? new Date(item.created_at).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
@@ -265,9 +539,15 @@ export default function FieldMappingClient({
                 })
               : '-'
 
+            const platform = getPlatformSource(item.action)
             return (
-              <div 
-                key={item.id} 
+              <motion.div 
+                key={item.id}
+                layout
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18 }}
                 className="p-4 hover:bg-muted/5 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
               >
                 {/* Details */}
@@ -279,6 +559,19 @@ export default function FieldMappingClient({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-bold text-xs text-foreground break-all">
                         {item.name || (lang === 'ar' ? 'ربط حقول غير مسمى' : 'Unnamed field mapping')}
+                      </span>
+                      {/* Platform Source Badge */}
+                      <span className={cn(
+                        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-bold border',
+                        platform === 'salla'
+                          ? 'bg-teal-500/10 text-teal-700 dark:text-teal-300 border-teal-400/30'
+                          : 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-400/30'
+                      )}>
+                        <span className={cn(
+                          'inline-block w-1.5 h-1.5 rounded-full',
+                          platform === 'salla' ? 'bg-teal-500' : 'bg-violet-500'
+                        )} />
+                        {platform === 'salla' ? (lang === 'ar' ? 'سله' : 'Salla') : (lang === 'ar' ? 'زد' : 'Zid')}
                       </span>
                       <span className={cn(
                         "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-semibold",
@@ -293,14 +586,27 @@ export default function FieldMappingClient({
                             ? t('map.operationUpdate')
                             : t('map.operationCreate')}
                       </span>
+                      {/* Sync Direction Badge */}
+                      {(item.sync_direction || 'store_to_erp').split(',').map((dir: string) => (
+                        <span key={dir} className={cn(
+                          "inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold border",
+                          dir === 'erp_to_store'
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20"
+                            : "bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20"
+                        )}>
+                          {dir === 'erp_to_store'
+                            ? (lang === 'ar' ? `من ${getErpFromLabel(erpType)} للمتجر` : `${getErpFromLabel(erpType)} to Store`)
+                            : (lang === 'ar' ? `من المتجر ${getErpLabel(erpType)}` : `Store to ${getErpFromLabel(erpType)}`)}
+                        </span>
+                      ))}
                     </div>
 
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Database className="h-3 w-3 text-muted-foreground" />
-                        <span>{lang === 'ar' ? 'نموذج أودو: ' : 'Odoo Model: '}<span className="font-mono text-foreground font-semibold">{item.odoo_model}</span></span>
+                        <span>{lang === 'ar' ? `نموذج ${getErpFromLabel(erpType)}: ` : `${getErpFromLabel(erpType)} Model: `}<span className="font-mono text-foreground font-semibold">{item.odoo_model}</span></span>
                       </span>
-                      {(item.odoo_operation === 'update' || item.odoo_operation === 'delete') && (item.odoo_match_field || item.zid_match_field) && (
+                      {(item.odoo_operation === 'update' || item.odoo_operation === 'delete' || (item.sync_direction || '').split(',').includes('erp_to_store')) && (item.odoo_match_field || item.zid_match_field) && (
                         <span className="flex items-center gap-1">
                           <Layers className="h-3 w-3 text-muted-foreground" />
                           <span>{lang === 'ar' ? 'مطابقة: ' : 'Matching: '}<span className="font-mono text-foreground font-semibold">{item.odoo_match_field || '-'} ⇄ {item.zid_match_field || '-'}</span></span>
@@ -376,9 +682,11 @@ export default function FieldMappingClient({
                     </>
                   )}
                 </div>
-              </div>
+              </motion.div>
             )
           })}
+          </div>
+          </AnimatePresence>
         </div>
       )}
       
@@ -389,6 +697,9 @@ export default function FieldMappingClient({
         mappingName={logMappingName}
         mappingsList={mappings.map(m => ({ id: m.id, name: m.name }))}
       />
+      </motion.div>
+      )}
+      </AnimatePresence>
     </div>
   )
 }

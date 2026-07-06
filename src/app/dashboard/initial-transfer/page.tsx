@@ -22,7 +22,7 @@ export default async function InitialTransferPage() {
   // Prefetch fields for the primary model on the server to prevent loading lag
   let preloadedFields: any[] = []
   let preloadedModel = ''
-  if (hasOdooConnection && initialModels.length > 0) {
+  if (hasOdooConnection && initialModels && initialModels.length > 0) {
     preloadedModel = initialModels[0].model
     const fieldsRes = await getOdooModelFields(preloadedModel)
     if (fieldsRes.success && fieldsRes.fields) {

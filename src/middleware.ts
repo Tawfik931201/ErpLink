@@ -4,7 +4,15 @@ import { NextResponse } from 'next/server'
 // Protect dashboard routes, keeping API endpoints and callbacks public
 const isProtectedRoute = createRouteMatcher(['/dashboard((?!/connect-zid).*)'])
 
+// Webhook routes must be excluded completely from Clerk - it consumes the body stream
+const isWebhookRoute = createRouteMatcher(['/api/webhooks/(.*)'])
+
 export default clerkMiddleware(async (auth, req) => {
+  // Skip Clerk entirely for webhook routes to prevent consuming the request body
+  if (isWebhookRoute(req)) {
+    return NextResponse.next()
+  }
+
   if (isProtectedRoute(req)) {
     await auth().protect()
   }

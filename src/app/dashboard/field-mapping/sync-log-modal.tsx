@@ -55,10 +55,33 @@ export default function SyncLogModal({
   const [selectedMappingIds, setSelectedMappingIds] = useState<string[]>(
     mappingId ? [mappingId] : mappingsList.map(m => m.id)
   )
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(['zid', 'salla'])
   const [isStatusDropdownOpen, setIsStatusDropdownOpen] = useState(false)
   const statusDropdownRef = useRef<HTMLDivElement>(null)
   const [isMappingDropdownOpen, setIsMappingDropdownOpen] = useState(false)
   const mappingDropdownRef = useRef<HTMLDivElement>(null)
+  const [isPlatformDropdownOpen, setIsPlatformDropdownOpen] = useState(false)
+  const platformDropdownRef = useRef<HTMLDivElement>(null)
+
+  const togglePlatform = (plat: string) => {
+    setSelectedPlatforms(prev => {
+      let next: string[]
+      if (prev.includes(plat)) {
+        next = prev.filter(p => p !== plat)
+      } else {
+        next = [...prev, plat]
+      }
+      return next
+    })
+  }
+
+  const toggleAllPlatforms = () => {
+    if (selectedPlatforms.length === 2) {
+      setSelectedPlatforms([])
+    } else {
+      setSelectedPlatforms(['zid', 'salla'])
+    }
+  }
 
   // Sync selectedMappingIds when mappingsList or mappingId changes
   useEffect(() => {
@@ -95,16 +118,23 @@ export default function SyncLogModal({
             : selectedMappingIds.join(',')
       )
       
+      const activePlatform = selectedPlatforms.length === 2 
+        ? 'all' 
+        : selectedPlatforms.length === 0 
+          ? 'none' 
+          : selectedPlatforms[0] as 'all' | 'zid' | 'salla'
+
       const res = await getSyncLogs({
         mappingId: activeMappingId,
         status: selectedStatuses.length === 4 ? 'all' : selectedStatuses.join(','),
         limit: LIMIT,
-        offset: 0
+        offset: 0,
+        platform: activePlatform
       })
 
       if (res.success) {
         setLogs(res.logs || [])
-        setTotalCount(res.totalCount)
+        setTotalCount(res.totalCount || 0)
       } else {
         console.error('Failed to load logs:', res.error)
       }
@@ -127,17 +157,24 @@ export default function SyncLogModal({
             : selectedMappingIds.join(',')
       )
       
+      const activePlatform = selectedPlatforms.length === 2 
+        ? 'all' 
+        : selectedPlatforms.length === 0 
+          ? 'none' 
+          : selectedPlatforms[0] as 'all' | 'zid' | 'salla'
+
       const res = await getSyncLogs({
         mappingId: activeMappingId,
         status: selectedStatuses.length === 4 ? 'all' : selectedStatuses.join(','),
         limit: LIMIT,
-        offset: newOffset
+        offset: newOffset,
+        platform: activePlatform
       })
 
       if (res.success) {
         setLogs(res.logs || [])
         setOffset(newOffset)
-        setTotalCount(res.totalCount)
+        setTotalCount(res.totalCount || 0)
       } else {
         console.error('Failed to load logs:', res.error)
       }
@@ -235,7 +272,7 @@ export default function SyncLogModal({
     }
   }
 
-  // Close status and mapping dropdowns when clicking outside
+  // Close status, mapping and platform dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (statusDropdownRef.current && !statusDropdownRef.current.contains(event.target as Node)) {
@@ -243,6 +280,9 @@ export default function SyncLogModal({
       }
       if (mappingDropdownRef.current && !mappingDropdownRef.current.contains(event.target as Node)) {
         setIsMappingDropdownOpen(false)
+      }
+      if (platformDropdownRef.current && !platformDropdownRef.current.contains(event.target as Node)) {
+        setIsPlatformDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -255,7 +295,7 @@ export default function SyncLogModal({
       fetchLogs()
       setExpandedPayloadIds(new Set())
     }
-  }, [isOpen, selectedStatuses, selectedMappingIds, mappingId])
+  }, [isOpen, selectedStatuses, selectedMappingIds, selectedPlatforms, mappingId])
 
   if (!isOpen) return null
 
@@ -578,6 +618,67 @@ export default function SyncLogModal({
               </div>
             </div>
 
+            {/* Store Platform Filter Dropdown */}
+            <div className="flex items-center gap-1.5 relative select-none" ref={platformDropdownRef}>
+              <span className="text-[11px] font-semibold text-muted-foreground mr-1 shrink-0">{lang === 'ar' ? 'المنصة:' : 'Platform:'}</span>
+              
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsPlatformDropdownOpen(!isPlatformDropdownOpen)}
+                  className="text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-primary font-medium flex items-center gap-2 select-none min-w-[120px] justify-between text-start"
+                >
+                  <span className="truncate max-w-[150px]">
+                    {selectedPlatforms.length === 2
+                      ? (lang === 'ar' ? 'الكل' : 'All')
+                      : selectedPlatforms.length === 0
+                        ? (lang === 'ar' ? 'لا شيء' : 'None')
+                        : selectedPlatforms.map(p => p === 'zid' ? (lang === 'ar' ? 'زد (Zid)' : 'Zid') : (lang === 'ar' ? 'سلة (Salla)' : 'Salla')).join(', ')
+                    }
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                </button>
+
+                {isPlatformDropdownOpen && (
+                  <div className="absolute z-50 mt-1 w-44 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg shadow-lg py-1 animate-in fade-in duration-100">
+                    {/* All option */}
+                    <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-semibold cursor-pointer text-foreground select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedPlatforms.length === 2}
+                        onChange={toggleAllPlatforms}
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <span>{lang === 'ar' ? 'الكل' : 'All'}</span>
+                    </label>
+                    <hr className="border-slate-100 dark:border-slate-800 my-1" />
+
+                    {/* Zid option */}
+                    <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium cursor-pointer text-foreground select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedPlatforms.includes('zid')}
+                        onChange={() => togglePlatform('zid')}
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <span>{lang === 'ar' ? 'زد (Zid)' : 'Zid'}</span>
+                    </label>
+
+                    {/* Salla option */}
+                    <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium cursor-pointer text-foreground select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedPlatforms.includes('salla')}
+                        onChange={() => togglePlatform('salla')}
+                        className="rounded border-slate-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <span>{lang === 'ar' ? 'سلة (Salla)' : 'Salla'}</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Global Mode: Mapping selector Multi-Select Dropdown */}
             {!mappingId && (
               <div className="flex items-center gap-1.5 relative select-none" ref={mappingDropdownRef}>
@@ -637,7 +738,7 @@ export default function SyncLogModal({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => fetchLogs(false)}
+            onClick={() => fetchLogs()}
             disabled={isLoading}
             className="h-7 text-[10px] font-semibold rounded-lg shrink-0"
           >

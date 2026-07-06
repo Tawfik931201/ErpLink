@@ -88,13 +88,17 @@ export async function startInitialTransfer(data: {
 
     // Retrieve Odoo Connection
     const { data: odooConn } = await supabase
-      .from('odoo_connections')
+      .from('erp_connections')
       .select('*')
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
 
     if (!odooConn) {
-      throw new Error('لم يتم ضبط اتصال Odoo لهذه البيئة (Odoo connection not configured)')
+      throw new Error('لم يتم ضبط اتصال الـ ERP لهذه البيئة (ERP connection not configured)')
+    }
+
+    if (odooConn.erp_type && odooConn.erp_type !== 'odoo') {
+      throw new Error('نقل البيانات الكلية غير مدعوم حالياً إلا لنظام أودو (Bulk transfer is currently only supported for Odoo)')
     }
 
     // Retrieve Zid merchant token
@@ -272,7 +276,7 @@ async function runTransferInBackground(
 
       try {
         // Build Odoo values using mapping rules
-        const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta)
+        const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, 'zid')
 
         if (Object.keys(odooValues).length === 0) {
           logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)

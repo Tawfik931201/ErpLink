@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { getActiveWorkspaceZidToken } from '@/app/actions/workspaces'
-import { getActiveWorkspaceOdooConnection } from '@/app/actions/odoo'
+import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 
 export const metadata: Metadata = { title: 'Integrations — ZidLink' }
 
@@ -41,9 +41,17 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
   const isZidConnected = zidRes.success && !!zidRes.token
   const storeName = zidRes.success && zidRes.token?.name ? zidRes.token.name : null
 
-  const odooRes = await getActiveWorkspaceOdooConnection()
+  const odooRes = await getActiveWorkspaceErpConnection()
   const isOdooConnected = odooRes.success && !!odooRes.connection
   const odooConnectionName = odooRes.success && odooRes.connection?.connection_name ? odooRes.connection.connection_name : null
+  const erpType = odooRes.success && odooRes.connection?.erp_type ? odooRes.connection.erp_type : null
+
+  const getErpLabel = (type: string | null) => {
+    if (type === 'odoo') return 'أودو (Odoo)'
+    if (type === 'zoho') return 'زوهو (Zoho)'
+    if (type === 'erpnext') return 'ERPNext'
+    return 'أودو (Odoo)'
+  }
 
   return (
     <div className="space-y-8" dir="rtl">
@@ -145,7 +153,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
           </CardContent>
         </Card>
 
-        {/* Odoo Card */}
+        {/* ERP Card */}
         <Card className="overflow-hidden rounded-2xl shadow-md border border-border hover:shadow-lg transition-shadow relative">
           <div className="absolute top-0 right-0 h-1.5 w-full bg-gradient-to-l from-primary to-purple-600" />
           <CardHeader className="pb-3 pt-6">
@@ -155,7 +163,9 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                   <Database className="h-5 w-5" />
                 </div>
                 <div>
-                  <CardTitle className="text-base">نظام أودو (Odoo ERP)</CardTitle>
+                  <CardTitle className="text-base">
+                    {isOdooConnected ? `نظام الـ ERP (${getErpLabel(erpType)})` : 'نظام الـ ERP (ERP System)'}
+                  </CardTitle>
                   <CardDescription className="text-xs">تخطيط موارد المؤسسات</CardDescription>
                 </div>
               </div>
@@ -169,16 +179,20 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-emerald-500" />
-                  تم التحقق من بيانات XML-RPC وحفظها.
+                  تم التحقق من بيانات الاتصال وحفظها بنجاح.
                 </p>
                 <p className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-emerald-500" />
-                  اسم الاتصال: <strong className="text-foreground">{odooConnectionName || 'أودو ERP'}</strong>
+                  البرنامج النشط: <strong className="text-foreground">{getErpLabel(erpType)}</strong>
+                </p>
+                <p className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  اسم الاتصال: <strong className="text-foreground">{odooConnectionName || 'الرئيسي'}</strong>
                 </p>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground leading-relaxed">
-                اربط نظام أودو الخاص بك لإتمام عمليات مزامنة المنتجات والطلبات وتحديثات المخازن بدقة وسهولة.
+                اربط نظام الـ ERP الخاص بك (Odoo، Zoho، أو ERPNext) لإتمام عمليات مزامنة المنتجات والطلبات وتحديثات المخازن بدقة وسهولة.
               </p>
             )}
             <div className="flex gap-2 pt-2">
@@ -190,7 +204,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
                     : 'gradient-brand inline-flex h-9 items-center justify-center rounded-xl px-4 text-sm font-medium text-white shadow-md transition-colors hover:opacity-90 active:opacity-80'
                 }
               >
-                {isOdooConnected ? 'إدارة الربط (Manage)' : 'ربط نظام أودو (Connect Odoo)'}
+                {isOdooConnected ? 'إدارة الربط (Manage)' : 'ربط نظام الـ ERP (Connect ERP)'}
               </Link>
             </div>
           </CardContent>

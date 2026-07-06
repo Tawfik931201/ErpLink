@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, Fragment } from 'react'
-import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp } from 'lucide-react'
+import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp, Check } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
@@ -71,6 +71,29 @@ const SYNC_GROUPS = [
     ]
   }
 ]
+
+interface CustomCheckboxProps {
+  checked: boolean
+  onChange: (val: boolean) => void
+  color?: string
+}
+
+function CustomCheckbox({ checked, onChange, color = 'bg-violet-600' }: CustomCheckboxProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "inline-flex items-center justify-center h-5 w-5 rounded-md border text-white transition-all duration-200 focus:outline-none focus:ring-1 focus:ring-primary/20 hover:scale-105 active:scale-95",
+        checked 
+          ? `${color} border-transparent shadow-sm` 
+          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40"
+      )}
+    >
+      <Check className={cn("h-3.5 w-3.5 stroke-[3.5] transition-transform duration-200", checked ? "scale-100" : "scale-0")} />
+    </button>
+  )
+}
 
 interface SyncSettingsTableProps {
   merchantId: string
@@ -162,15 +185,9 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                   <th className="py-3.5 px-6 font-bold text-foreground/90 text-start w-1/2 text-sm">
                     {t('zid.event')}
                   </th>
-                  <th className="py-3.5 px-4 font-bold text-center w-1/4 text-sm">
-                    <span className="text-violet-600 font-mono tracking-tight block dark:text-violet-400">
-                      {lang === 'ar' ? 'من أودو إلى زد (تحديث)' : 'Odoo to Zid (Sync)'}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground font-mono lowercase block mt-0.5">(erp2store)</span>
-                  </th>
-                  <th className="py-3.5 px-4 font-bold text-center w-1/4 text-sm">
+                  <th className="py-3.5 px-4 font-bold text-center w-1/2 text-sm">
                     <span className="text-blue-600 font-mono tracking-tight block dark:text-blue-400">
-                      {lang === 'ar' ? 'من زد إلى أودو (استقبال)' : 'Zid to Odoo (Sync)'}
+                      {lang === 'ar' ? 'حدث زد' : 'Zid Event'}
                     </span>
                     <span className="text-[10px] text-muted-foreground font-mono lowercase block mt-0.5">(store2erp)</span>
                   </th>
@@ -186,7 +203,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                         onClick={() => toggleGroup(group.title)}
                         className="bg-secondary/40 hover:bg-secondary/60 transition-colors border-b border-border cursor-pointer select-none"
                       >
-                        <td colSpan={3} className="py-3 px-6 font-bold text-sm text-foreground/90 text-start flex items-center gap-2">
+                        <td colSpan={2} className="py-3 px-6 font-bold text-sm text-foreground/90 text-start flex items-center gap-2">
                           <span className="flex h-5 w-5 items-center justify-center rounded bg-card border border-border text-muted-foreground shrink-0">
                             {isOpen ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
                           </span>
@@ -201,19 +218,10 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                             {opt.label}
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <input
-                              type="checkbox"
-                              checked={settings[opt.key]?.odoo2zid || false}
-                              onChange={(e) => handleCheckboxChange(opt.key, 'odoo2zid', e.target.checked)}
-                              className="h-5 w-5 rounded-none border border-border bg-card text-[#008080] focus:ring-0 focus:ring-offset-0 accent-[#008080] cursor-pointer transition-all"
-                            />
-                          </td>
-                          <td className="py-3 px-4 text-center">
-                            <input
-                              type="checkbox"
+                            <CustomCheckbox
                               checked={settings[opt.key]?.zid2odoo || false}
-                              onChange={(e) => handleCheckboxChange(opt.key, 'zid2odoo', e.target.checked)}
-                              className="h-5 w-5 rounded-none border border-border bg-card text-[#008080] focus:ring-0 focus:ring-offset-0 accent-[#008080] cursor-pointer transition-all"
+                              onChange={(val) => handleCheckboxChange(opt.key, 'zid2odoo', val)}
+                              color="bg-violet-600"
                             />
                           </td>
                         </tr>
@@ -229,7 +237,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
             <Button 
               onClick={handleSave} 
               disabled={loading}
-              className="gradient-brand text-white flex items-center gap-2 px-6 py-5 rounded-xl shadow-primary hover:shadow-lg hover:scale-[1.02] transition-all duration-300 font-bold"
+              className="bg-gradient-to-r from-[#1e3a5f] to-[#2b4a72] dark:from-[#1a3050] dark:to-[#243d60] text-white/90 flex items-center gap-2 px-6 py-5 rounded-xl shadow-none hover:brightness-110 transition-all duration-300 font-bold border border-white/5"
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
