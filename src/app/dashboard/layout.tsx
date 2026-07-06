@@ -5,7 +5,7 @@ import { headers, cookies } from 'next/headers'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
-import { getWorkspaces } from '@/app/actions/workspaces'
+import { hasAnyWorkspace } from '@/app/actions/workspaces'
 import SidebarNav from '@/components/sidebar-nav'
 import UserMenu from '@/components/user-menu'
 import { Language, translations } from '@/lib/translations'
@@ -19,14 +19,14 @@ async function ensureWorkspaceAccess() {
   const { userId } = await auth()
   if (!userId) return
 
-  const res = await getWorkspaces()
-  if (res.success) {
-    const workspacesCount = res.workspaces?.length ?? 0
-    if (workspacesCount === 0) {
-      const pathname = headers().get('x-pathname') || ''
-      if (pathname !== '/dashboard/settings/workspace') {
-        redirect('/dashboard/settings/workspace')
-      }
+  // Lightweight existence check — getWorkspaces() previously ran heavy joined
+  // queries (merchant tokens + ERP connections) on every single page navigation
+  // just to know whether the user has at least one workspace.
+  const res = await hasAnyWorkspace()
+  if (res.success && !res.hasWorkspace) {
+    const pathname = headers().get('x-pathname') || ''
+    if (pathname !== '/dashboard/settings/workspace') {
+      redirect('/dashboard/settings/workspace')
     }
   }
 }
@@ -35,6 +35,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   try {
     await ensureWorkspaceAccess()
   } catch (err) {
+    // redirect() works by throwing a special error — it must never be swallowed
+    if (err && typeof err === 'object' && 'digest' in err && String((err as { digest?: string }).digest).startsWith('NEXT_REDIRECT')) {
+      throw err
+    }
     console.error("Failed to verify workspace access:", err)
   }
 

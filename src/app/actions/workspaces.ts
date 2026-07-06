@@ -49,6 +49,36 @@ export async function getWorkspaces() {
   }
 }
 
+/**
+ * Lightweight existence check used by the dashboard layout on every navigation.
+ * Uses head+count queries (no row data, no joins) so it is much faster than
+ * getWorkspaces(), which loads merchant tokens and ERP connections.
+ */
+export async function hasAnyWorkspace() {
+  try {
+    const { userId } = await auth()
+    if (!userId) return { success: false, hasWorkspace: false }
+
+    const { count: ownedCount } = await supabase
+      .from('workspaces')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+
+    if ((ownedCount ?? 0) > 0) return { success: true, hasWorkspace: true }
+
+    const { count: memberCount } = await supabase
+      .from('workspace_members')
+      .select('workspace_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+
+    return { success: true, hasWorkspace: (memberCount ?? 0) > 0 }
+  } catch (error: any) {
+    console.error('Failed to check workspaces:', error)
+    // Fail open so the dashboard still renders if the check errors out
+    return { success: false, hasWorkspace: true }
+  }
+}
+
 export async function createWorkspace(name: string) {
   try {
     if (!name || name.trim() === '') throw new Error('Workspace name is required')
