@@ -878,7 +878,7 @@ export async function processSingleMapping(
   const fieldMeta = await fetchFieldMeta(client, odooModel, erpFieldNames)
 
   // ── 5. Build Odoo values (resolves Many2one/Many2many to IDs) ────────────────
-  const platform = getPlatformFromEvent(event)
+  const platform = platformHint ?? getPlatformFromEvent(event)
   const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, platform)
 
   if (Object.keys(odooValues).length === 0 && odooOperation !== 'delete') {
