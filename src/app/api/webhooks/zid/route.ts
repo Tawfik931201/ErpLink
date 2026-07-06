@@ -140,17 +140,12 @@ export async function POST(req: NextRequest) {
           store_id = Number(tokens[0].store_id)
           console.info(`[Zid Webhook] Resolved store_id=${store_id} from single merchant token database fallback`)
         } else {
-          const { data: latestToken } = await supabase
-            .from('merchant_tokens')
-            .select('store_id')
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-          if (latestToken) {
-            store_id = Number(latestToken.store_id)
-            console.info(`[Zid Webhook] Resolved store_id=${store_id} from latest merchant token database fallback`)
-          }
+          // SECURITY: never guess the store from the "latest" token when multiple
+          // stores exist — that could sync one tenant's data into another tenant's ERP.
+          console.warn(
+            `[Zid Webhook] ⚠️  store_id missing and ${tokens.length} merchant tokens exist — refusing to guess. ` +
+            'Register the Zid webhook URL with ?store_id=<id> to fix this.'
+          )
         }
       }
     } catch (err) {
