@@ -653,7 +653,7 @@ export async function processWebhookEvent(
   console.info(`[SyncEngine] Found ${filteredRows.length} field_mapping(s) to process`)
 
   for (const row of filteredRows as FieldMappingRow[]) {
-    const record = await processSingleMapping(row, event, storeIdStr, data)
+    const record = await processSingleMapping(row, event, storeIdStr, data, 'automatic', undefined, platformHint)
     result.records.push(record)
     result.processed += 1
     result[record.status] += 1
