@@ -140,17 +140,12 @@ export async function POST(req: NextRequest) {
           store_id = Number(tokens[0].store_id)
           console.info(`[Zid Webhook] Resolved store_id=${store_id} from single merchant token database fallback`)
         } else {
-          const { data: latestToken } = await supabase
-            .from('merchant_tokens')
-            .select('store_id')
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle()
-
-          if (latestToken) {
-            store_id = Number(latestToken.store_id)
-            console.info(`[Zid Webhook] Resolved store_id=${store_id} from latest merchant token database fallback`)
-          }
+          // SECURITY: never guess the store from the "latest" token when multiple
+          // stores exist — that could sync one tenant's data into another tenant's ERP.
+          console.warn(
+            `[Zid Webhook] ⚠️  store_id missing and ${tokens.length} merchant tokens exist — refusing to guess. ` +
+            'Register the Zid webhook URL with ?store_id=<id> to fix this.'
+          )
         }
       }
     } catch (err) {
@@ -294,7 +289,7 @@ async function handleOrderEvent(
   }
 
   console.info('[Zid Webhook] Order event received — triggering sync engine', { event, storeId, orderId: data.id })
-  await processWebhookEvent(event, storeId, data)
+  await processWebhookEvent(event, storeId, data, 'zid')
 }
 
 async function handleProductEvent(
@@ -308,7 +303,7 @@ async function handleProductEvent(
 
   // Trigger sync engine directly — it reads field_mappings by store_id internally
   console.info('[Zid Webhook] Calling processWebhookEvent...')
-  const result = await processWebhookEvent(event, storeId, data)
+  const result = await processWebhookEvent(event, storeId, data, 'zid')
   if (result.success > 0) {
     const syncedRecords = result.records
       .filter(record => record.status === 'success')
@@ -342,7 +337,7 @@ async function handleCustomerEvent(
   }
 
   console.info('[Zid Webhook] Customer event — triggering sync engine', { event, storeId, customerId: data.id })
-  await processWebhookEvent(event, storeId, data)
+  await processWebhookEvent(event, storeId, data, 'zid')
 }
 
 async function handleCategoryEvent(
@@ -356,7 +351,7 @@ async function handleCategoryEvent(
 
   // Trigger sync engine directly — it reads field_mappings by store_id internally
   console.info('[Zid Webhook] Calling processWebhookEvent...')
-  const result = await processWebhookEvent(event, storeId, data)
+  const result = await processWebhookEvent(event, storeId, data, 'zid')
   if (result.success > 0) {
     const syncedRecords = result.records
       .filter(record => record.status === 'success')

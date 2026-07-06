@@ -602,9 +602,11 @@ function normalizeOdooOperation(operation: unknown, event: string): OdooOperatio
 export async function processWebhookEvent(
   event: string,
   storeId: number | string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  platformHint?: 'zid' | 'salla'
 ): Promise<SyncEngineResult> {
-  const storeIdStr = String(storeId)
+  // Sanitize to prevent PostgREST filter injection via the .or() string below
+  const storeIdStr = String(storeId).replace(/[^a-zA-Z0-9_-]/g, '')
   const normalizedEvent = normalizeEvent(event)
   const result: SyncEngineResult = {
     processed: 0,
@@ -651,7 +653,7 @@ export async function processWebhookEvent(
   console.info(`[SyncEngine] Found ${filteredRows.length} field_mapping(s) to process`)
 
   for (const row of filteredRows as FieldMappingRow[]) {
-    const record = await processSingleMapping(row, event, storeIdStr, data)
+    const record = await processSingleMapping(row, event, storeIdStr, data, 'automatic', undefined, platformHint)
     result.records.push(record)
     result.processed += 1
     result[record.status] += 1
@@ -671,7 +673,8 @@ export async function processSingleMapping(
   storeId: string,
   zidData: Record<string, unknown>,
   triggerType: 'automatic' | 'manual' = 'automatic',
-  existingLogId?: string
+  existingLogId?: string,
+  platformHint?: 'zid' | 'salla'
 ): Promise<SyncEngineResult['records'][number]> {
   const zidEntityId = String(
     zidData.id ??
@@ -812,7 +815,7 @@ export async function processSingleMapping(
     const erpFieldNames = mappingItems.map(m => m.erpField)
     const fieldMeta = await fetchErpNextFieldMeta(client, odooModel, erpFieldNames)
 
-    const platform = getPlatformFromEvent(event)
+    const platform = platformHint ?? getPlatformFromEvent(event)
     const erpValues = await buildErpNextValues(client, mappingItems, zidData, fieldMeta, platform)
 
     if (Object.keys(erpValues).length === 0 && odooOperation !== 'delete') {
@@ -875,7 +878,7 @@ export async function processSingleMapping(
   const fieldMeta = await fetchFieldMeta(client, odooModel, erpFieldNames)
 
   // ── 5. Build Odoo values (resolves Many2one/Many2many to IDs) ────────────────
-  const platform = getPlatformFromEvent(event)
+  const platform = platformHint ?? getPlatformFromEvent(event)
   const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, platform)
 
   if (Object.keys(odooValues).length === 0 && odooOperation !== 'delete') {
