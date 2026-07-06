@@ -3,6 +3,12 @@ import crypto from 'crypto'
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-super-secret-key-32-chars-long!!' // Must be 32 bytes/chars
 const IV_LENGTH = 16 // For AES, this is always 16
 
+if (!process.env.ENCRYPTION_KEY && process.env.NODE_ENV === 'production') {
+  console.error(
+    '[Crypto] ENCRYPTION_KEY is not set in production — falling back to an INSECURE default key. Set ENCRYPTION_KEY immediately.'
+  )
+}
+
 export function encrypt(text: string): string {
   if (!text) return ''
   try {
@@ -14,8 +20,9 @@ export function encrypt(text: string): string {
     encrypted = Buffer.concat([encrypted, cipher.final()])
     return iv.toString('hex') + ':' + encrypted.toString('hex')
   } catch (error) {
+    // SECURITY: never silently store the plaintext credential on failure
     console.error('Encryption failed:', error)
-    return text
+    throw new Error('Failed to encrypt sensitive value')
   }
 }
 
