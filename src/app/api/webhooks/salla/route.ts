@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
 
     // ── Process the webhook in SyncEngine ─────────────────────────────────────
     console.info(`[Salla Webhook] ▶ Routing event="${event}" merchantId=${merchantId}`)
-    const result = await processWebhookEvent(event, merchantId, data)
+    const result = await processWebhookEvent(event, merchantId, data, 'salla')
     
     if (result.success > 0) {
       const syncedRecords = result.records

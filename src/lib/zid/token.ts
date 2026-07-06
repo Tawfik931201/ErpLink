@@ -49,10 +49,15 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
 
     if (!merchantToken) return null
 
+    // expires_in stores the remaining lifetime (in seconds) at save time, so the
+    // absolute expiry must be anchored to updated_at — not to Date.now() — otherwise
+    // the token never appears expired and refreshAccessToken() never runs.
+    const savedAt = merchantToken.updated_at ? new Date(merchantToken.updated_at).getTime() : 0
+
     return {
       accessToken: merchantToken.access_token,
       refreshToken: merchantToken.refresh_token,
-      expiresAt: merchantToken.expires_in ? Date.now() + Number(merchantToken.expires_in) * 1000 : 0,
+      expiresAt: merchantToken.expires_in && savedAt ? savedAt + Number(merchantToken.expires_in) * 1000 : 0,
       tokenType: merchantToken.token_type,
       authorization: merchantToken.authorization_token,
       scope: undefined,

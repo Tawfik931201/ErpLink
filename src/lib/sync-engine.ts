@@ -602,9 +602,11 @@ function normalizeOdooOperation(operation: unknown, event: string): OdooOperatio
 export async function processWebhookEvent(
   event: string,
   storeId: number | string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  platformHint?: 'zid' | 'salla'
 ): Promise<SyncEngineResult> {
-  const storeIdStr = String(storeId)
+  // Sanitize to prevent PostgREST filter injection via the .or() string below
+  const storeIdStr = String(storeId).replace(/[^a-zA-Z0-9_-]/g, '')
   const normalizedEvent = normalizeEvent(event)
   const result: SyncEngineResult = {
     processed: 0,
