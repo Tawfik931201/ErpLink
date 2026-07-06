@@ -342,7 +342,7 @@ async function handleCustomerEvent(
   }
 
   console.info('[Zid Webhook] Customer event — triggering sync engine', { event, storeId, customerId: data.id })
-  await processWebhookEvent(event, storeId, data)
+  await processWebhookEvent(event, storeId, data, 'zid')
 }
 
 async function handleCategoryEvent(

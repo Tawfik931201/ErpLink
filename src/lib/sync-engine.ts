@@ -815,7 +815,7 @@ export async function processSingleMapping(
     const erpFieldNames = mappingItems.map(m => m.erpField)
     const fieldMeta = await fetchErpNextFieldMeta(client, odooModel, erpFieldNames)
 
-    const platform = getPlatformFromEvent(event)
+    const platform = platformHint ?? getPlatformFromEvent(event)
     const erpValues = await buildErpNextValues(client, mappingItems, zidData, fieldMeta, platform)
 
     if (Object.keys(erpValues).length === 0 && odooOperation !== 'delete') {
