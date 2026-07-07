@@ -10,8 +10,9 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { OdooClient } from '@/lib/odoo-client'
+
 import { decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
 
 // ─── Supabase admin client (bypasses RLS) ────────────────────────────────────
 // Webhook requests have NO Clerk auth session, so the standard supabase client
@@ -443,7 +444,7 @@ async function logSync(entry: {
 
       if (currentLog) {
         let finalStatus = entry.status
-        let finalRecordId = entry.odoo_record_id || currentLog.odoo_record_id
+        const finalRecordId = entry.odoo_record_id || currentLog.odoo_record_id
         let finalError = entry.error_message ?? null
         let finalMappingId = entry.field_mapping_id
 

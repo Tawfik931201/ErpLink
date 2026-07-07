@@ -1,5 +1,4 @@
 import axios from 'axios'
-import { supabase } from './supabase'
 
 export interface SallaTokenRow {
   merchant_id: string

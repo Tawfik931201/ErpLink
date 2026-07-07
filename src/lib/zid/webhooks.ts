@@ -9,7 +9,6 @@
  *   DELETE /v1/managers/webhooks   → Delete webhook
  */
 
-import { supabase } from '@/lib/supabase'
 import { getZidConfig } from './config'
 import { getAccessToken } from './token'
 
