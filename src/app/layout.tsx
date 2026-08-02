@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
+import { ClerkProvider } from '@clerk/nextjs'
 import { Tajawal, JetBrains_Mono } from 'next/font/google'
 import { cookies } from 'next/headers'
-import { Language } from '@/lib/translations'
 
-import Providers from '@/components/providers'
+import AppProviders from '@/components/app-providers'
+import type { Language } from '@/lib/translations'
 
 import './globals.css'
 
@@ -42,10 +43,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   return (
-    <html lang={lang} dir={dir} suppressHydrationWarning>
-      <body className={`${tajawal.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
-        <Providers initialLang={lang}>{children}</Providers>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang={lang} dir={dir} suppressHydrationWarning>
+        <body className={`${tajawal.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+          <AppProviders initialLang={lang}>{children}</AppProviders>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

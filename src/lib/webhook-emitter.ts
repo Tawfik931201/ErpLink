@@ -11,7 +11,8 @@ import { EventEmitter } from 'events'
 
 export interface WebhookEventPayload {
   event: string
-  store_id: number
+  /** Zid: numeric store_id, Shopify: shop domain string, Salla: merchant ID string */
+  store_id: number | string
   data: Record<string, unknown>
   timestamp: string
   receivedAt: string

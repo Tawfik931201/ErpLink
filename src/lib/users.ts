@@ -1,8 +1,9 @@
 import { currentUser } from '@clerk/nextjs/server'
+import { cache } from 'react'
 
 import { supabase } from '@/lib/supabase'
 
-export async function getOrCreateDbUser(userId: string) {
+export const getOrCreateDbUser = cache(async (userId: string) => {
   const { data: dbUser } = await supabase
     .from('users')
     .select('*')
@@ -35,4 +36,4 @@ export async function getOrCreateDbUser(userId: string) {
   }
 
   return newUser
-}
+})

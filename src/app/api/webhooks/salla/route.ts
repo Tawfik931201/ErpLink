@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       // Still broadcast to browser console/SSE so the user can see it arrived but was skipped
       const broadcastPayload: WebhookEventPayload = {
         event: event as any,
-        store_id: Number(merchantId) || 0,
+        store_id: merchantId,
         data,
         timestamp: payload.created_at ?? new Date().toISOString(),
         receivedAt: new Date().toISOString(),
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
     // ── Broadcast to SSE-connected browsers ───────────────────────────────────
     const broadcastPayload: WebhookEventPayload = {
       event: event as any,
-      store_id: Number(merchantId) || 0,
+      store_id: merchantId,
       data,
       timestamp: payload.created_at ?? new Date().toISOString(),
       receivedAt: new Date().toISOString(),

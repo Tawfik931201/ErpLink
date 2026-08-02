@@ -330,7 +330,7 @@ export async function createCustomOdooField(data: CreateCustomFieldData) {
       console.warn('[createCustomOdooField] Supabase save failed (non-critical):', supaErr)
     }
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
 
     const viewsFailed = viewResults.filter(r => r.error)
     return {
@@ -445,7 +445,7 @@ export async function deleteCustomOdooField(odooFieldId: number, supabaseId?: st
         .eq('workspace_id', workspaceId)
     }
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[deleteCustomOdooField] Failed:', error)
@@ -519,7 +519,7 @@ export async function updateCustomOdooField(data: UpdateCustomFieldData) {
       })
       .eq('id', data.id)
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[updateCustomOdooField] Failed:', error)

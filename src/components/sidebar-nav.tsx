@@ -1,10 +1,6 @@
 'use client'
 
-import React from 'react'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
   Store,
@@ -13,7 +9,20 @@ import {
   GitCompare,
   RefreshCw,
   Settings,
+  Ticket,
+  Bell,
+  Handshake,
+  Shield,
+  Users,
+  ShoppingCart,
 } from 'lucide-react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import React from 'react'
+
+import { PendingTicketsBadge } from '@/components/pending-tickets-badge'
+import { stripLocaleFromPathname } from '@/lib/locale'
+import { cn } from '@/lib/utils'
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   dashboard: LayoutDashboard,
@@ -23,15 +32,22 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   mapping: GitCompare,
   transfer: RefreshCw,
   settings: Settings,
+  ticket: Ticket,
+  bell: Bell,
+  partner: Handshake,
+  admin: Shield,
+  users: Users,
+  order: ShoppingCart,
 }
 
 interface NavItem {
   href: string
   icon: string
   label: string
+  hasBadge?: boolean
 }
 
-interface NavSection {
+export interface NavSection {
   items: NavItem[]
 }
 
@@ -39,62 +55,61 @@ interface SidebarNavProps {
   sections: NavSection[]
 }
 
-import { useLanguage } from '@/components/language-provider'
-
 export default function SidebarNav({ sections }: SidebarNavProps) {
   const pathname = usePathname()
-  const { dir } = useLanguage()
+  const cleanPathname = stripLocaleFromPathname(pathname)
 
   return (
-    <nav className="flex flex-col gap-1 px-3 flex-1 py-4">
+    <nav className="flex flex-col gap-0.5 px-3 flex-1 py-3">
       {sections.map((section, sectionIdx) => (
         <React.Fragment key={sectionIdx}>
           {/* Section Items */}
-          <div className="flex flex-col gap-1">
-            {section.items.map(({ href, icon, label }) => {
+          <div className="flex flex-col gap-0.5">
+            {section.items.map(({ href, icon, label, hasBadge }) => {
               const Icon = ICON_MAP[icon] || LayoutDashboard
-              // Handle active state: Exact match for dashboard home, prefix match for sub-routes
-              const isActive = href === '/dashboard' 
-                ? pathname === '/dashboard'
-                : pathname.startsWith(href)
+              // Handle active state: Exact match, or sub-path (e.g. /dashboard/connect-zid/settings matches /dashboard/connect-zid)
+              const isActive = cleanPathname === href || (href !== '/dashboard' && cleanPathname.startsWith(href + '/'))
 
               return (
                 <Link
                   key={href}
                   href={href}
                   className={cn(
-                    "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200 outline-none select-none",
-                    isActive 
-                      ? "text-gray-900 dark:text-white" 
-                      : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100/50 dark:hover:bg-secondary/40"
+                    "group relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150 outline-none select-none",
+                    isActive
+                      ? "bg-muted/60 dark:bg-[#424242f0] text-muted-foreground dark:text-[#999999] shadow-sm dark:shadow-none"
+                      : "text-muted-foreground dark:text-[#999999] hover:text-foreground hover:bg-muted/40 dark:hover:bg-[#424242e0]"
                   )}
                 >
                   {/* Sliding Active Background Pill */}
                   {isActive && (
                     <motion.div
                       layoutId="activeNavPill"
-                      className="absolute inset-0 bg-gray-100/90 dark:bg-secondary/80 rounded-lg -z-10 shadow-sm border border-transparent"
+                      className="absolute inset-0 bg-muted/60 dark:bg-[#424242f0] -z-10 rounded-lg shadow-sm dark:shadow-none"
                       transition={{ type: "spring", stiffness: 380, damping: 30 }}
                     />
                   )}
 
                   {/* Icon */}
-                  <Icon 
+                  <Icon
                     className={cn(
-                      "h-[18px] w-[18px] transition-colors duration-200 shrink-0",
-                      isActive
-                        ? "text-gray-900 dark:text-white"
-                        : "text-gray-500 dark:text-gray-400 group-hover:text-gray-900 dark:group-hover:text-white"
-                    )} 
+                      "h-[16px] w-[16px] transition-colors duration-150 shrink-0",
+                      "text-muted-foreground dark:text-[#999999] group-hover:text-foreground"
+                    )}
                   />
 
                   {/* Label */}
-                  <span className={cn(
-                    "flex-1 transition-transform duration-200 truncate",
-                    dir === 'rtl' ? "group-hover:translate-x-[-1px]" : "group-hover:translate-x-[1px]"
-                  )}>
-                    {label}
-                  </span>
+                  <span className="flex-1 truncate">{label}</span>
+
+                  {/* Pulsing Pending-Status Dot */}
+                  {href === '/dashboard/tickets' ? (
+                    <PendingTicketsBadge />
+                  ) : hasBadge && (
+                    <span className="relative flex h-1.5 w-1.5 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-foreground opacity-60"></span>
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-foreground"></span>
+                    </span>
+                  )}
                 </Link>
               )
             })}
@@ -102,7 +117,7 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
 
           {/* Section Divider - rendered between sections */}
           {sectionIdx < sections.length - 1 && (
-            <hr className="border-border/60 dark:border-border/20 my-2.5 mx-1" />
+            <hr className="border-border my-1.5 mx-1" />
           )}
         </React.Fragment>
       ))}

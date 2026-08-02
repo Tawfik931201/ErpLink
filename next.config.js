@@ -34,7 +34,8 @@ const nextConfig = {
 
   // Allow the ngrok tunnel to access the dev server (development only)
   allowedDevOrigins: [
-    '2ad5-102-184-228-54.ngrok-free.app',
+    'pseudolegendary-conchological-ngan.ngrok-free.dev',
+    '*.ngrok-free.dev',
     '*.ngrok-free.app',
     '*.ngrok.io',
   ],

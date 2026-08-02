@@ -1,8 +1,13 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
-import { translations, Language } from '@/lib/translations'
+import React, { createContext, useContext, useState, useEffect } from 'react'
+
+import {
+  SUPPORTED_URL_LOCALES,
+  getUrlLocaleFromLanguage,
+} from '@/lib/locale'
+import type { Language } from '@/lib/translations'
+import { translations } from '@/lib/translations'
 
 interface LanguageContextProps {
   lang: Language
@@ -20,30 +25,34 @@ export function LanguageProvider({
   children: React.ReactNode
   initialLang: Language
 }) {
-  const [lang, setLangState] = useState<Language>(initialLang)
-  const router = useRouter()
-  const [, startTransition] = useTransition()
+  const [lang] = useState<Language>(initialLang)
 
   // Derived direction
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
-  // Function to switch language
+  // Function to switch language — does a full page reload to the new locale URL
   const setLang = (newLang: Language) => {
     if (newLang === lang) return
 
-    setLangState(newLang)
-
-    // Save to cookies with 1 year expiration
+    // Save to cookies before navigating (middleware will also set it)
     document.cookie = `lang=${newLang}; path=/; max-age=${365 * 24 * 60 * 60}; SameSite=Lax`
-
-    // Update document root immediately for smooth visual shift
     document.documentElement.lang = newLang
     document.documentElement.dir = newLang === 'ar' ? 'rtl' : 'ltr'
 
-    // Refresh page components from server to get new translations
-    startTransition(() => {
-      router.refresh()
-    })
+    // Build new URL with locale prefix
+    const currentPath = window.location.pathname
+    const search = window.location.search
+    const newUrlLocale = getUrlLocaleFromLanguage(newLang)
+
+    const firstSegment = currentPath.split('/').filter(Boolean)[0]?.toLowerCase()
+    let newPath: string
+    if (SUPPORTED_URL_LOCALES.includes(firstSegment)) {
+      newPath = currentPath.replace(/^\/[^/]+/, '/' + newUrlLocale)
+    } else {
+      newPath = '/' + newUrlLocale + (currentPath === '/' ? '' : currentPath)
+    }
+
+    window.location.href = newPath + search
   }
 
   // Effect to ensure client matches state on initial mount/changes
@@ -58,7 +67,6 @@ export function LanguageProvider({
     if (dict && dict[key]) {
       return dict[key]
     }
-    // Fallback dictionary
     const fallbackDict = translations['ar'] as Record<string, string>
     if (fallbackDict && fallbackDict[key]) {
       return fallbackDict[key]

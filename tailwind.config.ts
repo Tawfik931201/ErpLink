@@ -19,6 +19,7 @@ module.exports = {
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
+        inputBg: 'hsl(var(--input-bg))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
@@ -177,7 +178,7 @@ module.exports = {
         'pulse-ring': 'pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite',
       },
       fontFamily: {
-        sans: ['var(--font-tajawal)', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-tajawal)', 'Inter', 'system-ui', 'sans-serif'],
         mono: ['var(--font-jetbrains-mono)', 'Consolas', 'monospace'],
       },
     },

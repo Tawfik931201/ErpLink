@@ -2,17 +2,20 @@
 
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
-import { supabase } from '@/lib/supabase'
-import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
-import { OdooClient } from '@/lib/odoo-client'
+
 import { decrypt } from '@/lib/crypto'
-import { ZidAPI } from '@/lib/zid-client'
-import { getAccessToken } from '@/lib/zid/token'
+import { OdooClient } from '@/lib/odoo-client'
+import { supabase } from '@/lib/supabase'
 import {
   buildOdooValues,
   fetchFieldMeta,
-  findExistingOdooRecord
+  findExistingOdooRecord,
 } from '@/lib/sync-engine'
+import { notifySyncResult } from '@/lib/telegram-notifier'
+import type { SyncRecordSummary } from '@/lib/telegram-notifier'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
+import { getAccessToken } from '@/lib/zid/token'
+import { ZidAPI } from '@/lib/zid-client'
 
 async function getOrCreateDbUser() {
   const { userId } = await auth()
@@ -71,7 +74,7 @@ export async function getTransferById(id: string) {
 
 export async function startInitialTransfer(data: {
   name: string
-  dataType: 'categories' | 'products'
+  dataType: 'categories' | 'products' | 'customers'
   direction: 'zid_to_odoo'
   odooModel: string
   mappings: any
@@ -154,7 +157,7 @@ async function runTransferInBackground(
   merchantTok: any,
   data: {
     name: string
-    dataType: 'categories' | 'products'
+    dataType: 'categories' | 'products' | 'customers'
     direction: 'zid_to_odoo'
     odooModel: string
     mappings: any
@@ -334,6 +337,23 @@ async function runTransferInBackground(
       })
       .eq('id', transferId)
 
+    // Send Telegram summary notification for the bulk transfer
+    const summary: SyncRecordSummary = {
+      status: records_failed > 0 ? 'failed' : 'success',
+      event: `bulk.${data.dataType}.sync`,
+      mappingName: data.name || data.dataType,
+      mappingId: transferId,
+      model: data.odooModel,
+      odooRecordId: null,
+      errorMessage: records_failed > 0
+        ? `فشل ${records_failed} من أصل ${records_fetched} سجل. ${failure_reason.slice(0, 200)}`
+        : null,
+      workspaceId,
+      storeId: merchantTok.store_id ?? null,
+      receivedAt: new Date().toISOString(),
+    }
+    await notifySyncResult({ workspaceId, record: summary }).catch(() => {})
+
   } catch (error: any) {
     console.error('[Background Transfer Error]:', error)
     const errorDetail = error.response?.data ? JSON.stringify(error.response.data) : (error.message || error)
@@ -350,6 +370,21 @@ async function runTransferInBackground(
         updated_at: new Date().toISOString()
       })
       .eq('id', transferId)
+
+    // Send Telegram failure notification
+    const summary: SyncRecordSummary = {
+      status: 'failed',
+      event: `bulk.${data.dataType}.sync`,
+      mappingName: data.name || data.dataType,
+      mappingId: transferId,
+      model: data.odooModel,
+      odooRecordId: null,
+      errorMessage: errorDetail.slice(0, 300),
+      workspaceId,
+      storeId: merchantTok.store_id ?? null,
+      receivedAt: new Date().toISOString(),
+    }
+    await notifySyncResult({ workspaceId, record: summary }).catch(() => {})
   }
 }
 

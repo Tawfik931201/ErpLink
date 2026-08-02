@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { supabase } from '@/lib/supabase'
 
 export interface SallaTokenRow {
   merchant_id: string
@@ -169,4 +170,28 @@ export async function findSallaProductByMatchField(
 export async function updateSallaProduct(merchantId: string, sallaProductId: string, data: any) {
   console.info(`[SallaClient] Updating product ID="${sallaProductId}" in Salla...`)
   return callSallaApi(merchantId, 'PUT', `/products/${sallaProductId}`, data)
+}
+
+/**
+ * Lists products from Salla with pagination. Returns simplified products with stock info.
+ */
+export async function listSallaProducts(
+  merchantId: string,
+  page: number = 1,
+  perPage: number = 100
+): Promise<{ products: any[]; total: number; next: string | null }> {
+  console.info(`[SallaClient] Listing products page=${page} per_page=${perPage}...`)
+  const res = await callSallaApi(merchantId, 'GET', `/products?page=${page}&per_page=${perPage}`)
+  const data = res.data || []
+  const total = res.pagination?.total || data.length
+  const next = res.pagination?.next_page ? String(res.pagination.next_page) : null
+  const products = data.map((p: any) => ({
+    id: p.id,
+    sku: p.sku || '',
+    name: p.name || '',
+    quantity: p.quantity ?? p.stock_quantity ?? 0,
+    price: p.price || 0,
+    barcode: p.barcode || '',
+  }))
+  return { products, total, next }
 }

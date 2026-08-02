@@ -33,11 +33,16 @@ export default function UserMenu({
   const [activeWSId, setActiveWSId] = useState<string | null>(null)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const [mounted, setMounted] = useState(false)
   
   const { openUserProfile, signOut } = useClerk()
   const { user } = useUser()
   const { theme, setTheme } = useTheme()
   const { lang, setLang, dir } = useLanguage()
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Close when clicking outside
   useEffect(() => {
@@ -68,8 +73,9 @@ export default function UserMenu({
   const handleLanguageToggle = async (e: React.MouseEvent) => {
     e.stopPropagation()
     const nextLang = lang === 'ar' ? 'en' : 'ar'
-    setLang(nextLang)
+    // Save to DB first — setLang will trigger a full page reload
     await updateUserSettings(nextLang, theme || 'light')
+    setLang(nextLang)
   }
 
   const handleThemeToggle = async (e: React.MouseEvent) => {
@@ -116,30 +122,30 @@ export default function UserMenu({
       {/* Floating Menu Popover - Side Flyout layout */}
       {isOpen && (
         <div className={cn(
-          "absolute bottom-0 z-50 w-56 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 slide-in-from-bottom-2 duration-200",
+          "absolute bottom-0 z-50 w-56 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 slide-in-from-bottom-2 duration-200",
           dir === 'rtl' ? "right-full mr-6" : "left-full ml-6"
         )}>
           {/* Option 1: Profile Details */}
           {user && (
             <button
               onClick={handleProfileClick}
-              className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all text-start"
+              className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-medium text-foreground dark:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0] transition-colors text-start"
             >
-              <User className="h-4 w-4 text-muted-foreground shrink-0" />
-              <span>{lang === 'ar' ? 'الملف الشخصي' : 'My Profile'}</span>
+              <User className="h-4 w-4 text-muted-foreground dark:text-[#999999] shrink-0" />
+              <span className="flex-1">{lang === 'ar' ? 'الملف الشخصي' : 'My Profile'}</span>
             </button>
           )}
 
           {/* Option 2: Quick Language Switcher */}
           <button
             onClick={handleLanguageToggle}
-            className="flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all"
+            className="flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-medium text-foreground dark:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0] transition-colors"
           >
             <div className="flex items-center gap-2.5 text-start">
-              <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Globe className="h-4 w-4 text-muted-foreground dark:text-[#999999] shrink-0" />
               <span>{lang === 'ar' ? 'اللغة' : 'Language'}</span>
             </div>
-            <span className="text-[10px] font-extrabold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded uppercase">
+            <span className="text-[10px] font-semibold bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded uppercase">
               {lang === 'ar' ? 'en' : 'ar'}
             </span>
           </button>
@@ -147,19 +153,19 @@ export default function UserMenu({
           {/* Option 3: Quick Theme Switcher */}
           <button
             onClick={handleThemeToggle}
-            className="flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all"
+            className="flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-medium text-foreground dark:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0] transition-colors"
           >
             <div className="flex items-center gap-2.5 text-start">
               {theme === 'dark' ? (
-                <Moon className="h-4 w-4 text-primary shrink-0" />
+                <Moon className="h-4 w-4 text-muted-foreground dark:text-[#999999] shrink-0" />
               ) : (
-                <Sun className="h-4 w-4 text-amber-500 shrink-0" />
+                <Sun className="h-4 w-4 text-muted-foreground dark:text-[#999999] shrink-0" />
               )}
               <span>{lang === 'ar' ? 'المظهر' : 'Appearance'}</span>
             </div>
-            <span className="text-[10px] font-extrabold bg-secondary text-muted-foreground border border-border px-2 py-0.5 rounded">
-              {theme === 'dark' 
-                ? (lang === 'ar' ? 'مضيء' : 'Light') 
+            <span className="text-[10px] font-semibold bg-muted text-muted-foreground border border-border px-2 py-0.5 rounded">
+              {theme === 'dark'
+                ? (lang === 'ar' ? 'مضيء' : 'Light')
                 : (lang === 'ar' ? 'داكن' : 'Dark')}
             </span>
           </button>
@@ -169,8 +175,8 @@ export default function UserMenu({
             <button
               onClick={(e) => { e.stopPropagation(); setIsWorkspaceOpen(!isWorkspaceOpen) }}
               className={cn(
-                "flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-bold text-foreground hover:bg-secondary/60 transition-all",
-                isWorkspaceOpen && "bg-secondary/60"
+                "flex items-center justify-between w-full rounded-lg px-3 py-2 text-xs font-medium text-foreground dark:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0] transition-colors",
+                isWorkspaceOpen && "bg-muted/60 dark:bg-[#424242f0]"
               )}
             >
               <div className="flex items-center gap-2.5 text-start min-w-0">
@@ -185,7 +191,7 @@ export default function UserMenu({
 
             {isWorkspaceOpen && (
               <div className={cn(
-                "absolute top-0 z-50 w-52 bg-card border border-border rounded-xl shadow-lg p-1.5 flex flex-col gap-0.5 max-h-60 overflow-y-auto animate-in fade-in-50 slide-in-from-left-2 duration-150",
+                "absolute top-0 z-50 w-52 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-0.5 max-h-60 overflow-y-auto animate-in fade-in-50 slide-in-from-left-2 duration-150",
                 dir === 'rtl' ? "right-full mr-2" : "left-full ml-2"
               )}>
                 <div className="px-2 py-1 border-b border-border/40 text-[9px] font-extrabold text-muted-foreground uppercase mb-1">
@@ -199,17 +205,17 @@ export default function UserMenu({
                       key={ws.id}
                       onClick={(e) => handleWorkspaceSwitch(e, ws.id)}
                       className={cn(
-                        "flex items-center justify-between w-full rounded-md px-2 py-1.5 text-[10px] font-bold transition-all text-start",
+                        "flex items-center justify-between w-full rounded-md px-2 py-1.5 text-[10px] font-bold transition-colors text-start",
                         isActive
-                          ? "bg-primary/5 text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
+                          ? "bg-muted/60 dark:bg-[#424242f0] text-foreground dark:text-[#999999]"
+                          : "text-muted-foreground dark:text-[#999999] hover:text-foreground dark:hover:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0]"
                       )}
                     >
                       <span className="truncate pr-1 pl-1">{ws.name}</span>
                       {isSwitching ? (
-                        <Loader2 className="h-3 w-3 animate-spin text-primary shrink-0" />
+                        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
                       ) : isActive ? (
-                        <Check className="h-3 w-3 text-primary shrink-0" />
+                        <Check className="h-3 w-3 text-foreground shrink-0" />
                       ) : null}
                     </button>
                   )
@@ -218,14 +224,14 @@ export default function UserMenu({
             )}
           </div>
 
-          <hr className="border-border/60 my-1" />
+          <hr className="border-border my-1" />
 
           {/* Option 5: Sign Out */}
           <button
             onClick={handleSignOutClick}
-            className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 transition-all text-start"
+            className="flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-medium text-foreground dark:text-[#999999] hover:bg-muted/40 dark:hover:bg-[#424242e0] transition-colors text-start"
           >
-            <LogOut className="h-4 w-4 shrink-0" />
+            <LogOut className="h-4 w-4 text-muted-foreground dark:text-[#999999] shrink-0" />
             <span>{lang === 'ar' ? 'تسجيل الخروج' : 'Sign Out'}</span>
           </button>
         </div>
@@ -235,32 +241,32 @@ export default function UserMenu({
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "flex items-center gap-2.5 w-full p-2 rounded-xl transition-all duration-300 outline-none select-none text-start",
-          isOpen 
-            ? "bg-slate-100/80 dark:bg-slate-800/80" 
-            : "bg-transparent hover:bg-slate-100/50 dark:hover:bg-slate-800/30"
+          "flex items-center gap-2.5 w-full p-2 rounded-lg transition-colors duration-150 outline-none select-none text-start",
+          isOpen
+            ? "bg-muted/60 dark:bg-[#424242f0]"
+            : "bg-transparent hover:bg-muted/40 dark:hover:bg-[#424242e0]"
         )}
       >
         {/* User Avatar */}
-        {user?.imageUrl ? (
-          <img 
-            src={user.imageUrl} 
-            alt="User Avatar" 
-            className="h-8 w-8 rounded-full border border-slate-200/60 dark:border-slate-800 object-cover shrink-0" 
+        {mounted && user?.imageUrl ? (
+          <img
+            src={user.imageUrl}
+            alt="User Avatar"
+            className="h-8 w-8 rounded-full border border-border object-cover shrink-0"
           />
         ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600 text-white font-extrabold text-xs shrink-0 shadow-sm">
-            {(user?.fullName || displayName || 'U').charAt(0).toUpperCase()}
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background font-extrabold text-xs shrink-0">
+            {((mounted && user?.fullName) || displayName || 'U').charAt(0).toUpperCase()}
           </div>
         )}
 
         {/* Name & Details */}
         <div className="flex-1 min-w-0 flex flex-col justify-center">
-          <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200 truncate leading-snug">
-            {user?.fullName || displayName}
+          <span className="text-[11px] font-semibold text-foreground truncate leading-snug">
+            {mounted && user?.fullName ? user.fullName : displayName}
           </span>
-          <span className="text-[8px] text-muted-foreground/80 font-medium truncate leading-none mt-1">
-            {user?.primaryEmailAddress?.emailAddress || adminLabel}
+          <span className="text-[9px] text-muted-foreground truncate leading-none mt-1">
+            {mounted && user?.primaryEmailAddress?.emailAddress ? user.primaryEmailAddress.emailAddress : adminLabel}
           </span>
         </div>
 

@@ -77,7 +77,10 @@ export async function registerOdooWebhook(
   }
 
   // 3. Prepare Webhook URL with query parameter mapping ID
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://59f8-156-205-170-54.ngrok-free.app'
+  if (!process.env.NEXT_PUBLIC_APP_URL) {
+    throw new Error('[OdooWebhook] NEXT_PUBLIC_APP_URL environment variable is required for webhook registration')
+  }
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
   const webhookUrl = `${appUrl}/api/webhooks/odoo?field_mapping_id=${fieldMappingId}`
 
   // 4. Inspect base.automation to detect Odoo 17+ vs 16-

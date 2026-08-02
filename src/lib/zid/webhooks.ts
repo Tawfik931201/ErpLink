@@ -30,6 +30,9 @@ export const ZID_EVENT_MAP: Record<string, string> = {
   customer_login:                'customer.login',
   customer_update:               'customer.update',
   customer_merchant_update:      'customer.merchant.update',
+  location_create:               'location.create',
+  location_update:               'location.update',
+  location_delete:               'location.delete',
 }
 
 interface MerchantAuthHeaders {
@@ -89,10 +92,14 @@ export async function registerZidWebhook(
   }
 
   const config = getZidConfig()
-  const webhookUrl = getWebhookUrl()
+  const baseUrl = getWebhookUrl()
+  const targetUrl = new URL(baseUrl)
+  targetUrl.searchParams.set('event', zidEventName)
+  targetUrl.searchParams.set('store_id', merchantId)
+
   const body: Record<string, any> = {
     event: zidEventName,
-    target_url: webhookUrl,
+    target_url: targetUrl.toString(),
     original_id: config.clientId,
   }
   if (process.env.ZID_WEBHOOK_SECRET) body.secret = process.env.ZID_WEBHOOK_SECRET
@@ -144,13 +151,17 @@ export async function unregisterZidWebhook(
   }
 
   const config = getZidConfig()
-  const webhookUrl = getWebhookUrl()
+  const baseUrl = getWebhookUrl()
+  const targetUrl = new URL(baseUrl)
+  targetUrl.searchParams.set('event', zidEventName)
+  targetUrl.searchParams.set('store_id', merchantId)
+
   const deleteUrl = new URL('managers/webhooks', `${config.apiUrl}/`)
   deleteUrl.searchParams.set('original_id', config.clientId)
 
   const body: Record<string, any> = {
     event: zidEventName,
-    target_url: webhookUrl,
+    target_url: targetUrl.toString(),
     original_id: config.clientId,
   }
 

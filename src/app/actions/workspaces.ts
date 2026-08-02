@@ -1,18 +1,19 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
+import { getActiveUserId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { syncWebhooksWithSettings } from '@/lib/zid/webhooks'
 
 async function getOrCreateDbUser() {
-  const { userId } = await auth()
+  const userId = await getActiveUserId()
   if (!userId) throw new Error('Unauthorized')
 
   return ensureDbUser(userId)
 }
+
 
 export async function getWorkspaces() {
   try {
@@ -56,8 +57,9 @@ export async function getWorkspaces() {
  */
 export async function hasAnyWorkspace() {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) return { success: false, hasWorkspace: false }
+
 
     const { count: ownedCount } = await supabase
       .from('workspaces')
@@ -115,19 +117,15 @@ export async function updateWorkspace(id: string, name: string) {
 
     const user = await getOrCreateDbUser()
 
-    // Ensure user owns or is member of the workspace
     const { data: workspace } = await supabase
       .from('workspaces')
-      .select('*, workspace_members(user_id)')
+      .select('user_id')
       .eq('id', id)
       .single()
 
     if (!workspace) throw new Error('Workspace not found')
 
-    const isOwner = workspace.user_id === user.id
-    const isMember = workspace.workspace_members?.some((m: any) => m.user_id === user.id)
-
-    if (!isOwner && !isMember) throw new Error('Unauthorized')
+    if (workspace.user_id !== user.id) throw new Error('Unauthorized: Only the workspace owner can edit workspace settings')
 
     const { data: updated, error } = await supabase
       .from('workspaces')
@@ -219,6 +217,20 @@ export async function setActiveWorkspace(id: string) {
   }
 }
 
+const getCachedZidToken = unstable_cache(
+  async (workspaceId: string) => {
+    const { data: token, error } = await supabase
+      .from('merchant_tokens')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (error) throw new Error('Failed to query merchant token: ' + error.message)
+    return token
+  },
+  ['zid-token'],
+  { revalidate: 30, tags: ['zid-token'] }
+)
+
 export async function getActiveWorkspaceZidToken() {
   try {
     const user = await getOrCreateDbUser()
@@ -226,14 +238,7 @@ export async function getActiveWorkspaceZidToken() {
       return { success: true, token: null }
     }
 
-    const { data: token, error } = await supabase
-      .from('merchant_tokens')
-      .select('*')
-      .eq('workspace_id', user.active_workspace_id)
-      .maybeSingle()
-
-    if (error) throw new Error('Failed to query merchant token: ' + error.message)
-
+    const token = await getCachedZidToken(user.active_workspace_id)
     return { success: true, token }
   } catch (error: any) {
     console.error('Failed to get Zid token:', error)
@@ -256,6 +261,7 @@ export async function disconnectZidStore(merchantId: string) {
 
     if (error) throw new Error('Failed to disconnect Zid store: ' + error.message)
 
+    revalidateTag('zid-token')
     revalidatePath('/dashboard/connect-zid')
     revalidatePath('/dashboard/workspace')
     revalidatePath('/dashboard/integrations')
@@ -288,6 +294,7 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
       console.error('[Zid Webhook] syncWebhooksWithSettings failed:', err)
     )
 
+    revalidateTag('zid-token')
     revalidatePath('/dashboard/connect-zid')
     return { success: true }
   } catch (error: any) {
@@ -296,6 +303,20 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
   }
 }
 
+const getCachedSallaToken = unstable_cache(
+  async (workspaceId: string) => {
+    const { data: token, error } = await supabase
+      .from('salla_tokens')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (error) throw new Error('Failed to query Salla token: ' + error.message)
+    return token
+  },
+  ['salla-token'],
+  { revalidate: 30, tags: ['salla-token'] }
+)
+
 export async function getActiveWorkspaceSallaToken() {
   try {
     const user = await getOrCreateDbUser()
@@ -303,14 +324,7 @@ export async function getActiveWorkspaceSallaToken() {
       return { success: true, token: null }
     }
 
-    const { data: token, error } = await supabase
-      .from('salla_tokens')
-      .select('*')
-      .eq('workspace_id', user.active_workspace_id)
-      .maybeSingle()
-
-    if (error) throw new Error('Failed to query Salla token: ' + error.message)
-
+    const token = await getCachedSallaToken(user.active_workspace_id)
     return { success: true, token }
   } catch (error: any) {
     console.error('Failed to get Salla token:', error)
@@ -333,6 +347,7 @@ export async function disconnectSallaStore(merchantId: string) {
 
     if (error) throw new Error('Failed to disconnect Salla store: ' + error.message)
 
+    revalidateTag('salla-token')
     revalidatePath('/dashboard/connect-zid')
     revalidatePath('/dashboard/workspace')
     revalidatePath('/dashboard/integrations')
@@ -359,6 +374,7 @@ export async function updateSallaSyncSettings(merchantId: string, settings: any)
 
     if (error) throw new Error('Failed to update Salla sync settings: ' + error.message)
 
+    revalidateTag('salla-token')
     revalidatePath('/dashboard/connect-zid')
     return { success: true }
   } catch (error: any) {
@@ -366,6 +382,87 @@ export async function updateSallaSyncSettings(merchantId: string, settings: any)
     return { success: false, error: error.message || 'Failed to update Salla sync settings' }
   }
 }
+
+const getCachedShopifyToken = unstable_cache(
+  async (workspaceId: string) => {
+    const { data: token, error } = await supabase
+      .from('shopify_tokens')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (error) throw new Error('Failed to query Shopify token: ' + error.message)
+    return token
+  },
+  ['shopify-token'],
+  { revalidate: 30, tags: ['shopify-token'] }
+)
+
+export async function getActiveWorkspaceShopifyToken() {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: true, token: null }
+    }
+
+    const token = await getCachedShopifyToken(user.active_workspace_id)
+    return { success: true, token }
+  } catch (error: any) {
+    console.error('Failed to get Shopify token:', error)
+    return { success: false, error: error.message || 'Failed to fetch Shopify token' }
+  }
+}
+
+export async function disconnectShopifyStore(shopDomain: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    const { error } = await supabase
+      .from('shopify_tokens')
+      .delete()
+      .eq('shop_domain', shopDomain)
+      .eq('workspace_id', user.active_workspace_id)
+
+    if (error) throw new Error('Failed to disconnect Shopify store: ' + error.message)
+
+    revalidateTag('shopify-token')
+    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/workspace')
+    revalidatePath('/dashboard/integrations')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Failed to disconnect Shopify store:', error)
+    return { success: false, error: error.message || 'Failed to disconnect Shopify store' }
+  }
+}
+
+export async function updateShopifySyncSettings(shopDomain: string, settings: any) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      throw new Error('No active workspace selected')
+    }
+
+    // Save new settings to DB
+    const { error } = await supabase
+      .from('shopify_tokens')
+      .update({ sync_settings: settings })
+      .eq('shop_domain', shopDomain)
+      .eq('workspace_id', user.active_workspace_id)
+
+    if (error) throw new Error('Failed to update Shopify sync settings: ' + error.message)
+
+    revalidateTag('shopify-token')
+    revalidatePath('/dashboard/connect-zid')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Failed to update Shopify sync settings:', error)
+    return { success: false, error: error.message || 'Failed to update Shopify sync settings' }
+  }
+}
+
 
 
 

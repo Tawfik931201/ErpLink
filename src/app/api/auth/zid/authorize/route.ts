@@ -7,7 +7,7 @@
  * Zid App Registration details:
  *   Client ID       : 6784
  *   OAuth Base      : https://oauth.zid.sa
- *   Redirect URI    : https://33c8-102-184-228-54.ngrok-free.app/api/auth/zid/callback
+ *   Redirect URI    : https://pseudolegendary-conchological-ngan.ngrok-free.dev/api/auth/zid/callback
  *
  * Query params:
  *   - organizationId : the organization connecting Zid (from our DB)
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
   const authorizeUrl = buildZidOAuthUrl({
     clientId: process.env.ZID_CLIENT_ID || process.env.NEXT_PUBLIC_ZID_CLIENT_ID!,   // 6784
-    redirectUri: process.env.ZID_OAUTH_REDIRECT_URI!,   // https://33c8-...ngrok.../api/auth/zid/callback
+    redirectUri: process.env.ZID_OAUTH_REDIRECT_URI!,   // https://pseudolegendary-conchological-ngan.ngrok-free.dev/api/auth/zid/callback
     state,
   })
 

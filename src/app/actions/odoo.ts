@@ -1,23 +1,39 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, unstable_cache, revalidateTag } from 'next/cache'
 
+import { getActiveUserId } from '@/lib/auth'
+import { encrypt, decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
-import { OdooClient } from '@/lib/odoo-client'
-import { encrypt, decrypt } from '@/lib/crypto'
 
 async function getOrCreateDbUser() {
-  const { userId } = await auth()
+  const userId = await getActiveUserId()
   if (!userId) throw new Error('Unauthorized')
 
   return ensureDbUser(userId)
 }
 
+
 /**
  * Get active workspace's Odoo connection
  */
+const getCachedErpConnection = unstable_cache(
+  async (workspaceId: string) => {
+    const { data: connection, error } = await supabase
+      .from('erp_connections')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+
+    if (error) throw new Error('Failed to query Odoo connection: ' + error.message)
+    return connection
+  },
+  ['erp-connection'],
+  { revalidate: 30, tags: ['erp-connection'] }
+)
+
 export async function getActiveWorkspaceErpConnection() {
   try {
     const user = await getOrCreateDbUser()
@@ -25,14 +41,7 @@ export async function getActiveWorkspaceErpConnection() {
       return { success: true, connection: null }
     }
 
-    const { data: connection, error } = await supabase
-      .from('erp_connections')
-      .select('*')
-      .eq('workspace_id', user.active_workspace_id)
-      .maybeSingle()
-
-    if (error) throw new Error('Failed to query Odoo connection: ' + error.message)
-
+    const connection = await getCachedErpConnection(user.active_workspace_id)
     return { success: true, connection }
   } catch (error: any) {
     console.error('[Odoo Action] getActiveWorkspaceOdooConnection failed:', error)
@@ -254,12 +263,30 @@ export async function saveErpConnection(data: {
       result = inserted
     }
 
+    revalidateTag('erp-connection')
+    revalidateTag('odoo-models')
+    revalidateTag('odoo-fields')
     revalidatePath('/dashboard/connect-odoo')
     revalidatePath('/dashboard/integrations')
     return { success: true, connection: result }
   } catch (error: any) {
     console.error('[Odoo Action] saveOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to save connection details' }
+  }
+}
+
+/**
+ * Force refresh Odoo models/fields cache (clear 24h cache)
+ */
+export async function refreshOdooCache() {
+  try {
+    revalidateTag('odoo-models')
+    revalidateTag('odoo-fields')
+    // Also bust any per-model tags if they exist
+    revalidateTag('odoo-model-fields')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to refresh Odoo cache' }
   }
 }
 
@@ -281,6 +308,9 @@ export async function disconnectErpConnection(connectionId: string) {
 
     if (error) throw new Error('فشل قطع الاتصال من قاعدة البيانات: ' + error.message)
 
+    revalidateTag('erp-connection')
+    revalidateTag('odoo-models')
+    revalidateTag('odoo-fields')
     revalidatePath('/dashboard/connect-odoo')
     revalidatePath('/dashboard/integrations')
     return { success: true }
@@ -289,6 +319,68 @@ export async function disconnectErpConnection(connectionId: string) {
     return { success: false, error: error.message || 'Failed to disconnect Odoo connection' }
   }
 }
+
+async function fetchModelsRaw(connection: any) {
+  const { url, db_name, username, password, erp_type } = connection
+  const decryptedPassword = decrypt(password)
+
+  if (erp_type === 'erpnext') {
+    const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
+    const response = await fetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    })
+
+    if (response.ok) {
+      const json = await response.json()
+      const doctypes = json.data || []
+      return doctypes.map((d: any) => ({
+        model: d.name,
+        name: `${d.name} (${d.name})`,
+      })).sort((a: any, b: any) => a.model.localeCompare(b.model))
+    } else {
+      throw new Error(`Frappe API responded with HTTP ${response.status}: ${response.statusText}`)
+    }
+  }
+
+  if (erp_type && erp_type !== 'odoo') {
+    return []
+  }
+
+  const client = new OdooClient({
+    url,
+    db: db_name || '',
+    username,
+    apiKey: decryptedPassword,
+  })
+
+  // Fetch models from ir.model
+  return client.execute<Array<{ model: string; name: string }>>(
+    'ir.model',
+    'search_read',
+    [[]],
+    {
+      fields: ['model', 'name'],
+      order: 'model asc',
+    }
+  )
+}
+
+const getCachedModels = unstable_cache(
+  async (connectionId: string, connection: any) => {
+    return fetchModelsRaw(connection)
+  },
+  ['odoo-models'],
+  {
+    revalidate: 86400, // 24 hours
+    tags: ['odoo-models']
+  }
+)
 
 /**
  * Fetch all models from Odoo
@@ -300,13 +392,41 @@ export async function getOdooModels() {
       return { success: false, error: 'ERP connection not found or inactive. Please connect to your ERP first.' }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
-    const decryptedPassword = decrypt(password)
+    const models = await getCachedModels(connRes.connection.id, connRes.connection)
+    return { success: true, models }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooModels failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch models from Odoo' }
+  }
+}
 
-    if (erp_type === 'erpnext') {
-      const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
+async function fetchModelFieldsRaw(connection: any, modelName: string) {
+  const { url, db_name, username, password, erp_type } = connection
+  const decryptedPassword = decrypt(password)
+
+  if (erp_type === 'erpnext') {
+    const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
+    const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': authHeader,
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    })
+
+    if (response.ok) {
+      const json = await response.json()
+      const docType = json.data || {}
+      const rawFields = docType.fields || []
+
+      // Fetch custom fields for this DocType
+      let customFields: any[] = []
       try {
-        const response = await fetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
+        const cfFilters = JSON.stringify([["dt", "=", modelName]])
+        const cfUrl = `${url}/api/resource/Custom Field?fields=["fieldname","label","fieldtype","options","reqd","read_only","description"]&filters=${encodeURIComponent(cfFilters)}&limit_page_length=9999`
+        const cfResponse = await fetch(cfUrl, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -315,53 +435,98 @@ export async function getOdooModels() {
           },
           cache: 'no-store',
         })
-
-        if (response.ok) {
-          const json = await response.json()
-          const doctypes = json.data || []
-          const models = doctypes.map((d: any) => ({
-            model: d.name,
-            name: `${d.name} (${d.name})`,
-          })).sort((a: any, b: any) => a.model.localeCompare(b.model))
-
-          return { success: true, models }
+        if (cfResponse.ok) {
+          const cfJson = await cfResponse.json()
+          customFields = cfJson.data || []
         } else {
-          throw new Error(`Frappe API responded with HTTP ${response.status}: ${response.statusText}`)
+          console.error(`[ERPNext Action] Custom Field fetch responded with status ${cfResponse.status}`)
         }
-      } catch (err: any) {
-        console.error('[ERPNext Action] getOdooModels failed:', err)
-        return { success: false, error: err.message || 'Failed to fetch DocTypes from ERPNext' }
+      } catch (cfErr) {
+        console.error(`[ERPNext Action] getOdooModelFields failed to fetch custom fields for ${modelName}:`, cfErr)
       }
+
+      // Always add standard Frappe system fields like name, owner, creation, modified
+      const systemFields = [
+        { fieldname: 'name', label: 'ID / Name (name)', fieldtype: 'Data' },
+        { fieldname: 'owner', label: 'Owner (owner)', fieldtype: 'Data' },
+        { fieldname: 'creation', label: 'Created At (creation)', fieldtype: 'Datetime' },
+        { fieldname: 'modified', label: 'Modified At (modified)', fieldtype: 'Datetime' },
+      ]
+
+      const allFields = [...systemFields, ...rawFields, ...customFields]
+
+      return allFields.map((f: any) => {
+        let ttype = 'char'
+        const ftype = (f.fieldtype || '').toLowerCase()
+        
+        if (ftype === 'link') {
+          ttype = 'many2one'
+        } else if (ftype === 'table') {
+          ttype = 'one2many'
+        } else if (ftype === 'check') {
+          ttype = 'boolean'
+        } else if (['currency', 'float', 'percent'].includes(ftype)) {
+          ttype = 'float'
+        } else if (ftype === 'int') {
+          ttype = 'integer'
+        } else if (ftype === 'select') {
+          ttype = 'selection'
+        } else if (['text', 'long text', 'small text', 'code'].includes(ftype)) {
+          ttype = 'text'
+        }
+
+        return {
+          value: f.fieldname,
+          label: f.label || f.fieldname,
+          desc: f.fieldname,
+          type: ttype,
+          relation: f.options || undefined
+        }
+      }).sort((a: any, b: any) => a.label.localeCompare(b.label))
+    } else {
+      throw new Error(`Frappe API responded with HTTP ${response.status}: ${response.statusText}`)
     }
-
-    if (erp_type && erp_type !== 'odoo') {
-      return { success: true, models: [] }
-    }
-
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
-
-    // Fetch models from ir.model
-    const models = await client.execute<Array<{ model: string; name: string }>>(
-      'ir.model',
-      'search_read',
-      [[]],
-      {
-        fields: ['model', 'name'],
-        order: 'model asc',
-      }
-    )
-
-    return { success: true, models }
-  } catch (error: any) {
-    console.error('[Odoo Action] getOdooModels failed:', error)
-    return { success: false, error: error.message || 'Failed to fetch models from Odoo' }
   }
+
+  if (erp_type && erp_type !== 'odoo') {
+    return []
+  }
+
+  const client = new OdooClient({
+    url,
+    db: db_name || '',
+    username,
+    apiKey: decryptedPassword,
+  })
+
+  // Fetch fields directly from ir.model.fields database table via search_read
+  const fieldsData = await client.execute<Array<{ name: string; field_description: string; ttype: string; relation?: string }>>(
+    'ir.model.fields',
+    'search_read',
+    [[['model', '=', modelName]]],
+    { fields: ['name', 'field_description', 'ttype', 'relation'] }
+  )
+
+  // Map fields to a cleaner format
+  return fieldsData.map((f) => ({
+    value: f.name,
+    label: f.field_description || f.name,
+    desc: f.name,
+    type: f.ttype,
+    relation: f.relation
+  })).sort((a, b) => a.label.localeCompare(b.label))
 }
+
+const getCachedModelFields = unstable_cache(
+  async (connectionId: string, modelName: string, connection: any) => {
+    return fetchModelFieldsRaw(connection, modelName)
+  },
+  ['odoo-fields'],
+  {
+    revalidate: 300, // 5 minutes — so new Odoo fields appear quickly
+    tags: ['odoo-fields', 'odoo-model-fields']
+  }
+)
 
 /**
  * Fetch fields for a specific Odoo/ERPNext model
@@ -377,129 +542,7 @@ export async function getOdooModelFields(modelName: string) {
       return { success: false, error: 'ERP connection not found or inactive.' }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
-    const decryptedPassword = decrypt(password)
-
-    if (erp_type === 'erpnext') {
-      const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
-      try {
-        const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': authHeader,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          cache: 'no-store',
-        })
-
-        if (response.ok) {
-          const json = await response.json()
-          const docType = json.data || {}
-          const rawFields = docType.fields || []
-
-          // Fetch custom fields for this DocType
-          let customFields: any[] = []
-          try {
-            const cfFilters = JSON.stringify([["dt", "=", modelName]])
-            const cfUrl = `${url}/api/resource/Custom Field?fields=["fieldname","label","fieldtype","options","reqd","read_only","description"]&filters=${encodeURIComponent(cfFilters)}&limit_page_length=9999`
-            const cfResponse = await fetch(cfUrl, {
-              method: 'GET',
-              headers: {
-                'Authorization': authHeader,
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-              },
-              cache: 'no-store',
-            })
-            if (cfResponse.ok) {
-              const cfJson = await cfResponse.json()
-              customFields = cfJson.data || []
-            } else {
-              console.error(`[ERPNext Action] Custom Field fetch responded with status ${cfResponse.status}`)
-            }
-          } catch (cfErr) {
-            console.error(`[ERPNext Action] getOdooModelFields failed to fetch custom fields for ${modelName}:`, cfErr)
-          }
-
-          // Always add standard Frappe system fields like name, owner, creation, modified
-          const systemFields = [
-            { fieldname: 'name', label: 'ID / Name (name)', fieldtype: 'Data' },
-            { fieldname: 'owner', label: 'Owner (owner)', fieldtype: 'Data' },
-            { fieldname: 'creation', label: 'Created At (creation)', fieldtype: 'Datetime' },
-            { fieldname: 'modified', label: 'Modified At (modified)', fieldtype: 'Datetime' },
-          ]
-
-          const allFields = [...systemFields, ...rawFields, ...customFields]
-
-          const fields = allFields.map((f: any) => {
-            let ttype = 'char'
-            const ftype = (f.fieldtype || '').toLowerCase()
-            
-            if (ftype === 'link') {
-              ttype = 'many2one'
-            } else if (ftype === 'table') {
-              ttype = 'one2many'
-            } else if (ftype === 'check') {
-              ttype = 'boolean'
-            } else if (['currency', 'float', 'percent'].includes(ftype)) {
-              ttype = 'float'
-            } else if (ftype === 'int') {
-              ttype = 'integer'
-            } else if (ftype === 'select') {
-              ttype = 'selection'
-            } else if (['text', 'long text', 'small text', 'code'].includes(ftype)) {
-              ttype = 'text'
-            }
-
-            return {
-              value: f.fieldname,
-              label: f.label || f.fieldname,
-              desc: f.fieldname,
-              type: ttype,
-              relation: f.options || undefined
-            }
-          }).sort((a: any, b: any) => a.label.localeCompare(b.label))
-
-          return { success: true, fields }
-        } else {
-          throw new Error(`Frappe API responded with HTTP ${response.status}: ${response.statusText}`)
-        }
-      } catch (err: any) {
-        console.error(`[ERPNext Action] getOdooModelFields for ${modelName} failed:`, err)
-        return { success: false, error: err.message || `Failed to fetch fields for model ${modelName}` }
-      }
-    }
-
-    if (erp_type && erp_type !== 'odoo') {
-      return { success: true, fields: [] }
-    }
-
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
-
-    // Fetch fields directly from ir.model.fields database table via search_read
-    // This is 100x faster than fields_get since it queries the indexed SQL table directly
-    const fieldsData = await client.execute<Array<{ name: string; field_description: string; ttype: string; relation?: string }>>(
-      'ir.model.fields',
-      'search_read',
-      [[['model', '=', modelName]]],
-      { fields: ['name', 'field_description', 'ttype', 'relation'] }
-    )
-
-    // Map fields to a cleaner format (exact Odoo labels with technical names as descriptions)
-    const fields = fieldsData.map((f) => ({
-      value: f.name,
-      label: f.field_description || f.name,
-      desc: f.name,
-      type: f.ttype,
-      relation: f.relation
-    })).sort((a, b) => a.label.localeCompare(b.label))
-
+    const fields = await getCachedModelFields(connRes.connection.id, modelName, connRes.connection)
     return { success: true, fields }
   } catch (error: any) {
     console.error(`[Odoo Action] getOdooModelFields for ${modelName} failed:`, error)
@@ -726,6 +769,420 @@ export async function getOdooGroups() {
   } catch (error: any) {
     console.error('[Odoo Action] getOdooGroups failed:', error)
     return { success: false, error: error.message || 'Failed to fetch Odoo groups', groups: [] }
+  }
+}
+
+/**
+ * Fetch all warehouses (stock.warehouse) from Odoo
+ */
+export async function getOdooWarehouses(): Promise<{
+  success: boolean
+  warehouses?: Array<{ id: number; name: string; code: string }>
+  error?: string
+}> {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found' }
+    }
+
+    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
+      return { success: true, warehouses: [] }
+    }
+
+    const { url, db_name, username, password } = connRes.connection
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decrypt(password),
+    })
+
+    const records = await client.execute<Array<{ id: number; name: string; code: string }>>(
+      'stock.warehouse',
+      'search_read',
+      [[]],
+      { fields: ['id', 'name', 'code'], order: 'name asc' }
+    )
+
+    return {
+      success: true,
+      warehouses: records.map(w => ({
+        id: w.id,
+        name: w.name,
+        code: w.code || '',
+      })),
+    }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooWarehouses failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch warehouses' }
+  }
+}
+
+/**
+ * Fetch stock locations (stock.location) from Odoo, optionally filtered by usage type
+ */
+export async function getOdooLocations(usage?: string): Promise<{
+  success: boolean
+  locations?: Array<{ id: number; name: string; complete_name: string; usage: string }>
+  error?: string
+}> {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found' }
+    }
+
+    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
+      return { success: true, locations: [] }
+    }
+
+    const { url, db_name, username, password } = connRes.connection
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decrypt(password),
+    })
+
+    const domain: any[][] = []
+    if (usage) {
+      domain.push(['usage', '=', usage])
+    }
+
+    const records = await client.execute<Array<{ id: number; name: string; complete_name: string; usage: string }>>(
+      'stock.location',
+      'search_read',
+      [domain],
+      { fields: ['id', 'name', 'complete_name', 'usage'], order: 'complete_name asc' }
+    )
+
+    return {
+      success: true,
+      locations: records.map(l => ({
+        id: l.id,
+        name: l.name,
+        complete_name: l.complete_name || l.name,
+        usage: l.usage || '',
+      })),
+    }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooLocations failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch locations' }
+  }
+}
+
+/**
+ * Fetch product categories (product.category) from Odoo
+ */
+export async function getOdooCategories(): Promise<{
+  success: boolean
+  categories?: Array<{ id: number; name: string; parent_id: [number, string] | false; complete_name: string }>
+  error?: string
+}> {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found' }
+    }
+
+    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
+      return { success: true, categories: [] }
+    }
+
+    const { url, db_name, username, password } = connRes.connection
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decrypt(password),
+    })
+
+    const records = await client.execute<Array<{ id: number; name: string; parent_id: [number, string] | false; complete_name: string }>>(
+      'product.category',
+      'search_read',
+      [[]],
+      { fields: ['id', 'name', 'parent_id', 'complete_name'], order: 'complete_name asc' }
+    )
+
+    return {
+      success: true,
+      categories: records.map(c => ({
+        id: c.id,
+        name: c.name,
+        parent_id: c.parent_id,
+        complete_name: c.complete_name || c.name,
+      })),
+    }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooCategories failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch categories' }
+  }
+}
+
+/**
+ * Dry-run: Test a relation's smart match configuration without writing any data to Odoo.
+ * Returns which phase would succeed and what would happen.
+ */
+export async function dryRunMatch(args: {
+  relation: string
+  item: any
+  sampleData: Record<string, unknown>
+}) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: false, error: 'No active workspace', phase: 'error' }
+    }
+
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found', phase: 'error' }
+    }
+
+    const { url, db_name, username, password } = connRes.connection
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decrypt(password),
+    })
+
+    await client.authenticate()
+
+    // Try each phase manually for detailed reporting
+    const platform = 'zid' // default for dry run
+    const { resolveSingleRelationId } = await import('@/lib/sync-engine')
+
+    // Phase 1a: Custom Lookup (fuzzyMatchMappings)
+    if (args.item.fuzzyMatchMappings?.length > 0) {
+      const itemCopy = { ...args.item } // shallow clone is fine
+      const matchedId = await resolveSingleRelationId(
+        client, args.relation, args.sampleData, platform as any,
+        'create' as any, itemCopy, user.active_workspace_id, args.sampleData, {},
+        true // dryRun = true
+      )
+      if (matchedId && matchedId > 0) {
+        return { success: true, phase: 'custom_map', matchedId, willCreate: false }
+      }
+    }
+
+    // Phase 2: Check fallback policy
+    const policy = args.item.policy
+    if (policy === 'default') {
+      const staticVal = args.item.staticValue
+      if (staticVal !== undefined && staticVal !== null && staticVal !== '') {
+        const id = Number(Array.isArray(staticVal) ? staticVal[0] : staticVal)
+        if (Number.isInteger(id) && id > 0) {
+          return { success: true, phase: 'default_fallback', matchedId: id, willCreate: false }
+        }
+      }
+    }
+
+    if (policy === 'block') {
+      return { success: true, phase: 'block', matchedId: undefined, willCreate: false, error: 'Blocked - no match' }
+    }
+
+    if (policy === 'create') {
+      return { success: true, phase: 'create', matchedId: undefined, willCreate: true }
+    }
+
+    return { success: true, phase: 'not_found', matchedId: undefined, willCreate: false, error: 'No match found and no fallback policy' }
+
+  } catch (error: any) {
+    console.error('[dryRunMatch] failed:', error)
+    return { success: false, error: error.message || 'Dry run failed', phase: 'error' }
+  }
+}
+
+export async function getOdooAccountsByType(type: 'receivable' | 'payable', companyId?: number) {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
+    }
+
+    const { url, db_name, username, password, erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, options: [] }
+    }
+
+    const decryptedPassword = decrypt(password)
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decryptedPassword,
+    })
+
+    const fieldsMeta = await client.execute<Record<string, any>>(
+      'account.account',
+      'fields_get',
+      [['account_type', 'user_type_id', 'company_id', 'company_ids']],
+      { attributes: ['name', 'type'] }
+    )
+
+    let domain: any[] = []
+    if (fieldsMeta?.account_type) {
+      const targetType = type === 'receivable' ? 'asset_receivable' : 'liability_payable'
+      domain = [['account_type', '=', targetType]]
+    } else if (fieldsMeta?.user_type_id) {
+      domain = [['user_type_id.type', '=', type]]
+    } else {
+      domain = []
+    }
+
+    if (companyId && companyId > 0) {
+      if (fieldsMeta?.company_ids) {
+        domain.push(['company_ids', 'in', [companyId]])
+      } else if (fieldsMeta?.company_id) {
+        domain.push(['company_id', '=', companyId])
+      }
+    }
+
+    const records = await client.execute<Array<[number, string]>>(
+      'account.account',
+      'name_search',
+      ['', domain, 'ilike', 300]
+    )
+
+    return {
+      success: true,
+      options: records.map(([id, label]) => ({
+        value: String(id),
+        label: label || String(id),
+      })),
+    }
+  } catch (error: any) {
+    console.error(`[Odoo Action] getOdooAccountsByType for ${type} failed:`, error)
+    return { success: false, error: error.message || 'Failed to fetch accounts', options: [] }
+  }
+}
+
+export async function searchOdooAccounts(searchTerm: string = '', accountType?: string) {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
+    }
+
+    const { url, db_name, username, password, erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, options: [] }
+    }
+
+    const decryptedPassword = decrypt(password)
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decryptedPassword,
+    })
+
+    let domain: any[] = []
+    if (accountType) {
+      domain.push(['account_type', '=', accountType])
+    }
+
+    const records = await client.execute<Array<[number, string]>>(
+      'account.account',
+      'name_search',
+      [searchTerm, domain, 'ilike', 300]
+    )
+
+    return {
+      success: true,
+      options: records.map(([id, label]) => ({
+        value: String(id),
+        label: label || String(id),
+      })),
+    }
+  } catch (error: any) {
+    console.error(`[Odoo Action] searchOdooAccounts failed:`, error)
+    return { success: false, error: error.message || 'Failed to search accounts', options: [] }
+  }
+}
+
+export async function searchOdooJournals(searchTerm: string = '', journalType?: string) {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
+    }
+
+    const { url, db_name, username, password, erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, options: [] }
+    }
+
+    const decryptedPassword = decrypt(password)
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decryptedPassword,
+    })
+
+    let domain: any[] = []
+    if (journalType) {
+      domain.push(['type', '=', journalType])
+    }
+
+    const records = await client.execute<Array<[number, string]>>(
+      'account.journal',
+      'name_search',
+      [searchTerm, domain, 'ilike', 300]
+    )
+
+    return {
+      success: true,
+      options: records.map(([id, label]) => ({
+        value: String(id),
+        label: label || String(id),
+      })),
+    }
+  } catch (error: any) {
+    console.error(`[Odoo Action] searchOdooJournals failed:`, error)
+    return { success: false, error: error.message || 'Failed to search journals', options: [] }
+  }
+}
+
+export async function searchOdooCategories(searchTerm: string = '') {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
+    }
+
+    const { url, db_name, username, password, erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, options: [] }
+    }
+
+    const decryptedPassword = decrypt(password)
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decryptedPassword,
+    })
+
+    const records = await client.execute<Array<[number, string]>>(
+      'product.category',
+      'name_search',
+      [searchTerm, [], 'ilike', 300]
+    )
+
+    return {
+      success: true,
+      options: records.map(([id, label]) => ({
+        value: String(id),
+        label: label || String(id),
+      })),
+    }
+  } catch (error: any) {
+    console.error(`[Odoo Action] searchOdooCategories failed:`, error)
+    return { success: false, error: error.message || 'Failed to search categories', options: [] }
   }
 }
 

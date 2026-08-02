@@ -23,7 +23,8 @@ export async function getSyncLogs(params: {
   status?: string
   limit?: number
   offset?: number
-  platform?: 'all' | 'zid' | 'salla' | 'none'
+  platform?: string
+  eventFilter?: string
 }) {
   try {
     const user = await getOrCreateDbUser()
@@ -45,6 +46,9 @@ export async function getSyncLogs(params: {
       .order('created_at', { ascending: false })
 
     if (params.mappingId && params.mappingId !== 'all') {
+      if (params.mappingId === 'none') {
+        return { success: true, logs: [], totalCount: 0 }
+      }
       const mappingIds = params.mappingId.split(',')
       if (mappingIds.length > 0) {
         query = query.in('field_mapping_id', mappingIds)
@@ -52,6 +56,12 @@ export async function getSyncLogs(params: {
     }
 
     if (params.platform && params.platform !== 'all') {
+      const shopifyEvents = [
+        'products/create', 'products/update', 'products/delete',
+        'orders/create', 'orders/updated', 'orders/cancelled', 'orders/fulfilled',
+        'customers/create', 'customers/update'
+      ]
+
       const sallaEvents = [
         // Products
         'product.created', 'product.updated', 'product.deleted', 'product.available',
@@ -93,15 +103,44 @@ export async function getSyncLogs(params: {
         'cart.abandoned'
       ]
 
-      if (params.platform === 'salla') {
-        query = query.in('event', sallaEvents)
-      } else if (params.platform === 'zid') {
-        query = query.in('event', zidEvents)
-      } else if (params.platform === 'none') {
+      const platforms = params.platform.split(',')
+      const allowedEvents: string[] = []
+
+      if (platforms.includes('salla')) {
+        allowedEvents.push(...sallaEvents)
+      }
+      if (platforms.includes('zid')) {
+        allowedEvents.push(...zidEvents)
+      }
+      if (platforms.includes('shopify')) {
+        allowedEvents.push(...shopifyEvents)
+      }
+
+      if (platforms.includes('none') || allowedEvents.length === 0) {
         query = query.eq('id', '00000000-0000-0000-0000-000000000000')
+      } else {
+        query = query.in('event', allowedEvents)
       }
     }
     
+    if (params.eventFilter) {
+      const entityEvents: Record<string, string[]> = {
+        category: [
+          'category.create', 'category.update', 'category.delete',
+          'category.created', 'category.updated', 'category.deleted',
+        ],
+      }
+      const filters = params.eventFilter.split(',')
+      const matchedEvents: string[] = []
+      for (const f of filters) {
+        const events = entityEvents[f.trim()]
+        if (events) matchedEvents.push(...events)
+      }
+      if (matchedEvents.length > 0) {
+        query = query.in('event', matchedEvents)
+      }
+    }
+
     if (params.status && params.status !== 'all') {
       const selectedTypes = params.status.split(',')
       const clauses: string[] = []
@@ -190,7 +229,7 @@ export async function retrySyncLog(logId: string) {
       logId // existingLogId
     )
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
 
     return {
       success: true,
@@ -228,7 +267,7 @@ export async function resolveLogManually(logId: string) {
       throw new Error('Failed to resolve log: ' + error.message)
     }
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
 
     return {
       success: true,

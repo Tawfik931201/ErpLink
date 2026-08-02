@@ -102,7 +102,7 @@ export async function createCustomErpNextField(data: CreateCustomFieldData) {
     console.info(`[ERPNext Custom Fields] Creating custom field in ERPNext:`, payload)
     const newFieldName = await client.create('Custom Field', payload)
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
     return {
       success: true,
       fieldName: newFieldName,
@@ -198,7 +198,7 @@ export async function deleteCustomErpNextField(fieldname: string, docType: strin
     
     try {
       const ok = await client.delete('Custom Field', namePattern)
-      revalidatePath('/dashboard/field-mapping')
+      revalidatePath('/dashboard/mapping-center')
       return { success: ok }
     } catch (directDelErr) {
       console.warn(`[deleteCustomErpNextField] Direct deletion of "${namePattern}" failed, looking up exact ID:`, directDelErr)
@@ -226,7 +226,7 @@ export async function deleteCustomErpNextField(fieldname: string, docType: strin
       const exactName = items[0].name
       console.info(`[deleteCustomErpNextField] Found exact record name: ${exactName}, executing delete...`)
       const ok = await client.delete('Custom Field', exactName)
-      revalidatePath('/dashboard/field-mapping')
+      revalidatePath('/dashboard/mapping-center')
       return { success: ok }
     }
   } catch (error: any) {
@@ -267,7 +267,7 @@ export async function updateCustomErpNextField(data: UpdateCustomErpNextFieldDat
     console.info(`[updateCustomErpNextField] Updating custom field "${data.id}":`, payload)
     const ok = await client.update('Custom Field', data.id, payload)
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
     return { success: ok }
   } catch (error: any) {
     console.error('[updateCustomErpNextField] Failed:', error)

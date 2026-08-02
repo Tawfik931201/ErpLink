@@ -18,6 +18,7 @@
  * Base URL: https://api.zid.sa/
  */
 import axios from 'axios'
+import { checkImpersonationWriteBlock } from './auth'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ export const ZID_BASE_URL = 'https://api.zid.sa'
 export const ZID_OAUTH_BASE_URL = 'https://oauth.zid.sa'
 export const ZID_OAUTH_AUTHORIZE_URL = 'https://oauth.zid.sa/oauth/authorize'
 export const ZID_OAUTH_TOKEN_URL = 'https://oauth.zid.sa/oauth/token'
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -285,6 +287,16 @@ export const zidClient = axios.create({
   },
   timeout: 30_000,
 })
+
+// Block any write requests to Zid API when impersonating
+zidClient.interceptors.request.use(async (config) => {
+  const method = config.method?.toUpperCase() || 'GET'
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    await checkImpersonationWriteBlock('Zid API')
+  }
+  return config
+})
+
 
 // ─── Header builder ───────────────────────────────────────────────────────────
 

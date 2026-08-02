@@ -1,6 +1,7 @@
 'use server'
 
 import { auth } from '@clerk/nextjs/server'
+import { getActiveUserId } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
@@ -10,7 +11,7 @@ import crypto from 'crypto'
 
 async function getOrCreateDbUser() {
   console.log('[getFieldMappings/saveFieldMapping] Calling Clerk auth()...')
-  const { userId } = await auth()
+  const userId = await getActiveUserId()
   console.log('[getFieldMappings/saveFieldMapping] Clerk userId:', userId)
   if (!userId) throw new Error('Unauthorized')
   
@@ -19,6 +20,7 @@ async function getOrCreateDbUser() {
   console.log('[getFieldMappings/saveFieldMapping] dbUser resolved with active_workspace_id:', dbUser?.active_workspace_id)
   return dbUser
 }
+
 
 export async function getFieldMappings() {
   try {
@@ -77,9 +79,13 @@ export async function saveFieldMapping(data: {
   odooOperation?: 'create' | 'update' | 'delete'
   odooMatchField?: string
   zidMatchField?: string
+  odooFallbackPolicy?: 'none' | 'create' | 'block'
   mappings: any
-  platform?: 'zid' | 'salla'
+  platform?: 'zid' | 'salla' | 'shopify'
   syncDirection?: string
+  variantSyncMode?: string
+  variantOdooMatchField?: string
+  variantZidMatchField?: string
 }) {
   console.log('[saveFieldMapping] Started action with parameters:', {
     id: data.id,
@@ -91,7 +97,8 @@ export async function saveFieldMapping(data: {
     zidMatchField: data.zidMatchField || '',
     platform: data.platform || 'auto',
     syncDirection: data.syncDirection || 'store_to_erp',
-    mappingsCount: data.mappings ? Object.keys(data.mappings).length : 0
+    mappingsCount: data.mappings ? Object.keys(data.mappings).length : 0,
+    odooFallbackPolicy: data.odooFallbackPolicy || 'none'
   })
 
   try {
@@ -130,12 +137,26 @@ export async function saveFieldMapping(data: {
       )
     }
 
-    const isSalla = data.platform === 'salla' || (data.platform === undefined && isSallaEvent(data.action))
+    const isShopify = data.platform === 'shopify' || (data.platform === undefined && (data.action.includes('/') || data.action.startsWith('shopify:')))
+    const isSalla = !isShopify && (data.platform === 'salla' || (data.platform === undefined && isSallaEvent(data.action)))
 
     let merchantId: string
     let storeId: string | null = null
 
-    if (isSalla) {
+    if (isShopify) {
+      console.log('[saveFieldMapping] Querying shopify_tokens...')
+      const { data: shopifyTok } = await supabase
+        .from('shopify_tokens')
+        .select('shop_domain')
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+      console.log('[saveFieldMapping] shopifyTok resolved:', shopifyTok ? { shop_domain: shopifyTok.shop_domain } : 'none')
+
+      if (!shopifyTok) {
+        throw new Error('متجرك في شوبيفاي غير متصل - يرجى ربط شوبيفاي أولاً (Shopify store not connected)')
+      }
+      merchantId = shopifyTok.shop_domain
+    } else if (isSalla) {
       console.log('[saveFieldMapping] Querying salla_tokens...')
       const { data: sallaTok } = await supabase
         .from('salla_tokens')
@@ -244,7 +265,11 @@ export async function saveFieldMapping(data: {
       odoo_operation: data.odooOperation || 'create',
       odoo_match_field: data.odooMatchField || null,
       zid_match_field: data.zidMatchField || null,
+      odoo_fallback_policy: data.odooFallbackPolicy || 'none',
       mappings: data.mappings,
+      variant_sync_mode: data.variantSyncMode || 'AS_VARIANTS',
+      variant_odoo_match_field: data.variantOdooMatchField || null,
+      variant_zid_match_field: data.variantZidMatchField || null,
       sync_direction: syncDirection,
       odoo_webhook_id: odooWebhookId,
       odoo_server_action_id: odooServerActionId,
@@ -274,8 +299,8 @@ export async function saveFieldMapping(data: {
       console.log('[saveFieldMapping] Insert completed successfully.')
     }
 
-    console.log('[saveFieldMapping] Revalidating path /dashboard/field-mapping...')
-    revalidatePath('/dashboard/field-mapping')
+    console.log('[saveFieldMapping] Revalidating path /dashboard/mapping-center...')
+    revalidatePath('/dashboard/mapping-center')
     console.log('[saveFieldMapping] Revalidation complete.')
 
     return { success: true }
@@ -336,7 +361,7 @@ export async function deleteFieldMapping(id: string) {
     if (error) throw new Error('Failed to delete field mapping: ' + error.message)
     console.log('[deleteFieldMapping] Delete completed successfully.')
 
-    revalidatePath('/dashboard/field-mapping')
+    revalidatePath('/dashboard/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[Field Mapping Action] deleteFieldMapping failed:', error)

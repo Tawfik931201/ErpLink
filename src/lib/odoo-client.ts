@@ -9,6 +9,7 @@
  * in typed, promise-based helpers.
  */
 import xmlrpc from 'xmlrpc'
+import { checkImpersonationWriteBlock } from './auth'
 
 export interface OdooConfig {
   url: string      // e.g. https://mycompany.odoo.com
@@ -40,9 +41,20 @@ function callAsync<T>(client: ReturnType<typeof xmlrpc.createClient>, method: st
 export class OdooClient {
   private config: OdooConfig
   private uid: number | null = null
+  private majorVersion: number | null = null
 
   constructor(config: OdooConfig) {
     this.config = config
+  }
+
+  /** Get Odoo major version (e.g. 17, 18, 19) */
+  async getMajorVersion(): Promise<number> {
+    if (this.majorVersion) return this.majorVersion
+    const common = createXmlRpcClient(this.config.url, '/xmlrpc/2/common')
+    const info = await callAsync<Record<string, unknown>>(common, 'version', [])
+    const infoArr = info.server_version_info as number[]
+    this.majorVersion = infoArr?.[0] ?? 17
+    return this.majorVersion
   }
 
   /** Authenticate and cache the user UID */
@@ -62,9 +74,16 @@ export class OdooClient {
 
   /** Generic model execute wrapper */
   async execute<T>(model: string, method: string, args: unknown[], kwargs: Record<string, unknown> = {}): Promise<T> {
+    // List of read-only XML-RPC methods in Odoo
+    const readMethods = ['search', 'read', 'search_read', 'search_count', 'name_get', 'fields_get']
+    if (!readMethods.includes(method)) {
+      await checkImpersonationWriteBlock('Odoo ERP')
+    }
+
     const uid = await this.authenticate()
     const object = createXmlRpcClient(this.config.url, '/xmlrpc/2/object')
-    return callAsync<T>(object, 'execute_kw', [
+
+    const rpcParams = [
       this.config.db,
       uid,
       this.config.apiKey,
@@ -72,8 +91,35 @@ export class OdooClient {
       method,
       args,
       kwargs,
-    ])
+    ]
+
+    console.log(`\n=========================================`)
+    console.log(`[OdooClient] → ${model}.${method}`)
+    console.log(`[OdooClient]   URL: ${this.config.url}`)
+    console.log(`[OdooClient]   DB: ${this.config.db}`)
+    console.log(`[OdooClient]   args: ${JSON.stringify(args, null, 2)}`)
+    if (Object.keys(kwargs).length > 0) {
+      console.log(`[OdooClient]   kwargs: ${JSON.stringify(kwargs, null, 2)}`)
+    }
+    console.log(`=========================================\n`)
+
+    try {
+      const result = await callAsync<T>(object, 'execute_kw', rpcParams)
+      console.log(`\n[OdooClient] ← ${model}.${method} RESPONSE:`)
+      console.log(JSON.stringify(result, null, 2))
+      console.log(`=========================================\n`)
+      return result
+    } catch (err: any) {
+      console.error(`\n[OdooClient] ✖ ${model}.${method} ERROR:`)
+      console.error(err?.message ?? String(err))
+      if (err?.res?.statusCode) {
+        console.error(`HTTP Status: ${err.res.statusCode}`)
+      }
+      console.log(`=========================================\n`)
+      throw err
+    }
   }
+
 
   // ─── Convenience methods ─────────────────────────────────────────────────
 
