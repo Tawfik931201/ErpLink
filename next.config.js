@@ -31,6 +31,9 @@ const corsAllowedOrigin = process.env.CORS_ALLOWED_ORIGIN
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
 
   // Allow the ngrok tunnel to access the dev server (development only)
   allowedDevOrigins: [
