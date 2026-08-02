@@ -24,7 +24,6 @@ import { startTelegramPoller } from '@/lib/telegram-long-poller'
 
 // Lazy-start the Telegram poller on first webhook hit so /start confirmations
 // work even if the user has never visited the notifications settings page.
-startTelegramPoller()
 
 interface ZidWebhookPayload {
   event: string   // Keep as string — Zid may send event names not in our type union
@@ -43,6 +42,7 @@ function verifyZidSignature(body: string, signature: string, secret: string): bo
 }
 
 export async function POST(req: NextRequest) {
+  startTelegramPoller()
   const rawBody = await req.text()
   const headersList = headers()
   const signature = headersList.get('x-zid-signature') ?? ''

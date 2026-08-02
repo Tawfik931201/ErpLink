@@ -266,6 +266,7 @@ async function pollAllOnce(): Promise<void> {
 }
 
 export function startTelegramPoller(): void {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
   if (g.__telegramPollerStarted) return
   g.__telegramPollerStarted = true
 
