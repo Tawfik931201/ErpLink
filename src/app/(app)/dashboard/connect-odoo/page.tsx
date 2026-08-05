@@ -6,7 +6,7 @@ import OdooConnectionForm from './odoo-form'
 import { Language, translations } from '@/lib/translations'
 
 export const metadata: Metadata = {
-  title: 'Connect with ERP — ZidLink',
+  title: 'Connect with ERP — ErpLink',
   description: 'إدارة وتوصيل متجرك بنظام الـ ERP',
 }
 

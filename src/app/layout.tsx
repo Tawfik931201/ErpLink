@@ -23,15 +23,15 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'ZidLink — Connect Odoo & Zid',
-    template: '%s | ZidLink',
+    default: 'ErpLink — Connect Odoo & Zid',
+    template: '%s | ErpLink',
   },
   description:
     'The easiest way to synchronise your Zid e-commerce store with Odoo ERP. Automate products, orders, customers and inventory in real time.',
   keywords: ['Zid', 'Odoo', 'integration', 'sync', 'e-commerce', 'ERP', 'SaaS'],
-  authors: [{ name: 'ZidLink' }],
+  authors: [{ name: 'ErpLink' }],
   openGraph: {
-    title: 'ZidLink — Connect Odoo & Zid',
+    title: 'ErpLink — Connect Odoo & Zid',
     description: 'Real-time sync between your Zid store and Odoo ERP.',
     type: 'website',
   },

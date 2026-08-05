@@ -282,7 +282,7 @@ export default function FieldMappingClient({
 
   // ── Customer Odoo fields ──
   useEffect(() => {
-    if (!hasOdooConnection) return
+    if (!hasOdooConnection || standardSubTab !== 'customers') return
     setIsLoadingCustomerFields(true)
     import('@/app/actions/odoo').then(({ getOdooModelFields }) => {
       getOdooModelFields('res.partner').then(res => {
@@ -291,11 +291,11 @@ export default function FieldMappingClient({
         }
       })
     }).finally(() => setIsLoadingCustomerFields(false))
-  }, [hasOdooConnection])
+  }, [hasOdooConnection, standardSubTab])
 
   // ── Customer Accounts (Receivable/Payable) ──
   useEffect(() => {
-    if (!hasOdooConnection) return
+    if (!hasOdooConnection || standardSubTab !== 'customers') return
     setIsLoadingAccounts(true)
     const companyIdNum = customerCompanyId ? Number(customerCompanyId) : undefined
     import('@/app/actions/odoo').then(({ getOdooAccountsByType }) => {
@@ -307,7 +307,7 @@ export default function FieldMappingClient({
         if (payableRes.success) setPayableAccountOptions(payableRes.options || [])
       }).finally(() => setIsLoadingAccounts(false))
     })
-  }, [hasOdooConnection, customerCompanyId])
+  }, [hasOdooConnection, customerCompanyId, standardSubTab])
 
   // ── Odoo Companies ──
   const fetchCompanies = useCallback(async () => {
@@ -331,7 +331,7 @@ export default function FieldMappingClient({
   }, [fetchCompanies])
 
   useEffect(() => {
-    if (!hasOdooConnection) return
+    if (!hasOdooConnection || standardSubTab !== 'categories') return
     setIsLoadingOdooOpts(true)
     Promise.all([
       getOdooFieldValueOptions('product.category', 'property_cost_method'),
@@ -340,7 +340,7 @@ export default function FieldMappingClient({
       if (costRes.success) setCostMethodOptions(costRes.options)
       if (valRes.success) setValuationOptions(valRes.options)
     }).finally(() => setIsLoadingOdooOpts(false))
-  }, [hasOdooConnection])
+  }, [hasOdooConnection, standardSubTab])
 
   const fetchOdooCategoryFields = useCallback(async () => {
     if (!hasOdooConnection) return
@@ -359,8 +359,10 @@ export default function FieldMappingClient({
   }, [hasOdooConnection])
 
   useEffect(() => {
-    fetchOdooCategoryFields()
-  }, [fetchOdooCategoryFields])
+    if (standardSubTab === 'categories') {
+      fetchOdooCategoryFields()
+    }
+  }, [fetchOdooCategoryFields, standardSubTab])
 
   // ── Product Odoo fields ──
   const fetchOdooProductFields = useCallback(async () => {
@@ -380,9 +382,11 @@ export default function FieldMappingClient({
   }, [hasOdooConnection])
 
   useEffect(() => {
-    fetchOdooProductFields()
+    if (standardSubTab === 'products') {
+      fetchOdooProductFields()
+    }
 
-    if (!hasOdooConnection) {
+    if (!hasOdooConnection || standardSubTab !== 'products') {
       setIsLoadingProductOpts(false)
       setIsLoadingTaxOpts(false)
       return
@@ -403,10 +407,10 @@ export default function FieldMappingClient({
       setIsLoadingProductOpts(false)
       setIsLoadingTaxOpts(false)
     })
-  }, [hasOdooConnection, fetchOdooProductFields])
+  }, [hasOdooConnection, fetchOdooProductFields, standardSubTab])
   // ── Order Odoo fields & static mappings ──
   useEffect(() => {
-    if (!hasOdooConnection) return
+    if (!hasOdooConnection || standardSubTab !== 'orders') return
     setIsLoadingOrderFields(true)
     setIsLoadingWarehouses(true)
     setIsLoadingPricelists(true)
@@ -449,10 +453,13 @@ export default function FieldMappingClient({
         }
       }).finally(() => setIsLoadingProducts(false))
     })
-  }, [hasOdooConnection])
+  }, [hasOdooConnection, standardSubTab])
 
   // Load saved settings
   useEffect(() => {
+    if (standardSubTab === 'orders') {
+      setOrderStateMapping({})
+    }
     getStandardMappingSettings(standardStoreTab, standardSubTab).then(res => {
       if (!res.success || !res.settings) {
         if (standardSubTab === 'orders') {
@@ -461,7 +468,7 @@ export default function FieldMappingClient({
           setOrderMatchZidField('')
           setOrderMatchOdooField('')
           setOrderCompanyId('')
-          setOrderLinkCompany(false)
+          setOrderLinkCompany(true)
           setOrderWarehouseId('')
           setOrderPricelistId('')
           setOrderPaymentTermId('')
@@ -473,6 +480,9 @@ export default function FieldMappingClient({
           setOrderDiscountProductId('')
           setOrderDiscountProductSku('')
           setOrderDiscountMode('fixed')
+          setOrderAutoInvoice(false)
+          setOrderPartialFulfillment(false)
+          setStoreWarehouseMappings({})
           setOrderStateMapping({})
         } else if (standardSubTab === 'products') {
           setProductVariantSyncMode('AS_VARIANTS')
@@ -560,9 +570,7 @@ export default function FieldMappingClient({
     // Load order status mappings from the dedicated table for Orders
     if (standardSubTab === 'orders') {
       getOrderStatusMappings(standardStoreTab).then(res => {
-        if (res.success && Object.keys(res.mappings).length > 0) {
-          setOrderStateMapping(res.mappings)
-        }
+        setOrderStateMapping(res.success ? (res.mappings || {}) : {})
       })
     }
   }, [standardStoreTab, standardSubTab])

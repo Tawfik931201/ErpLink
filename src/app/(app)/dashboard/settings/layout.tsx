@@ -1,6 +1,6 @@
 'use client'
 
-import { Sliders, Briefcase, Bell, Users } from 'lucide-react'
+import { Sliders, Briefcase, Bell, Users, CreditCard } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -14,6 +14,7 @@ const SETTINGS_PERMISSION_MAP: Record<string, string | null> = {
   '/dashboard/settings/notifications': 'settings-notifications',
   '/dashboard/settings/workspace': null, // always accessible
   '/dashboard/settings/team': 'settings-team',
+  '/dashboard/settings/billing': null, // always accessible
 }
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -52,6 +53,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       href: '/dashboard/settings/team',
       label: lang === 'ar' ? 'فريق العمل' : 'Team',
       icon: Users,
+      exact: false
+    },
+    {
+      href: '/dashboard/settings/billing',
+      label: lang === 'ar' ? 'الاشتراكات والفواتير' : 'Billing',
+      icon: CreditCard,
       exact: false
     }
   ]

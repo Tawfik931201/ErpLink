@@ -93,21 +93,29 @@ export class OdooClient {
       kwargs,
     ]
 
-    console.log(`\n=========================================`)
-    console.log(`[OdooClient] → ${model}.${method}`)
-    console.log(`[OdooClient]   URL: ${this.config.url}`)
-    console.log(`[OdooClient]   DB: ${this.config.db}`)
-    console.log(`[OdooClient]   args: ${JSON.stringify(args, null, 2)}`)
-    if (Object.keys(kwargs).length > 0) {
-      console.log(`[OdooClient]   kwargs: ${JSON.stringify(kwargs, null, 2)}`)
+    const isDebug = process.env.ODOO_DEBUG === 'true'
+
+    if (isDebug) {
+      console.log(`\n=========================================`)
+      console.log(`[OdooClient] → ${model}.${method}`)
+      console.log(`[OdooClient]   URL: ${this.config.url}`)
+      console.log(`[OdooClient]   DB: ${this.config.db}`)
+      console.log(`[OdooClient]   args: ${JSON.stringify(args, null, 2)}`)
+      if (Object.keys(kwargs).length > 0) {
+        console.log(`[OdooClient]   kwargs: ${JSON.stringify(kwargs, null, 2)}`)
+      }
+      console.log(`=========================================\n`)
+    } else {
+      console.info(`[OdooClient] → ${model}.${method}`)
     }
-    console.log(`=========================================\n`)
 
     try {
       const result = await callAsync<T>(object, 'execute_kw', rpcParams)
-      console.log(`\n[OdooClient] ← ${model}.${method} RESPONSE:`)
-      console.log(JSON.stringify(result, null, 2))
-      console.log(`=========================================\n`)
+      if (isDebug) {
+        console.log(`\n[OdooClient] ← ${model}.${method} RESPONSE:`)
+        console.log(JSON.stringify(result, null, 2))
+        console.log(`=========================================\n`)
+      }
       return result
     } catch (err: any) {
       console.error(`\n[OdooClient] ✖ ${model}.${method} ERROR:`)
@@ -115,7 +123,9 @@ export class OdooClient {
       if (err?.res?.statusCode) {
         console.error(`HTTP Status: ${err.res.statusCode}`)
       }
-      console.log(`=========================================\n`)
+      if (isDebug) {
+        console.log(`=========================================\n`)
+      }
       throw err
     }
   }

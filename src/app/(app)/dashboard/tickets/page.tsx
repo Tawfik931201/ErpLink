@@ -5,7 +5,7 @@ import TicketsClient from './tickets-client'
 export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
-  title: 'Support Tickets — ZidLink',
+  title: 'Support Tickets — ErpLink',
   description: 'إدارة وتتبع تذاكر الدعم الفني الخاصة بك في أودو (Support Tickets)',
 }
 

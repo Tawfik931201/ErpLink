@@ -330,18 +330,24 @@ export async function updateMemberPermissions(
   }
 }
 
-export async function checkPendingInvitations() {
+export async function checkPendingInvitations(userId?: string, email?: string) {
   try {
-    const clerkUser = await currentUser()
-    if (!clerkUser) return { success: true, invitations: [] }
+    let activeUserId = userId
+    let activeEmail = email
 
-    const email = clerkUser.emailAddresses[0]?.emailAddress
-    if (!email) return { success: true, invitations: [] }
+    if (!activeUserId || !activeEmail) {
+      const clerkUser = await currentUser()
+      if (!clerkUser) return { success: true, invitations: [] }
+      activeUserId = clerkUser.id
+      activeEmail = clerkUser.emailAddresses[0]?.emailAddress
+    }
+
+    if (!activeEmail) return { success: true, invitations: [] }
 
     // Ensure the user exists in the local users table first, so the
     // workspace_members FK constraint is satisfied.
     try {
-      await ensureDbUser(clerkUser.id)
+      await ensureDbUser(activeUserId)
     } catch {
       console.error('[checkPendingInvitations] Failed to ensure DB user exists')
     }
@@ -349,7 +355,7 @@ export async function checkPendingInvitations() {
     const { data: pendingInvites, error } = await supabase
       .from('workspace_invitations')
       .select('*, workspaces(name)')
-      .eq('email', email.toLowerCase())
+      .eq('email', activeEmail.toLowerCase())
       .eq('status', 'pending')
 
     if (error) {
@@ -364,7 +370,7 @@ export async function checkPendingInvitations() {
         .from('workspace_members')
         .insert({
           workspace_id: invite.workspace_id,
-          user_id: clerkUser.id,
+          user_id: activeUserId,
           role: 'member',
           permissions: invite.permissions,
         })

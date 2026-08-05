@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import FieldMappingClient from '../field-mapping-client'
 
 export const metadata: Metadata = {
-  title: 'Category Mapping — Mapping Center — ZidLink',
+  title: 'Category Mapping — Mapping Center — ErpLink',
   description: 'إعدادات ربط التصنيفات بين المتجر وأودو',
 }
 

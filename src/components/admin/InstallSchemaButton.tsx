@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
 import { Database, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 
@@ -14,7 +14,9 @@ export default function InstallSchemaButton() {
     setMessage('')
     try {
       const res = await fetch('/api/admin/install-partner-schema', { method: 'POST' })
-      const json = await res.json().catch(() => ({} as any))
+      const json: { ok?: boolean; error?: string } | null = await res
+        .json()
+        .catch(() => null)
       if (res.ok && json?.ok) {
         setState('success')
         setMessage('Schema installed successfully.')
@@ -24,9 +26,9 @@ export default function InstallSchemaButton() {
         setState('error')
         setMessage(json?.error || `Install failed (${res.status}).`)
       }
-    } catch (err: any) {
+    } catch (err) {
       setState('error')
-      setMessage(err?.message || 'Network error while installing schema.')
+      setMessage(err instanceof Error ? err.message : 'Network error while installing schema.')
     }
   }
 
@@ -36,7 +38,7 @@ export default function InstallSchemaButton() {
         <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
         <div className="flex-1">
           <p className="text-sm font-bold text-amber-900">
-            Partner system tables are not installed in this database.
+            Affiliate system tables are not installed in this database.
           </p>
           <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
             Click the button below to run the migration. (Equivalent to pasting
@@ -64,7 +66,7 @@ export default function InstallSchemaButton() {
           ) : (
             <>
               <Database className="h-4 w-4 mr-2" />
-              Install Partner Schema
+              Install Affiliate Schema
             </>
           )}
         </Button>

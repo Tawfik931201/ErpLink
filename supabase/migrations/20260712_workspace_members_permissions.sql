@@ -7,7 +7,7 @@
 
 -- 1. Add permissions column to workspace_members
 ALTER TABLE workspace_members
-ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["dashboard", "connect-zid", "connect-odoo", "mapping-center", "transfers", "tickets"]'::jsonb;
+ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '["dashboard", "connect-store", "connect-odoo", "mapping-center", "transfers", "tickets"]'::jsonb;
 
 -- 2. Create workspace_invitations table
 CREATE TABLE IF NOT EXISTS workspace_invitations (
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS workspace_invitations (
   email           TEXT NOT NULL,
   workspace_id    UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   invited_by      TEXT NOT NULL,
-  permissions     JSONB NOT NULL DEFAULT '["dashboard", "connect-zid", "connect-odoo", "mapping-center", "transfers", "tickets"]'::jsonb,
+  permissions     JSONB NOT NULL DEFAULT '["dashboard", "connect-store", "connect-odoo", "mapping-center", "transfers", "tickets"]'::jsonb,
   status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','accepted','expired','revoked')),
   clerk_invite_id TEXT,

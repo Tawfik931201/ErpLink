@@ -12,7 +12,7 @@ import {
 const LOCALE_COOKIE = 'lang'
 
 // Protect dashboard routes, keeping API endpoints and callbacks public
-const isProtectedRoute = createRouteMatcher(['/dashboard((?!/connect-zid).*)'])
+const isProtectedRoute = createRouteMatcher(['/dashboard((?!/connect-store).*)'])
 
 // Admin routes get a separate, lighter protection: they're public at the
 // middleware level, but the layouts themselves guard with isAdmin().

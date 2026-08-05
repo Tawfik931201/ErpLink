@@ -1,7 +1,10 @@
-import { auth } from '@clerk/nextjs/server'
-import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+import { auth } from '@clerk/nextjs/server'
+import type { NextRequest} from 'next/server';
+import { NextResponse } from 'next/server'
+import type { Pool as PgPool } from 'pg'
 
 import { isAdmin } from '@/lib/auth'
 
@@ -25,14 +28,23 @@ export async function POST(_req: NextRequest) {
     return new NextResponse('Unauthorized', { status: 401 })
   }
 
-  // Load SQL from disk. The file is the source of truth.
-  const filePath = resolve(process.cwd(), 'supabase', 'migrations', '20260711_partner_system.sql')
-  const sql = readFileSync(filePath, 'utf8')
+  // Load SQL from disk. The files are the source of truth.
+  const migrations = [
+    '20260711_partner_system.sql',
+    '20260803_subscriptions.sql',
+    '20260803_subscription_number.sql',
+    '20260803_affiliate_client_invites.sql',
+    '20260804_subscription_payments.sql',
+    '20260805_client_phone_and_archive.sql',
+  ]
+  const sql = migrations
+    .map((f) => readFileSync(resolve(process.cwd(), 'supabase', 'migrations', f), 'utf8'))
+    .join('\n;\n')
 
   try {
     // Lazy require so this module isn't loaded eagerly on edge runtimes.
     const { default: pg } = await import('pg')
-    const { Pool } = pg as unknown as { Pool: any }
+    const { Pool } = pg as unknown as { Pool: new (cfg: { connectionString: string; ssl: boolean | { rejectUnauthorized: boolean } }) => PgPool }
 
     let connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL
     if (!connectionString) {
@@ -48,7 +60,7 @@ export async function POST(_req: NextRequest) {
     // Try without SSL first (Supabase pooler accepts plain), fallback to SSL.
     const candidates = [
       { connectionString, ssl: false as const },
-      { connectionString, ssl: { rejectUnauthorized: false } as any },
+      { connectionString, ssl: { rejectUnauthorized: false } },
     ]
 
     let lastErr: unknown = null
@@ -74,16 +86,16 @@ export async function POST(_req: NextRequest) {
         try { await pool.end() } catch (_) {}
       }
     }
-    const err = lastErr as any
+    const err = lastErr as Error | undefined
     console.error('[install-partner-schema] failed:', err?.message || err)
     return NextResponse.json(
-      { ok: false, error: err?.message || 'install_failed', code: err?.code },
+      { ok: false, error: err?.message || 'install_failed', code: (err as { code?: string })?.code },
       { status: 500 },
     )
-  } catch (err: any) {
-    console.error('[install-partner-schema] outer failed:', err?.message || err)
+  } catch (err) {
+    console.error('[install-partner-schema] outer failed:', err instanceof Error ? err.message : err)
     return NextResponse.json(
-      { ok: false, error: err?.message || 'install_failed' },
+      { ok: false, error: err instanceof Error ? err.message : 'install_failed' },
       { status: 500 },
     )
   }

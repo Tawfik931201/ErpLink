@@ -12,11 +12,20 @@ import { cn } from '@/lib/utils'
 import FieldMappingClient from './field-mapping-client'
 
 export const metadata: Metadata = {
-  title: 'Mapping Center — ZidLink',
+  title: 'Mapping Center — ErpLink',
   description: 'تخصيص ربط الحقول وإعدادات المزامنة بين المتجر ونظام ERP',
 }
 
-export default async function MappingCenterPage() {
+export default async function MappingCenterPage({
+  searchParams,
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined }
+}) {
+  const subtabParam = typeof searchParams?.subtab === 'string' ? searchParams.subtab : undefined
+  const initialSubTab = subtabParam === 'orders' || subtabParam === 'products' || subtabParam === 'customers'
+    ? subtabParam
+    : undefined
+
   const [connRes, zidTokenRes, sallaTokenRes, shopifyTokenRes] = await Promise.all([
     getActiveWorkspaceErpConnection(),
     getActiveWorkspaceZidToken(),
@@ -102,6 +111,7 @@ export default async function MappingCenterPage() {
         zidStoreName={zidTokenRes.success && zidTokenRes.token ? (zidTokenRes.token.name || null) : null}
         sallaStoreName={sallaTokenRes.success && sallaTokenRes.token ? (sallaTokenRes.token.store_name || sallaTokenRes.token.name || null) : null}
         shopifyStoreName={shopifyTokenRes.success && shopifyTokenRes.token ? (shopifyTokenRes.token.name || null) : null}
+        initialSubTab={initialSubTab}
       />
     </div>
   )

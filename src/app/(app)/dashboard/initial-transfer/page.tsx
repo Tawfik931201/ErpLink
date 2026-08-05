@@ -9,7 +9,7 @@ import { Language, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 export const metadata: Metadata = {
-  title: 'Initial Data Transfer — ZidLink',
+  title: 'Initial Data Transfer — ErpLink',
   description: 'نقل البيانات من متجر زد إلى نظام أودو (Initial Data Transfer)',
 }
 

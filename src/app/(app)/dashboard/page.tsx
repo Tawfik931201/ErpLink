@@ -1,5 +1,3 @@
-import { cookies } from 'next/headers'
-import Link from 'next/link'
 import {
   Activity,
   CheckCircle2,
@@ -11,16 +9,21 @@ import {
   RefreshCw,
   ArrowLeft,
 } from 'lucide-react'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
 
 import { getDashboardStats, getEventDistribution, getDailyActivity, getRecentLogs, getRecentTransfers } from '@/app/actions/dashboard'
-import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
+import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
+import SubscriptionStatusCard from '@/components/subscription/SubscriptionStatusCard'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { translations } from '@/lib/translations'
 import type { Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
+
 import { SyncAreaChart, EventPieChart } from './dashboard-client'
+
 
 function t(key: string, dict: Record<string, string>): string {
   return dict[key] || key
@@ -161,6 +164,9 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* ── Subscription status ─────────────────────────────── */}
+      <SubscriptionStatusCard />
 
       {/* ── Row 1: KPI Cards ─────────────────────────────────── */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

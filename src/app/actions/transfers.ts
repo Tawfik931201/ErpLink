@@ -272,8 +272,26 @@ async function runTransferInBackground(
       .update({ records_fetched, updated_at: new Date().toISOString() })
       .eq('id', transferId)
 
-    // 6. Process each entity
-    for (const entity of entities) {
+    // Throttled progress update in database
+    let lastDbUpdate = Date.now()
+    const updateDbProgress = async (force = false) => {
+      const now = Date.now()
+      if (force || now - lastDbUpdate > 3000) {
+        lastDbUpdate = now
+        await supabase
+          .from('data_transfers')
+          .update({
+            records_created,
+            records_failed,
+            failure_reason: failure_reason || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', transferId)
+      }
+    }
+
+    // 6. Process entities concurrently (concurrency limit = 5)
+    await runWithConcurrencyLimit(5, entities, async (entity) => {
       const zidId = String(entity.id || '')
       const nameForLog = entity.name?.ar || entity.name?.en || entity.name || zidId
 
@@ -284,7 +302,8 @@ async function runTransferInBackground(
         if (Object.keys(odooValues).length === 0) {
           logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
           records_failed++
-          continue
+          await updateDbProgress()
+          return
         }
 
         // Duplication check in Odoo
@@ -313,17 +332,11 @@ async function runTransferInBackground(
         records_failed++
       }
 
-      // Update counters in database periodically
-      await supabase
-        .from('data_transfers')
-        .update({
-          records_created,
-          records_failed,
-          failure_reason: failure_reason || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', transferId)
-    }
+      await updateDbProgress()
+    })
+
+    // Force one final DB progress update
+    await updateDbProgress(true)
 
     // 7. Mark as Completed
     await supabase
@@ -416,4 +429,26 @@ export async function cleanupExpiredTransfers() {
   } catch (err) {
     console.error('[Transfers Action] Exception during transfers purge:', err)
   }
+}
+
+/**
+ * Concurrency Limit Helper
+ * Runs a list of tasks with a concurrency limit.
+ */
+async function runWithConcurrencyLimit<T>(
+  concurrencyLimit: number,
+  items: T[],
+  fn: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  const executing = new Set<Promise<void>>()
+  for (let i = 0; i < items.length; i++) {
+    const p = Promise.resolve().then(() => fn(items[i], i))
+    executing.add(p)
+    const clean = () => executing.delete(p)
+    p.then(clean, clean)
+    if (executing.size >= concurrencyLimit) {
+      await Promise.race(executing)
+    }
+  }
+  await Promise.all(executing)
 }

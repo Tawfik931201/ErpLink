@@ -152,7 +152,7 @@ async function injectFieldIntoViews(
     }
 
     // ── Step 2: Check duplicate ──────────────────────────────────────────
-    const viewName = `zidlink_${modelSlug}_${fieldName}_form`
+    const viewName = `erplink_${modelSlug}_${fieldName}_form`
     try {
       const existing = await client.execute<Array<{ id: number }>>(
         'ir.ui.view', 'search_read',
@@ -418,7 +418,7 @@ export async function deleteCustomOdooField(odooFieldId: number, supabaseId?: st
       // 2. Find and delete the inherited views created by our app
       // e.g. zidlink_product_template_x_myfield_form or zidlink_product_template_x_myfield_tree
       try {
-        const viewNamePattern = `zidlink_${modelSlug}_${fieldName}_`
+        const viewNamePattern = `erplink_${modelSlug}_${fieldName}_`
         const views = await client.execute<Array<{ id: number }>>(
           'ir.ui.view', 'search',
           [[['name', 'like', viewNamePattern]]]

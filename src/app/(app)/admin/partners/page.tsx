@@ -1,18 +1,18 @@
-import { redirect } from 'next/navigation'
 import { auth } from '@clerk/nextjs/server'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 
+import InstallSchemaButton from '@/components/admin/InstallSchemaButton'
 import { isAdmin } from '@/lib/auth'
+import { calculateRelease } from '@/lib/commission-calculator'
 import { supabase } from '@/lib/supabase'
 import { translations, type Language } from '@/lib/translations'
-import { PARTNER_TIERS, tierLabel } from '@/lib/partner-tiers'
-import { cn } from '@/lib/utils'
-import InstallSchemaButton from '@/components/admin/InstallSchemaButton'
+
 import AdminPartnersClient from './AdminPartnersClient'
 
 export const metadata = { title: 'Partners — Admin' }
 
-interface DbProfileRaw {
+interface DbPartnerProfile {
   id: string
   user_id: string
   display_name: string
@@ -24,6 +24,21 @@ interface DbProfileRaw {
   created_at: string
 }
 
+interface DbProfileRaw {
+  id: string
+  user_id: string
+  display_name: string
+  status: string
+  tier: string
+  commission_rate: number | string
+  rejection_reason?: string | null
+  approved_at?: string | null
+  created_at: string
+  totalEarnings: number
+  totalPending: number
+  eligibleToWithdraw: number
+}
+
 async function loadData() {
   const { data: raw, error } = await supabase
     .from('partner_profiles')
@@ -33,7 +48,71 @@ async function loadData() {
 
   if (error) return { profiles: null, error: error.message }
 
-  return { profiles: raw as DbProfileRaw[], error: null as string | null }
+  const profiles = raw as DbPartnerProfile[]
+  if (profiles.length === 0) return { profiles: [], error: null }
+
+  const partnerIds = profiles.map((p) => p.id)
+
+  // Fetch approved commissions for these partners
+  const { data: commissions, error: commErr } = await supabase
+    .from('partner_commissions')
+    .select('partner_id, commission_amount, period_start, period_end')
+    .in('partner_id', partnerIds)
+    .eq('status', 'approved')
+
+  if (commErr) return { profiles: null, error: commErr.message }
+
+  // Fetch payouts for these partners
+  const { data: payouts, error: payErr } = await supabase
+    .from('payout_requests')
+    .select('partner_id, amount, status')
+    .in('partner_id', partnerIds)
+
+  if (payErr) return { profiles: null, error: payErr.message }
+
+  const now = new Date()
+
+  const profilesWithStats: DbProfileRaw[] = profiles.map((p) => {
+    const partnerComms = (commissions ?? []).filter((c) => c.partner_id === p.id)
+    const partnerPayouts = (payouts ?? []).filter((pay) => pay.partner_id === p.id)
+
+    // Total Profit (Earnings)
+    const totalEarnings = partnerComms.reduce((sum, c) => sum + Number(c.commission_amount), 0)
+
+    // Total Paid Payouts
+    const totalPaid = partnerPayouts
+      .filter((pay) => pay.status === 'paid')
+      .reduce((sum, pay) => sum + Number(pay.amount), 0)
+
+    // Total Pending Payouts (pending, under_review, approved)
+    const totalPending = partnerPayouts
+      .filter((pay) => ['pending', 'under_review', 'approved'].includes(pay.status))
+      .reduce((sum, pay) => sum + Number(pay.amount), 0)
+
+    // Total Released Commissions up to today
+    let totalReleased = 0
+    for (const comm of partnerComms) {
+      const { releasedAmount } = calculateRelease(
+        comm.commission_amount,
+        comm.period_start,
+        comm.period_end,
+        now
+      )
+      totalReleased += releasedAmount
+    }
+
+    // Eligible to withdraw = totalReleased - totalPaid - totalPending
+    const eligibleToWithdraw = Math.max(0, Math.round((totalReleased - totalPaid - totalPending) * 100) / 100)
+
+    return {
+      ...p,
+      totalEarnings,
+      totalPending,
+      eligibleToWithdraw,
+    }
+  })
+
+  return { profiles: profilesWithStats, error: null as string | null }
 }
 
 export default async function AdminPartnersPage() {
@@ -52,11 +131,11 @@ export default async function AdminPartnersPage() {
 
   if (schemaMissing) {
     return (
-      <div className={cn('min-h-screen bg-background p-6 md:p-10')} dir={dir}>
-        <div className="max-w-6xl mx-auto space-y-8">
+      <div dir={dir}>
+        <div className="max-w-6xl mx-auto space-y-4">
           <div>
-            <h1 className="text-2xl font-black text-foreground">{t('admin.partners.title')}</h1>
-            <p className="text-muted-foreground text-sm mt-1">{t('admin.partners.subtitle')}</p>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">{t('admin.partners.title')}</h1>
+            <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">{t('admin.partners.subtitle')}</p>
           </div>
           <InstallSchemaButton />
         </div>
@@ -65,12 +144,10 @@ export default async function AdminPartnersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background" dir={dir}>
-      <AdminPartnersClient
-        profiles={profiles ?? []}
-        error={error}
-        lang={lang}
-      />
-    </div>
+    <AdminPartnersClient
+      profiles={profiles ?? []}
+      error={error}
+      lang={lang}
+    />
   )
 }

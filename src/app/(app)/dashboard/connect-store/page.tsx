@@ -8,7 +8,7 @@ import { translations } from '@/lib/translations'
 import StoreSelector from './store-selector'
 
 export const metadata: Metadata = {
-  title: 'ربط المتجر — ZidLink',
+  title: 'ربط المتجر — ErpLink',
   description: 'إدارة وتوصيل متجرك الإلكتروني وقنوات البيع',
 }
 

@@ -21,9 +21,27 @@ async function ensureWorkspaceAccess() {
   const userId = await getActiveUserId()
   if (!userId) return
 
-
   const pathname = headers().get('x-pathname') || ''
   if (pathname === '/dashboard/settings/workspace') return
+
+  // 1. Sync pending affiliate workspace if any (self-healing fallback in case Clerk webhook failed/was not running)
+  const { supabase } = await import('@/lib/supabase')
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('email')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (userRow?.email) {
+    const { checkAndCreateAffiliateWorkspace } = await import('@/app/actions/affiliate-actions')
+    await checkAndCreateAffiliateWorkspace(userId, userRow.email)
+  }
+
+  // Check active workspace first to skip existence check in 99% of requests
+  const activeId = await getActiveWorkspaceId()
+  if (activeId) {
+    return
+  }
 
   // Lightweight existence check — getWorkspaces() previously ran heavy joined
   // queries (merchant tokens + ERP connections) on every single page navigation
@@ -36,10 +54,7 @@ async function ensureWorkspaceAccess() {
   // User has workspaces (owner or member) but none marked as active —
   // send them to the workspace settings page to pick one.
   if (res.hasWorkspace) {
-    const activeId = await getActiveWorkspaceId()
-    if (!activeId) {
-      redirect('/dashboard/settings/workspace')
-    }
+    redirect('/dashboard/settings/workspace')
   }
 }
 
@@ -54,32 +69,30 @@ export default async function DashboardLayout({ children }: { children: React.Re
     console.error("Failed to verify workspace access:", err)
   }
 
-  let user = null
-  try {
-    user = await currentUser()
-    // Auto-accept any pending workspace invitations for this user
-    if (user) {
-      checkPendingInvitations().catch((err: unknown) =>
-        console.error('[Dashboard] Failed to check pending invitations:', err)
-      )
-    }
-  } catch (err) {
-    console.error("Failed to fetch Clerk user:", err)
-  }
-
   const cookieStore = cookies()
   const lang = (cookieStore.get('lang')?.value || 'ar') as Language
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 
-  const layoutInfo = await getLayoutUserInfo()
+  // Run layout info and permissions check in parallel
+  const [layoutInfo, permissionsData] = await Promise.all([
+    getLayoutUserInfo(),
+    getCurrentUserPermissions()
+  ])
 
-  // Check user permissions for sidebar filtering
-  const { isOwner, permissions } = await getCurrentUserPermissions()
+  const { isOwner, permissions } = permissionsData
+  const userId = await getActiveUserId()
+
+  // Auto-accept any pending workspace invitations for this user (background)
+  if (userId && layoutInfo.email) {
+    checkPendingInvitations(userId, layoutInfo.email).catch((err: unknown) =>
+      console.error('[Dashboard] Failed to check pending invitations:', err)
+    )
+  }
 
   const permissionMap: Record<string, string> = {
     '/dashboard': 'dashboard',
-    '/dashboard/connect-zid': 'connect-zid',
+    '/dashboard/connect-store': 'connect-store',
     '/dashboard/connect-odoo': 'connect-odoo',
     '/dashboard/mapping-center': 'mapping-center',
     '/dashboard/mapping-center/orders': 'mapping-center',
@@ -107,9 +120,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect('/dashboard/settings/workspace')
   }
 
-  const displayName = user 
-    ? (user.firstName || user.lastName ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : (user.username || user.emailAddresses[0]?.emailAddress))
-    : t('user.defaultName')
+  const displayName = layoutInfo.name || layoutInfo.email || t('user.defaultName')
 
   function hasPageAccess(href: string): boolean {
     if (isOwner) return true
@@ -126,7 +137,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     },
     {
       items: [
-        { href: '/dashboard/connect-zid', icon: 'store', label: t('nav.connectZid') },
+        { href: '/dashboard/connect-store', icon: 'store', label: t('nav.connectZid') },
         { href: '/dashboard/connect-odoo', icon: 'database', label: t('nav.connectOdoo') },
         { href: '/dashboard/mapping-center', icon: 'mapping', label: t('nav.fieldMapping') },
         { href: '/dashboard/mapping-center/orders', icon: 'order', label: t('nav.orderDashboard') },
@@ -163,7 +174,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     navSections.push({
       items: [
         { href: '/admin/partners', icon: 'admin', label: t('nav.adminPartners') },
-        { href: '/admin/workspace-links', icon: 'users', label: lang === 'ar' ? 'روابط العملاء' : 'Client Links' },
+        { href: '/admin/clients', icon: 'users', label: lang === 'ar' ? 'روابط العملاء' : 'Client Links' },
         { href: '/admin/commissions', icon: 'store', label: lang === 'ar' ? 'العمولات' : 'Commissions' },
         { href: '/admin/payouts', icon: 'transfer', label: lang === 'ar' ? 'الصرف' : 'Payouts' },
       ],

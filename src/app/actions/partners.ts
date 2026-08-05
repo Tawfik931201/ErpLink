@@ -3,24 +3,19 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
-import { getActiveUserId, isAdmin } from '@/lib/auth'
-import { supabase } from '@/lib/supabase'
-import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { recordAudit } from '@/lib/audit-logs'
+import { getActiveUserId, isAdmin } from '@/lib/auth'
 import { sendEmail } from '@/lib/email'
-import {
-  PartnerTier,
-  PARTNER_TIERS,
-  DEFAULT_PARTNER_TIER,
-  isPartnerTier,
-} from '@/lib/partner-tiers'
 import {
   partnerApprovedEmail,
   partnerRejectedEmail,
 } from '@/lib/email-templates'
-
-const PartnerStatus = ['pending', 'active', 'suspended', 'rejected'] as const
-const UserAppRole = ['user', 'partner', 'admin'] as const
+import {
+  PARTNER_TIERS,
+  DEFAULT_PARTNER_TIER,
+} from '@/lib/partner-tiers'
+import { supabase } from '@/lib/supabase'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
 async function getOrCreateDbUser() {
   const userId = await getActiveUserId()
@@ -133,9 +128,9 @@ export async function requestPartnership(input: { displayName: string; notes?: s
         display_name: profile.display_name,
       },
     }
-  } catch (err: any) {
+  } catch (err) {
     console.error('[partners] requestPartnership error:', err)
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }
 
@@ -157,10 +152,10 @@ export async function getMyPartnerProfile() {
     }
 
     return { success: true, profile: data ?? null }
-  } catch (err: any) {
-    if (err?.message === 'Unauthorized') return { success: true, profile: null }
+  } catch (err) {
+    if (err instanceof Error && err.message === 'Unauthorized') return { success: true, profile: null }
     console.error('[partners] getMyPartnerProfile error:', err)
-    return { success: false, error: err.message ?? 'unexpected', profile: null }
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected', profile: null }
   }
 }
 
@@ -257,7 +252,7 @@ export async function approvePartner(input: { partnerId: string; tier: string; n
       .maybeSingle()
 
     if (userRow?.email) {
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.zidlink.app'
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.erplink.app'
       const tpl = partnerApprovedEmail(
         {
           partnerName: userRow.name || profile.display_name,
@@ -275,9 +270,9 @@ export async function approvePartner(input: { partnerId: string; tier: string; n
     revalidatePath(`/admin/partners/${profile.id}`)
     revalidatePath('/dashboard')
     return { success: true, profile }
-  } catch (err: any) {
+  } catch (err) {
     console.error('[partners] approvePartner error:', err)
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }
 
@@ -341,9 +336,9 @@ export async function rejectPartner(input: { partnerId: string; reason: string }
 
     revalidatePath('/admin/partners')
     return { success: true, profile }
-  } catch (err: any) {
+  } catch (err) {
     console.error('[partners] rejectPartner error:', err)
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }
 
@@ -387,8 +382,8 @@ export async function suspendPartner(input: { partnerId: string; reason: string 
 
     revalidatePath('/admin/partners')
     return { success: true, profile }
-  } catch (err: any) {
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }
 
@@ -429,8 +424,8 @@ export async function reactivatePartner(input: { partnerId: string }) {
 
     revalidatePath('/admin/partners')
     return { success: true, profile }
-  } catch (err: any) {
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }
 
@@ -507,7 +502,7 @@ export async function setPartnerTier(input: {
 
     revalidatePath('/admin/partners')
     return { success: true }
-  } catch (err: any) {
-    return { success: false, error: err?.message ?? 'unexpected_error' }
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
   }
 }

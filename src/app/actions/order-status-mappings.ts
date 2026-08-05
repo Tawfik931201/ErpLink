@@ -27,12 +27,14 @@ export async function saveOrderStatusMappings(
       .eq('platform', platform)
 
     // Upsert new/changed mappings (safe: old data preserved if this fails)
-    const rows = Object.entries(mappings).map(([zidStatus, odooState]) => ({
-      workspace_id: workspaceId,
-      zid_status: zidStatus,
-      odoo_state: odooState,
-      platform,
-    }))
+    const rows = Object.entries(mappings)
+      .filter(([, odooState]) => odooState && String(odooState).trim() !== '')
+      .map(([zidStatus, odooState]) => ({
+        workspace_id: workspaceId,
+        zid_status: zidStatus,
+        odoo_state: String(odooState).trim(),
+        platform,
+      }))
 
     if (rows.length > 0) {
       const { error: upsertError } = await supabase
@@ -45,7 +47,9 @@ export async function saveOrderStatusMappings(
     }
 
     // Delete mappings no longer in the new set (safe: if this fails, stale rows remain harmlessly)
-    const newStatuses = Object.keys(mappings)
+    const newStatuses = Object.entries(mappings)
+      .filter(([, odooState]) => odooState && String(odooState).trim() !== '')
+      .map(([zidStatus]) => zidStatus)
     const toDelete = (existing || [])
       .filter(e => !newStatuses.includes(e.zid_status))
       .map(e => e.zid_status)
@@ -86,7 +90,7 @@ export async function getOrderStatusMappings(platform: string) {
 
     const mappings: Record<string, string> = {}
     for (const row of data || []) {
-      mappings[row.zid_status] = row.odoo_state
+      if (row.odoo_state) mappings[row.zid_status] = row.odoo_state
     }
 
     return { success: true, mappings }

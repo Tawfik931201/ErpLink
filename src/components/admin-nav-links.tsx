@@ -1,28 +1,31 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
-import Link from 'next/link'
 import {
+  BarChart3,
   Users,
-  Link2,
+  CalendarCheck,
   DollarSign,
-  CreditCard,
+  Contact,
 } from 'lucide-react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+
 import type { Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 const links: { href: string; icon: React.ComponentType<{ className?: string }>; labelAr: string; labelEn: string }[] = [
-  { href: '/admin/partners', icon: Users, labelAr: 'الشركاء', labelEn: 'Partners' },
-  { href: '/admin/workspace-links', icon: Link2, labelAr: 'روابط العملاء', labelEn: 'Client Links' },
+  { href: '/admin', icon: BarChart3, labelAr: 'الإحصائيات', labelEn: 'Stats' },
+  { href: '/admin/clients', icon: Contact, labelAr: 'العملاء', labelEn: 'Clients' },
+  { href: '/admin/partners', icon: Users, labelAr: 'الأفلييت', labelEn: 'Affiliates' },
+  { href: '/admin/subscriptions', icon: CalendarCheck, labelAr: 'الاشتراكات', labelEn: 'Subscriptions' },
   { href: '/admin/commissions', icon: DollarSign, labelAr: 'العمولات', labelEn: 'Commissions' },
-  { href: '/admin/payouts', icon: CreditCard, labelAr: 'الصرف', labelEn: 'Payouts' },
 ]
 
 export default function AdminNavLinks({ lang }: { lang: Language }) {
   const pathname = usePathname()
 
   return (
-    <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+    <nav className="flex items-center gap-1 overflow-x-auto">
       {links.map((link) => {
         const Icon = link.icon
         const isActive = pathname === link.href || pathname.startsWith(link.href + '/')
@@ -31,13 +34,13 @@ export default function AdminNavLinks({ lang }: { lang: Language }) {
             key={link.href}
             href={link.href}
             className={cn(
-              'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+              'flex items-center gap-1.5 whitespace-nowrap rounded px-2.5 py-1.5 text-xs font-medium transition-colors',
               isActive
-                ? 'bg-secondary/80 text-foreground'
+                ? 'text-foreground bg-secondary/80'
                 : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60',
             )}
           >
-            <Icon className="h-4 w-4 shrink-0" />
+            <Icon className="h-3.5 w-3.5 shrink-0" />
             <span>{lang === 'ar' ? link.labelAr : link.labelEn}</span>
           </Link>
         )

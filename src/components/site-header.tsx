@@ -36,7 +36,7 @@ export function SiteHeader() {
             href="/partners"
             className="transition-colors hover:text-foreground"
           >
-            {lang === 'ar' ? 'الشركاء' : 'Partners'}
+            {lang === 'ar' ? 'الأفلييت' : 'Affiliates'}
           </Link>
           <Link
             href="/contact"

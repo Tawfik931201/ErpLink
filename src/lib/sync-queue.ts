@@ -41,8 +41,31 @@ export async function enqueueFailedSync(params: {
 }
 
 /**
- * Process all queued syncs that are due for retry.
- * Called automatically at the end of each webhook handler.
+ * Enqueue a webhook event for immediate background processing.
+ */
+export async function enqueueWebhookEvent(params: {
+  workspaceId: string
+  storeId: string
+  event: string
+  platform: string
+  payload: Record<string, unknown>
+}) {
+  await supabase.from('sync_queue').insert({
+    workspace_id: params.workspaceId,
+    store_id: params.storeId,
+    event: params.event,
+    platform: params.platform,
+    payload: params.payload,
+    retry_count: 0,
+    max_retries: 3,
+    next_retry_at: new Date().toISOString(), // Process immediately
+  })
+  console.info(`[SyncQueue] 📥 Enqueued webhook event "${params.event}" for store ${params.storeId}`)
+}
+
+/**
+ * Process all queued syncs that are due for retry or background processing.
+ * Called automatically at the end of each webhook handler or by the background runner.
  */
 export async function processSyncQueue(maxItems = 5) {
   const { data: items } = await supabase
@@ -57,19 +80,22 @@ export async function processSyncQueue(maxItems = 5) {
 
   for (const item of items) {
     try {
+      // Pass isQueueExecution = true as 5th argument to prevent duplicate enqueueing
       const result = await processWebhookEvent(
         item.event,
         item.store_id,
         item.payload as Record<string, unknown>,
-        item.platform as any
+        item.platform as any,
+        true // isQueueExecution
       )
 
-      if (result.success > 0) {
-        // Success — remove from queue
+      if (result.failed === 0) {
+        // Success or skipped — remove from queue
         await supabase.from('sync_queue').delete().eq('id', item.id)
-        console.info(`[SyncQueue] ✅ Retry succeeded for queue item ${item.id}`)
+        console.info(`[SyncQueue] ✅ Processed/skipped queue item ${item.id} successfully`)
       } else {
-        await incrementRetry(item)
+        const errorRecord = result.records.find((r: any) => r.status === 'failed')
+        await incrementRetry(item, errorRecord?.message || 'Sync failed')
       }
     } catch (err: any) {
       await incrementRetry(item, err?.message)

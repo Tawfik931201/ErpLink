@@ -1,6 +1,6 @@
 export const DEFAULT_PERMISSIONS = [
   'dashboard',
-  'connect-zid',
+  'connect-store',
   'connect-odoo',
   'mapping-center',
   'transfers',
@@ -12,7 +12,7 @@ export const DEFAULT_PERMISSIONS = [
 
 export const ALL_PAGES = [
   { id: 'dashboard', labelAr: 'لوحة التحكم', labelEn: 'Dashboard' },
-  { id: 'connect-zid', labelAr: 'ربط المتجر', labelEn: 'Connect Store' },
+  { id: 'connect-store', labelAr: 'ربط المتجر', labelEn: 'Connect Store' },
   { id: 'connect-odoo', labelAr: 'ربط نظام الـ ERP', labelEn: 'Connect ERP' },
   { id: 'mapping-center', labelAr: 'مركز الربط', labelEn: 'Mapping Center' },
   { id: 'transfers', labelAr: 'نقل البيانات', labelEn: 'Data Transfer' },

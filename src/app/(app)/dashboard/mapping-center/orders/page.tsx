@@ -3,7 +3,7 @@ import { Suspense } from 'react'
 import OrderDashboardClient from './order-dashboard-client'
 
 export const metadata = {
-  title: 'Order Sync Dashboard — ZidLink',
+  title: 'Order Sync Dashboard — ErpLink',
 }
 
 export default function OrderDashboardPage() {

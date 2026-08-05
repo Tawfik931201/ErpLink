@@ -132,8 +132,8 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
 
     result.total = platformProducts.length
 
-    // 3. For each platform product, find Odoo match and update stock
-    for (const pp of platformProducts) {
+    // 3. For each platform product, find Odoo match and update stock concurrently (concurrency limit = 5)
+    await runWithConcurrencyLimit(5, platformProducts, async (pp) => {
       try {
         const odooIds = await odooClient.search('product.product', [
           ['default_code', '=', pp.sku],
@@ -147,14 +147,14 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
           ], 1)
           if (templateIds.length === 0) {
             result.skipped++
-            continue
+            return
           }
           const variantIds = await odooClient.search('product.product', [
             ['product_tmpl_id', '=', templateIds[0]],
           ], 1)
           if (variantIds.length === 0) {
             result.skipped++
-            continue
+            return
           }
           await updateOdooStock(odooClient, variantIds[0], pp.quantity)
           result.updated++
@@ -166,7 +166,7 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
         result.failed++
         result.errors.push(`${pp.sku}: ${err.message?.slice(0, 100)}`)
       }
-    }
+    })
 
     // 4. Record sync result
     try {
@@ -216,4 +216,26 @@ export async function getStockSyncHistory() {
   } catch (err: any) {
     return { success: false, error: err.message, history: [] }
   }
+}
+
+/**
+ * Concurrency Limit Helper
+ * Runs a list of tasks with a concurrency limit.
+ */
+async function runWithConcurrencyLimit<T>(
+  concurrencyLimit: number,
+  items: T[],
+  fn: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  const executing = new Set<Promise<void>>()
+  for (let i = 0; i < items.length; i++) {
+    const p = Promise.resolve().then(() => fn(items[i], i))
+    executing.add(p)
+    const clean = () => executing.delete(p)
+    p.then(clean, clean)
+    if (executing.size >= concurrencyLimit) {
+      await Promise.race(executing)
+    }
+  }
+  await Promise.all(executing)
 }

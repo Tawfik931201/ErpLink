@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import StockSyncClient from './stock-sync-client'
 
 export const metadata = {
-  title: 'Bulk Stock Sync — ZidLink',
+  title: 'Bulk Stock Sync — ErpLink',
   description: 'مزامنة المخزون الجماعية بين المتجر ونظام ERP',
 }
 

@@ -15,12 +15,19 @@ import { getAccessToken } from './token'
 /** Maps internal sync-settings keys → Zid webhook event names */
 export const ZID_EVENT_MAP: Record<string, string> = {
   order_create:                  'order.create',
+  order_updated:                 'order.updated',
   order_status_update:           'order.status.update',
   order_payment_status_update:   'order.payment_status.update',
+  order_cancelled:               'order.cancelled',
+  order_delivered:               'order.delivered',
+  order_tagged:                  'order.tagged',
   product_create:                'product.create',
   product_update:                'product.update',
   product_delete:                'product.delete',
   product_publish:               'product.publish',
+  product_stock_create:          'product.stock.create',
+  product_stock_update:          'product.stock.update',
+  product_stock_delete:          'product.stock.delete',
   abandoned_cart_created:        'abandoned_cart.created',
   abandoned_cart_completed:      'abandoned_cart.completed',
   category_create:               'category.create',
@@ -33,6 +40,8 @@ export const ZID_EVENT_MAP: Record<string, string> = {
   location_create:               'location.create',
   location_update:               'location.update',
   location_delete:               'location.delete',
+  location_shipping_zone_attach: 'location.shipping_zone.attach',
+  location_shipping_zone_detach: 'location.shipping_zone.detach',
 }
 
 interface MerchantAuthHeaders {

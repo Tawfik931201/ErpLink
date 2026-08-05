@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { Handshake, Loader2, CheckCircle2, Clock4, XCircle, ArrowLeft } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
 
-import { Button } from '@/components/ui/button'
 import { getMyPartnerProfile, requestPartnership } from '@/app/actions/partners'
 import { clearSignupIntent } from '@/app/actions/signup-intent'
+import { Button } from '@/components/ui/button'
 import { PARTNER_TIERS } from '@/lib/partner-tiers'
 import { translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'

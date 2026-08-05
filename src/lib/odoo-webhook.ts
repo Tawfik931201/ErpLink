@@ -141,7 +141,7 @@ export async function registerOdooWebhook(
       // Native Webhook Action (No Python code validation, bypasses safe_eval)
       console.log('[OdooWebhook] Registering native Webhook Server Action...')
       const srvActionData: Record<string, any> = {
-        name: `ZidLink Webhook: ${odooModel} (${fieldMappingId})`,
+        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
         model_id: modelId,
         state: 'webhook',
         [urlFieldName]: webhookUrl,
@@ -170,7 +170,7 @@ except Exception:
     pass`
 
       serverActionId = await client.create('ir.actions.server', {
-        name: `ZidLink Webhook: ${odooModel} (${fieldMappingId})`,
+        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
         model_id: modelId,
         state: 'code',
         code: pythonCode,
@@ -181,7 +181,7 @@ except Exception:
     // Create automated action (base.automation) and link it
     console.log('[OdooWebhook] Creating base.automation...')
     const baseAutomationData: Record<string, any> = {
-      name: `ZidLink Automated Action: ${odooModel} (${fieldMappingId})`,
+      name: `ErpLink Automated Action: ${odooModel} (${fieldMappingId})`,
       model_id: modelId,
       trigger: 'on_create_or_write',
       action_server_ids: [[6, 0, [serverActionId]]], // Many2many link syntax
@@ -212,7 +212,7 @@ except Exception:
 
     console.log('[OdooWebhook] Creating base.automation directly (delegated inheritance)...')
     const baseAutomationData: Record<string, any> = {
-      name: `ZidLink Webhook: ${odooModel} (${fieldMappingId})`,
+      name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
       model_id: modelId,
       trigger: 'on_create_or_write',
       state: 'code',

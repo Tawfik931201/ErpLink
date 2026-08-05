@@ -11,7 +11,7 @@ function redirectToConnectZid(request: NextRequest, params: Record<string, strin
     process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
     process.env.NEXTAUTH_URL?.replace(/\/$/, '') ??
     request.nextUrl.origin
-  const url = new URL('/dashboard/connect-zid', appUrl)
+  const url = new URL('/dashboard/connect-store', appUrl)
 
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value)

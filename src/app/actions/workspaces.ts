@@ -262,7 +262,7 @@ export async function disconnectZidStore(merchantId: string) {
     if (error) throw new Error('Failed to disconnect Zid store: ' + error.message)
 
     revalidateTag('zid-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
     revalidatePath('/dashboard/integrations')
     return { success: true }
@@ -295,7 +295,7 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
     )
 
     revalidateTag('zid-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update sync settings:', error)
@@ -348,7 +348,7 @@ export async function disconnectSallaStore(merchantId: string) {
     if (error) throw new Error('Failed to disconnect Salla store: ' + error.message)
 
     revalidateTag('salla-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
     revalidatePath('/dashboard/integrations')
     return { success: true }
@@ -375,7 +375,7 @@ export async function updateSallaSyncSettings(merchantId: string, settings: any)
     if (error) throw new Error('Failed to update Salla sync settings: ' + error.message)
 
     revalidateTag('salla-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update Salla sync settings:', error)
@@ -428,7 +428,7 @@ export async function disconnectShopifyStore(shopDomain: string) {
     if (error) throw new Error('Failed to disconnect Shopify store: ' + error.message)
 
     revalidateTag('shopify-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
     revalidatePath('/dashboard/integrations')
     return { success: true }
@@ -455,7 +455,7 @@ export async function updateShopifySyncSettings(shopDomain: string, settings: an
     if (error) throw new Error('Failed to update Shopify sync settings: ' + error.message)
 
     revalidateTag('shopify-token')
-    revalidatePath('/dashboard/connect-zid')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update Shopify sync settings:', error)

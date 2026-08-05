@@ -5,8 +5,10 @@ import { supabase } from '@/lib/supabase'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import { processWebhookEvent } from '@/lib/sync-engine'
 import { verifyShopifySignature } from '@/lib/shopify-client'
+import { startSyncQueueRunner } from '@/lib/sync-queue-runner'
 
 export async function POST(req: NextRequest) {
+  startSyncQueueRunner()
   const rawBody = await req.text()
   const headersList = headers()
   
@@ -84,25 +86,18 @@ export async function POST(req: NextRequest) {
     }
     webhookEmitter.emit('zid-event', broadcastPayload)
 
-    // ── Process webhook in SyncEngine ─────────────────────────────────────────
-    console.info(`[Shopify Webhook] Routing event="${topic}" shopDomain=${shopDomain}`)
-    const result = await processWebhookEvent(topic, shopDomain, payload, 'shopify')
+    // ── Enqueue webhook in sync queue ─────────────────────────────────────────
+    console.info(`[Shopify Webhook] ▶ Enqueuing event="${topic}" shopDomain=${shopDomain} to sync queue`)
+    const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+    await enqueueWebhookEvent({
+      workspaceId: shopifyToken.workspace_id,
+      storeId: shopDomain,
+      event: topic,
+      platform: 'shopify',
+      payload: payload,
+    })
 
-    if (result.success > 0) {
-      const syncedRecords = result.records
-        .filter(record => record.status === 'success')
-        .map(record => `${record.model}#${record.odooRecordId}`)
-        .join(', ')
-      console.info(`[Shopify Webhook] ✅ ERP sync completed: ${syncedRecords}`)
-    } else if (result.processed === 0) {
-      console.warn(`[Shopify Webhook] ⚠️ No matching Field Mapping found for event="${topic}" shopDomain=${shopDomain}`)
-    } else {
-      console.warn(
-        `[Shopify Webhook] ⚠️ ERP sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
-      )
-    }
-
-    return NextResponse.json({ received: true, processed: true, summary: result })
+    return NextResponse.json({ received: true, queued: true })
   } catch (err: any) {
     console.error('[Shopify Webhook] Handler error', { topic, shopDomain, err })
     return NextResponse.json({ received: true, processed: false, error: err?.message || String(err) })

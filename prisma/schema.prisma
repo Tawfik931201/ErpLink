@@ -14,60 +14,66 @@ datasource db {
 // ─── Core Models (Mapped to Supabase Tables) ───────────────────────────────────
 
 model User {
-  id                  String            @id
-  email               String            @unique
+  id                  String   @id
+  email               String   @unique
   name                String?
-  active_workspace_id String?           @db.Uuid
-  app_role            String?           @default("user") // user | partner | admin
-  created_at          DateTime          @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+  active_workspace_id String?  @db.Uuid
+  app_role            String?  @default("user") // user | partner | admin
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  active_workspace    Workspace?        @relation("ActiveWorkspace", fields: [active_workspace_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  owned_workspaces    Workspace[]       @relation("WorkspaceOwner")
-  memberships         WorkspaceMember[]
-  settings            UserSettings?
-  partner_profile     PartnerProfile?
+  active_workspace Workspace?        @relation("ActiveWorkspace", fields: [active_workspace_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  owned_workspaces Workspace[]       @relation("WorkspaceOwner")
+  memberships      WorkspaceMember[]
+  settings         UserSettings?
+  partner_profile  PartnerProfile?
 
   @@map("users")
 }
 
 model Workspace {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String
-  clerk_org_id String?  @unique
-  created_at   DateTime @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
-  user_id      String?
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                String
+  clerk_org_id        String?  @unique
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user_id             String?
+  subscription_number String?  @unique
 
   // ─── Partner linkage (optional) ────────────────────────────────────────────
-  partner_id                    String?  @db.Uuid
-  partner_status                String?  @default("pending") // pending | active | rejected
-  partner_linked_at             DateTime?
-  partner_link_requested_by     String?  // user id who initiated the link request
-  partner_approved_by_admin     String?
-  partner_approved_admin_at     DateTime?
+  partner_id                String?   @db.Uuid
+  partner_status            String?   @default("pending") // pending | active | rejected
+  partner_linked_at         DateTime?
+  partner_link_requested_by String? // user id who initiated the link request
+  partner_approved_by_admin String?
+  partner_approved_admin_at DateTime?
 
-  owner            User?             @relation("WorkspaceOwner", fields: [user_id], references: [id], onDelete: Cascade)
-  partner          PartnerProfile?   @relation(fields: [partner_id], references: [id], onDelete: SetNull)
-  active_users     User[]            @relation("ActiveWorkspace")
-  members          WorkspaceMember[]
-  merchant_tokens  MerchantToken[]
-  salla_tokens     SallaToken[]
-  shopify_tokens   ShopifyToken[]
-  erp_connections  ErpConnection[]
-  field_mappings   FieldMapping[]
-  data_transfers   DataTransfer[]
-  invitations      PartnerOnboardingInvitation[]
-  agreements       PartnerAgreement[]
-  workspace_invitations WorkspaceInvitation[]
-  commissions             PartnerCommission[]
-  sync_queues             SyncQueue[]
-  order_status_mappings   OrderStatusMapping[]
-  payment_method_mappings PaymentMethodMapping[]
+  owner                    User?                         @relation("WorkspaceOwner", fields: [user_id], references: [id], onDelete: Cascade)
+  partner                  PartnerProfile?               @relation(fields: [partner_id], references: [id], onDelete: SetNull)
+  active_users             User[]                        @relation("ActiveWorkspace")
+  members                  WorkspaceMember[]
+  merchant_tokens          MerchantToken[]
+  salla_tokens             SallaToken[]
+  shopify_tokens           ShopifyToken[]
+  erp_connections          ErpConnection[]
+  field_mappings           FieldMapping[]
+  data_transfers           DataTransfer[]
+  invitations              PartnerOnboardingInvitation[]
+  agreements               PartnerAgreement[]
+  workspace_invitations    WorkspaceInvitation[]
+  commissions              PartnerCommission[]
+  subscriptions            Subscription[]
+  sync_queues              SyncQueue[]
+  order_status_mappings    OrderStatusMapping[]
+  payment_method_mappings  PaymentMethodMapping[]
   shipping_method_mappings ShippingMethodMapping[]
-  tax_mappings            TaxMapping[]
-  warehouse_mappings      WarehouseMapping[]
-  currency_mappings       CurrencyMapping[]
+  tax_mappings             TaxMapping[]
+  warehouse_mappings       WarehouseMapping[]
+  currency_mappings        CurrencyMapping[]
+  StandardMappingSettings  StandardMappingSettings[]
+  PaymentTermMapping       PaymentTermMapping[]
+  PricelistMapping         PricelistMapping[]
+  CategoryMapping          CategoryMapping[]
 
   @@index([partner_id])
   @@index([partner_status])
@@ -78,7 +84,7 @@ model WorkspaceMember {
   workspace_id String   @db.Uuid
   user_id      String
   role         String?  @default("member")
-  permissions  Json?    @default("[\"dashboard\", \"connect-zid\", \"connect-odoo\", \"mapping-center\", \"transfers\", \"tickets\"]")
+  permissions  Json?    @default("[\"dashboard\", \"connect-store\", \"connect-odoo\", \"mapping-center\", \"transfers\", \"tickets\"]")
   created_at   DateTime @default(now()) @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
@@ -94,7 +100,7 @@ model WorkspaceInvitation {
   email           String
   workspace_id    String   @db.Uuid
   invited_by      String
-  permissions     Json     @default("[\"dashboard\", \"connect-zid\", \"connect-odoo\", \"mapping-center\", \"transfers\", \"tickets\"]")
+  permissions     Json     @default("[\"dashboard\", \"connect-store\", \"connect-odoo\", \"mapping-center\", \"transfers\", \"tickets\"]")
   status          String   @default("pending")
   clerk_invite_id String?
   created_at      DateTime @default(now()) @db.Timestamptz(6)
@@ -122,29 +128,29 @@ model MerchantToken {
   workspace_id        String?  @db.Uuid
   sync_settings       Json?    @default("{}")
 
-  workspace Workspace? @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace      Workspace?     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   field_mappings FieldMapping[]
 
   @@map("merchant_tokens")
 }
 
 model SallaToken {
-  merchant_id         String   @id
-  access_token        String
-  expires_in          BigInt?
-  refresh_token       String
-  updated_at          DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
-  name                String?
-  email               String?
-  workspace_id        String?  @db.Uuid
-  sync_settings       Json?    @default("{}")
+  merchant_id   String   @id
+  access_token  String
+  expires_in    BigInt?
+  refresh_token String
+  updated_at    DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  name          String?
+  email         String?
+  workspace_id  String?  @db.Uuid
+  sync_settings Json?    @default("{}")
 
   // Salla details
-  username            String?
-  store_name          String?
-  mobile              String?
-  scope               String?
-  token_type          String?
+  username   String?
+  store_name String?
+  mobile     String?
+  scope      String?
+  token_type String?
 
   workspace Workspace? @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
@@ -152,14 +158,14 @@ model SallaToken {
 }
 
 model ShopifyToken {
-  shop_domain         String   @id // e.g. "my-brand.myshopify.com"
-  access_token        String
-  scopes              String?
-  updated_at          DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
-  name                String?  // Shop name
-  email               String?  // Shop email
-  workspace_id        String?  @db.Uuid
-  sync_settings       Json?    @default("{}")
+  shop_domain   String   @id // e.g. "my-brand.myshopify.com"
+  access_token  String
+  scopes        String?
+  updated_at    DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  name          String? // Shop name
+  email         String? // Shop email
+  workspace_id  String?  @db.Uuid
+  sync_settings Json?    @default("{}")
 
   workspace Workspace? @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
@@ -186,31 +192,31 @@ model ErpConnection {
 }
 
 model FieldMapping {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name               String
-  workspace_id      String?        @db.Uuid
-  erp_connection_id String?        @db.Uuid
-  merchant_id       String
-  store_id          String?
-  action            String
-  odoo_model            String?        @default("")
-  odoo_operation        String         @default("create")
-  odoo_match_field      String?
-  zid_match_field       String?
-  odoo_fallback_policy  String         @default("none")
-  mappings              Json?          @default("[]")
-  variant_sync_mode     String         @default("AS_VARIANTS")
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                     String
+  workspace_id             String?  @db.Uuid
+  erp_connection_id        String?  @db.Uuid
+  merchant_id              String
+  store_id                 String?
+  action                   String
+  odoo_model               String?  @default("")
+  odoo_operation           String   @default("create")
+  odoo_match_field         String?
+  zid_match_field          String?
+  odoo_fallback_policy     String   @default("none")
+  mappings                 Json?    @default("[]")
+  variant_sync_mode        String   @default("AS_VARIANTS")
   variant_odoo_match_field String?
   variant_zid_match_field  String?
-  sync_direction        String?        @default("store_to_erp")
-  odoo_webhook_id   Int?
-  odoo_server_action_id Int?
-  created_at        DateTime       @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime       @default(now()) @updatedAt @db.Timestamptz(6)
+  sync_direction           String?  @default("store_to_erp")
+  odoo_webhook_id          Int?
+  odoo_server_action_id    Int?
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  workspace      Workspace?      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  erp_connection ErpConnection?  @relation(fields: [erp_connection_id], references: [id], onDelete: Cascade)
-  merchant_token  MerchantToken   @relation(fields: [merchant_id], references: [merchant_id], onDelete: Cascade)
+  workspace      Workspace?     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  erp_connection ErpConnection? @relation(fields: [erp_connection_id], references: [id], onDelete: Cascade)
+  merchant_token MerchantToken  @relation(fields: [merchant_id], references: [merchant_id], onDelete: Cascade)
 
   @@map("field_mappings")
 }
@@ -219,9 +225,9 @@ model DataTransfer {
   id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspace_id    String?  @db.Uuid
   name            String
-  data_type       String   // "categories", "products"
-  direction       String   // "zid_to_odoo"
-  status          String   // "pending", "running", "completed", "failed"
+  data_type       String // "categories", "products"
+  direction       String // "zid_to_odoo"
+  status          String // "pending", "running", "completed", "failed"
   records_fetched Int      @default(0)
   records_created Int      @default(0)
   records_failed  Int      @default(0)
@@ -230,7 +236,7 @@ model DataTransfer {
   created_at      DateTime @default(now()) @db.Timestamptz(6)
   updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
-  workspace       Workspace? @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@map("data_transfers")
 }
@@ -249,21 +255,21 @@ model UserSettings {
 // ─── Sync Retry Queue ──────────────────────────────────────────────────────────
 /// Stores failed sync operations for later retry.
 model SyncQueue {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id  String   @db.Uuid
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id  String    @db.Uuid
   store_id      String
   event         String
-  platform      String   @default("zid")
-  payload       Json     @default("{}")
+  platform      String    @default("zid")
+  payload       Json      @default("{}")
   error_message String?
-  retry_count   Int      @default(0)
-  max_retries   Int      @default(3)
+  retry_count   Int       @default(0)
+  max_retries   Int       @default(3)
   last_error_at DateTime? @db.Timestamptz(6)
-  next_retry_at DateTime @default(now()) @db.Timestamptz(6)
-  created_at    DateTime @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  next_retry_at DateTime  @default(now()) @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  workspace     Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@index([next_retry_at])
   @@index([workspace_id])
@@ -299,13 +305,13 @@ model TelegramBotCode {
 
 /// One registered Telegram bot per workspace. A workspace may have many bots.
 model TelegramBot {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String   @db.Uuid
-  bot_token    String   // AES-256-CBC encrypted
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  bot_token    String // AES-256-CBC encrypted
   bot_username String?
-  label        String?  // user-facing label, e.g. "Marketing bot"
-  status       String   @default("pending") // 'pending' | 'linked' | 'invalid'
-  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  label        String? // user-facing label, e.g. "Marketing bot"
+  status       String    @default("pending") // 'pending' | 'linked' | 'invalid'
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
   linked_at    DateTime? @db.Timestamptz(6)
 
   chats TelegramBotChat[]
@@ -320,8 +326,8 @@ model TelegramBotChat {
   id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   bot_id           String   @db.Uuid
   workspace_id     String   @db.Uuid
-  chat_id          String   // Telegram chat id (string for safety)
-  chat_label       String?  // user-facing label, e.g. "Sales team"
+  chat_id          String // Telegram chat id (string for safety)
+  chat_label       String? // user-facing label, e.g. "Sales team"
   language         String   @default("ar") // 'ar' | 'en'
   notify_mode      String   @default("both") // 'success' | 'failure' | 'both'
   enabled          Boolean  @default(true)
@@ -339,7 +345,7 @@ model TelegramBotChat {
 
 // ─── Partner System ───────────────────────────────────────────────────────────
 //
-// The Partner system lets external resellers (partners) sell ZidLink subscriptions.
+// The Partner system lets external resellers (partners) sell ErpLink subscriptions.
 // A partner gets their own profile (tiered) and creates workspaces for each client.
 // Clients don't sign up themselves — partners generate an invite token sent by
 // email; the client clicks the link, sets a password, and the workspace is
@@ -352,28 +358,29 @@ model TelegramBotChat {
 //   gold    : unlimited,    30% commission
 
 model PartnerProfile {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id         String   @unique                  // Clerk user id (must also appear in users)
-  display_name    String
-  status          String   @default("pending")      // pending | active | suspended | rejected
-  tier            String   @default("starter")      // starter | growth | gold
-  commission_rate Decimal  @default(0.15) @db.Decimal(5,2)
-  approved_by     String?                            // admin user id
-  approved_at     DateTime?
-  notes           String?
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String    @unique // Clerk user id (must also appear in users)
+  display_name     String
+  status           String    @default("pending") // pending | active | suspended | rejected
+  tier             String    @default("starter") // starter | growth | gold
+  commission_rate  Decimal   @default(0.15) @db.Decimal(5, 2)
+  approved_by      String? // admin user id
+  approved_at      DateTime?
+  notes            String?
   rejection_reason String?
-  suspended_at    DateTime?
-  suspended_by    String?
-  created_at      DateTime @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  suspended_at     DateTime?
+  suspended_by     String?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
-  user          User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  user          User                          @relation(fields: [user_id], references: [id], onDelete: Cascade)
   tier_history  PartnerTierHistory[]
   invitations   PartnerOnboardingInvitation[]
   agreements    PartnerAgreement[]
   commissions   PartnerCommission[]
   payouts       PayoutRequest[]
   workspaces    Workspace[]
+  subscriptions Subscription[]
 
   @@index([status])
   @@index([tier])
@@ -381,15 +388,15 @@ model PartnerProfile {
 }
 
 model PartnerTierHistory {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  partner_id  String   @db.Uuid
-  old_tier    String?
-  new_tier    String
-  old_rate    Decimal? @db.Decimal(5,2)
-  new_rate    Decimal? @db.Decimal(5,2)
-  changed_by  String   // admin user id
-  changed_at  DateTime @default(now()) @db.Timestamptz(6)
-  reason      String?
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partner_id String   @db.Uuid
+  old_tier   String?
+  new_tier   String
+  old_rate   Decimal? @db.Decimal(5, 2)
+  new_rate   Decimal? @db.Decimal(5, 2)
+  changed_by String // admin user id
+  changed_at DateTime @default(now()) @db.Timestamptz(6)
+  reason     String?
 
   partner PartnerProfile @relation(fields: [partner_id], references: [id], onDelete: Cascade)
 
@@ -400,17 +407,17 @@ model PartnerTierHistory {
 /// One-time, expiring token that lets a partner's prospective client activate
 /// their account and claim the pre-created workspace.
 model PartnerOnboardingInvitation {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  partner_id        String    @db.Uuid
-  workspace_id      String?   @db.Uuid
-  email             String
-  client_name       String    // shown to the client when activating
-  token             String    @unique                  // 32-byte base64url
-  status            String    @default("pending")      // pending | accepted | linked | expired | revoked
-  expires_at        DateTime? @db.Timestamptz(6)
-  accepted_at       DateTime?
-  created_user_id   String?                            // Clerk user id once the client accepts
-  created_at        DateTime   @default(now()) @db.Timestamptz(6)
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partner_id      String    @db.Uuid
+  workspace_id    String?   @db.Uuid
+  email           String
+  client_name     String // shown to the client when activating
+  token           String    @unique // 32-byte base64url
+  status          String    @default("pending") // pending | accepted | linked | expired | revoked
+  expires_at      DateTime? @db.Timestamptz(6)
+  accepted_at     DateTime?
+  created_user_id String? // Clerk user id once the client accepts
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
 
   partner   PartnerProfile @relation(fields: [partner_id], references: [id], onDelete: Cascade)
   workspace Workspace?     @relation(fields: [workspace_id], references: [id], onDelete: SetNull)
@@ -426,28 +433,28 @@ model PartnerOnboardingInvitation {
 /// A PDF may be uploaded; SHA-256 hash is taken at upload time and cannot be
 /// changed afterwards so that disputes can be verified later.
 model PartnerAgreement {
-  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  partner_id               String   @db.Uuid
-  workspace_id             String   @db.Uuid
-  workspace_owner_user_id  String                            // user id of the client
-  pdf_url                  String?                           // Supabase storage public URL
-  pdf_hash                 String?                           // SHA-256 of the file at upload time
-  pdf_filename             String?
-  pdf_size                 Int?
-  signed_text              String?                           // plain-text agreement accepted by both sides
+  id                        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partner_id                String    @db.Uuid
+  workspace_id              String    @db.Uuid
+  workspace_owner_user_id   String // user id of the client
+  pdf_url                   String? // Supabase storage public URL
+  pdf_hash                  String? // SHA-256 of the file at upload time
+  pdf_filename              String?
+  pdf_size                  Int?
+  signed_text               String? // plain-text agreement accepted by both sides
   signed_by_partner_user_id String?
   signed_by_client_user_id  String?
   signed_by_partner_at      DateTime?
   signed_by_client_at       DateTime?
-  status                   String   @default("draft")         // draft | pending_signatures | active | terminated
-  terminated_at            DateTime?
-  terminated_reason        String?
-  agreement_version        Int      @default(1)               // increments when PDF or text changes
-  created_at               DateTime @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  status                    String    @default("draft") // draft | pending_signatures | active | terminated
+  terminated_at             DateTime?
+  terminated_reason         String?
+  agreement_version         Int       @default(1) // increments when PDF or text changes
+  created_at                DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
 
   partner   PartnerProfile @relation(fields: [partner_id], references: [id], onDelete: Cascade)
-  workspace Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@index([partner_id])
   @@index([workspace_id])
@@ -464,12 +471,12 @@ model PartnerCommission {
   partner_id        String   @db.Uuid
   workspace_id      String   @db.Uuid
   client_user_id    String
-  gross_amount      Decimal  @db.Decimal(12,2)
-  commission_rate   Decimal  @db.Decimal(5,2)
-  commission_amount Decimal  @db.Decimal(12,2)
+  gross_amount      Decimal  @db.Decimal(12, 2)
+  commission_rate   Decimal  @db.Decimal(5, 2)
+  commission_amount Decimal  @db.Decimal(12, 2)
   currency          String   @default("USD")
-  status            String   @default("approved")            // approved | void
-  source            String   @default("manual")              // manual | stripe
+  status            String   @default("approved") // approved | void
+  source            String   @default("manual") // manual | stripe
   invoice_ref       String?
   stripe_invoice_id String?  @unique
   period_start      DateTime @db.Timestamptz(6)
@@ -477,11 +484,11 @@ model PartnerCommission {
   note              String?
   paid_in_payout_id String?  @db.Uuid
   void_reason       String?
-  created_by        String?                                   // admin user id (for manual)
+  created_by        String? // admin user id (for manual)
   created_at        DateTime @default(now()) @db.Timestamptz(6)
 
   partner   PartnerProfile @relation(fields: [partner_id], references: [id], onDelete: Cascade)
-  workspace Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   payout    PayoutRequest? @relation(fields: [paid_in_payout_id], references: [id])
 
   @@index([partner_id])
@@ -493,26 +500,26 @@ model PartnerCommission {
 
 /// Payout requests submitted by a partner. Admin reviews, then marks paid.
 model PayoutRequest {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  partner_id           String   @db.Uuid
-  amount               Decimal  @db.Decimal(12,2)
-  currency             String   @default("USD")
-  period_start         DateTime @db.Timestamptz(6)
-  period_end           DateTime @db.Timestamptz(6)
-  status               String   @default("pending")  // pending | under_review | approved | paid | rejected
-  commission_ids       Json     @default("[]")        // PartnerCommission.id[]
-  requested_by         String                          // user id of partner
-  requested_at         DateTime @default(now()) @db.Timestamptz(6)
-  reviewed_by          String?
-  reviewed_at          DateTime?
-  review_note          String?
-  approved_by          String?
-  approved_at          DateTime?
-  paid_by              String?
-  paid_at              DateTime?
-  payment_reference    String?                        // bank/transfer reference text
-  payment_note         String?
-  rejection_reason     String?
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  partner_id        String    @db.Uuid
+  amount            Decimal   @db.Decimal(12, 2)
+  currency          String    @default("USD")
+  period_start      DateTime  @db.Timestamptz(6)
+  period_end        DateTime  @db.Timestamptz(6)
+  status            String    @default("pending") // pending | under_review | approved | paid | rejected
+  commission_ids    Json      @default("[]") // PartnerCommission.id[]
+  requested_by      String // user id of partner
+  requested_at      DateTime  @default(now()) @db.Timestamptz(6)
+  reviewed_by       String?
+  reviewed_at       DateTime?
+  review_note       String?
+  approved_by       String?
+  approved_at       DateTime?
+  paid_by           String?
+  paid_at           DateTime?
+  payment_reference String? // bank/transfer reference text
+  payment_note      String?
+  rejection_reason  String?
 
   partner     PartnerProfile      @relation(fields: [partner_id], references: [id], onDelete: Cascade)
   commissions PartnerCommission[]
@@ -526,10 +533,10 @@ model PayoutRequest {
 /// We use JSON metadata so we don't have to grow the schema for every event.
 model AuditLog {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  actor_id    String                                // user id who performed the action
-  actor_role  String                                // user | partner | admin | system
-  action      String                                // e.g. "partner.approve", "payout.paid"
-  entity_type String                                // e.g. "PartnerProfile", "PayoutRequest"
+  actor_id    String // user id who performed the action
+  actor_role  String // user | partner | admin | system
+  action      String // e.g. "partner.approve", "payout.paid"
+  entity_type String // e.g. "PartnerProfile", "PayoutRequest"
   entity_id   String?
   metadata    Json     @default("{}")
   created_at  DateTime @default(now()) @db.Timestamptz(6)
@@ -541,13 +548,44 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+/// Manually-registered subscription (manual payment flow). Admin records the
+/// start date (day of transfer), months paid, and amount paid; end_date is
+/// computed. Attributed to a workspace owner and optionally an affiliate.
+/// `status` is 'active' | 'cancelled'; "expired" is derived from end_date.
+model Subscription {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  user_id      String // workspace owner (client)
+  affiliate_id String?  @db.Uuid // optional affiliate attribution
+  start_date   DateTime @db.Date
+  months_paid  Int
+  end_date     DateTime @db.Date
+  amount_paid  Decimal  @default(0) @db.Decimal(12, 2)
+  currency     String   @default("USD")
+  status       String   @default("active") // active | cancelled
+  notes        String?
+  created_by   String?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  workspace Workspace?      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  affiliate PartnerProfile? @relation(fields: [affiliate_id], references: [id], onDelete: SetNull)
+
+  @@index([workspace_id])
+  @@index([user_id])
+  @@index([affiliate_id])
+  @@index([status])
+  @@index([end_date])
+  @@map("subscriptions")
+}
+
 // ─── Static Mapping Tables ─────────────────────────────────────────────────────
 /// Maps workspace-level order statuses from platform (Zid/Salla/Shopify) to Odoo states.
 model OrderStatusMapping {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspace_id String   @db.Uuid
-  zid_status   String   // platform status key: 'new', 'preparing', 'ready', etc.
-  odoo_state   String   // Odoo state: 'draft', 'sale', 'done', 'cancel'
+  zid_status   String // platform status key: 'new', 'preparing', 'ready', etc.
+  odoo_state   String // Odoo state: 'draft', 'sale', 'done', 'cancel'
   platform     String   @default("zid") // 'zid' | 'salla' | 'shopify'
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -561,14 +599,14 @@ model OrderStatusMapping {
 
 /// Maps workspace-level payment methods from platform to Odoo journal/payment method.
 model PaymentMethodMapping {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id         String   @db.Uuid
-  source_method           String   // platform payment method key
-  odoo_journal_id         Int?     // account.journal
-  odoo_payment_method_id  Int?     // account.payment.method
-  platform                String   @default("zid")
-  created_at              DateTime @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id           String   @db.Uuid
+  source_method          String // platform payment method key
+  odoo_journal_id        Int? // account.journal
+  odoo_payment_method_id Int? // account.payment.method
+  platform               String   @default("zid")
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
@@ -579,11 +617,11 @@ model PaymentMethodMapping {
 
 /// Maps workspace-level shipping methods from platform to Odoo carrier.
 model ShippingMethodMapping {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id    String   @db.Uuid
-  source_method_name String   // shipping method title from platform
-  odoo_carrier_id    Int      // delivery.carrier
-  odoo_product_id    Int?     // delivery product (for shipping line)
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id       String   @db.Uuid
+  source_method_name String // shipping method title from platform
+  odoo_carrier_id    Int // delivery.carrier
+  odoo_product_id    Int? // delivery product (for shipping line)
   platform           String   @default("zid")
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -597,10 +635,10 @@ model ShippingMethodMapping {
 
 /// Maps workspace-level tax names from platform to Odoo tax.
 model TaxMapping {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String   @db.Uuid
-  source_tax_name String   // tax name or percentage from platform
-  odoo_tax_id     Int      // account.tax
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id    String   @db.Uuid
+  source_tax_name String // tax name or percentage from platform
+  odoo_tax_id     Int // account.tax
   platform        String   @default("zid")
   created_at      DateTime @default(now()) @db.Timestamptz(6)
   updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -614,12 +652,12 @@ model TaxMapping {
 
 /// Maps workspace-level warehouse/locations from platform to Odoo warehouse.
 model WarehouseMapping {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id      String   @db.Uuid
-  source_location_id   String?  // platform location UUID
-  source_location_name String?  // platform location name
-  odoo_warehouse_id    Int      // stock.warehouse
-  odoo_location_id     Int?     // stock.location (for stock moves)
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id         String   @db.Uuid
+  source_location_id   String? // platform location UUID
+  source_location_name String? // platform location name
+  odoo_warehouse_id    Int // stock.warehouse
+  odoo_location_id     Int? // stock.location (for stock moves)
   platform             String   @default("zid")
   created_at           DateTime @default(now()) @db.Timestamptz(6)
   updated_at           DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -633,15 +671,15 @@ model WarehouseMapping {
 
 /// Maps workspace-level currencies from platform to Odoo currency.
 model CurrencyMapping {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id    String        @db.Uuid
-  source_currency  String        // 'SAR', 'AED', etc.
-  odoo_currency_id Int           // res.currency
-  conversion_rate  Decimal?      @db.Decimal(12, 6)
-  auto_update      Boolean       @default(false)
-  platform         String        @default("zid")
-  created_at       DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id     String   @db.Uuid
+  source_currency  String // 'SAR', 'AED', etc.
+  odoo_currency_id Int // res.currency
+  conversion_rate  Decimal? @db.Decimal(12, 6)
+  auto_update      Boolean  @default(false)
+  platform         String   @default("zid")
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
@@ -655,8 +693,8 @@ model CurrencyMapping {
 model StandardMappingSettings {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspace_id String   @db.Uuid
-  store_type   String   // 'zid' | 'salla' | 'shopify' | 'woocommerce' | 'amazon' | 'noon' | 'jumia'
-  entity_type  String   // 'categories' | 'products' | 'customers' | 'orders'
+  store_type   String // 'zid' | 'salla' | 'shopify' | 'woocommerce' | 'amazon' | 'noon' | 'jumia'
+  entity_type  String // 'categories' | 'products' | 'customers' | 'orders'
   settings     Json     @default("{}") @db.JsonB
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)
@@ -671,11 +709,11 @@ model StandardMappingSettings {
 
 /// Maps workspace-level payment terms from platform to Odoo payment term.
 model PaymentTermMapping {
-  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id        String   @db.Uuid
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id         String   @db.Uuid
   platform             String   @default("zid")
-  source_payment_term  String   // payment term name from platform (e.g. 'immediate', 'net_15', 'net_30')
-  odoo_payment_term_id Int      // account.payment.term
+  source_payment_term  String // payment term name from platform (e.g. 'immediate', 'net_15', 'net_30')
+  odoo_payment_term_id Int // account.payment.term
   created_at           DateTime @default(now()) @db.Timestamptz(6)
   updated_at           DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
@@ -690,11 +728,11 @@ model PaymentTermMapping {
 model PricelistMapping {
   id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   workspace_id      String   @db.Uuid
-  platform           String   @default("zid")
-  source_pricelist   String   // pricelist name from platform
-  odoo_pricelist_id  Int      // product.pricelist
-  created_at         DateTime @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  platform          String   @default("zid")
+  source_pricelist  String // pricelist name from platform
+  odoo_pricelist_id Int // product.pricelist
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
@@ -706,20 +744,20 @@ model PricelistMapping {
 /// Platform category → Odoo product.category with accounting + valuation settings
 /// Mirrors Odoo's product.category form (Accounting Properties + Inventory Valuation).
 model CategoryMapping {
-  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id              String   @db.Uuid
-  platform                  String   @default("zid")
-  source_category_name       String
-  odoo_category_id           Int?
-  parent_id                  Int?
+  id                   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id         String @db.Uuid
+  platform             String @default("zid")
+  source_category_name String
+  odoo_category_id     Int?
+  parent_id            Int?
 
   /// Accounting Properties
-  income_account_id          Int?
-  expense_account_id         Int?
+  income_account_id  Int?
+  expense_account_id Int?
 
   /// Inventory Valuation
-  property_cost_method       String?
-  property_valuation         String?
+  property_cost_method String?
+  property_valuation   String?
 
   /// Account Stock Properties
   stock_valuation_account_id Int?
@@ -727,8 +765,8 @@ model CategoryMapping {
   stock_input_account_id     Int?
   stock_output_account_id    Int?
 
-  created_at                 DateTime @default(now()) @db.Timestamptz(6)
-  updated_at                 DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 

@@ -1234,7 +1234,8 @@ function derivePresetKey(event: string, platform: string): string | null {
   }
   if (!model || !action) {
     // Match both "<entity>.create" and "<entity>_create" (and the past-tense variants)
-    const m = ev.match(/^(\w+)\.(create|update|delete)d?$/) ?? ev.match(/^(\w+)_(create|update|delete)d?$/)
+    // Also match cancel/deliver actions (order.cancelled, order_delivered, ...)
+    const m = ev.match(/^(\w+)\.(create|update|delete|cancel|deliver)d?$/) ?? ev.match(/^(\w+)_(create|update|delete|cancel|deliver)d?$/)
     if (m) {
       const entity = m[1]
       const verb = m[2]
@@ -2434,7 +2435,7 @@ async function isEntityOperationAllowed(
     return { allowed: true }
   }
 
-  if (Array.isArray(settings.enabled_actions) && settings.enabled_actions.length > 0) {
+  if (Array.isArray(settings.enabled_actions)) {
     if (!settings.enabled_actions.includes(operation)) {
       return { allowed: false, reason: `${entityType} "${operation}" operation is not enabled in Standard Mapping settings` }
     }
@@ -2453,7 +2454,8 @@ export async function processWebhookEvent(
   event: string,
   storeId: number | string,
   data: Record<string, unknown>,
-  platformHint?: 'zid' | 'salla' | 'shopify'
+  platformHint?: 'zid' | 'salla' | 'shopify',
+  isQueueExecution = false
 ): Promise<SyncEngineResult> {
   const storeIdNum = Number(storeId)
   const storeIdStr = Number.isNaN(storeIdNum) ? String(storeId) : String(storeIdNum)
@@ -2552,6 +2554,46 @@ export async function processWebhookEvent(
     }
   }
 
+  // ── If Zid order event, fetch full details when the payload is minimal ──
+  if (syncPlatform === 'zid' && normalizedEvent.startsWith('order.')) {
+    const hasOrderItems = ['products', 'items', 'order_items', 'order_items_list', 'line_items']
+      .some(k => Array.isArray((data as any)?.[k]) && ((data as any)[k] as any[]).length > 0)
+    const orderId = data.id || data.order_id
+    if (orderId && !hasOrderItems) {
+      try {
+        const { data: tokenRow } = await supabaseAdmin
+          .from('merchant_tokens')
+          .select('*')
+          .or(`store_id.eq.${storeIdStr},merchant_id.eq.${storeIdStr}`)
+          .maybeSingle()
+
+        if (tokenRow) {
+          const { getAccessToken } = await import('./zid/token')
+          const { ZidAPI } = await import('./zid-client')
+
+          const storedTokens = await getAccessToken(tokenRow.merchant_id)
+          const creds = {
+            authorization: storedTokens.authorization || '',
+            managerToken: storedTokens.accessToken,
+            storeId: tokenRow.store_id || tokenRow.merchant_id,
+          }
+          console.info(`[SyncEngine] Zid order webhook payload is minimal. Fetching full details for ID ${orderId}...`)
+          const response = await ZidAPI.orders.get(creds, String(orderId))
+          const orderData = response.data?.order || response.data?.data || response.data
+          if (orderData && (orderData.id || orderData.order_number || orderData.code)) {
+            console.info(`[SyncEngine] Full Zid order data fetched for ID ${orderId}. Status: ${orderData.order_status || orderData.status || 'n/a'}`)
+            data = {
+              ...orderData,
+              ...data,
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[SyncEngine] Failed to fetch full Zid order details for ID ${orderId}:`, err?.message ?? err)
+      }
+    }
+  }
+
   // Run cleanup of expired logs in the background
   cleanupExpiredLogs().catch(err => console.error('[SyncEngine] Background cleanup failed:', err))
 
@@ -2602,7 +2644,7 @@ export async function processWebhookEvent(
         result.records.push(presetRecord)
         result.processed += 1
         result[presetRecord.status] += 1
-        if (presetRecord.status === 'failed') {
+        if (presetRecord.status === 'failed' && !isQueueExecution) {
           try {
             const { enqueueFailedSync } = await import('./sync-queue')
             enqueueFailedSync({
@@ -2642,7 +2684,7 @@ export async function processWebhookEvent(
     result.processed += 1
     result[record.status] += 1
     // Enqueue failed operations for retry
-    if (record.status === 'failed' && row.workspace_id) {
+    if (record.status === 'failed' && row.workspace_id && !isQueueExecution) {
       try {
         const { enqueueFailedSync } = await import('./sync-queue')
         enqueueFailedSync({
@@ -2770,6 +2812,20 @@ async function processFixedMappingFallback(
       return null
     }
   }
+  if (presetKey.includes('order') && workspaceId) {
+    const storeType = presetKey.split('_')[0]
+    const normalizedEvent = normalizeEvent(event)
+    const operation: 'create' | 'update' | 'cancel' | 'deliver' | 'delete' = normalizedEvent.includes('cancel') ? 'cancel'
+      : normalizedEvent.includes('deliver') ? 'deliver'
+      : normalizedEvent.includes('delete') ? 'delete'
+      : normalizedEvent.includes('update') || normalizedEvent.includes('publish') ? 'update'
+      : 'create'
+    const orderCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, 'orders')
+    if (!orderCheck.allowed) {
+      console.info(`[FixedMapping] Order operation blocked for preset="${presetKey}": ${orderCheck.reason}`)
+      return null
+    }
+  }
 
   // Merge field rows from DB
   const defaultFieldPairs: any[] = []
@@ -2883,6 +2939,24 @@ async function processFixedMappingFallback(
         { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'amount_total', platform_field: 'total_price' },
         { odoo_field: 'date_order', platform_field: 'created_at' },
+        { odoo_field: 'x_zid_id', platform_field: 'id' },
+      ],
+      'zid_order_cancel': [
+        { odoo_field: 'x_zid_id', platform_field: 'id' },
+      ],
+      'zid_order_deliver': [
+        { odoo_field: 'x_zid_id', platform_field: 'id' },
+      ],
+      'salla_order_cancel': [
+        { odoo_field: 'x_salla_id', platform_field: 'id' },
+      ],
+      'salla_order_deliver': [
+        { odoo_field: 'x_salla_id', platform_field: 'id' },
+      ],
+      'shopify_order_cancel': [
+        { odoo_field: 'x_zid_id', platform_field: 'id' },
+      ],
+      'shopify_order_deliver': [
         { odoo_field: 'x_zid_id', platform_field: 'id' },
       ],
     }
@@ -4261,6 +4335,7 @@ async function executeOdooOperation(params: {
             : 'order'
           override[matchKey] = {
             ...((mergedSettings as any)?.[matchKey] || {}),
+            ...(stdSettings[matchKey] && typeof stdSettings[matchKey] === 'object' && !Array.isArray(stdSettings[matchKey]) ? stdSettings[matchKey] : {}),
             ...(stdSettings.match_zid_field ? { zid_match_field: stdSettings.match_zid_field } : {}),
             ...(stdSettings.match_odoo_field ? { odoo_match_field: stdSettings.match_odoo_field } : {}),
           }
@@ -4575,19 +4650,24 @@ async function executeOdooOperation(params: {
         }
       }
     }
-    if (orderSettings) {
-      // Resolve order state from DB mapping or fallback
-      const zidStatus = (zidData as any)?.status || (zidData as any)?.order_status || ''
-      if (zidStatus && !effectiveOdooValues.state) {
-        const resolvedState = await resolveOrderState(
-          mapping.workspace_id,
-          String(zidStatus),
-          platform
-        )
-        if (resolvedState) {
-          effectiveOdooValues.state = resolvedState
-        }
+    // Resolve order state from DB mapping or fallback
+    const zidStatus = String(
+      (zidData as any)?.status
+      || (zidData as any)?.order_status
+      || (zidData as any)?.financial_status
+      || ''
+    )
+    if (zidStatus && !effectiveOdooValues.state) {
+      const resolvedState = await resolveOrderState(
+        mapping.workspace_id,
+        zidStatus,
+        platform
+      )
+      if (resolvedState) {
+        effectiveOdooValues.state = resolvedState
       }
+    }
+    if (orderSettings) {
       // Resolve payment method â†’ Odoo journal from DB mapping
       const zidPaymentMethod = (zidData as any)?.payment_method?.title
         || (zidData as any)?.payment_gateway?.title
@@ -4633,7 +4713,10 @@ async function executeOdooOperation(params: {
       if (storeWhMappings && !effectiveOdooValues.warehouse_id) {
         const storeKey = String(storeId || '')
         if (storeKey && storeWhMappings[storeKey]) {
-          effectiveOdooValues.warehouse_id = storeWhMappings[storeKey]
+          const whId = Number(storeWhMappings[storeKey])
+          if (!isNaN(whId) && whId > 0) {
+            effectiveOdooValues.warehouse_id = whId
+          }
         }
       }
       // Apply default warehouse from settings if not already set
@@ -4648,10 +4731,8 @@ async function executeOdooOperation(params: {
       if (orderSettings.default_payment_term_id && !effectiveOdooValues.payment_term_id) {
         effectiveOdooValues.payment_term_id = orderSettings.default_payment_term_id
       }
-      // Auto-confirm order (set state = 'sale')
-      if (orderSettings.auto_confirm && effectiveOdooValues.state === 'draft') {
-        effectiveOdooValues.state = 'sale'
-      }
+      // Auto-confirm order (state is computed in Odoo — real confirmation happens
+      // after create via action_confirm; see the create branch below)
       // Auto-extract order notes from common payload paths (if not already mapped)
       if (!effectiveOdooValues.note) {
         const zidNote = String(
@@ -4784,6 +4865,20 @@ async function executeOdooOperation(params: {
       await syncProductBom(client, newId, zidData, mergedSettings, execPlatform, mapping.workspace_id).catch(err => {
         console.warn(`[SyncEngine] Failed to sync BoM for new template:`, err)
       })
+    }
+
+    // Auto-confirm: convert draft/sent order to a confirmed sales order (action_confirm)
+    const autoConfirm = (mergedSettings as any)?.order?.auto_confirm
+    if (odooModel === 'sale.order' && autoConfirm) {
+      try {
+        const recs = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['state'])
+        if (recs.length > 0 && (recs[0].state === 'draft' || recs[0].state === 'sent')) {
+          await client.execute(odooModel, 'action_confirm', [newId])
+          console.info(`[SyncEngine] ✅ Auto-confirmed order #${newId} (auto_confirm enabled)`)
+        }
+      } catch (confirmErr: any) {
+        console.warn(`[SyncEngine] Auto-confirm failed for ${odooModel} #${newId}:`, confirmErr?.message || confirmErr)
+      }
     }
 
     // Auto-invoice: confirm + create invoice if enabled

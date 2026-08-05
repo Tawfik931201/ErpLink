@@ -14,6 +14,9 @@ const SYNC_GROUPS = [
     title: 'Order',
     options: [
       { key: 'order_create', label: 'Order Create' },
+      { key: 'order_updated', label: 'Order Updated' },
+      { key: 'order_cancelled', label: 'Order Cancelled' },
+      { key: 'order_delivered', label: 'Order Delivered' },
       { key: 'order_status_update', label: 'Order Status Update' },
       { key: 'order_payment_status_update', label: 'Order Payment Status Update' },
       { key: 'order_tagged', label: 'Order Tagged' }

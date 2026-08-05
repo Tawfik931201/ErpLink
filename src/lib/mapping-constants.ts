@@ -104,6 +104,9 @@ export const ZID_EVENTS = [
 
   // Orders Group
   { id: 'order.create', name: 'Order Created (إنشاء طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.update', name: 'Order Updated (تحديث طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.cancel', name: 'Order Cancelled (إلغاء طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'order.deliver', name: 'Order Delivered (توصيل طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
   { id: 'order.status.update', name: 'Order Status Updated (تحديث حالة الطلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
   { id: 'order.payment_status.update', name: 'Order Payment Status Updated (تحديث حالة دفع الطلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
 

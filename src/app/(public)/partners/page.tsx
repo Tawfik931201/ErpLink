@@ -132,9 +132,9 @@ export default function PartnersLandingPage() {
 
               <h1 className="text-4xl md:text-5xl font-black text-foreground leading-[1.15] tracking-tight">
                 {lang === 'ar' ? (
-                  <>انضم لـ <span className="text-foreground">برنامج الشركاء</span> وابني <span className="text-foreground">دخلاً متكرراً</span></>
+                  <>انضم لـ <span className="text-foreground">برنامج الأفلييت</span> وابني <span className="text-foreground">دخلاً متكرراً</span></>
                 ) : (
-                  <>Join the <span className="text-foreground">Partner Program</span> and Build <span className="text-foreground">Recurring Revenue</span></>
+                  <>Join the <span className="text-foreground">Affiliate Program</span> and Build <span className="text-foreground">Recurring Revenue</span></>
                 )}
               </h1>
 

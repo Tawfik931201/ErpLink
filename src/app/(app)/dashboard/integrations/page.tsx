@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { getActiveWorkspaceZidToken } from '@/app/actions/workspaces'
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 
-export const metadata: Metadata = { title: 'Integrations — ZidLink' }
+export const metadata: Metadata = { title: 'Integrations — ErpLink' }
 
 interface PageProps {
   searchParams: {
@@ -73,8 +73,8 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
             </p>
             <p className="text-sm text-muted-foreground mt-0.5">
               {storeName
-                ? `المتجر "${storeName}" مرتبط الآن بـ ZidLink.`
-                : 'متجر زد الخاص بك مرتبط الآن بـ ZidLink.'}
+                ? `المتجر "${storeName}" مرتبط الآن بـ ErpLink.`
+                : 'متجر زد الخاص بك مرتبط الآن بـ ErpLink.'}
               {' '}يمكنك الآن تهيئة إعدادات المزامنة وتفعيل التحديثات التلقائية.
             </p>
           </div>
@@ -131,7 +131,7 @@ export default async function IntegrationsPage({ searchParams }: PageProps) {
             <div className="flex gap-2 pt-2">
               {isZidConnected ? (
                 <Link
-                  href="/dashboard/connect-zid"
+                  href="/dashboard/connect-store"
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground hover:bg-muted transition-colors"
                 >
                   إدارة الربط (Manage)

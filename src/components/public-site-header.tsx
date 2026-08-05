@@ -26,7 +26,7 @@ export function PublicSiteHeader({ lang, isPartnersPage }: { lang: Language; isP
             {lang === 'ar' ? 'الأسعار' : 'Pricing'}
           </Link>
           <Link href="/partners" className="transition-colors hover:text-foreground">
-            {lang === 'ar' ? 'الشركاء' : 'Partners'}
+            {lang === 'ar' ? 'الأفلييت' : 'Affiliates'}
           </Link>
           <Link href="/contact" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'اتصل بنا' : 'Contact Us'}

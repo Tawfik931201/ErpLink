@@ -21,9 +21,10 @@ import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import type { ZidWebhookEvent } from '@/lib/zid-client'
 import { processWebhookEvent } from '@/lib/sync-engine'
 import { startTelegramPoller } from '@/lib/telegram-long-poller'
+import { startSyncQueueRunner } from '@/lib/sync-queue-runner'
 
-// Lazy-start the Telegram poller on first webhook hit so /start confirmations
-// work even if the user has never visited the notifications settings page.
+// Lazy-start the Telegram poller and Sync Queue runner on first webhook hit so they
+// work even if the server restarted or the user hasn't visited the dashboard.
 
 interface ZidWebhookPayload {
   event: string   // Keep as string — Zid may send event names not in our type union
@@ -43,6 +44,7 @@ function verifyZidSignature(body: string, signature: string, secret: string): bo
 
 export async function POST(req: NextRequest) {
   startTelegramPoller()
+  startSyncQueueRunner()
   const rawBody = await req.text()
   const headersList = headers()
   const signature = headersList.get('x-zid-signature') ?? ''
@@ -410,8 +412,15 @@ async function handleOrderEvent(
     }
   }
 
-  console.info('[Zid Webhook] Order event received — triggering sync engine', { event, storeId, orderId: data.id })
-  await processWebhookEvent(event, storeId, data, 'zid')
+  console.info('[Zid Webhook] Order event received — enqueuing to sync queue', { event, storeId, orderId: data.id })
+  const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+  await enqueueWebhookEvent({
+    workspaceId: merchantToken.workspace_id,
+    storeId: String(storeId),
+    event,
+    platform: 'zid',
+    payload: data,
+  })
 }
 
 async function handleProductEvent(
@@ -429,7 +438,7 @@ async function handleProductEvent(
   // Check sync settings from merchant_tokens (like Salla and Shopify do)
   const { data: merchantToken } = await supabase
     .from('merchant_tokens')
-    .select('sync_settings')
+    .select('workspace_id, sync_settings')
     .eq('store_id', String(storeId))
     .maybeSingle()
 
@@ -447,22 +456,15 @@ async function handleProductEvent(
     }
   }
 
-  // Trigger sync engine directly — it reads field_mappings by store_id internally
-  const result = await processWebhookEvent(event, storeId, data, 'zid')
-  if (result.success > 0) {
-    const syncedRecords = result.records
-      .filter(record => record.status === 'success')
-      .map(record => `${record.model}#${record.odooRecordId}`)
-      .join(', ')
-    console.info(`[Zid Webhook] ✅ تم التسجيل والمزامنة بنجاح في أودو: ${syncedRecords}`)
-  } else if (result.processed === 0) {
-    console.warn(`[Zid Webhook] ⚠️  لم يتم العثور على خريطة مطابقة (Field Mapping) لحدث المنتجات: event="${event}" store_id=${storeId}`)
-  } else {
-    console.warn(
-      `[Zid Webhook] ⚠️  انتهت محاولة التسجيل في أودو بدون نجاح: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
-    )
-  }
-  console.info('[Zid Webhook] ======================================')
+  console.info('[Zid Webhook] Product event received — enqueuing to sync queue', { event, storeId, productId })
+  const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+  await enqueueWebhookEvent({
+    workspaceId: merchantToken?.workspace_id || '',
+    storeId: String(storeId),
+    event,
+    platform: 'zid',
+    payload: data,
+  })
 }
 
 async function handleCustomerEvent(
@@ -481,8 +483,15 @@ async function handleCustomerEvent(
     return
   }
 
-  console.info('[Zid Webhook] Customer event — triggering sync engine', { event, storeId, customerId: data.id })
-  await processWebhookEvent(event, storeId, data, 'zid')
+  console.info('[Zid Webhook] Customer event — enqueuing to sync queue', { event, storeId, customerId: data.id })
+  const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+  await enqueueWebhookEvent({
+    workspaceId: merchantToken.workspace_id,
+    storeId: String(storeId),
+    event,
+    platform: 'zid',
+    payload: data,
+  })
 }
 
 async function handleCategoryEvent(
@@ -494,27 +503,25 @@ async function handleCategoryEvent(
   console.info('[Zid Webhook] event:', event, '| storeId:', storeId)
   console.info('[Zid Webhook] data keys:', Object.keys(data))
 
-  // Trigger sync engine directly — it reads field_mappings by store_id internally
-  // Sync operation filtering (create/update/delete) is handled by Standard Mapping settings
-  // in the sync engine via isEntityOperationAllowed().
-  console.info('[Zid Webhook] Calling processWebhookEvent...')
+  // Find workspace_id from merchant token
+  const { data: merchantToken } = await supabase
+    .from('merchant_tokens')
+    .select('workspace_id')
+    .eq('store_id', String(storeId))
+    .maybeSingle()
+
+  console.info('[Zid Webhook] Category event — enqueuing to sync queue', { event, storeId })
   try {
-    const result = await processWebhookEvent(event, storeId, data, 'zid')
-    if (result.success > 0) {
-      const syncedRecords = result.records
-        .filter(record => record.status === 'success')
-        .map(record => `${record.model}#${record.odooRecordId}`)
-        .join(', ')
-      console.info(`[Zid Webhook] ✅ ERP sync completed: ${syncedRecords}`)
-    } else if (result.processed === 0) {
-      console.warn(`[Zid Webhook] ⚠️  No matching Field Mapping found for event="${event}" store_id=${storeId}`)
-    } else {
-      console.warn(
-        `[Zid Webhook] ⚠️  ERP sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
-      )
-    }
+    const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+    await enqueueWebhookEvent({
+      workspaceId: merchantToken?.workspace_id || '',
+      storeId: String(storeId),
+      event,
+      platform: 'zid',
+      payload: data,
+    })
   } catch (err: any) {
-    console.error(`[Zid Webhook] ❌ processWebhookEvent threw for "${event}":`, err?.message ?? String(err))
+    console.error(`[Zid Webhook] ❌ Failed to enqueue category event:`, err?.message ?? String(err))
   }
   console.info('[Zid Webhook] ===== handleCategoryEvent END =====')
 }

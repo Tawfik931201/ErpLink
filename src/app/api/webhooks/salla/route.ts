@@ -15,6 +15,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import { processWebhookEvent } from '@/lib/sync-engine'
+import { startSyncQueueRunner } from '@/lib/sync-queue-runner'
 
 function verifySallaSignature(body: string, signature: string, secret: string): boolean {
   try {
@@ -26,6 +27,7 @@ function verifySallaSignature(body: string, signature: string, secret: string): 
 }
 
 export async function POST(req: NextRequest) {
+  startSyncQueueRunner()
   const rawBody = await req.text()
   const headersList = headers()
   const signature = headersList.get('x-salla-signature') ?? headersList.get('salla-signature') ?? ''
@@ -103,25 +105,18 @@ export async function POST(req: NextRequest) {
     }
     webhookEmitter.emit('zid-event', broadcastPayload)
 
-    // ── Process the webhook in SyncEngine ─────────────────────────────────────
-    console.info(`[Salla Webhook] ▶ Routing event="${event}" merchantId=${merchantId}`)
-    const result = await processWebhookEvent(event, merchantId, data, 'salla')
-    
-    if (result.success > 0) {
-      const syncedRecords = result.records
-        .filter(record => record.status === 'success')
-        .map(record => `${record.model}#${record.odooRecordId}`)
-        .join(', ')
-      console.info(`[Salla Webhook] ✅ ERP sync completed: ${syncedRecords}`)
-    } else if (result.processed === 0) {
-      console.warn(`[Salla Webhook] ⚠️  No matching Field Mapping found for event="${event}" merchantId=${merchantId}`)
-    } else {
-      console.warn(
-        `[Salla Webhook] ⚠️  ERP sync finished without successful operations: success=${result.success} skipped=${result.skipped} failed=${result.failed}`
-      )
-    }
+    // ── Enqueue the webhook in sync queue ─────────────────────────────────────
+    console.info(`[Salla Webhook] ▶ Enqueuing event="${event}" merchantId=${merchantId} to sync queue`)
+    const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+    await enqueueWebhookEvent({
+      workspaceId: sallaToken.workspace_id,
+      storeId: merchantId,
+      event,
+      platform: 'salla',
+      payload: data,
+    })
 
-    return NextResponse.json({ received: true, processed: true, summary: result })
+    return NextResponse.json({ received: true, queued: true })
   } catch (err: any) {
     console.error('[Salla Webhook] handler error', { event, merchantId, err })
     return NextResponse.json({ received: true, processed: false, error: err?.message || String(err) })

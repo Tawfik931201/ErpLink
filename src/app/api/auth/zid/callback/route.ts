@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
   // ── Handle denied consent ────────────────────────────────────────────────
   if (error) {
-    return redirect(`/dashboard/connect-zid?error=zid_denied`)
+    return redirect(`/dashboard/connect-store?error=zid_denied`)
   }
 
   // ── Redirect to Authorize if no code (App Market Install) ────────────────
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
     })
   } catch (err) {
     console.error('[Zid OAuth] Token exchange failed:', err)
-    return redirect(`/dashboard/connect-zid?error=zid_token_exchange_failed`)
+    return redirect(`/dashboard/connect-store?error=zid_token_exchange_failed`)
   }
 
   // ── Fetch the store info so we know WHICH store just connected ───────────
@@ -284,8 +284,8 @@ export async function GET(req: NextRequest) {
     }
   } catch (err) {
     console.error('[Zid OAuth] Failed to save merchant token:', err)
-    return redirect(`/dashboard/connect-zid?error=zid_db_error`)
+    return redirect(`/dashboard/connect-store?error=zid_db_error`)
   }
 
-  return redirect(`/dashboard/connect-zid?success=zid_connected&store=${storeName ?? storeId ?? ''}`)
+  return redirect(`/dashboard/connect-store?success=zid_connected&store=${storeName ?? storeId ?? ''}`)
 }

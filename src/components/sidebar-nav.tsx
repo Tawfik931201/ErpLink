@@ -67,7 +67,7 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
           <div className="flex flex-col gap-0.5">
             {section.items.map(({ href, icon, label, hasBadge }) => {
               const Icon = ICON_MAP[icon] || LayoutDashboard
-              // Handle active state: Exact match, or sub-path (e.g. /dashboard/connect-zid/settings matches /dashboard/connect-zid)
+              // Handle active state: Exact match, or sub-path (e.g. /dashboard/connect-store/settings matches /dashboard/connect-store)
               const isActive = cleanPathname === href || (href !== '/dashboard' && cleanPathname.startsWith(href + '/'))
 
               return (

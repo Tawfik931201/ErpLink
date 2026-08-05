@@ -1,25 +1,23 @@
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import {
   Handshake,
   Users,
   DollarSign,
   TrendingUp,
   CreditCard,
-  Percent,
   Calendar,
   ArrowLeft,
   Shield,
-  CheckCircle2,
-  XCircle,
-  Clock,
+  CalendarCheck,
 } from 'lucide-react'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
+import { redirect } from 'next/navigation'
 
 import { getActiveUserId, isAdmin } from '@/lib/auth'
-import { supabase } from '@/lib/supabase'
-import { translations, type Language } from '@/lib/translations'
 import { PARTNER_TIERS, tierLabel } from '@/lib/partner-tiers'
+import { isSubscriptionExpired } from '@/lib/subscription-utils'
+import { supabase } from '@/lib/supabase'
+import type { Language } from '@/lib/translations'
 
 export default async function AdminPartnerDetailPage({
   params,
@@ -33,7 +31,7 @@ export default async function AdminPartnerDetailPage({
   const lang = (cookieStore.get('lang')?.value || 'ar') as Language
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
-  // 1. Partner profile
+  // 1. Affiliate profile
   const { data: profile } = await supabase
     .from('partner_profiles')
     .select('*')
@@ -43,28 +41,57 @@ export default async function AdminPartnerDetailPage({
   if (!profile) {
     return (
       <div className="p-6 text-center text-muted-foreground">
-        {lang === 'ar' ? 'الشريك غير موجود' : 'Partner not found'}
+        {lang === 'ar' ? 'الأفلييت غير موجود' : 'Affiliate not found'}
       </div>
     )
   }
 
-  // 2. Stats
-  const { count: totalClients } = await supabase
-    .from('partner_onboarding_invitations')
-    .select('*', { count: 'exact', head: true })
+  // 2. Workspaces registered by this affiliate
+  const { data: workspaces } = await supabase
+    .from('workspaces')
+    .select('id, name, user_id, created_at')
     .eq('partner_id', params.partnerId)
-    .in('status', ['accepted', 'linked'])
+    .order('created_at', { ascending: false })
+    .limit(50)
 
-  const { count: pendingClients } = await supabase
-    .from('partner_onboarding_invitations')
-    .select('*', { count: 'exact', head: true })
-    .eq('partner_id', params.partnerId)
-    .eq('status', 'pending')
+  const wsIds = (workspaces ?? []).map((w) => w.id)
+  let activeCount = 0
+  const subsByWorkspace: Record<
+    string,
+    { id: string; workspace_id: string; user_id: string; end_date: string; status: string }
+  > = {}
 
+  if (wsIds.length > 0) {
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .in('workspace_id', wsIds)
+      .eq('status', 'active')
+      .order('end_date', { ascending: true })
+
+    // Keep the latest active subscription per workspace (highest end_date)
+    for (const s of subs ?? []) {
+      const prev = subsByWorkspace[s.workspace_id]
+      if (!prev || s.end_date > prev.end_date) subsByWorkspace[s.workspace_id] = s
+    }
+    activeCount = Object.values(subsByWorkspace).filter((s) => !isSubscriptionExpired(s)).length
+  }
+
+  // Resolve client emails/names
+  const clientIds = [...new Set((workspaces ?? []).map((w) => w.user_id))]
+  const { data: users } = await supabase
+    .from('users')
+    .select('id, email, name')
+    .in('id', clientIds.length ? clientIds : ['__none__'])
+
+  const userMap = new Map((users ?? []).map((u) => [u.id, u]))
+
+  // 3. Financial stats
   const { data: commissions } = await supabase
     .from('partner_commissions')
     .select('commission_amount')
     .eq('partner_id', params.partnerId)
+    .eq('status', 'approved')
 
   const totalCommissions = commissions?.reduce((s, c) => s + Number(c.commission_amount), 0) ?? 0
 
@@ -74,15 +101,10 @@ export default async function AdminPartnerDetailPage({
     .eq('partner_id', params.partnerId)
 
   const totalPaid = payouts?.filter((p) => p.status === 'paid').reduce((s, p) => s + Number(p.amount), 0) ?? 0
-  const pendingPayouts = payouts?.filter((p) => p.status === 'pending').length ?? 0
-
-  // 3. Clients
-  const { data: clients } = await supabase
-    .from('partner_onboarding_invitations')
-    .select('id, email, client_name, status, workspace_id, created_at, accepted_at')
-    .eq('partner_id', params.partnerId)
-    .order('created_at', { ascending: false })
-    .limit(20)
+  const pendingPayouts =
+    payouts
+      ?.filter((p) => ['pending', 'under_review', 'approved'].includes(p.status))
+      .reduce((s, p) => s + Number(p.amount), 0) ?? 0
 
   const commissionPercent = Math.round(Number(profile.commission_rate) * 100)
   const maxClients = PARTNER_TIERS[profile.tier as keyof typeof PARTNER_TIERS]?.maxClients
@@ -97,8 +119,37 @@ export default async function AdminPartnerDetailPage({
     return `inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${m[status] || ''}`
   }
 
+  const subBadge = (sub: {
+    id: string
+    workspace_id: string
+    user_id: string
+    end_date: string
+    status: string
+  }) => {
+    if (!sub) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border bg-muted border-border text-muted-foreground">
+          {lang === 'ar' ? 'بلا اشتراك' : 'No subscription'}
+        </span>
+      )
+    }
+    const expired = isSubscriptionExpired(sub)
+    if (expired) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border bg-red-50 border-red-200 text-red-700">
+          {lang === 'ar' ? 'منتهٍ' : 'Expired'}
+        </span>
+      )
+    }
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border bg-emerald-50 border-emerald-200 text-emerald-700">
+        {lang === 'ar' ? 'نشط' : 'Active'}
+      </span>
+    )
+  }
+
   return (
-    <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-6" dir={dir}>
+    <div className="max-w-6xl mx-auto space-y-6" dir={dir}>
       {/* Back + Actions */}
       <div className="flex items-center justify-between">
         <Link
@@ -114,13 +165,13 @@ export default async function AdminPartnerDetailPage({
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border text-xs font-bold hover:bg-secondary transition-colors"
           >
             <Handshake className="h-3.5 w-3.5" />
-            {lang === 'ar' ? 'لوحة الشريك' : 'Partner Dashboard'}
+            {lang === 'ar' ? 'لوحة الأفلييت' : 'Affiliate Dashboard'}
           </Link>
         </div>
       </div>
 
       {/* Header */}
-      <div className="rounded-2xl border border-border bg-card shadow-sm p-6 space-y-4">
+      <div className="border border-border bg-card p-6 space-y-4">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -187,109 +238,101 @@ export default async function AdminPartnerDetailPage({
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-border bg-card shadow-sm p-5 space-y-2">
+        <div className="border border-border bg-card p-5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
               {lang === 'ar' ? 'العملاء' : 'Clients'}
             </span>
             <Users className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-black">{totalClients ?? 0}</p>
+          <p className="text-2xl font-black">{workspaces?.length ?? 0}</p>
           {maxClients !== null && (
             <p className="text-[10px] text-muted-foreground">
               {lang === 'ar' ? `الحد: ${maxClients}` : `Max: ${maxClients}`}
             </p>
           )}
+          <p className="text-[10px] text-emerald-600 font-medium">
+            {lang === 'ar' ? `${activeCount} باشتراك نشط` : `${activeCount} with active subscription`}
+          </p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card shadow-sm p-5 space-y-2">
+        <div className="border border-border bg-card p-5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
               {lang === 'ar' ? 'العمولات' : 'Commissions'}
             </span>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-black">${totalCommissions.toLocaleString()}</p>
+          <p className="text-2xl font-black">${totalCommissions.toLocaleString('en-US')}</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card shadow-sm p-5 space-y-2">
+        <div className="border border-border bg-card p-5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
               {lang === 'ar' ? 'المدفوع' : 'Paid'}
             </span>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-black">${totalPaid.toLocaleString()}</p>
+          <p className="text-2xl font-black">${totalPaid.toLocaleString('en-US')}</p>
         </div>
 
-        <div className="rounded-2xl border border-border bg-card shadow-sm p-5 space-y-2">
+        <div className="border border-border bg-card p-5 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-              {lang === 'ar' ? 'طلبات الصرف' : 'Payouts'}
+              {lang === 'ar' ? 'قيد المراجعة (صرف)' : 'Pending Payouts'}
             </span>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </div>
-          <p className="text-2xl font-black">{pendingPayouts}</p>
+          <p className="text-2xl font-black">${pendingPayouts.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           <p className="text-[10px] text-muted-foreground">
-            {lang === 'ar' ? 'قيد المراجعة' : 'Pending review'}
+            {lang === 'ar' ? 'طلبات لم تُدفع بعد' : 'Requests not yet paid'}
           </p>
         </div>
       </div>
 
       {/* Clients table */}
-      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="border border-border bg-card overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <h2 className="font-bold text-sm flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
             {lang === 'ar' ? 'العملاء' : 'Clients'}
             <span className="text-muted-foreground font-normal text-xs">
-              ({clients?.length ?? 0})
+              ({workspaces?.length ?? 0})
             </span>
           </h2>
-          <Link
-            href={`/admin/partners`}
-            className="text-xs text-primary font-bold hover:underline"
-          >
-            {lang === 'ar' ? 'إدارة' : 'Manage'}
-          </Link>
         </div>
-        {!clients || clients.length === 0 ? (
+        {!workspaces || workspaces.length === 0 ? (
           <div className="px-6 py-10 text-center text-xs text-muted-foreground">
-            {lang === 'ar' ? 'لا يوجد عملاء لهذا الشريك' : 'No clients for this partner'}
+            {lang === 'ar' ? 'لا يوجد عملاء لهذا الأفلييت' : 'No clients for this affiliate'}
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead className="text-[10px] uppercase text-muted-foreground bg-secondary/30">
               <tr>
-                <th className="px-6 py-3 text-start">{lang === 'ar' ? 'الاسم' : 'Name'}</th>
+                <th className="px-6 py-3 text-start">{lang === 'ar' ? 'المساحة' : 'Workspace'}</th>
                 <th className="px-6 py-3 text-start">Email</th>
-                <th className="px-6 py-3 text-start">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
-                <th className="px-6 py-3 text-start">{lang === 'ar' ? 'ربط' : 'Linked'}</th>
+                <th className="px-6 py-3 text-start">{lang === 'ar' ? 'الاشتراك' : 'Subscription'}</th>
                 <th className="px-6 py-3 text-start">{lang === 'ar' ? 'التاريخ' : 'Date'}</th>
               </tr>
             </thead>
             <tbody>
-              {clients.map((c) => (
-                <tr key={c.id} className="border-t border-border/40">
-                  <td className="px-6 py-3 font-semibold">{c.client_name}</td>
-                  <td className="px-6 py-3 text-xs text-muted-foreground">{c.email}</td>
-                  <td className="px-6 py-3">
-                    <span className={statusBadge(c.status)}>
-                      {c.status === 'linked' ? <CheckCircle2 className="h-3 w-3" /> : c.status === 'accepted' ? <Clock className="h-3 w-3" /> : null}
-                      {c.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3 text-[10px] font-mono text-muted-foreground">
-                    {c.workspace_id ? `${c.workspace_id.slice(0, 8)}...` : '—'}
-                  </td>
-                  <td className="px-6 py-3 text-[10px] text-muted-foreground">
-                    {new Date(c.created_at).toLocaleDateString(
-                      lang === 'ar' ? 'ar-SA' : 'en-US',
-                      { year: 'numeric', month: 'short', day: 'numeric' },
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {(workspaces ?? []).map((ws) => {
+                const user = userMap.get(ws.user_id)
+                const sub = subsByWorkspace[ws.id] ?? null
+                return (
+                  <tr key={ws.id} className="border-t border-border/40">
+                    <td className="px-6 py-3 font-semibold">{ws.name}</td>
+                    <td className="px-6 py-3 text-xs text-muted-foreground">{user?.email ?? '—'}</td>
+                    <td className="px-6 py-3">{subBadge(sub)}</td>
+                    <td className="px-6 py-3 text-[10px] text-muted-foreground">
+                      {new Date(ws.created_at).toLocaleDateString(
+                        lang === 'ar' ? 'ar-SA' : 'en-US',
+                        { year: 'numeric', month: 'short', day: 'numeric' },
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -298,25 +341,18 @@ export default async function AdminPartnerDetailPage({
       {/* Quick links */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Link
+          href={`/admin/subscriptions`}
+          className="border border-border bg-card p-4 text-center hover:bg-secondary/40 transition-colors"
+        >
+          <CalendarCheck className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
+          <span className="text-xs font-bold">{lang === 'ar' ? 'إدارة الاشتراكات' : 'Manage Subscriptions'}</span>
+        </Link>
+        <Link
           href={`/admin/commissions`}
-          className="rounded-2xl border border-border bg-card shadow-sm p-4 text-center hover:bg-secondary/40 transition-colors"
+          className="border border-border bg-card p-4 text-center hover:bg-secondary/40 transition-colors"
         >
           <DollarSign className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
           <span className="text-xs font-bold">{lang === 'ar' ? 'إدارة العمولات' : 'Manage Commissions'}</span>
-        </Link>
-        <Link
-          href={`/admin/payouts`}
-          className="rounded-2xl border border-border bg-card shadow-sm p-4 text-center hover:bg-secondary/40 transition-colors"
-        >
-          <CreditCard className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-          <span className="text-xs font-bold">{lang === 'ar' ? 'إدارة الصرف' : 'Manage Payouts'}</span>
-        </Link>
-        <Link
-          href={`/admin/workspace-links`}
-          className="rounded-2xl border border-border bg-card shadow-sm p-4 text-center hover:bg-secondary/40 transition-colors"
-        >
-          <Users className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
-          <span className="text-xs font-bold">{lang === 'ar' ? 'روابط العملاء' : 'Client Links'}</span>
         </Link>
       </div>
     </div>

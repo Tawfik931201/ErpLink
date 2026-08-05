@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types for the ZidLink SaaS application.
+ * Shared TypeScript types for the ErpLink SaaS application.
  */
 // ─── Prisma replaced by Supabase ───────────────────────────────────────────────────
 
