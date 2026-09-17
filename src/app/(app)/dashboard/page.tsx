@@ -158,10 +158,13 @@ export default async function DashboardPage() {
         </div>
 
         {(!storeConnected || !isOdooConnected) && (
-          <div className="flex items-center gap-2 text-xs font-semibold bg-muted text-foreground border px-4 py-2.5 rounded-lg shrink-0">
+          <Link
+            href="/dashboard/setup"
+            className="flex items-center gap-2 text-xs font-semibold bg-muted text-foreground border px-4 py-2.5 rounded-lg shrink-0 hover:bg-muted/70 transition-colors"
+          >
             <AlertTriangle className="h-4 w-4 shrink-0" />
             <span>{t('db.completeSteps', dict)}</span>
-          </div>
+          </Link>
         )}
       </div>
 

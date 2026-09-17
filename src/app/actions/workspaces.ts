@@ -3,9 +3,16 @@
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
 import { getActiveUserId } from '@/lib/auth'
+import { unregisterSallaWebhooks } from '@/lib/salla-client'
+import {
+  listShopifyWebhooks,
+  registerShopifyWebhook,
+  unregisterShopifyWebhookTopic,
+  unregisterShopifyWebhooks,
+} from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
-import { syncWebhooksWithSettings } from '@/lib/zid/webhooks'
+import { syncWebhooksWithSettings, unregisterAllZidWebhooks } from '@/lib/zid/webhooks'
 
 async function getOrCreateDbUser() {
   const userId = await getActiveUserId()
@@ -253,6 +260,11 @@ export async function disconnectZidStore(merchantId: string) {
       throw new Error('No active workspace selected')
     }
 
+    // Unregister this merchant's webhooks from Zid first (best-effort, non-blocking)
+    unregisterAllZidWebhooks(merchantId).catch((err) =>
+      console.error('[Zid Webhook] Cleanup on disconnect failed:', err)
+    )
+
     const { error } = await supabase
       .from('merchant_tokens')
       .delete()
@@ -264,7 +276,7 @@ export async function disconnectZidStore(merchantId: string) {
     revalidateTag('zid-token')
     revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/integrations')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Zid store:', error)
@@ -339,6 +351,9 @@ export async function disconnectSallaStore(merchantId: string) {
       throw new Error('No active workspace selected')
     }
 
+    // Unregister webhooks from Salla before deleting the tokens (needs auth token)
+    await unregisterSallaWebhooks(merchantId)
+
     const { error } = await supabase
       .from('salla_tokens')
       .delete()
@@ -350,7 +365,7 @@ export async function disconnectSallaStore(merchantId: string) {
     revalidateTag('salla-token')
     revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/integrations')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Salla store:', error)
@@ -419,6 +434,9 @@ export async function disconnectShopifyStore(shopDomain: string) {
       throw new Error('No active workspace selected')
     }
 
+    // Unregister webhooks from Shopify before deleting the tokens (needs auth token)
+    await unregisterShopifyWebhooks(shopDomain)
+
     const { error } = await supabase
       .from('shopify_tokens')
       .delete()
@@ -430,7 +448,7 @@ export async function disconnectShopifyStore(shopDomain: string) {
     revalidateTag('shopify-token')
     revalidatePath('/dashboard/connect-store')
     revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/integrations')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Shopify store:', error)
@@ -445,7 +463,9 @@ export async function updateShopifySyncSettings(shopDomain: string, settings: an
       throw new Error('No active workspace selected')
     }
 
-    // Save new settings to DB
+    // Save new settings to DB first (source of truth for the UI toggles).
+    // Topic catalog: src/lib/shopify-topics.ts (SHOPIFY_TOPIC_CATALOG) — must
+    // stay in sync with shopify.app.toml + mapping-constants SHOPIFY_EVENTS.
     const { error } = await supabase
       .from('shopify_tokens')
       .update({ sync_settings: settings })
@@ -454,12 +474,141 @@ export async function updateShopifySyncSettings(shopDomain: string, settings: an
 
     if (error) throw new Error('Failed to update Shopify sync settings: ' + error.message)
 
+    // Toggle ON → register a real webhook; OFF → delete it (non-blocking,
+    // best-effort so a Shopify API blip never fails the save).
+    const { data: tok } = await supabase
+      .from('shopify_tokens')
+      .select('access_token')
+      .eq('shop_domain', shopDomain)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+    const accessToken: string | null = (tok as any)?.access_token ?? null
+    if (accessToken) {
+      for (const [topic, val] of Object.entries(settings as Record<string, any>)) {
+        const enabled = (val as any)?.shopify2odoo === true
+        if (enabled) {
+          registerShopifyWebhook(shopDomain, topic, accessToken).catch((err) =>
+            console.error(`[Shopify] toggle ON failed for "${topic}":`, err?.message || err)
+          )
+        } else {
+          unregisterShopifyWebhookTopic(shopDomain, topic).catch((err) =>
+            console.error(`[Shopify] toggle OFF failed for "${topic}":`, err?.message || err)
+          )
+        }
+      }
+    } else {
+      console.warn('[Shopify] No access token found — skipping webhook sync after settings save')
+    }
+
     revalidateTag('shopify-token')
     revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update Shopify sync settings:', error)
     return { success: false, error: error.message || 'Failed to update Shopify sync settings' }
+  }
+}
+
+/**
+ * زر «مزامنة الاشتراكات»: يعيد تسجيل webhooks الناقصة حسب الإعدادات المحفوظة
+ * ويحذف الزائدة — لإصلاح أي انحراف بين Shopify والـ DB دون لمس التبديلات.
+ */
+export async function syncShopifyWebhooks(shopDomain: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) throw new Error('No active workspace selected')
+
+    const { data: tok, error } = await supabase
+      .from('shopify_tokens')
+      .select('access_token, sync_settings')
+      .eq('shop_domain', shopDomain)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+    if (error || !tok) throw new Error('Shopify store not connected')
+
+    const settings = ((tok as any).sync_settings as Record<string, any>) || {}
+    const accessToken = (tok as any).access_token as string
+    const existing = await listShopifyWebhooks(shopDomain)
+    const existingTopics = new Set(existing.map((w: any) => w.topic))
+
+    let registered = 0
+    let removed = 0
+    for (const [topic, val] of Object.entries(settings)) {
+      const enabled = (val as any)?.shopify2odoo === true
+      if (enabled && !existingTopics.has(topic)) {
+        const res = await registerShopifyWebhook(shopDomain, topic, accessToken)
+        if (res) registered++
+      } else if (!enabled && existingTopics.has(topic)) {
+        removed += await unregisterShopifyWebhookTopic(shopDomain, topic)
+      }
+    }
+
+    revalidateTag('shopify-token')
+    revalidatePath('/dashboard/connect-store')
+    return { success: true, registered, removed }
+  } catch (error: any) {
+    console.error('Failed to sync Shopify webhooks:', error)
+    return { success: false, error: error.message || 'Failed to sync Shopify webhooks' }
+  }
+}
+
+/** ملخص صحة webhooks زد (يُعرض في store-selector). آمن: يعيد null عند الفشل. */
+export async function getZidWebhookHealth(merchantId: string) {
+  try {
+    const { getAccessToken } = await import('@/lib/zid/token')
+    const { ZidAPI } = await import('@/lib/zid-client')
+    const tokens = await getAccessToken(merchantId)
+    const creds = {
+      authorization: tokens.authorization || tokens.accessToken,
+      managerToken: tokens.accessToken,
+    }
+    const res = await ZidAPI.webhooks.healthSummary(creds)
+    return { success: true, health: res.data ?? null }
+  } catch (error: any) {
+    console.error('[Zid] health-summary failed:', error?.message || error)
+    return { success: false, health: null, error: error?.message || 'Failed to fetch health' }
+  }
+}
+
+/** زر recoverBroken: يعيد تفعيل webhooks زد المعطلة. */
+export async function recoverZidBrokenWebhooks(merchantId: string) {
+  try {
+    const { getAccessToken } = await import('@/lib/zid/token')
+    const { ZidAPI } = await import('@/lib/zid-client')
+    const tokens = await getAccessToken(merchantId)
+    const creds = {
+      authorization: tokens.authorization || tokens.accessToken,
+      managerToken: tokens.accessToken,
+    }
+    await ZidAPI.webhooks.recoverBroken(creds)
+    return { success: true }
+  } catch (error: any) {
+    console.error('[Zid] recoverBroken failed:', error?.message || error)
+    return { success: false, error: error?.message || 'Failed to recover webhooks' }
+  }
+}
+
+/**
+ * خيارات الشحن/الدفع من زد لملء خرائط المطابقة تلقائياً (P2 أساس).
+ * آمن: يعيد قوائم فارغة عند الفشل — واجهة المطابقة تبقى تعمل بالقيم اليدوية.
+ */
+export async function getZidStoreMeta(merchantId: string) {
+  try {
+    const { getAccessToken } = await import('@/lib/zid/token')
+    const { ZidAPI } = await import('@/lib/zid-client')
+    const tokens = await getAccessToken(merchantId)
+    const creds = {
+      authorization: tokens.authorization || tokens.accessToken,
+      managerToken: tokens.accessToken,
+    }
+    const [deliveryOptions, paymentMethods] = await Promise.all([
+      ZidAPI.storeMeta.deliveryOptions(creds),
+      ZidAPI.storeMeta.paymentMethods(creds),
+    ])
+    return { success: true, deliveryOptions, paymentMethods }
+  } catch (error: any) {
+    console.error('[Zid] storeMeta failed:', error?.message || error)
+    return { success: false, deliveryOptions: [], paymentMethods: [], error: error?.message || 'Failed' }
   }
 }
 

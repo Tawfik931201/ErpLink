@@ -65,11 +65,11 @@ export default function SubscriptionBanner() {
       <p className="flex-1 leading-relaxed">
         {sub.isExpired
           ? isAr
-            ? `اشتراكك انتهى في ${formatDate(sub.end_date, isAr)}. تواصل مع الأفلييت أو فريق الدعم لتجديد الاشتراك.`
-            : `Your subscription expired on ${formatDate(sub.end_date, isAr)}. Contact your affiliate or support to renew.`
+            ? `اشتراكك انتهى في ${formatDate(sub.end_date, isAr)}. تواصل مع الدعم لتجديد الاشتراك.`
+            : `Your subscription expired on ${formatDate(sub.end_date, isAr)}. Contact support to renew.`
           : isAr
-            ? `اشتراكك ينتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'} (${formatDate(sub.end_date, isAr)}). تواصل مع الأفلييت أو فريق الدعم للتجديد.`
-            : `Your subscription ends in ${days} day${days === 1 ? '' : 's'} (${formatDate(sub.end_date, isAr)}). Contact your affiliate or support to renew.`}
+            ? `اشتراكك ينتهي بعد ${days} ${days === 1 ? 'يوم' : 'أيام'} (${formatDate(sub.end_date, isAr)}). تواصل مع الدعم للتجديد.`
+            : `Your subscription ends in ${days} day${days === 1 ? '' : 's'} (${formatDate(sub.end_date, isAr)}). Contact support to renew.`}
       </p>
       <button
         onClick={dismiss}

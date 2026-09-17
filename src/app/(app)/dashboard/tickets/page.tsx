@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
+
 import { getClientTickets } from '@/app/actions/tickets'
+
 import TicketsClient from './tickets-client'
 
 export const dynamic = 'force-dynamic'

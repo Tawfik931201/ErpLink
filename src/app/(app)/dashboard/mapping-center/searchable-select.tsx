@@ -1,12 +1,14 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
-import { Check, ChevronsUpDown, Search, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { cn } from '@/lib/utils'
+import { Check, ChevronsUpDown, Search, X } from 'lucide-react'
+import React, { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
+
 import { useLanguage } from '@/components/language-provider'
 import { formatFieldLabel } from '@/lib/translations'
-import { createPortal } from 'react-dom'
+import { cn } from '@/lib/utils'
+
 
 interface Option {
   value: string

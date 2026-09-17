@@ -1,6 +1,5 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
 import { 
   X, 
   RefreshCw, 
@@ -22,11 +21,13 @@ import {
   Check,
   Clock
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { useLanguage } from '@/components/language-provider'
+import React, { useState, useEffect, useRef } from 'react'
+
 import { getSyncLogs, retrySyncLog, resolveLogManually } from '@/app/actions/sync-logs'
+import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
+import { cn } from '@/lib/utils'
 
 interface SyncLogModalProps {
   isOpen: boolean

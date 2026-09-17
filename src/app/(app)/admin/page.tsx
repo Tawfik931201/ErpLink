@@ -1,5 +1,4 @@
 import { cookies } from 'next/headers'
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import { getAdminStats } from '@/app/actions/subscription-actions'
@@ -56,18 +55,6 @@ export default async function AdminStatsPage() {
       value: fmtMoney(stats.totalRevenue),
     },
     {
-      labelAr: 'التزام العمولات',
-      labelEn: 'Commission liability',
-      value: fmtMoney(stats.commissionLiability),
-      hintAr: 'عمولات معتمدة لم تُدفع بعد',
-      hintEn: 'approved commissions not yet paid',
-    },
-    {
-      labelAr: 'طلبات صرف معلقة',
-      labelEn: 'Pending payouts',
-      value: fmtMoney(stats.pendingPayouts),
-    },
-    {
       labelAr: 'تنتهي خلال 30 يوم',
       labelEn: 'Expiring within 30 days',
       value: String(stats.expiringSoon),
@@ -89,8 +76,8 @@ export default async function AdminStatsPage() {
         </h1>
         <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
           {isAr
-            ? 'نظرة عامة على الإيرادات والاشتراكات والتزامات العمولات.'
-            : 'An overview of revenue, subscriptions and commission liabilities.'}
+            ? 'نظرة عامة على الإيرادات والاشتراكات.'
+            : 'An overview of revenue and subscriptions.'}
         </p>
       </div>
 
@@ -106,50 +93,6 @@ export default async function AdminStatsPage() {
             )}
           </div>
         ))}
-      </div>
-
-      <div className="border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-muted/30">
-          <span className="text-[11px] font-medium text-foreground">
-            {isAr ? 'أعلى الأفلييت عمولات' : 'Top affiliates by commission'}
-          </span>
-          <span className="text-[11px] text-muted-foreground">{stats.topAffiliates.length}</span>
-        </div>
-        {stats.topAffiliates.length === 0 ? (
-          <div className="px-6 py-10 text-center text-xs text-muted-foreground">
-            {isAr ? 'لا توجد عمولات معتمدة بعد.' : 'No approved commissions yet.'}
-          </div>
-        ) : (
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="px-3 py-2 text-start font-medium">{isAr ? 'الأفلييت' : 'Affiliate'}</th>
-                <th className="px-3 py-2 text-end font-medium">{isAr ? 'إجمالي العمولات' : 'Total commission'}</th>
-                <th className="px-3 py-2 text-end font-medium" />
-              </tr>
-            </thead>
-            <tbody>
-              {stats.topAffiliates.map((a) => (
-                <tr key={a.id} className="border-b border-border/50 hover:bg-muted/30">
-                  <td className="px-3 py-2.5">
-                    <span className="font-medium text-foreground">{a.display_name}</span>
-                  </td>
-                  <td className="px-3 py-2.5 font-mono font-semibold text-foreground text-end">
-                    {fmtMoney(a.total_commission)}
-                  </td>
-                  <td className="px-3 py-2.5 text-end">
-                    <Link
-                      href={`/admin/partners/${a.id}`}
-                      className="inline-flex items-center rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
-                    >
-                      {isAr ? 'التفاصيل' : 'Details'}
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </div>
     </div>
   )

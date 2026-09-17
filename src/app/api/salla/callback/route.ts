@@ -1,6 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
@@ -16,6 +17,29 @@ function redirectToConnectStore(request: NextRequest, params: Record<string, str
   return NextResponse.redirect(url)
 }
 
+// Arabic descriptions shown by store-selector.tsx (it renders `description`
+// for unknown codes, with built-in Arabic for access_denied /
+// redirect_uri_mismatch / invalid_scope / invalid_client).
+const AR = {
+  invalid_state: 'انتهت صلاحية طلب الربط. اضغط «ربط متجر Salla» وحاول مجدداً.',
+  missing_code: 'لم يصل رمز التفويض من سلة. أعد المحاولة ووافق على الصلاحيات.',
+  token_failed: 'فشل تبادل الرمز مع سلة. تأكد من تطابق رابط إعادة التوجيه (redirect_uri) ثم أعد المحاولة.',
+  profile_failed: 'تعذر جلب بيانات متجر سلة. أعد الربط، وإن تكررت المشكلة تواصل مع الدعم.',
+  no_merchant: 'تعذر التعرف على معرف متجر سلة من حساب سلة. سجل الدخول بحساب مالك المتجر ثم أعد المحاولة.',
+  no_workspace: 'اختر مساحة عمل نشطة أولاً من لوحة التحكم ثم أعد ربط المتجر.',
+  save_failed: 'تعذر حفظ بيانات الربط. حاول مجدداً، وإن تكررت المشكلة تواصل مع الدعم.',
+} as const
+
+/** Map Salla OAuth error codes to the codes store-selector.tsx understands. */
+function mapSallaError(error: string): string {
+  const e = error.toLowerCase()
+  if (e === 'access_denied') return 'access_denied'
+  if (e.includes('redirect_uri')) return 'redirect_uri_mismatch'
+  if (e.includes('invalid_client')) return 'invalid_client'
+  if (e.includes('invalid_scope') || e.includes('scope')) return 'invalid_scope'
+  return error
+}
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code')
   const error = request.nextUrl.searchParams.get('error')
@@ -24,26 +48,23 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     const errorDesc = request.nextUrl.searchParams.get('error_description')
-    console.warn('[Salla OAuth] Salla authorization error:', { error, errorDesc })
-    return redirectToConnectStore(request, { error: error, description: errorDesc || '' })
+    return redirectToConnectStore(request, { error: mapSallaError(error), description: errorDesc || '' })
   }
 
   if (!state || !storedState || state !== storedState) {
-    console.warn('[Salla OAuth] Callback state validation failed')
-    return redirectToConnectStore(request, { error: 'invalid_state' })
+    return redirectToConnectStore(request, { error: 'invalid_state', description: AR.invalid_state })
   }
 
   if (!code) {
-    console.warn('[Salla OAuth] Callback missing authorization code')
-    return redirectToConnectStore(request, { error: 'salla_missing_code' })
+    return redirectToConnectStore(request, { error: 'salla_missing_code', description: AR.missing_code })
   }
 
   try {
     const clientId = process.env.SALLA_CLIENT_ID!
     const clientSecret = process.env.SALLA_CLIENT_SECRET!
+    // Must be byte-identical to the redirect_uri sent in /connect,
+    // otherwise the code exchange fails with redirect_uri_mismatch.
     const redirectUri = process.env.SALLA_REDIRECT_URI!
-
-    console.info('[Salla OAuth] Exchanging authorization code for tokens')
 
     // 1. Exchange authorization code for access/refresh tokens
     const tokenRequestBody = new URLSearchParams({
@@ -66,14 +87,17 @@ export async function GET(request: NextRequest) {
     const tokenPayload = await tokenResponse.json()
 
     if (!tokenResponse.ok) {
-      console.error('[Salla OAuth] Token exchange failed response', tokenPayload)
-      return redirectToConnectStore(request, { error: 'salla_token_exchange_failed' })
+      const errCode = typeof tokenPayload?.error === 'string' ? mapSallaError(tokenPayload.error) : 'salla_token_exchange_failed'
+      const errDesc =
+        typeof tokenPayload?.error_description === 'string' && tokenPayload.error_description
+          ? tokenPayload.error_description
+          : AR.token_failed
+      return redirectToConnectStore(request, { error: errCode, description: errDesc })
     }
 
     const { access_token, refresh_token, expires_in } = tokenPayload
 
     // 2. Fetch merchant profile info
-    console.info('[Salla OAuth] Fetching merchant profile details')
     const profileResponse = await fetch('https://accounts.salla.sa/oauth2/user/info', {
       headers: {
         Authorization: `Bearer ${access_token}`,
@@ -83,15 +107,20 @@ export async function GET(request: NextRequest) {
     })
 
     const profilePayload = await profileResponse.json()
-    const sallaData = profilePayload.data
+    const sallaData = profilePayload?.data
 
     if (!profileResponse.ok || !sallaData) {
-      console.error('[Salla OAuth] Profile fetch failed response or data missing', profilePayload)
-      return redirectToConnectStore(request, { error: 'salla_profile_fetch_failed' })
+      return redirectToConnectStore(request, { error: 'salla_profile_fetch_failed', description: AR.profile_failed })
     }
 
-    const merchant = sallaData.merchant
-    const merchantId = merchant?.id ? String(merchant.id) : 'unknown_salla_merchant'
+    // Robust merchant extraction (number|string|object) — never persist a
+    // placeholder id; fail loudly with an Arabic message instead.
+    const merchantId = extractSallaMerchantIdFromProfile(profilePayload)
+    if (!merchantId) {
+      return redirectToConnectStore(request, { error: 'salla_profile_fetch_failed', description: AR.no_merchant })
+    }
+
+    const merchant = sallaData.merchant && typeof sallaData.merchant === 'object' ? sallaData.merchant : {}
     const storeName = merchant?.name ?? null
     const username = merchant?.username ?? null
     const name = sallaData.name ?? null
@@ -107,21 +136,22 @@ export async function GET(request: NextRequest) {
         .select('active_workspace_id')
         .eq('id', userId)
         .single()
-      
+
       workspaceId = userDb?.active_workspace_id ?? null
     }
 
     if (!workspaceId) {
-      console.warn('[Salla OAuth] User has no active workspace selected')
-      return redirectToConnectStore(request, { error: 'no_active_workspace' })
+      return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
     }
 
     // 4. Upsert SallaToken record in supabase
+    // (expires_in is BIGINT — plain number, never BigInt: JSON
+    // serialization of BigInt throws inside the Supabase client).
     const tokenData: any = {
       merchant_id: merchantId,
       access_token: access_token,
       refresh_token: refresh_token,
-      expires_in: expires_in ? BigInt(expires_in) : null,
+      expires_in: expires_in ? Number(expires_in) : null,
       updated_at: new Date().toISOString(),
       workspace_id: workspaceId,
       name,
@@ -156,20 +186,35 @@ export async function GET(request: NextRequest) {
       if (insertError) throw insertError
     }
 
-    console.info('[Salla OAuth] Salla token saved successfully')
+    // 5. Register webhooks automatically so event sync works out of the box
+    // (capped parallelism inside registerSallaWebhooks; best-effort).
+    try {
+      const { registerSallaWebhooks } = await import('@/lib/salla-client')
+      const webhookSecret = process.env.SALLA_WEBHOOK_SECRET || undefined
+      await registerSallaWebhooks(merchantId, webhookSecret)
+    } catch {
+      // Webhook registration is best-effort — the store is connected even if
+      // some events failed to register; they can be repaired later.
+    }
 
+    // Auto-bootstrap workspace defaults in background (zero-configuration)
+    if (workspaceId) {
+      import('@/lib/auto-bootstrap').then(({ autoBootstrapWorkspace }) => {
+        autoBootstrapWorkspace(workspaceId).catch(() => {})
+      }).catch(() => {})
+    }
+
+    // NOTE: pass the raw store name — URLSearchParams encodes it once.
+    // (Pre-encoding here double-encoded Arabic names.)
     const response = redirectToConnectStore(request, {
       success: 'salla_connected',
-      store: storeName ? encodeURIComponent(storeName) : (merchantId ?? ''),
+      store: storeName || merchantId,
     })
 
     response.cookies.delete('salla_oauth_state')
     return response
 
-  } catch (error) {
-    console.error('[Salla OAuth] Callback handler failed', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
-    return redirectToConnectStore(request, { error: 'salla_token_exchange_failed' })
+  } catch {
+    return redirectToConnectStore(request, { error: 'salla_token_exchange_failed', description: AR.save_failed })
   }
 }

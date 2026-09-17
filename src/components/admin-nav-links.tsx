@@ -2,9 +2,7 @@
 
 import {
   BarChart3,
-  Users,
   CalendarCheck,
-  DollarSign,
   Contact,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -16,9 +14,7 @@ import { cn } from '@/lib/utils'
 const links: { href: string; icon: React.ComponentType<{ className?: string }>; labelAr: string; labelEn: string }[] = [
   { href: '/admin', icon: BarChart3, labelAr: 'الإحصائيات', labelEn: 'Stats' },
   { href: '/admin/clients', icon: Contact, labelAr: 'العملاء', labelEn: 'Clients' },
-  { href: '/admin/partners', icon: Users, labelAr: 'الأفلييت', labelEn: 'Affiliates' },
   { href: '/admin/subscriptions', icon: CalendarCheck, labelAr: 'الاشتراكات', labelEn: 'Subscriptions' },
-  { href: '/admin/commissions', icon: DollarSign, labelAr: 'العمولات', labelEn: 'Commissions' },
 ]
 
 export default function AdminNavLinks({ lang }: { lang: Language }) {

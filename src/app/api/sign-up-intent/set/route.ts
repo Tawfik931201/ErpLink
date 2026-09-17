@@ -1,31 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-
-const PARTNER_INTENT_COOKIE = 'partner_intent'
+import type { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 
 /**
- * GET /api/sign-up-intent/set?intent=partner
- * Persists a cookie for the given signup intent so the signup page knows
- * where to redirect after Clerk finishes onboarding.
+ * GET /api/sign-up-intent/set — removed (affiliate system cancelled 2026-09-10).
+ * Manual payments only, no Stripe, no affiliate attribution.
+ * Kept as a redirect shim so old links don't 404.
  */
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url)
-  const intent = url.searchParams.get('intent')
-
-  if (intent !== 'partner') {
-    return NextResponse.json({ ok: false, error: 'invalid intent' }, { status: 400 })
-  }
-
-  cookies().set({
-    name: PARTNER_INTENT_COOKIE,
-    value: intent,
-    httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-    path: '/',
-  })
-
   const base = new URL(req.url).origin
-  return NextResponse.redirect(`${base}/sign-up?intent=partner`, 302)
+  return NextResponse.redirect(`${base}/sign-up`, 302)
 }

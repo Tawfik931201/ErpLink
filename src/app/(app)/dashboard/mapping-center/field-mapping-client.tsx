@@ -9,8 +9,6 @@ import {
   ArrowRight, 
   Database, 
   Layers, 
-  Calendar,
-  AlertTriangle,
   Loader2,
   History,
   Puzzle,
@@ -25,9 +23,9 @@ import {
   Pencil,
   RefreshCw,
 } from 'lucide-react'
-import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import React, { useState, useEffect, useCallback } from 'react'
 
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
 import { getOdooFieldValueOptions } from '@/app/actions/odoo'
@@ -38,12 +36,12 @@ import CategoryMappingDialog from '@/components/mapping/category-mapping-dialog'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/hooks/use-toast'
+import { ZID_EVENTS, SALLA_EVENTS, SHOPIFY_EVENTS, ZID_FIELDS, SALLA_FIELDS, SHOPIFY_FIELDS } from '@/lib/mapping-constants'
 import { formatFieldLabel } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import AddCustomFieldForm from './add-custom-field-form'
 import FieldMappingForm from './field-mapping-form'
-import { ZID_EVENTS, SALLA_EVENTS, SHOPIFY_EVENTS, ZID_FIELDS, SALLA_FIELDS, SHOPIFY_FIELDS } from '@/lib/mapping-constants'
 import SearchableSelect from './searchable-select'
 import StaticMappingEditor from './static-mapping-editor'
 import SyncLogModal from './sync-log-modal'
@@ -85,7 +83,6 @@ export default function FieldMappingClient({
   const router = useRouter()
 
   const [pageTab, setPageTab] = useState<'standard' | 'mapping' | 'addfield' | 'values'>('standard')
-  const fixedMappings: any[] = []
   
   // Filter tab state: 'all' | 'zid' | 'salla'
   const [platformFilter, setPlatformFilter] = useState<string[]>([])
@@ -97,7 +94,7 @@ export default function FieldMappingClient({
 
   // Delete confirm state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [, setIsDeleting] = useState(false)
 
   // Standard Mapping
   const [standardSubTab, setStandardSubTab] = useState<'categories' | 'products' | 'customers' | 'orders'>(initialSubTab || 'categories')
@@ -281,17 +278,31 @@ export default function FieldMappingClient({
   }
 
   // ── Customer Odoo fields ──
-  useEffect(() => {
-    if (!hasOdooConnection || standardSubTab !== 'customers') return
+  const fetchOdooCustomerFields = useCallback(async (force = true) => {
+    if (!hasOdooConnection) return
     setIsLoadingCustomerFields(true)
-    import('@/app/actions/odoo').then(({ getOdooModelFields }) => {
-      getOdooModelFields('res.partner').then(res => {
-        if (res.success && res.fields) {
-          setOdooCustomerFields(res.fields.map((f: any) => ({ value: f.value, label: f.label })))
-        }
-      })
-    }).finally(() => setIsLoadingCustomerFields(false))
-  }, [hasOdooConnection, standardSubTab])
+    try {
+      const { getOdooModelFields } = await import('@/app/actions/odoo')
+      const res = await getOdooModelFields('res.partner', force)
+      if (res.success && res.fields) {
+        setOdooCustomerFields(res.fields.map((f: any) => ({
+          value: f.value,
+          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
+          desc: f.desc || f.value,
+        })))
+      }
+    } catch (error) {
+      console.error('Failed to fetch Odoo customer fields:', error)
+    } finally {
+      setIsLoadingCustomerFields(false)
+    }
+  }, [hasOdooConnection])
+
+  useEffect(() => {
+    if (standardSubTab === 'customers') {
+      fetchOdooCustomerFields(false)
+    }
+  }, [fetchOdooCustomerFields, standardSubTab])
 
   // ── Customer Accounts (Receivable/Payable) ──
   useEffect(() => {
@@ -342,14 +353,18 @@ export default function FieldMappingClient({
     }).finally(() => setIsLoadingOdooOpts(false))
   }, [hasOdooConnection, standardSubTab])
 
-  const fetchOdooCategoryFields = useCallback(async () => {
+  const fetchOdooCategoryFields = useCallback(async (force = true) => {
     if (!hasOdooConnection) return
     setIsLoadingOdooFields(true)
     try {
       const { getOdooModelFields } = await import('@/app/actions/odoo')
-      const res = await getOdooModelFields('product.category')
+      const res = await getOdooModelFields('product.category', force)
       if (res.success && res.fields) {
-        setOdooCategoryFields(res.fields.map((f: any) => ({ value: f.value, label: f.label })))
+        setOdooCategoryFields(res.fields.map((f: any) => ({
+          value: f.value,
+          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
+          desc: f.desc || f.value,
+        })))
       }
     } catch (error) {
       console.error('Failed to fetch Odoo category fields:', error)
@@ -360,19 +375,23 @@ export default function FieldMappingClient({
 
   useEffect(() => {
     if (standardSubTab === 'categories') {
-      fetchOdooCategoryFields()
+      fetchOdooCategoryFields(false)
     }
   }, [fetchOdooCategoryFields, standardSubTab])
 
   // ── Product Odoo fields ──
-  const fetchOdooProductFields = useCallback(async () => {
+  const fetchOdooProductFields = useCallback(async (force = true) => {
     if (!hasOdooConnection) return
     setIsLoadingProductFields(true)
     try {
       const { getOdooModelFields } = await import('@/app/actions/odoo')
-      const res = await getOdooModelFields('product.template')
+      const res = await getOdooModelFields('product.template', force)
       if (res.success && res.fields) {
-        setProductOdooFields(res.fields.map((f: any) => ({ value: f.value, label: f.label })))
+        setProductOdooFields(res.fields.map((f: any) => ({
+          value: f.value,
+          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
+          desc: f.desc || f.value,
+        })))
       }
     } catch (error) {
       console.error('Failed to fetch Odoo product fields:', error)
@@ -383,7 +402,7 @@ export default function FieldMappingClient({
 
   useEffect(() => {
     if (standardSubTab === 'products') {
-      fetchOdooProductFields()
+      fetchOdooProductFields(false)
     }
 
     if (!hasOdooConnection || standardSubTab !== 'products') {
@@ -409,21 +428,36 @@ export default function FieldMappingClient({
     })
   }, [hasOdooConnection, fetchOdooProductFields, standardSubTab])
   // ── Order Odoo fields & static mappings ──
+  const fetchOdooOrderFields = useCallback(async (force = true) => {
+    if (!hasOdooConnection) return
+    setIsLoadingOrderFields(true)
+    try {
+      const { getOdooModelFields } = await import('@/app/actions/odoo')
+      const res = await getOdooModelFields('sale.order', force)
+      if (res.success && res.fields) {
+        setOdooOrderFields(res.fields.map((f: any) => ({
+          value: f.value,
+          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
+          desc: f.desc || f.value,
+        })))
+      }
+    } catch (error) {
+      console.error('Failed to fetch Odoo order fields:', error)
+    } finally {
+      setIsLoadingOrderFields(false)
+    }
+  }, [hasOdooConnection])
+
   useEffect(() => {
     if (!hasOdooConnection || standardSubTab !== 'orders') return
-    setIsLoadingOrderFields(true)
     setIsLoadingWarehouses(true)
     setIsLoadingPricelists(true)
     setIsLoadingPaymentTerms(true)
     setIsLoadingProducts(true)
 
-    import('@/app/actions/odoo').then(({ getOdooModelFields, getOdooFieldValueOptions, getOdooWarehouses }) => {
-      // 1. Get sale.order fields
-      getOdooModelFields('sale.order').then(res => {
-        if (res.success && res.fields) {
-          setOdooOrderFields(res.fields.map((f: any) => ({ value: f.value, label: f.label })))
-        }
-      }).finally(() => setIsLoadingOrderFields(false))
+    fetchOdooOrderFields(false)
+
+    import('@/app/actions/odoo').then(({ getOdooFieldValueOptions, getOdooWarehouses }) => {
 
       // 2. Get warehouses
       getOdooWarehouses().then(res => {
@@ -859,10 +893,6 @@ export default function FieldMappingClient({
     }
   }
 
-  const getEventBadgeStyles = (eventId: string) => {
-    return 'bg-muted text-muted-foreground border-border'
-  }
-
   const getEventName = (eventId: string) => {
     const found = ZID_EVENTS.find((e: any) => e.id === eventId) || SALLA_EVENTS.find((e: any) => e.id === eventId) || SHOPIFY_EVENTS.find((e: any) => e.id === eventId)
     return found ? formatFieldLabel(found.name, lang) : eventId
@@ -874,15 +904,6 @@ export default function FieldMappingClient({
     if (SALLA_EVENTS.find(e => e.id === action)) return 'salla'
     if (SHOPIFY_EVENTS.find(e => e.id === action)) return 'shopify'
     return 'zid'
-  }
-
-  const getActionGroup = (action: string) => {
-    const act = action.toLowerCase()
-    if (act.includes('product') || act.includes('item') || act.includes('stock')) return 'products'
-    if (act.includes('order') || act.includes('cart') || act.includes('shipment') || act.includes('abandoned')) return 'orders'
-    if (act.includes('customer') || act.includes('branch') || act.includes('brand') || act.includes('partner')) return 'customers'
-    if (act.includes('category')) return 'categories'
-    return 'other'
   }
 
   // Count total fields in all mappings nested object
@@ -1420,7 +1441,7 @@ export default function FieldMappingClient({
                                         </label>
                                         <button
                                           type="button"
-                                          onClick={fetchOdooCategoryFields}
+                                          onClick={() => fetchOdooCategoryFields(true)}
                                           disabled={isLoadingOdooFields}
                                           className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                                           title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
@@ -1888,7 +1909,7 @@ export default function FieldMappingClient({
                                         </label>
                                         <button
                                           type="button"
-                                          onClick={fetchOdooProductFields}
+                                          onClick={() => fetchOdooProductFields(true)}
                                           disabled={isLoadingProductFields}
                                           className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                                           title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
@@ -2475,9 +2496,20 @@ export default function FieldMappingClient({
                                       />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                      </label>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-xs font-semibold text-muted-foreground">
+                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => fetchOdooCustomerFields(true)}
+                                          disabled={isLoadingCustomerFields}
+                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
+                                        >
+                                          <RefreshCw className={cn("h-3 w-3", isLoadingCustomerFields && "animate-spin")} />
+                                        </button>
+                                      </div>
                                       <SearchableSelect
                                         options={odooCustomerFields}
                                         value={customerMatchOdooField}
@@ -2667,9 +2699,20 @@ export default function FieldMappingClient({
                                       />
                                     </div>
                                     <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                      </label>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <label className="block text-xs font-semibold text-muted-foreground">
+                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => fetchOdooOrderFields(true)}
+                                          disabled={isLoadingOrderFields}
+                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
+                                        >
+                                          <RefreshCw className={cn("h-3 w-3", isLoadingOrderFields && "animate-spin")} />
+                                        </button>
+                                      </div>
                                       <SearchableSelect
                                         options={odooOrderFields}
                                         value={orderMatchOdooField}

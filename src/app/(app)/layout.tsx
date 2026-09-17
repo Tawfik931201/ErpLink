@@ -1,10 +1,9 @@
 import { cookies } from 'next/headers'
-import { Language } from '@/lib/translations'
-
-import { LanguageProvider } from '@/components/language-provider'
-import ImpersonationBanner from '@/components/ImpersonationBanner'
 import NextTopLoader from 'nextjs-toploader'
+
+import ImpersonationBanner from '@/components/ImpersonationBanner'
 import AppProviders from '@/components/app-providers'
+import type { Language } from '@/lib/translations'
 
 export const dynamic = 'force-dynamic'
 

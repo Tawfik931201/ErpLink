@@ -15,6 +15,8 @@ import {
   Shield,
   Users,
   ShoppingCart,
+  CreditCard,
+  Rocket,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -38,6 +40,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   admin: Shield,
   users: Users,
   order: ShoppingCart,
+  card: CreditCard,
+  setup: Rocket,
 }
 
 interface NavItem {
@@ -48,6 +52,7 @@ interface NavItem {
 }
 
 export interface NavSection {
+  label?: string
   items: NavItem[]
 }
 
@@ -63,6 +68,13 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
     <nav className="flex flex-col gap-0.5 px-3 flex-1 py-3">
       {sections.map((section, sectionIdx) => (
         <React.Fragment key={sectionIdx}>
+          {/* Section Label */}
+          {section.label && (
+            <span className="px-3 pt-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+              {section.label}
+            </span>
+          )}
+
           {/* Section Items */}
           <div className="flex flex-col gap-0.5">
             {section.items.map(({ href, icon, label, hasBadge }) => {

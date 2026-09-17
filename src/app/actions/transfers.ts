@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
+import { listSallaProducts, listSallaCustomers, listSallaCategories } from '@/lib/salla-client'
+import { listShopifyProducts, listShopifyCustomers, listShopifyCollections } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import {
   buildOdooValues,
@@ -75,10 +77,17 @@ export async function getTransferById(id: string) {
 export async function startInitialTransfer(data: {
   name: string
   dataType: 'categories' | 'products' | 'customers'
-  direction: 'zid_to_odoo'
+  direction: 'store_to_odoo' | 'odoo_to_store' | 'zid_to_odoo' | 'odoo_to_zid'
+  platform?: 'zid' | 'salla' | 'shopify'
   odooModel: string
   mappings: any
 }) {
+  // Normalize direction values for backward compatibility
+  const direction = data.direction === 'zid_to_odoo' ? 'store_to_odoo'
+    : data.direction === 'odoo_to_zid' ? 'odoo_to_store'
+    : data.direction
+  const platform = data.platform || 'zid'
+
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
@@ -104,15 +113,38 @@ export async function startInitialTransfer(data: {
       throw new Error('نقل البيانات الكلية غير مدعوم حالياً إلا لنظام أودو (Bulk transfer is currently only supported for Odoo)')
     }
 
-    // Retrieve Zid merchant token
-    const { data: merchantTok } = await supabase
-      .from('merchant_tokens')
-      .select('*')
-      .eq('workspace_id', user.active_workspace_id)
-      .maybeSingle()
+    // Retrieve platform-specific store token
+    let storeToken: any = null
+    let storeIdentifier = ''
 
-    if (!merchantTok) {
-      throw new Error('متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
+    if (platform === 'shopify') {
+      const { data: tok } = await supabase
+        .from('shopify_tokens')
+        .select('*')
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+      if (!tok) throw new Error('متجر Shopify غير متصل (Shopify store not connected)')
+      storeToken = tok
+      storeIdentifier = tok.shop_domain
+    } else if (platform === 'salla') {
+      const { data: tok } = await supabase
+        .from('salla_tokens')
+        .select('*')
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+      if (!tok) throw new Error('متجر Salla غير متصل (Salla store not connected)')
+      storeToken = tok
+      storeIdentifier = tok.merchant_id
+    } else {
+      // Zid (default)
+      const { data: tok } = await supabase
+        .from('merchant_tokens')
+        .select('*')
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+      if (!tok) throw new Error('متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
+      storeToken = tok
+      storeIdentifier = tok.merchant_id
     }
 
     // Create the transfer record in database with pending status
@@ -122,7 +154,7 @@ export async function startInitialTransfer(data: {
         workspace_id: user.active_workspace_id,
         name: data.name.trim(),
         data_type: data.dataType,
-        direction: data.direction,
+        direction,
         status: 'pending',
         records_fetched: 0,
         records_created: 0,
@@ -140,7 +172,7 @@ export async function startInitialTransfer(data: {
     }
 
     // Trigger the background task without awaiting it!
-    runTransferInBackground(transfer.id, user.active_workspace_id, odooConn, merchantTok, data)
+    runTransferInBackground(transfer.id, user.active_workspace_id, odooConn, storeToken, { ...data, direction, platform, storeIdentifier })
 
     revalidatePath('/dashboard/initial-transfer')
     return { success: true, transfer }
@@ -154,11 +186,13 @@ async function runTransferInBackground(
   transferId: string,
   workspaceId: string,
   odooConn: any,
-  merchantTok: any,
+  storeToken: any,
   data: {
     name: string
     dataType: 'categories' | 'products' | 'customers'
-    direction: 'zid_to_odoo'
+    direction: 'store_to_odoo' | 'odoo_to_store'
+    platform: 'zid' | 'salla' | 'shopify'
+    storeIdentifier: string
     odooModel: string
     mappings: any
   }
@@ -189,13 +223,15 @@ async function runTransferInBackground(
       apiKey: decryptedPassword,
     })
 
-    // 3. Setup Zid Credentials
-    const tokenData = await getAccessToken(merchantTok.merchant_id)
-    const zidCreds = {
-      authorization: tokenData.authorization || '',
-      managerToken: tokenData.accessToken,
-      // storeId is only required for products/variants endpoints
-      storeId: data.dataType === 'products' ? (merchantTok.store_id || undefined) : undefined,
+    // 3. Setup Store Credentials (platform-specific)
+    let storeCreds: any = null
+    if (data.platform === 'zid') {
+      const tokenData = await getAccessToken(storeToken.merchant_id)
+      storeCreds = {
+        authorization: tokenData.authorization || '',
+        managerToken: tokenData.accessToken,
+        storeId: data.dataType === 'products' ? (storeToken.store_id || undefined) : undefined,
+      }
     }
 
     // 4. Fetch field metadata from Odoo
@@ -204,63 +240,132 @@ async function runTransferInBackground(
     const erpFieldNames = mappingItems.map((m: any) => m.erpField)
     const fieldMeta = await fetchFieldMeta(odooClient, odooModel, erpFieldNames)
 
-    // 5. Fetch all Zid Data
+    // 5. Fetch source data (store for store_to_odoo, Odoo for odoo_to_store)
     let entities: any[] = []
 
-    if (data.dataType === 'categories') {
+    if (data.direction === 'odoo_to_store') {
+      // ── Fetch from Odoo (search_read on the mapped model) ────────────────
       try {
-        const res = await ZidAPI.categories.list(zidCreds)
-        entities = res.data.categories || res.data.results || (Array.isArray(res.data) ? res.data : [])
+        const readFields = erpFieldNames.length > 0 ? [...erpFieldNames, 'id'] : ['id', 'name']
+        const pageSize = 100
+        let offset = 0
+        while (true) {
+          const page = await odooClient.searchRead<any>(odooModel, [], readFields, pageSize, offset)
+          if (!page || page.length === 0) break
+          entities = [...entities, ...page]
+          if (page.length < pageSize) break
+          offset += pageSize
+        }
       } catch (err: any) {
         const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
-        logError(`فشل جلب التصنيفات من زد: ${errorDetail}`)
+        logError(`فشل جلب البيانات من أودو: ${errorDetail}`)
         throw err
       }
-    } else if (data.dataType === 'products') {
-      let page = 1
-      let hasMore = true
-      while (hasMore) {
-        try {
-          const res = await ZidAPI.products.list(zidCreds, { page, page_size: 50 })
-          const pageResults = res.data.results || []
-          if (pageResults.length === 0) {
-            hasMore = false
-          } else {
-            entities = [...entities, ...pageResults]
-            page++
-            if (!res.data.next) {
-              hasMore = false
-            }
-          }
-        } catch (err: any) {
-          const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
-          logError(`فشل جلب صفحة المنتجات رقم ${page} من زد: ${errorDetail}`)
-          hasMore = false
-          if (entities.length === 0) throw err
+    } else if (data.platform === 'shopify') {
+      // ── Shopify: fetch products/customers/collections ─────────────────────
+      try {
+        if (data.dataType === 'products') {
+          let pageInfo: string | null = null
+          do {
+            const res = await listShopifyProducts(data.storeIdentifier, 250, pageInfo || undefined)
+            entities = [...entities, ...res.products]
+            pageInfo = res.nextPageInfo
+          } while (pageInfo)
+        } else if (data.dataType === 'customers') {
+          let pageInfo: string | null = null
+          do {
+            const res = await listShopifyCustomers(data.storeIdentifier, 250, pageInfo || undefined)
+            entities = [...entities, ...res.customers]
+            pageInfo = res.nextPageInfo
+          } while (pageInfo)
+        } else if (data.dataType === 'categories') {
+          let pageInfo: string | null = null
+          do {
+            const res = await listShopifyCollections(data.storeIdentifier, 250, pageInfo || undefined)
+            entities = [...entities, ...res.collections]
+            pageInfo = res.nextPageInfo
+          } while (pageInfo)
         }
+      } catch (err: any) {
+        const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
+        logError(`فشل جلب البيانات من Shopify: ${errorDetail}`)
+        throw err
       }
-    } else if (data.dataType === 'customers') {
-      let page = 1
-      let hasMore = true
-      while (hasMore) {
-        try {
-          const res = await ZidAPI.customers.list(zidCreds, { page, per_page: 50 })
-          const pageResults = res.data.customers || []
-          if (pageResults.length === 0) {
-            hasMore = false
-          } else {
-            entities = [...entities, ...pageResults]
+    } else if (data.platform === 'salla') {
+      // ── Salla: fetch products/customers/categories ────────────────────────
+      try {
+        if (data.dataType === 'products') {
+          let page = 1
+          let hasMore = true
+          while (hasMore) {
+            const res = await listSallaProducts(data.storeIdentifier, page, 100)
+            entities = [...entities, ...res.products]
+            hasMore = res.next !== null
             page++
-            if (pageResults.length < 50) {
+          }
+        } else if (data.dataType === 'customers') {
+          let page = 1
+          let hasMore = true
+          while (hasMore) {
+            const res = await listSallaCustomers(data.storeIdentifier, page, 100)
+            entities = [...entities, ...res.customers]
+            hasMore = res.next !== null
+            page++
+          }
+        } else if (data.dataType === 'categories') {
+          let page = 1
+          let hasMore = true
+          while (hasMore) {
+            const res = await listSallaCategories(data.storeIdentifier, page, 100)
+            entities = [...entities, ...res.categories]
+            hasMore = res.next !== null
+            page++
+          }
+        }
+      } catch (err: any) {
+        const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
+        logError(`فشل جلب البيانات من Salla: ${errorDetail}`)
+        throw err
+      }
+    } else {
+      // ── Zid (default): fetch products/customers/categories ────────────────
+      try {
+        if (data.dataType === 'categories') {
+          const res = await ZidAPI.categories.list(storeCreds)
+          entities = res.data.categories || res.data.results || (Array.isArray(res.data) ? res.data : [])
+        } else if (data.dataType === 'products') {
+          let page = 1
+          let hasMore = true
+          while (hasMore) {
+            const res = await ZidAPI.products.list(storeCreds, { page, page_size: 50 })
+            const pageResults = res.data.results || []
+            if (pageResults.length === 0) {
               hasMore = false
+            } else {
+              entities = [...entities, ...pageResults]
+              page++
+              if (!res.data.next) hasMore = false
             }
           }
-        } catch (err: any) {
-          const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
-          logError(`فشل جلب صفحة العملاء رقم ${page} من زد: ${errorDetail}`)
-          hasMore = false
-          if (entities.length === 0) throw err
+        } else if (data.dataType === 'customers') {
+          let page = 1
+          let hasMore = true
+          while (hasMore) {
+            const res = await ZidAPI.customers.list(storeCreds, { page, per_page: 50 })
+            const pageResults = res.data.customers || []
+            if (pageResults.length === 0) {
+              hasMore = false
+            } else {
+              entities = [...entities, ...pageResults]
+              page++
+              if (pageResults.length < 50) hasMore = false
+            }
+          }
         }
+      } catch (err: any) {
+        const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : (err.message || err)
+        logError(`فشل جلب البيانات من زد: ${errorDetail}`)
+        throw err
       }
     }
 
@@ -291,49 +396,140 @@ async function runTransferInBackground(
     }
 
     // 6. Process entities concurrently (concurrency limit = 5)
-    await runWithConcurrencyLimit(5, entities, async (entity) => {
-      const zidId = String(entity.id || '')
-      const nameForLog = entity.name?.ar || entity.name?.en || entity.name || zidId
+    if (data.direction === 'odoo_to_store') {
+      // ── Odoo → Zid: read Odoo record, map to Zid payload, create/update in Zid ──
+      await runWithConcurrencyLimit(5, entities, async (entity) => {
+        const nameForLog = String(entity.name || entity.code || entity.id || '')
 
-      try {
-        // Build Odoo values using mapping rules
-        const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, 'zid')
+        try {
+          const zidPayload: Record<string, any> = {}
+          for (const line of mappingItems) {
+            const rawVal = line.staticValue !== undefined && line.staticValue !== ''
+              ? line.staticValue
+              : entity[line.erpField]
+            if (rawVal === undefined || rawVal === null) continue
+            if (line.zidField) zidPayload[line.zidField] = rawVal
+          }
 
-        if (Object.keys(odooValues).length === 0) {
-          logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
+          if (Object.keys(zidPayload).length === 0) {
+            logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
+            records_failed++
+            await updateDbProgress()
+            return
+          }
+
+          if (data.dataType === 'products') {
+            const createData: Record<string, any> = {
+              product_class: 'standalone',
+              is_draft: false,
+            }
+            for (const [k, v] of Object.entries(zidPayload)) {
+              if (k === 'name') {
+                createData.name = { ar: String(v), en: String(v) }
+              } else if (k === 'price') {
+                createData.price = Number(v)
+              } else {
+                createData[k] = v
+              }
+            }
+            if (!createData.name) createData.name = { ar: nameForLog, en: nameForLog }
+            if (createData.price === undefined) createData.price = 0
+
+            // Lookup existing Zid product by sku or id field
+            const matchKey = odooConn.zid_match_field || 'sku'
+            const matchValue = createData[matchKey] ?? createData.sku ?? createData.id
+            let existingId: string | null = null
+            if (matchValue) {
+              const listRes = await ZidAPI.products.list(storeCreds, { page_size: 1, sku: matchValue } as any)
+                .catch(() => ({ data: { results: [] } }))
+              const match = (listRes.data?.results || []).find((p: any) =>
+                String(p[matchKey] ?? p.sku ?? '').trim() === String(matchValue).trim())
+              existingId = match?.id ?? null
+            }
+
+            if (existingId) {
+              delete (createData as any).id
+              await ZidAPI.products.update(storeCreds, existingId, createData)
+            } else {
+              delete (createData as any).id
+              await ZidAPI.products.create(storeCreds, createData)
+            }
+            records_created++
+          } else if (data.dataType === 'categories') {
+            const createData: Record<string, any> = {}
+            for (const [k, v] of Object.entries(zidPayload)) {
+              if (k === 'name') {
+                createData.name = { ar: String(v), en: String(v) }
+              } else {
+                createData[k] = v
+              }
+            }
+            delete (createData as any).id
+            await ZidAPI.categories.create(storeCreds, createData)
+            records_created++
+          } else if (data.dataType === 'customers') {
+            const createData: Record<string, any> = {}
+            for (const [k, v] of Object.entries(zidPayload)) {
+              if (v === undefined || v === null) continue
+              createData[k] = v
+            }
+            delete (createData as any).id
+            await ZidAPI.customers.create(storeCreds, createData as any)
+            records_created++
+          }
+        } catch (err: any) {
+          logError(`فشل مزامنة [${nameForLog}]: ${err.message || err}`)
           records_failed++
-          await updateDbProgress()
-          return
         }
 
-        // Duplication check in Odoo
-        const existingId = await findExistingOdooRecord(odooClient, odooModel, entity, odooValues, {
-          odoo_match_field: odooConn.odoo_match_field || undefined,
-          zid_match_field: odooConn.zid_match_field || undefined,
-        })
+        await updateDbProgress()
+      })
+    } else {
+      // store_to_odoo: push fetched store entities into Odoo
+      await runWithConcurrencyLimit(5, entities, async (entity) => {
+        const zidId = String(entity.id || '')
+        const nameForLog = entity.name?.ar || entity.name?.en || entity.name || entity.title || zidId
 
-        if (existingId !== null) {
-          // Record already exists, update it to keep Odoo in sync!
-          const ok = await odooClient.write(odooModel, [existingId], odooValues)
-          if (!ok) {
-            throw new Error(`فشل تحديث السجل في Odoo #${existingId}`)
+        try {
+          // Build Odoo values using mapping rules
+          const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, data.platform)
+
+          if (Object.keys(odooValues).length === 0) {
+            logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
+            records_failed++
+            await updateDbProgress()
+            return
           }
-          records_created++
-        } else {
-          // Create new record
-          const newId = await odooClient.create(odooModel, odooValues)
-          if (!newId) {
-            throw new Error(`فشل إنشاء السجل في أودو`)
+
+          // Duplication check in Odoo
+          const existingId = await findExistingOdooRecord(odooClient, odooModel, entity, odooValues, {
+            odoo_match_field: odooConn.odoo_match_field || undefined,
+            zid_match_field: odooConn.zid_match_field || undefined,
+          })
+
+          if (existingId !== null) {
+            // Record already exists, update it to keep Odoo in sync!
+            const ok = await odooClient.write(odooModel, [existingId], odooValues)
+            if (!ok) {
+              throw new Error(`فشل تحديث السجل في Odoo #${existingId}`)
+            }
+            records_created++
+          } else {
+            // Create new record
+            const newId = await odooClient.create(odooModel, odooValues)
+            if (!newId) {
+              throw new Error(`فشل إنشاء السجل في أودو`)
+            }
+            records_created++
           }
-          records_created++
+        } catch (err: any) {
+          logError(`فشل مزامنة [${nameForLog}]: ${err.message || err}`)
+          records_failed++
         }
-      } catch (err: any) {
-        logError(`فشل مزامنة [${nameForLog}]: ${err.message || err}`)
-        records_failed++
-      }
 
-      await updateDbProgress()
-    })
+        await updateDbProgress()
+      })
+    }
 
     // Force one final DB progress update
     await updateDbProgress(true)
@@ -362,7 +558,7 @@ async function runTransferInBackground(
         ? `فشل ${records_failed} من أصل ${records_fetched} سجل. ${failure_reason.slice(0, 200)}`
         : null,
       workspaceId,
-      storeId: merchantTok.store_id ?? null,
+      storeId: storeToken.store_id || storeToken.shop_domain || storeToken.merchant_id || null,
       receivedAt: new Date().toISOString(),
     }
     await notifySyncResult({ workspaceId, record: summary }).catch(() => {})
@@ -394,7 +590,7 @@ async function runTransferInBackground(
       odooRecordId: null,
       errorMessage: errorDetail.slice(0, 300),
       workspaceId,
-      storeId: merchantTok.store_id ?? null,
+      storeId: storeToken.store_id || storeToken.shop_domain || storeToken.merchant_id || null,
       receivedAt: new Date().toISOString(),
     }
     await notifySyncResult({ workspaceId, record: summary }).catch(() => {})

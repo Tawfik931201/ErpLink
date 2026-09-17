@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
+import type { NextRequest} from 'next/server';
+import { NextResponse } from 'next/server'
+
 import { executeKw } from '@/lib/odoo'
 
 export const dynamic = 'force-dynamic'

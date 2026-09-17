@@ -15,17 +15,15 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import {
   addSubscriptionPayment,
   archiveSubscription,
   cancelSubscription,
-  detectAffiliateForClient,
   extendSubscription,
   registerSubscription,
   restoreSubscription,
-  type AffiliatePick,
   type ClientStatementPayment,
   type ClientStatementSubscription,
 } from '@/app/actions/subscription-actions'
@@ -38,7 +36,6 @@ interface Props {
   workspaces: { id: string; name: string; subscription_number: string | null }[]
   subscriptions: ClientStatementSubscription[]
   payments: ClientStatementPayment[]
-  affiliates: AffiliatePick[]
 }
 
 type Modal =
@@ -65,7 +62,6 @@ export default function ClientStatementClient({
   workspaces,
   subscriptions,
   payments,
-  affiliates,
 }: Props) {
   const router = useRouter()
   const isAr = lang === 'ar'
@@ -81,10 +77,6 @@ export default function ClientStatementClient({
   // Register / renew form
   const [workspaceId, setWorkspaceId] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
-  const [affiliateId, setAffiliateId] = useState('')
-  const [autoAffiliate, setAutoAffiliate] = useState<AffiliatePick | null>(null)
-  const [manualAffiliate, setManualAffiliate] = useState(false)
-  const [detectingAffiliate, setDetectingAffiliate] = useState(false)
   const [startDate, setStartDate] = useState(today())
   const [months, setMonths] = useState(1)
   const [amount, setAmount] = useState('')
@@ -102,33 +94,12 @@ export default function ClientStatementClient({
   const [payDate, setPayDate] = useState(today())
   const [payNotes, setPayNotes] = useState('')
 
-  useEffect(() => {
-    let cancelled = false
-    setDetectingAffiliate(true)
-    detectAffiliateForClient({ userId, workspaceId: workspaceId || null }).then((res) => {
-      if (cancelled) return
-      setDetectingAffiliate(false)
-      if (res.success && res.affiliate) {
-        setAutoAffiliate(res.affiliate)
-        if (!manualAffiliate) setAffiliateId(res.affiliate!.id)
-      } else {
-        setAutoAffiliate(null)
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, manualAffiliate])
-
   const openRegister = (sub?: ClientStatementSubscription | null) => {
     const targetWs = sub
       ? workspaces.find((w) => w.id === sub.workspace_id)
       : workspaces[0]
     setWorkspaceId(targetWs?.id ?? '')
     setNewWorkspaceName('')
-    setAffiliateId(sub?.affiliate_id || '')
-    setManualAffiliate(false)
     setStartDate(today())
     setMonths(1)
     setAmount('')
@@ -150,7 +121,6 @@ export default function ClientStatementClient({
       clientEmail,
       workspaceId: workspaceId || null,
       newWorkspaceName: newWorkspaceName.trim() || null,
-      affiliateId: affiliateId || null,
       startDate,
       monthsPaid: months,
       amountPaid: Number(amount) || 0,
@@ -375,7 +345,6 @@ export default function ClientStatementClient({
                     <th className="px-3 py-2 text-start font-medium">{isAr ? 'النهاية' : 'End'}</th>
                     <th className="px-3 py-2 text-start font-medium">{isAr ? 'الشهور' : 'Months'}</th>
                     <th className="px-3 py-2 text-start font-medium">{isAr ? 'المبلغ الإجمالي' : 'Total Amount'}</th>
-                    <th className="px-3 py-2 text-start font-medium">{isAr ? 'الأفلييت' : 'Affiliate'}</th>
                     <th className="px-3 py-2 text-start font-medium">{isAr ? 'فاتورة' : 'Invoice'}</th>
                     <th className="px-3 py-2 text-end font-medium">{isAr ? 'إجراءات' : 'Actions'}</th>
                   </tr>
@@ -412,7 +381,6 @@ export default function ClientStatementClient({
                         <td className="px-3 py-2.5 font-mono font-semibold text-foreground whitespace-nowrap">
                           {fmtMoney(sub.amount_paid)} {sub.currency}
                         </td>
-                        <td className="px-3 py-2.5 text-muted-foreground">{sub.affiliate_name || '—'}</td>
                         <td className="px-3 py-2.5">
                           <Link
                             href={`/invoice/${sub.id}`}
@@ -621,58 +589,6 @@ export default function ClientStatementClient({
                   : 'Cancel previous active subscriptions on this workspace (leave unchecked to add the new one alongside the old one)'}
               </span>
             </label>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-medium text-muted-foreground">
-                {isAr ? 'الأفلييت المرتبط (اكتشاف تلقائي)' : 'Linked Affiliate (auto-detected)'}
-              </label>
-              {detectingAffiliate ? (
-                <div className="flex items-center gap-2 border border-border bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {isAr ? 'جارٍ اكتشاف الأفلييت المرتبط...' : 'Detecting linked affiliate...'}
-                </div>
-              ) : autoAffiliate && !manualAffiliate ? (
-                <div className="border border-border bg-muted/30 px-3 py-2.5 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-foreground">{autoAffiliate.display_name}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {Math.round(Number(autoAffiliate.commission_rate) * 100)}% ·{' '}
-                      {isAr ? 'مرتبط تلقائياً — العمولة تُحسب له' : 'auto-linked — commission goes to this affiliate'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setManualAffiliate(true)}
-                    className="text-[10px] font-medium text-muted-foreground hover:text-foreground shrink-0"
-                  >
-                    {isAr ? 'تغيير' : 'Change'}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <select value={affiliateId} onChange={(e) => setAffiliateId(e.target.value)} className={inputCls}>
-                    <option value="">{isAr ? '— بدون أفلييت —' : '— No affiliate —'}</option>
-                    {affiliates.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.display_name} · {Math.round(Number(a.commission_rate) * 100)}%
-                      </option>
-                    ))}
-                  </select>
-                  {autoAffiliate && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setManualAffiliate(false)
-                        setAffiliateId(autoAffiliate.id)
-                      }}
-                      className="text-[10px] font-medium text-muted-foreground hover:text-foreground"
-                    >
-                      {isAr ? 'رجوع للاكتشاف التلقائي' : 'Back to auto-detected'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -906,10 +822,6 @@ export default function ClientStatementClient({
                 <p className="text-[11px] font-semibold text-foreground mt-0.5 font-mono">
                   {fmtMoney(detailSub.amount_paid)} {detailSub.currency}
                 </p>
-              </div>
-              <div>
-                <p className="text-[10px] text-muted-foreground font-medium">{isAr ? 'الأفلييت' : 'Affiliate'}</p>
-                <p className="text-[11px] font-semibold text-foreground mt-0.5">{detailSub.affiliate_name || '—'}</p>
               </div>
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">{isAr ? 'إجمالي الدفعات المسجلة' : 'Recorded payments'}</p>

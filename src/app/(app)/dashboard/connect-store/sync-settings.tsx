@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, Fragment } from 'react'
 import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp, Check } from 'lucide-react'
+import { useState, Fragment } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { useToast } from '@/hooks/use-toast'
 import { updateZidSyncSettings } from '@/app/actions/workspaces'
 import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
+import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
 const SYNC_GROUPS = [
@@ -14,12 +14,8 @@ const SYNC_GROUPS = [
     title: 'Order',
     options: [
       { key: 'order_create', label: 'Order Create' },
-      { key: 'order_updated', label: 'Order Updated' },
-      { key: 'order_cancelled', label: 'Order Cancelled' },
-      { key: 'order_delivered', label: 'Order Delivered' },
       { key: 'order_status_update', label: 'Order Status Update' },
       { key: 'order_payment_status_update', label: 'Order Payment Status Update' },
-      { key: 'order_tagged', label: 'Order Tagged' }
     ]
   },
   {
@@ -29,24 +25,6 @@ const SYNC_GROUPS = [
       { key: 'product_update', label: 'Product Update' },
       { key: 'product_delete', label: 'Product Delete' },
       { key: 'product_publish', label: 'Product Publish' }
-    ]
-  },
-  {
-    title: 'Product Stock',
-    options: [
-      { key: 'product_stock_create', label: 'Product Stock Create' },
-      { key: 'product_stock_update', label: 'Product Stock Update' },
-      { key: 'product_stock_delete', label: 'Product Stock Delete' }
-    ]
-  },
-  {
-    title: 'Location',
-    options: [
-      { key: 'location_create', label: 'Location Create' },
-      { key: 'location_update', label: 'Location Update' },
-      { key: 'location_delete', label: 'Location Delete' },
-      { key: 'location_shipping_zone_attach', label: 'Location Shipping Zone Attach' },
-      { key: 'location_shipping_zone_detach', label: 'Location Shipping Zone Detach' }
     ]
   },
   {
@@ -60,19 +38,43 @@ const SYNC_GROUPS = [
     title: 'Category',
     options: [
       { key: 'category_create', label: 'Category Create' },
-      { key: 'category_delete', label: 'Category Delete' },
-      { key: 'category_update', label: 'Category Update' }
+      { key: 'category_update', label: 'Category Update' },
+      { key: 'category_delete', label: 'Category Delete' }
     ]
   },
   {
     title: 'Customer',
     options: [
       { key: 'customer_create', label: 'Customer Create' },
-      { key: 'customer_login', label: 'Customer Login' },
       { key: 'customer_update', label: 'Customer Update' },
+      { key: 'customer_login', label: 'Customer Login' },
       { key: 'customer_merchant_update', label: 'Customer Merchant Update' }
     ]
+  },
+  // مفتاح مخزون واحد ثنائي الاتجاه (P2):
+  //  - zid2odoo (✓) = لحظي عبر product.update webhook (Zid لا ترسل حدث مخزون مستقل).
+  //  - odoo2zid (✓) = مجدول (cron) عبر locations stock-update — ليس webhook.
+  // لا يُسجَّل webhook مستقل لهذا المفتاح في syncWebhooksWithSettings.
+  {
+    title: 'Inventory (المخزون)',
+    options: [
+      { key: 'inventory_sync', label: 'Inventory Sync ⇄ (مزامنة المخزون)' }
+    ]
   }
+]
+
+// P0 core preset: orders + products + customers (store → ERP) ON by default.
+// Reverse direction (ERP → store) stays OFF — managed from Mapping Center.
+const CORE_ZID_EVENTS = [
+  'order_create',
+  'order_status_update',
+  'order_payment_status_update',
+  'product_create',
+  'product_update',
+  'product_delete',
+  'product_publish',
+  'customer_create',
+  'customer_update',
 ]
 
 function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {
@@ -106,15 +108,17 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
 
   const [settings, setSettings] = useState<Record<string, { odoo2zid: boolean; zid2odoo: boolean }>>(() => {
     const initial = {} as any
-    const parsedInitial = typeof initialSettings === 'string' 
-      ? JSON.parse(initialSettings) 
+    const parsedInitial = typeof initialSettings === 'string'
+      ? JSON.parse(initialSettings)
       : (initialSettings || {})
+    // First run (no saved settings): enable the core preset in store → ERP direction.
+    const hasSaved = !!parsedInitial && Object.keys(parsedInitial).length > 0
 
     SYNC_GROUPS.forEach(group => {
       group.options.forEach(opt => {
         initial[opt.key] = {
-          odoo2zid: parsedInitial[opt.key]?.odoo2zid ?? false,
-          zid2odoo: parsedInitial[opt.key]?.zid2odoo ?? false,
+          odoo2zid: hasSaved ? (parsedInitial[opt.key]?.odoo2zid ?? false) : false,
+          zid2odoo: hasSaved ? (parsedInitial[opt.key]?.zid2odoo ?? false) : CORE_ZID_EVENTS.includes(opt.key),
         }
       })
     })
@@ -136,6 +140,30 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
         [field]: value
       }
     }))
+  }
+
+  const applyCorePreset = () => {
+    setSettings(prev => {
+      const next = { ...prev }
+      SYNC_GROUPS.forEach(group => {
+        group.options.forEach(opt => {
+          next[opt.key] = { odoo2zid: false, zid2odoo: CORE_ZID_EVENTS.includes(opt.key) }
+        })
+      })
+      return next
+    })
+  }
+
+  const applySelectAll = () => {
+    setSettings(prev => {
+      const next = { ...prev }
+      SYNC_GROUPS.forEach(group => {
+        group.options.forEach(opt => {
+          next[opt.key] = { odoo2zid: true, zid2odoo: true }
+        })
+      })
+      return next
+    })
   }
 
   const handleSave = async () => {
@@ -173,18 +201,35 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
 
       {isMainOpen && (
         <div className="space-y-4 animate-in fade-in-50 duration-200">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">{t('sync.presetCore')}</span>
+            <div className="ms-auto flex gap-2">
+              <Button onClick={applySelectAll} variant="outline" size="sm" className="h-7 text-[11px]">
+                {t('sync.selectAll')}
+              </Button>
+              <Button onClick={applyCorePreset} variant="outline" size="sm" className="h-7 text-[11px]">
+                {t('sync.coreOnly')}
+              </Button>
+            </div>
+          </div>
           <div className="overflow-x-auto border border-border bg-card">
             <table className="w-full border-collapse text-start">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
-                  <th className="py-3 px-4 font-medium text-foreground text-start w-1/2">
+                  <th className="py-3 px-4 font-medium text-foreground text-start w-1/3">
                     {t('zid.event')}
                   </th>
-                  <th className="py-3 px-4 font-medium text-center w-1/2">
+                  <th className="py-3 px-4 font-medium text-center w-1/3">
                     <span className="text-muted-foreground">
-                      {lang === 'ar' ? 'حدث زد' : 'Zid Event'}
+                      {lang === 'ar' ? 'زد → أودو' : 'Zid → ERP'}
                     </span>
                     <span className="text-[10px] text-muted-foreground block mt-0.5">(store2erp)</span>
+                  </th>
+                  <th className="py-3 px-4 font-medium text-center w-1/3">
+                    <span className="text-muted-foreground">
+                      {lang === 'ar' ? 'أودو → زد' : 'ERP → Zid'}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground block mt-0.5">(erp2store)</span>
                   </th>
                 </tr>
               </thead>
@@ -196,7 +241,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                       {/* Category Header Row (Sub-accordion Trigger) */}
                       <tr onClick={() => toggleGroup(group.title)}
                         className="hover:bg-muted/30 transition-colors border-b border-border cursor-pointer select-none">
-                        <td colSpan={2} className="py-2 px-4 text-[11px] font-medium text-foreground">
+                        <td colSpan={3} className="py-2 px-4 text-[11px] font-medium text-foreground">
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted-foreground">{isOpen ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</span>
                             <span>{group.title}</span>
@@ -211,6 +256,10 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                           <td className="py-2 px-4 text-center">
                             <CustomCheckbox checked={settings[opt.key]?.zid2odoo || false}
                               onChange={(val) => handleCheckboxChange(opt.key, 'zid2odoo', val)} />
+                          </td>
+                          <td className="py-2 px-4 text-center">
+                            <CustomCheckbox checked={settings[opt.key]?.odoo2zid || false}
+                              onChange={(val) => handleCheckboxChange(opt.key, 'odoo2zid', val)} />
                           </td>
                         </tr>
                       ))}

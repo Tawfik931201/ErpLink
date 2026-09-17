@@ -1,10 +1,12 @@
-import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { OdooClient } from '@/lib/odoo-client'
+import { type NextRequest, NextResponse } from 'next/server'
+
 import { decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
+import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
+import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
-import { findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,13 +24,6 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.warn('[Odoo Webhook] Raw body read/parse failed:', err.message)
   }
-
-  // Diagnostic Logs
-  console.info('[Odoo Webhook Debug] Method:', req.method)
-  console.info('[Odoo Webhook Debug] Headers:', JSON.stringify(Object.fromEntries(req.headers.entries()), null, 2))
-  console.info('[Odoo Webhook Debug] Query Params:', req.nextUrl.search)
-  console.info('[Odoo Webhook Debug] Raw Body Text:', rawText)
-  console.info('[Odoo Webhook] Received payload:', payload)
 
   // Support both array payloads (Odoo native webhook read()) and object payloads
   const actualPayload = Array.isArray(payload) ? (payload[0] || {}) : payload
@@ -124,13 +119,12 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
     return
   }
 
-  const matchField = mapping.odoo_match_field
+  let matchField = mapping.odoo_match_field
   let odooRecord: Record<string, any>
 
   // 3. Use the payload data if already received, otherwise fetch from Odoo via XML-RPC
   const payloadHasFields = payloadData && Object.keys(payloadData).length > 1
   if (payloadHasFields) {
-    console.info(`[Odoo Webhook Bg] Using field values from webhook payload directly (skipping Odoo read)`, payloadData)
     odooRecord = payloadData
   } else {
     // Fallback: Connect to Odoo and fetch the record fields
@@ -154,9 +148,13 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
     odooRecord = odooRecords[0]
   }
 
-  // 4. Determine platform (Salla vs Zid)
-  const isSallaEvent = (action: string) => {
-    return (
+  // 4. Determine platform from event naming convention
+  const platform: 'zid' | 'salla' | 'shopify' = (() => {
+    const action = mapping.action
+    // Shopify events use "/" syntax (products/create, orders/create) or "shopify:" prefix
+    if (action.includes('/') || action.startsWith('shopify:')) return 'shopify'
+    // Salla events use dot notation with past-tense suffixes: product.created, order.cancelled
+    if (
       action.startsWith('product.') ||
       action.startsWith('order.') ||
       action.startsWith('customer.') ||
@@ -168,30 +166,259 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
       action.startsWith('brand.') ||
       action.startsWith('special.offer.') ||
       action.startsWith('app.')
-    )
+    ) return 'salla'
+    // Zid events use dot notation with present-tense: product.create, order.update
+    return 'zid'
+  })()
+
+  // ——— Read product standard mapping settings (applies to Odoo → Zid too) ———
+  // standard_mapping_settings (store_type=zid, entity_type=products) is the source
+  // of truth for match fields / enabled_actions / on_delete / disabled — apply it
+  // to the ERP → store direction just like sync-engine applies it for store → ERP.
+  let stdProductSettings: Record<string, any> | null = null
+  if (platform === 'zid' && (model === 'product.template' || model === 'product.product')) {
+    const { data: stdRow } = await supabaseAdmin
+      .from('standard_mapping_settings')
+      .select('settings')
+      .eq('workspace_id', mapping.workspace_id)
+      .eq('store_type', 'zid')
+      .eq('entity_type', 'products')
+      .maybeSingle()
+    if (stdRow?.settings) stdProductSettings = stdRow.settings as Record<string, any>
+    if (stdProductSettings?.match_odoo_field) matchField = stdProductSettings.match_odoo_field
   }
-  const isSalla = isSallaEvent(mapping.action)
 
   // Match reference value
-  const matchValue = String(odooRecord[matchField] || '').trim()
+  let matchValue = String(odooRecord[matchField] || '').trim()
+
+  // ——— Odoo product variants enrichment (best-effort) ———
+  // Multi-option Odoo templates often have an empty default_code / zero price
+  // while their variants carry the real SKU / barcode / price. When the webhook
+  // payload includes product_variant_ids, fall back to the first variant so the
+  // product can still be matched & created in the store.
+  const variantIds: number[] =
+    model === 'product.template' && Array.isArray(odooRecord.product_variant_ids)
+      ? odooRecord.product_variant_ids
+          .map((v: any) => (Array.isArray(v) ? v[0] : v))
+          .filter((id: any) => typeof id === 'number' && id > 0)
+      : []
+
+  const needsVariantEnrichment =
+    variantIds.length > 0 &&
+    (!matchValue || !odooRecord.list_price || Number(odooRecord.list_price) === 0)
+
+  if (needsVariantEnrichment) {
+    try {
+      const richClient = new OdooClient({
+        url: odooConn.url,
+        db: odooConn.db_name || '',
+        username: odooConn.username,
+        apiKey: decrypt(odooConn.password),
+      })
+      const variants = await richClient.read<any>('product.product', [variantIds[0]], ['default_code', 'barcode', 'list_price'])
+      const firstVariant = variants?.[0]
+      if (firstVariant) {
+        const varSku = String(firstVariant.default_code || '').trim()
+        const varBarcode = String(firstVariant.barcode || '').trim()
+        if (varSku && !String(odooRecord.default_code || '').trim()) odooRecord.default_code = varSku
+        if (varBarcode && !String(odooRecord.barcode || '').trim()) odooRecord.barcode = varBarcode
+        if (!matchValue) matchValue = varSku || varBarcode || matchValue
+        if ((!odooRecord.list_price || Number(odooRecord.list_price) === 0) && Number(firstVariant.list_price) > 0) {
+          odooRecord.list_price = firstVariant.list_price
+        }
+        console.info(`[Odoo Webhook Bg] Enriched template from first variant #${variantIds[0]} (sku=${varSku || '-'}, barcode=${varBarcode || '-'})`)
+      }
+    } catch (err: any) {
+      console.warn('[Odoo Webhook Bg] Variant enrichment failed (non-fatal):', err?.message ?? err)
+    }
+  }
+
   if (!matchValue) {
     console.warn(`[Odoo Webhook Bg] Match field "${matchField}" is empty on Odoo record. Cannot sync.`)
     return
   }
 
-  // 5. Update target store
-  if (isSalla) {
-    console.info(`[Odoo Webhook Bg] Syncing to Salla (Merchant ID=${mapping.merchant_id})...`)
-    
-    // Search for the product in Salla
-    const sallaProduct = await findSallaProductByMatchField(
-      mapping.merchant_id,
-      mapping.zid_match_field || 'sku',
+  // Detect removal intent (product archived/deleted in Odoo)
+  const removalRequested = hasRemovalSignal(payloadData, odooRecord, model)
+
+  // 5. Push to target platform
+  if (platform === 'shopify') {
+    // ── Shopify (ERP → store; يحتاج write_products عند التفعيل) ─────────────
+    const shopDomain = mapping.merchant_id
+    // منتج محذوف/مؤرشف في أودو = لا نعيد إنشاءه في المتجر (حذف Shopify غير مطبَّق بعد)
+    if (removalRequested) {
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(shopDomain || ''),
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'skipped',
+        error_message: 'Odoo product removal → Shopify delete is not implemented yet',
+        payload: { operation: 'delete', platform: 'shopify', skipped: true }
+      })
+      return
+    }
+    // early-return خفيف: نطاق غير صالح = لا مكالمات Shopify عبثاً (429/فشل)
+    if (!shopDomain || !isValidShopDomain(String(shopDomain))) {
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(shopDomain || ''),
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'failed',
+        error_message: 'Invalid Shopify shop domain',
+        payload: { operation: 'skip', reason: 'invalid_shop_domain' }
+      })
+      return
+    }
+    const shopifyProduct = await findShopifyProductByMatchField(
+      shopDomain,
+      (mapping.zid_match_field || 'sku') as 'sku' | 'barcode' | 'id',
       matchValue
     )
 
-    if (!sallaProduct) {
-      console.warn(`[Odoo Webhook Bg] Salla product with ${mapping.zid_match_field}="${matchValue}" not found`)
+    if (!shopifyProduct) {
+      // Create new product in Shopify
+      const createData: Record<string, any> = {
+        title: String(odooRecord.name || `Product ${matchValue}`),
+      }
+      for (const line of modelMappings) {
+        const odooVal = odooRecord[line.erpField]
+        const field = line.zidField
+        if (field === 'body_html') createData.body_html = String(odooVal)
+        else if (field === 'variants.0.price') createData.variants = [{ price: Number(odooVal) }]
+        else if (field === 'variants.0.sku') {
+          if (!createData.variants) createData.variants = [{}]
+          createData.variants[0].sku = odooVal
+        }
+        else if (field === 'variants.0.barcode') {
+          if (!createData.variants) createData.variants = [{}]
+          createData.variants[0].barcode = odooVal
+        }
+        else if (field === 'variants.0.weight') {
+          if (!createData.variants) createData.variants = [{}]
+          createData.variants[0].weight = Number(odooVal)
+        }
+      }
+      // Ensure match field is present in create payload
+      if (mapping.zid_match_field === 'sku' && createData.variants?.[0]) createData.variants[0].sku = matchValue
+      if (mapping.zid_match_field === 'barcode' && createData.variants?.[0]) createData.variants[0].barcode = matchValue
+
+      try {
+        const res = await createShopifyProduct(shopDomain, createData)
+        const newId = res.product?.id
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: shopDomain,
+          zid_entity_id: String(newId || ''),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'success',
+          payload: { operation: 'create', createData }
+        })
+      } catch (err: any) {
+        const errMsg = err.response?.data?.errors || err.message || 'Failed to create product in Shopify'
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: shopDomain,
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'failed',
+          error_message: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg),
+          payload: { operation: 'create', createData, error: errMsg }
+        })
+      }
+      return
+    }
+
+    // Update existing Shopify product (match specific variant by SKU/barcode instead of always [0])
+    const matchedVariant =
+      (shopifyProduct.variants || []).find((v: any) => {
+        if (mapping.zid_match_field === 'barcode' && v.barcode && matchValue) {
+          return String(v.barcode).trim() === String(matchValue).trim()
+        }
+        if (v.sku && matchValue) {
+          return String(v.sku).trim() === String(matchValue).trim()
+        }
+        return false
+      }) || shopifyProduct.variants?.[0]
+
+    const targetVariantId = matchedVariant?.id
+
+    const updateData: Record<string, any> = {}
+    const variantPayload: Record<string, any> = targetVariantId ? { id: targetVariantId } : {}
+    let hasVariantUpdates = false
+
+    for (const line of modelMappings) {
+      const odooVal = odooRecord[line.erpField]
+      const field = line.zidField
+      if (field === 'title') updateData.title = String(odooVal)
+      else if (field === 'body_html') updateData.body_html = String(odooVal)
+      else if (field === 'variants.0.price' || field === 'price') {
+        variantPayload.price = Number(odooVal)
+        hasVariantUpdates = true
+      }
+      else if (field === 'variants.0.sku' || field === 'sku') {
+        variantPayload.sku = odooVal
+        hasVariantUpdates = true
+      }
+      else if (field === 'variants.0.barcode' || field === 'barcode') {
+        variantPayload.barcode = odooVal
+        hasVariantUpdates = true
+      }
+      else if (field === 'variants.0.weight' || field === 'weight') {
+        variantPayload.weight = Number(odooVal)
+        hasVariantUpdates = true
+      }
+    }
+
+    if (hasVariantUpdates && targetVariantId) {
+      updateData.variants = [variantPayload]
+    }
+
+    try {
+      await updateShopifyProduct(shopDomain, shopifyProduct.id, updateData)
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: shopDomain,
+        zid_entity_id: shopifyProduct.id,
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'success',
+        payload: { operation: 'update', updateData }
+      })
+    } catch (err: any) {
+      const errMsg = err.response?.data?.errors || err.message || 'Failed to update product in Shopify'
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: shopDomain,
+        zid_entity_id: shopifyProduct.id,
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'failed',
+        error_message: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg),
+        payload: { operation: 'update', updateData, error: errMsg }
+      })
+    }
+
+  } else if (platform === 'salla') {
+    // ── Salla ─────────────────────────────────────────────────────────────────
+    console.info(`[Odoo Webhook Bg] Syncing to Salla (merchant=${mapping.merchant_id})...`)
+
+    // منتج محذوف/مؤرشف في أودو = لا نعيد إنشاءه في المتجر (حذف Salla غير مطبَّق بعد)
+    if (removalRequested) {
       await logOdooToZidSync({
         workspace_id: mapping.workspace_id || '',
         field_mapping_id: mapping.id,
@@ -200,172 +427,52 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         odoo_model: model,
         odoo_record_id: odooRecordId,
         status: 'skipped',
-        error_message: `Salla product with match field not found`,
-        payload: { operation: 'search_not_found', matchValue }
+        error_message: 'Odoo product removal → Salla delete is not implemented yet',
+        payload: { operation: 'delete', platform: 'salla', skipped: true }
       })
       return
     }
 
-    // Build update payload
-    const updateData: Record<string, any> = {}
-    for (const line of modelMappings) {
-      const odooVal = odooRecord[line.erpField]
-      // Salla product structure updates
-      if (line.zidField === 'name') {
-        updateData.name = odooVal
-      } else if (line.zidField === 'price') {
-        updateData.price = Number(odooVal)
-      } else if (line.zidField === 'sku') {
-        updateData.sku = odooVal
-      } else if (line.zidField === 'barcode') {
-        updateData.barcode = odooVal
-      } else {
-        updateData[line.zidField] = odooVal
-      }
-    }
+    const sallaProduct = await findSallaProductByMatchField(
+      mapping.merchant_id,
+      mapping.zid_match_field || 'sku',
+      matchValue
+    )
 
-    console.info('[Odoo Webhook Bg] Salla update payload:', updateData)
-    try {
-      await updateSallaProduct(mapping.merchant_id, sallaProduct.id, updateData)
-      console.info(`[Odoo Webhook Bg] Salla product ID=${sallaProduct.id} updated successfully!`)
-
-      // Log SUCCESS
-      await logOdooToZidSync({
-        workspace_id: mapping.workspace_id || '',
-        field_mapping_id: mapping.id,
-        event: mapping.action,
-        store_id: String(mapping.store_id || mapping.merchant_id),
-        zid_entity_id: sallaProduct.id,
-        odoo_model: model,
-        odoo_record_id: odooRecordId,
-        status: 'success',
-        payload: { operation: 'update', updateData }
-      })
-    } catch (err: any) {
-      const errMsg = err.response?.data?.message || err.message || 'Failed to update product in Salla'
-      console.error('[Odoo Webhook Bg] Failed to update product in Salla:', errMsg)
-
-      // Log FAILED
-      await logOdooToZidSync({
-        workspace_id: mapping.workspace_id || '',
-        field_mapping_id: mapping.id,
-        event: mapping.action,
-        store_id: String(mapping.store_id || mapping.merchant_id),
-        zid_entity_id: sallaProduct.id,
-        odoo_model: model,
-        odoo_record_id: odooRecordId,
-        status: 'failed',
-        error_message: errMsg,
-        payload: { operation: 'update', updateData, error: err.response?.data || err.message }
-      })
-    }
-    
-  } else {
-    console.info(`[Odoo Webhook Bg] Syncing to Zid (Merchant ID=${mapping.merchant_id})...`)
-    
-    // Get Zid credentials
-    const tokenData = await getAccessToken(mapping.merchant_id)
-    const zidCreds = {
-      authorization: tokenData.authorization || '',
-      managerToken: tokenData.accessToken,
-      storeId: mapping.store_id || undefined,
-    }
-
-    // Search for product in Zid
-    const matchFieldZid = mapping.zid_match_field || 'sku'
-    console.info(`[Odoo Webhook Bg] Searching Zid product by ${matchFieldZid}="${matchValue}"...`)
-    
-    let zidProductId: string | null = null
-    
-    if (matchFieldZid === 'id') {
-      zidProductId = matchValue
-    } else {
-      const searchParams: Record<string, any> = { page_size: 1 }
-      if (matchFieldZid === 'sku') searchParams.sku = matchValue
-      else if (matchFieldZid === 'barcode') searchParams.barcode = matchValue
-      else searchParams.search = matchValue
-
-      const listRes = await ZidAPI.products.list(zidCreds, searchParams)
-      const products = listRes.data?.results || []
-      
-      // Exact match check
-      const match = products.find((p: any) => {
-        if (matchFieldZid === 'sku') return String(p.sku || '').trim() === matchValue
-        if (matchFieldZid === 'barcode') return String(p.barcode || '').trim() === matchValue
-        return false
-      })
-
-      if (match) {
-        zidProductId = match.id
-      }
-    }
-
-    if (!zidProductId) {
-      // Build Zid create payload
+    if (!sallaProduct) {
+      // Create new product in Salla
       const createData: Record<string, any> = {
-        product_class: 'standalone',
-        is_draft: false,
+        name: String(odooRecord.name || `Product ${matchValue}`),
+        price: { amount: 0, currency: 'SAR' },
       }
       for (const line of modelMappings) {
         const odooVal = odooRecord[line.erpField]
-        if (line.zidField === 'name') {
-          createData.name = {
-            ar: String(odooVal),
-            en: String(odooVal)
-          }
-        } else if (line.zidField === 'price') {
-          createData.price = Number(odooVal)
-        } else if (line.zidField === 'sku') {
-          createData.sku = odooVal
-        } else if (line.zidField === 'barcode') {
-          createData.barcode = odooVal
-        } else {
-          createData[line.zidField] = odooVal
-        }
+        if (line.zidField === 'name') createData.name = odooVal
+        else if (line.zidField === 'price') createData.price = { amount: Number(odooVal), currency: 'SAR' }
+        else if (line.zidField === 'sku') createData.sku = odooVal
+        else if (line.zidField === 'barcode') createData.barcode = odooVal
+        else createData[line.zidField] = odooVal
       }
+      // Ensure match field is present
+      if (mapping.zid_match_field === 'sku' && !createData.sku) createData.sku = matchValue
+      if (mapping.zid_match_field === 'barcode' && !createData.barcode) createData.barcode = matchValue
 
-      // Ensure match field is present in createData
-      if (matchFieldZid && !createData[matchFieldZid]) {
-        if (matchFieldZid === 'name') {
-          createData.name = { ar: matchValue, en: matchValue }
-        } else if (matchFieldZid === 'price') {
-          createData.price = Number(matchValue)
-        } else {
-          createData[matchFieldZid] = matchValue
-        }
-      }
-
-      // Default required fields for Zid if not provided
-      if (!createData.name) {
-        createData.name = { ar: 'Product ' + matchValue, en: 'Product ' + matchValue }
-      }
-      if (createData.price === undefined) {
-        createData.price = 0
-      }
-
-      console.info('[Odoo Webhook Bg] Creating new product in Zid:', createData)
       try {
-        const createRes = await ZidAPI.products.create(zidCreds, createData)
-        const newZidId = createRes.data?.product?.id || createRes.data?.id
-        console.info(`[Odoo Webhook Bg] Zid product created successfully! ID=${newZidId || 'unknown'}`)
-
-        // Log SUCCESS
+        const res = await createSallaProduct(mapping.merchant_id, createData)
+        const newId = res?.data?.id || res?.data?.data?.id
         await logOdooToZidSync({
           workspace_id: mapping.workspace_id || '',
           field_mapping_id: mapping.id,
           event: mapping.action,
           store_id: String(mapping.store_id || mapping.merchant_id),
-          zid_entity_id: String(newZidId || ''),
+          zid_entity_id: String(newId || ''),
           odoo_model: model,
           odoo_record_id: odooRecordId,
           status: 'success',
-          payload: { operation: 'create', createData, result: createRes.data }
+          payload: { operation: 'create', createData }
         })
       } catch (err: any) {
-        const errMsg = err.response?.data?.message || err.message || 'Failed to create product in Zid'
-        console.error('[Odoo Webhook Bg] Failed to create product in Zid:', errMsg)
-
-        // Log FAILED
+        const errMsg = err.response?.data?.message || err.message || 'Failed to create product in Salla'
         await logOdooToZidSync({
           workspace_id: mapping.workspace_id || '',
           field_mapping_id: mapping.id,
@@ -381,32 +488,339 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
       return
     }
 
-    // Build Zid update payload
+    // Update existing Salla product
     const updateData: Record<string, any> = {}
     for (const line of modelMappings) {
       const odooVal = odooRecord[line.erpField]
-      if (line.zidField === 'name') {
-        updateData.name = {
-          ar: String(odooVal),
-          en: String(odooVal)
+      if (line.zidField === 'name') updateData.name = odooVal
+      else if (line.zidField === 'price') updateData.price = Number(odooVal)
+      else if (line.zidField === 'sku') updateData.sku = odooVal
+      else if (line.zidField === 'barcode') updateData.barcode = odooVal
+      else updateData[line.zidField] = odooVal
+    }
+
+    try {
+      await updateSallaProduct(mapping.merchant_id, sallaProduct.id, updateData)
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(mapping.store_id || mapping.merchant_id),
+        zid_entity_id: sallaProduct.id,
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'success',
+        payload: { operation: 'update', updateData }
+      })
+    } catch (err: any) {
+      const errMsg = err.response?.data?.message || err.message || 'Failed to update product in Salla'
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(mapping.store_id || mapping.merchant_id),
+        zid_entity_id: sallaProduct.id,
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'failed',
+        error_message: errMsg,
+        payload: { operation: 'update', updateData, error: err.response?.data || err.message }
+      })
+    }
+
+  } else {
+    // ── Zid ───────────────────────────────────────────────────────────────────
+    console.info(`[Odoo Webhook Bg] Syncing to Zid (merchant=${mapping.merchant_id})...`)
+
+    const tokenData = await getAccessToken(mapping.merchant_id)
+    const zidCreds = {
+      authorization: tokenData.authorization || '',
+      managerToken: tokenData.accessToken,
+      storeId: mapping.store_id || undefined,
+    }
+
+    const matchFieldZid = stdProductSettings?.match_zid_field || mapping.zid_match_field || 'sku'
+    const enabledActions: string[] = stdProductSettings?.enabled_actions || ['create', 'update']
+    console.info(`[Odoo Webhook Bg] Searching Zid product by ${matchFieldZid}...`)
+
+    // احترام إعداد "تعطيل مزامنة المنتجات" من إعدادات الاستندر ماب
+    if (stdProductSettings?.disabled === true) {
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(mapping.store_id || mapping.merchant_id),
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'skipped',
+        error_message: 'Product sync is disabled via standard mapping settings',
+        payload: { operation: 'disable', skipped: true }
+      })
+      return
+    }
+
+    let zidProductId: string | null = null
+
+    if (matchFieldZid === 'id') {
+      zidProductId = matchValue
+    } else {
+      const searchParams: Record<string, any> = { page_size: 1 }
+      if (matchFieldZid === 'sku') searchParams.sku = matchValue
+      else if (matchFieldZid === 'barcode') searchParams.barcode = matchValue
+      else searchParams.search = matchValue
+
+      const listRes = await ZidAPI.products.list(zidCreds, searchParams)
+      const products = listRes.data?.results || []
+
+      const match = products.find((p: any) => {
+        if (matchFieldZid === 'sku') return String(p.sku || '').trim() === matchValue
+        if (matchFieldZid === 'barcode') return String(p.barcode || '').trim() === matchValue
+        return false
+      })
+      if (match) zidProductId = match.id
+
+      // Fallback: match by product name when SKU/barcode lookup found nothing
+      if (!zidProductId && (matchFieldZid === 'sku' || matchFieldZid === 'barcode')) {
+        const odooName = String(odooRecord.name || '').trim()
+        if (odooName) {
+          try {
+            const nameRes = await ZidAPI.products.list(zidCreds, { page_size: 1, search: odooName })
+            const byName = (nameRes.data?.results || []).find((p: any) => {
+              const pName = typeof p.name === 'object'
+                ? String(p.name?.ar || p.name?.en || '')
+                : String(p.name || '')
+              return pName.trim().toLowerCase() === odooName.toLowerCase()
+            })
+            if (byName) zidProductId = byName.id
+          } catch {
+            console.warn('[Odoo Webhook Bg] Name fallback search failed (best-effort).')
+          }
         }
-      } else if (line.zidField === 'price') {
-        updateData.price = Number(odooVal)
-      } else if (line.zidField === 'sku') {
-        updateData.sku = odooVal
-      } else if (line.zidField === 'barcode') {
-        updateData.barcode = odooVal
-      } else {
-        updateData[line.zidField] = odooVal
       }
     }
 
-    console.info('[Odoo Webhook Bg] Zid update payload:', updateData)
+    if (removalRequested) {
+      // behavior يتبع إعداد on_delete من إعدادات الاستندر ماب:
+      //   nothing           → لا نفعل شيئاً
+      //   archive (الافتراضي)→ إخفاء المنتج من المتجر (is_draft = true)
+      //   delete / delete_or_archive → حذف فعلي من زد
+      const onDeleteMode = stdProductSettings
+        ? (stdProductSettings.on_delete || (enabledActions.includes('delete') ? 'delete_or_archive' : 'nothing'))
+        : 'delete_or_archive'
+
+      if (onDeleteMode === 'nothing') {
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'skipped',
+          error_message: 'Odoo product removal skipped (on_delete = nothing in standard mapping settings)',
+          payload: { operation: 'delete', skipped: true, mode: onDeleteMode }
+        })
+        return
+      }
+
+      if (!zidProductId) {
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'success',
+          payload: { operation: 'delete', zid_product_id: null, result: 'not_found_or_already_deleted', mode: onDeleteMode }
+        })
+        return
+      }
+
+      if (onDeleteMode === 'archive') {
+        // يُخفى المنتج من المتجر (زد ليس لديه أرشفة فعلية — is_draft يُخفي المنتج)
+        try {
+          await ZidAPI.products.update(zidCreds, zidProductId, { is_draft: true })
+          await logOdooToZidSync({
+            workspace_id: mapping.workspace_id || '',
+            field_mapping_id: mapping.id,
+            event: mapping.action,
+            store_id: String(mapping.store_id || mapping.merchant_id),
+            zid_entity_id: String(zidProductId),
+            odoo_model: model,
+            odoo_record_id: odooRecordId,
+            status: 'success',
+            payload: { operation: 'archive', zid_product_id: zidProductId, mode: onDeleteMode }
+          })
+        } catch (err: any) {
+          const errMsg = err.response?.data?.message || err.message || 'Failed to unpublish product in Zid'
+          await logOdooToZidSync({
+            workspace_id: mapping.workspace_id || '',
+            field_mapping_id: mapping.id,
+            event: mapping.action,
+            store_id: String(mapping.store_id || mapping.merchant_id),
+            zid_entity_id: String(zidProductId),
+            odoo_model: model,
+            odoo_record_id: odooRecordId,
+            status: 'failed',
+            error_message: errMsg,
+            payload: { operation: 'archive', zid_product_id: zidProductId, error: err.response?.data || err.message }
+          })
+        }
+        return
+      }
+
+      // delete / delete_or_archive → حذف فعلي من زد
+      try {
+        await ZidAPI.products.delete(zidCreds, zidProductId)
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          zid_entity_id: String(zidProductId),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'success',
+          payload: { operation: 'delete', zid_product_id: zidProductId, mode: onDeleteMode }
+        })
+      } catch (err: any) {
+        const errMsg = err.response?.data?.message || err.message || 'Failed to delete product in Zid'
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          zid_entity_id: String(zidProductId),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'failed',
+          error_message: errMsg,
+          payload: { operation: 'delete', zid_product_id: zidProductId, error: err.response?.data || err.message }
+        })
+      }
+      return
+    }
+
+    // احترام enabled_actions من إعدادات الاستندر ماب (create / update)
+    if (!zidProductId && !enabledActions.includes('create')) {
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(mapping.store_id || mapping.merchant_id),
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'skipped',
+        error_message: 'Product create is not enabled in standard mapping settings',
+        payload: { operation: 'create', skipped: true }
+      })
+      return
+    }
+    if (zidProductId && !enabledActions.includes('update')) {
+      await logOdooToZidSync({
+        workspace_id: mapping.workspace_id || '',
+        field_mapping_id: mapping.id,
+        event: mapping.action,
+        store_id: String(mapping.store_id || mapping.merchant_id),
+        odoo_model: model,
+        odoo_record_id: odooRecordId,
+        status: 'skipped',
+        error_message: 'Product update is not enabled in standard mapping settings',
+        payload: { operation: 'update', skipped: true }
+      })
+      return
+    }
+
+    if (!zidProductId) {
+      // Create new product in Zid
+      const createData: Record<string, any> = {
+        product_class: 'standalone',
+        is_draft: false,
+      }
+      for (const line of modelMappings) {
+        const odooVal = odooRecord[line.erpField]
+        if (line.zidField === 'name') createData.name = { ar: String(odooVal), en: String(odooVal) }
+        else if (line.zidField === 'price') {
+          const stdMarkup = Number(stdProductSettings?.price?.markup_percent || 0)
+          const rawPrice = Number(odooVal)
+          createData.price = stdMarkup !== 0 ? rawPrice * (1 + stdMarkup / 100) : rawPrice
+        }
+        else createData[line.zidField] = odooVal
+      }
+      if (matchFieldZid && !createData[matchFieldZid]) {
+        if (matchFieldZid === 'name') createData.name = { ar: matchValue, en: matchValue }
+        else createData[matchFieldZid] = matchValue
+      }
+      if (!createData.name) createData.name = { ar: 'Product ' + matchValue, en: 'Product ' + matchValue }
+      if (createData.price === undefined) createData.price = 0
+
+      // Best-effort: ربط تصنيف أودو → تصنيف زد (إن وُجد)
+      const odooCateg = odooRecord.categ_id ?? odooRecord.categ_name
+      if (odooCateg !== undefined && odooCateg !== null) {
+        const zidCategoryId = await resolveZidCategoryId(zidCreds, odooConn, odooCateg)
+        if (zidCategoryId) createData.category_id = zidCategoryId
+      }
+
+      try {
+        let createRes
+        try {
+          createRes = await ZidAPI.products.create(zidCreds, createData)
+        } catch (createErr: any) {
+          // لو رفض زد حقل category_id نعيد المحاولة بدونه حتى لا يفشل الإنشاء بسبب التصنيف
+          if (createData.category_id) {
+            delete createData.category_id
+            createRes = await ZidAPI.products.create(zidCreds, createData)
+          } else {
+            throw createErr
+          }
+        }
+        const newZidId = createRes.data?.product?.id || createRes.data?.id
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          zid_entity_id: String(newZidId || ''),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'success',
+          payload: { operation: 'create', createData }
+        })
+      } catch (err: any) {
+        const errMsg = err.response?.data?.message || err.message || 'Failed to create product in Zid'
+        await logOdooToZidSync({
+          workspace_id: mapping.workspace_id || '',
+          field_mapping_id: mapping.id,
+          event: mapping.action,
+          store_id: String(mapping.store_id || mapping.merchant_id),
+          odoo_model: model,
+          odoo_record_id: odooRecordId,
+          status: 'failed',
+          error_message: errMsg,
+          payload: { operation: 'create', createData, error: err.response?.data || err.message }
+        })
+      }
+      return
+    }
+
+    // Update existing product in Zid
+    const updateData: Record<string, any> = {}
+    for (const line of modelMappings) {
+      const odooVal = odooRecord[line.erpField]
+      if (line.zidField === 'name') updateData.name = { ar: String(odooVal), en: String(odooVal) }
+      else if (line.zidField === 'price') {
+        const stdMarkup = Number(stdProductSettings?.price?.markup_percent || 0)
+        const rawPrice = Number(odooVal)
+        updateData.price = stdMarkup !== 0 ? rawPrice * (1 + stdMarkup / 100) : rawPrice
+      }
+      else if (line.zidField === 'sku') updateData.sku = odooVal
+      else if (line.zidField === 'barcode') updateData.barcode = odooVal
+      else updateData[line.zidField] = odooVal
+    }
+
     try {
       await ZidAPI.products.update(zidCreds, zidProductId, updateData)
-      console.info(`[Odoo Webhook Bg] Zid product ID=${zidProductId} updated successfully!`)
-
-      // Log SUCCESS
       await logOdooToZidSync({
         workspace_id: mapping.workspace_id || '',
         field_mapping_id: mapping.id,
@@ -420,9 +834,6 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
       })
     } catch (err: any) {
       const errMsg = err.response?.data?.message || err.message || 'Failed to update product in Zid'
-      console.error('[Odoo Webhook Bg] Failed to update product in Zid:', errMsg)
-
-      // Log FAILED
       await logOdooToZidSync({
         workspace_id: mapping.workspace_id || '',
         field_mapping_id: mapping.id,
@@ -474,6 +885,95 @@ async function logOdooToZidSync(params: {
   } catch (err) {
     console.error('[Odoo Webhook Bg] Failed to write sync log:', err)
   }
+}
+
+/**
+ * Resolve an Odoo product category (categ_id) to a Zid category id (best-effort).
+ * Finds an existing Zid category by name, or creates it when missing.
+ * Never throws — returns null on any failure so product sync continues.
+ */
+async function resolveZidCategoryId(
+  zidCreds: { authorization: string; managerToken: string; storeId?: string },
+  odooConn: any,
+  categValue: any
+): Promise<string | number | null> {
+  try {
+    let categId: number | null = null
+    let categName = ''
+    if (Array.isArray(categValue)) {
+      categId = Number(categValue[0]) || null
+      categName = String(categValue[1] || '').trim()
+    } else {
+      const n = Number(categValue)
+      if (Number.isFinite(n) && n > 0) categId = n
+      else return null
+    }
+    if (!categId) return null
+
+    // Get the category name from Odoo when the payload only carried the id
+    if (!categName && odooConn) {
+      try {
+        const catClient = new OdooClient({
+          url: odooConn.url,
+          db: odooConn.db_name || '',
+          username: odooConn.username,
+          apiKey: decrypt(odooConn.password),
+        })
+        const rows = await catClient.read<any>('product.category', [categId], ['name'])
+        categName = String(rows?.[0]?.name || '').trim()
+      } catch (err: any) {
+        console.warn('[Odoo Webhook Bg] Failed to read Odoo category name (non-fatal):', err?.message ?? err)
+      }
+    }
+    if (!categName) return null
+
+    // Find existing Zid category by name, else create it
+    const listRes = await ZidAPI.categories.list(zidCreds)
+    const cats = Array.isArray(listRes?.data?.results)
+      ? listRes.data.results
+      : Array.isArray(listRes?.data?.categories)
+        ? listRes.data.categories
+        : (Array.isArray(listRes?.data) ? listRes.data : [])
+    const target = categName.toLowerCase()
+    const existing = cats.find((c: any) => String(c?.name ?? c?.name_ar ?? '').trim().toLowerCase() === target)
+    if (existing) return existing.id
+
+    const created = await ZidAPI.categories.create(zidCreds, { name: categName })
+    return created?.data?.category?.id ?? created?.data?.id ?? null
+  } catch (err: any) {
+    console.warn('[Odoo Webhook Bg] Category resolve failed (non-fatal):', err?.message ?? err)
+    return null
+  }
+}
+
+/**
+ * Detect whether an Odoo product record signals removal (deleted or archived).
+ * Supports both the webhook payload and the read() record.
+ */
+function hasRemovalSignal(
+  payloadData: Record<string, any> | undefined,
+  record: Record<string, any>,
+  model: string
+): boolean {
+  if (model !== 'product.template' && model !== 'product.product') return false
+
+  const src = payloadData && Object.keys(payloadData).length > 1 ? payloadData : record
+
+  if (src.active !== undefined && (src.active === false || src.active === 'false' || src.active === 0 || src.active === '0')) {
+    return true
+  }
+
+  for (const key of ['is_deleted', 'deleted', 'is_archived']) {
+    const val = src[key]
+    if (val === true || val === 'true' || val === 1 || val === '1') return true
+  }
+
+  if (src.deleted_at !== undefined && src.deleted_at !== null) {
+    const s = String(src.deleted_at).trim()
+    if (s !== '' && s !== 'false') return true
+  }
+
+  return false
 }
 
 export async function GET() {

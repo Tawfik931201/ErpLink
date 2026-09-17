@@ -1,8 +1,9 @@
 'use client'
 
+import { Sun, Moon, Monitor, ChevronDown } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useEffect, useState, useRef } from 'react'
-import { Sun, Moon, Monitor, ChevronDown } from 'lucide-react'
+
 import { useLanguage } from './language-provider'
 
 export default function ThemeSwitcher() {

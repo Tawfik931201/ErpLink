@@ -2,9 +2,10 @@
 
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
+
 import { supabase } from '@/lib/supabase'
-import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { processSingleMapping, cleanupExpiredLogs } from '@/lib/sync-engine'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
 async function getOrCreateDbUser() {
   console.log('[sync-logs action] Calling Clerk auth()...')
@@ -251,7 +252,7 @@ export async function resolveLogManually(logId: string) {
 
     console.log('[resolveLogManually] Updating log ID to success (manual resolve):', logId)
     
-    const { data: updated, error } = await supabase
+    const { error } = await supabase
       .from('sync_logs')
       .update({
         status: 'success',

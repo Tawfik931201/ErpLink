@@ -1,5 +1,7 @@
-import { getSubscriptionForInvoice } from '@/app/actions/subscription-actions'
 import { redirect } from 'next/navigation'
+
+import { getSubscriptionForInvoice } from '@/app/actions/subscription-actions'
+
 import InvoiceClient from './InvoiceClient'
 
 interface Props {

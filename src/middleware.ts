@@ -18,13 +18,6 @@ const isProtectedRoute = createRouteMatcher(['/dashboard((?!/connect-store).*)']
 // middleware level, but the layouts themselves guard with isAdmin().
 const isAdminRoute = createRouteMatcher(['/admin((?!/api).*)'])
 
-// Partner routes are protected by the layout itself (parrot safety check).
-// Match `/partner/<id>` and nested paths, but not `/partners` (the public
-// landing page) and not partner-facing API routes.
-const isPartnerRoute = createRouteMatcher([
-  '/partner/((?!api).*)',
-])
-
 // Onboarding/accept is allowed for unauthenticated users (Clerk sign-up).
 const isOnboardingRoute = createRouteMatcher(['/onboarding(.*)'])
 
@@ -64,7 +57,7 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   // --- CLERK: Protect routes ---
-  if (isProtectedRoute(req) || isAdminRoute(req) || isPartnerRoute(req) || isOnboardingRoute(req)) {
+  if (isProtectedRoute(req) || isAdminRoute(req) || isOnboardingRoute(req)) {
     await auth().protect()
   }
 

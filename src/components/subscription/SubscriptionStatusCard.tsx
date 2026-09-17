@@ -65,8 +65,8 @@ export default function SubscriptionStatusCard() {
         </div>
         <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
           {isAr
-            ? 'لم يتم تسجيل اشتراك لمساحة العمل الخاصة بك بعد. تواصل مع الأفلييت أو فريق الدعم لتفعيل اشتراكك.'
-            : 'No subscription has been registered for your workspace yet. Contact your affiliate or support to activate your subscription.'}
+            ? 'لم يتم تسجيل اشتراك لمساحة العمل الخاصة بك بعد. تواصل مع الدعم لتفعيل اشتراكك.'
+            : 'No subscription has been registered for your workspace yet. Contact support to activate your subscription.'}
         </p>
       </div>
     )
@@ -149,8 +149,8 @@ export default function SubscriptionStatusCard() {
       {expired && (
         <p className="text-[11px] text-red-700 leading-relaxed">
           {isAr
-            ? 'انتهى اشتراكك. تواصل مع الأفلييت أو فريق الدعم لتجديد الاشتراك.'
-            : 'Your subscription has expired. Contact your affiliate or support to renew.'}
+            ? 'انتهى اشتراكك. تواصل مع الدعم لتجديد الاشتراك.'
+            : 'Your subscription has expired. Contact support to renew.'}
         </p>
       )}
     </div>

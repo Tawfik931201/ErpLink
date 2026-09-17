@@ -2,8 +2,10 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
+import type { Language} from '@/lib/translations';
+import { translations } from '@/lib/translations'
+
 import OdooConnectionForm from './odoo-form'
-import { Language, translations } from '@/lib/translations'
 
 export const metadata: Metadata = {
   title: 'Connect with ERP — ErpLink',
@@ -16,7 +18,8 @@ export default async function ConnectOdooPage() {
   // Strip password/apiKey on the server side to prevent sending the cipher key to client/inspect
   let connection = null
   if (odooRes.success && odooRes.connection) {
-    const { password, ...safeConnection } = odooRes.connection
+    const safeConnection = { ...odooRes.connection }
+    delete (safeConnection as any).password
     connection = safeConnection
   }
 

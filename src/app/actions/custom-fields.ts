@@ -2,11 +2,11 @@
 
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
+
+import { decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
-import { OdooClient } from '@/lib/odoo-client'
-import { decrypt } from '@/lib/crypto'
-import { sanitizeTechnicalName } from '@/lib/field-utils'
 
 async function getOrCreateDbUser() {
   const { userId } = await auth()

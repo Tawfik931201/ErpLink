@@ -3,6 +3,7 @@
 import { revalidatePath, unstable_cache, revalidateTag } from 'next/cache'
 
 import { getActiveUserId } from '@/lib/auth'
+import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
 import { encrypt, decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
@@ -267,7 +268,15 @@ export async function saveErpConnection(data: {
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
     revalidatePath('/dashboard/connect-odoo')
-    revalidatePath('/dashboard/integrations')
+    revalidatePath('/dashboard/connect-store')
+
+    // Auto-bootstrap workspace defaults in background (zero-configuration)
+    if (user.active_workspace_id) {
+      autoBootstrapWorkspace(user.active_workspace_id).catch((err) =>
+        console.warn('[Odoo Action] autoBootstrapWorkspace non-fatal warning:', err)
+      )
+    }
+
     return { success: true, connection: result }
   } catch (error: any) {
     console.error('[Odoo Action] saveOdooConnection failed:', error)
@@ -312,7 +321,7 @@ export async function disconnectErpConnection(connectionId: string) {
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
     revalidatePath('/dashboard/connect-odoo')
-    revalidatePath('/dashboard/integrations')
+    revalidatePath('/dashboard/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('[Odoo Action] disconnectOdooConnection failed:', error)
@@ -499,22 +508,69 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
     apiKey: decryptedPassword,
   })
 
-  // Fetch fields directly from ir.model.fields database table via search_read
-  const fieldsData = await client.execute<Array<{ name: string; field_description: string; ttype: string; relation?: string }>>(
-    'ir.model.fields',
-    'search_read',
-    [[['model', '=', modelName]]],
-    { fields: ['name', 'field_description', 'ttype', 'relation'] }
-  )
+  // For products, query both product.template and product.product so variants and custom fields on both are found
+  const modelsToQuery = (modelName === 'product.template' || modelName === 'product.product')
+    ? ['product.template', 'product.product']
+    : [modelName]
 
-  // Map fields to a cleaner format
-  return fieldsData.map((f) => ({
-    value: f.name,
-    label: f.field_description || f.name,
-    desc: f.name,
-    type: f.ttype,
-    relation: f.relation
-  })).sort((a, b) => a.label.localeCompare(b.label))
+  // Fetch fields directly from ir.model.fields database table via search_read
+  let fieldsData: Array<{ name: string; field_description: string; ttype: string; relation?: string }> = []
+  try {
+    fieldsData = await client.execute<Array<{ name: string; field_description: string; ttype: string; relation?: string }>>(
+      'ir.model.fields',
+      'search_read',
+      [[['model', 'in', modelsToQuery]]],
+      { fields: ['name', 'field_description', 'ttype', 'relation'], limit: 5000 }
+    )
+  } catch (searchErr) {
+    console.error(`[Odoo Action] search_read on ir.model.fields failed for ${modelName}:`, searchErr)
+  }
+
+  const seen = new Set<string>()
+  const result: Array<{ value: string; label: string; desc: string; type: string; relation?: string }> = []
+
+  for (const f of (fieldsData || [])) {
+    if (f && f.name && !seen.has(f.name)) {
+      seen.add(f.name)
+      result.push({
+        value: f.name,
+        label: f.field_description || f.name,
+        desc: f.name,
+        type: f.ttype,
+        relation: f.relation
+      })
+    }
+  }
+
+  // Fallback / Enrichment: try fields_get if fieldsData was empty or to catch any dynamic custom fields
+  if (result.length === 0) {
+    try {
+      const fgRes = await client.execute<Record<string, { string?: string; type?: string; relation?: string }>>(
+        modelName,
+        'fields_get',
+        [],
+        { attributes: ['string', 'type', 'relation'] }
+      )
+      if (fgRes && typeof fgRes === 'object') {
+        for (const [name, meta] of Object.entries(fgRes)) {
+          if (!seen.has(name)) {
+            seen.add(name)
+            result.push({
+              value: name,
+              label: meta.string || name,
+              desc: name,
+              type: meta.type || 'char',
+              relation: meta.relation
+            })
+          }
+        }
+      }
+    } catch (fgErr) {
+      console.warn(`[Odoo] fields_get fallback for ${modelName} failed:`, fgErr)
+    }
+  }
+
+  return result.sort((a, b) => a.label.localeCompare(b.label))
 }
 
 const getCachedModelFields = unstable_cache(
@@ -529,9 +585,10 @@ const getCachedModelFields = unstable_cache(
 )
 
 /**
- * Fetch fields for a specific Odoo/ERPNext model
+ * Fetch fields for a specific Odoo/ERPNext model.
+ * If forceRefresh is true, bypasses the cache and queries Odoo directly.
  */
-export async function getOdooModelFields(modelName: string) {
+export async function getOdooModelFields(modelName: string, forceRefresh = false) {
   try {
     if (!modelName) {
       return { success: false, error: 'Model name is required' }
@@ -540,6 +597,15 @@ export async function getOdooModelFields(modelName: string) {
     const connRes = await getActiveWorkspaceErpConnection()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.' }
+    }
+
+    if (forceRefresh) {
+      try {
+        revalidateTag('odoo-fields')
+        revalidateTag('odoo-model-fields')
+      } catch {}
+      const fields = await fetchModelFieldsRaw(connRes.connection, modelName)
+      return { success: true, fields }
     }
 
     const fields = await getCachedModelFields(connRes.connection.id, modelName, connRes.connection)
@@ -1079,7 +1145,7 @@ export async function searchOdooAccounts(searchTerm: string = '', accountType?: 
       apiKey: decryptedPassword,
     })
 
-    let domain: any[] = []
+    const domain: any[] = []
     if (accountType) {
       domain.push(['account_type', '=', accountType])
     }
@@ -1123,7 +1189,7 @@ export async function searchOdooJournals(searchTerm: string = '', journalType?: 
       apiKey: decryptedPassword,
     })
 
-    let domain: any[] = []
+    const domain: any[] = []
     if (journalType) {
       domain.push(['type', '=', journalType])
     }

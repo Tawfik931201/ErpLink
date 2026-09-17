@@ -1,9 +1,10 @@
 'use server'
 
 import { auth } from '@clerk/nextjs/server'
+import { revalidatePath } from 'next/cache'
+
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser } from '@/lib/users'
-import { revalidatePath } from 'next/cache'
 
 export async function saveStandardMappingSettings(
   storeType: string,

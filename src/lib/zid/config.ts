@@ -18,11 +18,18 @@ const REQUIRED_ENV = [
   'ZID_API_URL',
 ] as const
 
+/** أسماء بديلة مقبولة للتوافق مع المسار القديم /api/auth/zid/* */
+const ENV_FALLBACKS: Partial<Record<(typeof REQUIRED_ENV)[number], string[]>> = {
+  ZID_CLIENT_ID: ['NEXT_PUBLIC_ZID_CLIENT_ID'],
+  ZID_REDIRECT_URI: ['ZID_OAUTH_REDIRECT_URI'],
+}
+
 function readRequiredEnv(
   name: (typeof REQUIRED_ENV)[number],
   options: { trimTrailingSlash?: boolean } = {}
 ): string {
-  const value = process.env[name]
+  const fallbacks = ENV_FALLBACKS[name] ?? []
+  const value = process.env[name] ?? fallbacks.map((k) => process.env[k]).find(Boolean)
 
   if (!value) {
     throw new ZidOAuthError({

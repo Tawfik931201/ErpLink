@@ -1,6 +1,6 @@
+import { ArrowLeft } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
-import { ArrowLeft } from 'lucide-react'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'

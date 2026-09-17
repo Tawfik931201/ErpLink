@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import {
   CreditCard,
   Copy,
@@ -9,9 +8,10 @@ import {
   Calendar,
   AlertCircle,
   Download,
-  Clock,
-  DollarSign
+  Clock
 } from 'lucide-react'
+import { useState } from 'react'
+
 import { Button } from '@/components/ui/button'
 
 interface Subscription {

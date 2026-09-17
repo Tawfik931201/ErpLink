@@ -1,19 +1,21 @@
 import crypto from 'crypto'
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'default-super-secret-key-32-chars-long!!' // Must be 32 bytes/chars
 const IV_LENGTH = 16 // For AES, this is always 16
 
-if (!process.env.ENCRYPTION_KEY && process.env.NODE_ENV === 'production') {
-  console.error(
-    '[Crypto] ENCRYPTION_KEY is not set in production — falling back to an INSECURE default key. Set ENCRYPTION_KEY immediately.'
-  )
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY
+if (!ENCRYPTION_KEY) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('[Crypto] ENCRYPTION_KEY is required in production. Set ENCRYPTION_KEY immediately — refusing to boot with an insecure default key.')
+  }
+  console.warn('[Crypto] ENCRYPTION_KEY is not set — using an insecure default key. This is acceptable only for local development.')
 }
+const ACTIVE_KEY = ENCRYPTION_KEY || 'default-super-secret-key-32-chars-long!!'
 
 export function encrypt(text: string): string {
   if (!text) return ''
   try {
     // Ensure key is exactly 32 bytes
-    const key = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest()
+    const key = crypto.createHash('sha256').update(ACTIVE_KEY).digest()
     const iv = crypto.randomBytes(IV_LENGTH)
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
     let encrypted = cipher.update(text)
@@ -34,7 +36,7 @@ export function decrypt(text: string): string {
     if (!ivHex) return text
     const iv = Buffer.from(ivHex, 'hex')
     const encryptedText = Buffer.from(textParts.join(':'), 'hex')
-    const key = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest()
+    const key = crypto.createHash('sha256').update(ACTIVE_KEY).digest()
     const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
     let decrypted = decipher.update(encryptedText)
     decrypted = Buffer.concat([decrypted, decipher.final()])

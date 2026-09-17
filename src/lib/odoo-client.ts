@@ -9,6 +9,7 @@
  * in typed, promise-based helpers.
  */
 import xmlrpc from 'xmlrpc'
+
 import { checkImpersonationWriteBlock } from './auth'
 
 export interface OdooConfig {

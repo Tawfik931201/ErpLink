@@ -11,7 +11,6 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
 import {
-  getActiveAffiliates,
   getClientStatement,
 } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
@@ -33,10 +32,7 @@ export default async function AdminClientStatementPage({
   const lang = (cookieStore.get('lang')?.value || 'ar') as Language
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
-  const [statementRes, affiliatesRes] = await Promise.all([
-    getClientStatement(params.userId),
-    getActiveAffiliates(),
-  ])
+  const statementRes = await getClientStatement(params.userId)
 
   if (!statementRes.success || !statementRes.data) {
     return (
@@ -145,7 +141,6 @@ export default async function AdminClientStatementPage({
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((kpi) => {
-          const Icon = kpi.icon
           return (
             <div key={kpi.label} className="border border-border bg-card p-4 space-y-1.5">
               <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
@@ -162,7 +157,6 @@ export default async function AdminClientStatementPage({
         workspaces={workspaces}
         subscriptions={subscriptions}
         payments={payments}
-        affiliates={affiliatesRes.success ? affiliatesRes.affiliates : []}
       />
     </div>
   )

@@ -1,6 +1,7 @@
-import { cookies } from 'next/headers'
-import StopImpersonationButton from './StopImpersonationButton'
 import { Eye } from 'lucide-react'
+import { cookies } from 'next/headers'
+
+import StopImpersonationButton from './StopImpersonationButton'
 
 export default function ImpersonationBanner() {
   const cookieStore = cookies()

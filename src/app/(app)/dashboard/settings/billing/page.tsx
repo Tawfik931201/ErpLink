@@ -1,6 +1,8 @@
 import { cookies } from 'next/headers'
+
 import { getMyWorkspaceBillingDetails } from '@/app/actions/subscription-actions'
 import type { Language } from '@/lib/translations'
+
 import BillingClient from './BillingClient'
 
 export const metadata = { title: 'Subscriptions & Billing' }

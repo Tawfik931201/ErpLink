@@ -1,8 +1,8 @@
+import { FileQuestion, Home, LifeBuoy } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
-import { FileQuestion, Home, LifeBuoy } from 'lucide-react'
+
 import type { Language } from '@/lib/translations'
-import { translations } from '@/lib/translations'
 
 export default function DashboardNotFound() {
   const cookieStore = cookies()

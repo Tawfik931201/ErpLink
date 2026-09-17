@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
-import { Suspense } from 'react'
 import { cookies } from 'next/headers'
+import { Suspense } from 'react'
 
 import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
 import type { Language } from '@/lib/translations'
 import { translations } from '@/lib/translations'
+
 import StoreSelector from './store-selector'
 
 export const metadata: Metadata = {
@@ -40,6 +41,11 @@ export default async function ConnectZidPage() {
         <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
           {t('zid.desc')}
         </p>
+        <ol className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <li><span className="font-semibold text-foreground">1.</span> {lang === 'ar' ? 'اختر منصتك' : 'Pick your platform'}</li>
+          <li><span className="font-semibold text-foreground">2.</span> {lang === 'ar' ? 'وافق على الصلاحيات' : 'Approve permissions'}</li>
+          <li><span className="font-semibold text-foreground">3.</span> {lang === 'ar' ? 'المزامنة تعمل تلقائياً' : 'Sync runs automatically'}</li>
+        </ol>
       </div>
 
       <Suspense fallback={<div className="animate-pulse h-48 rounded-xl bg-muted/40" />}>

@@ -2,41 +2,118 @@
  * POST /api/webhooks/salla
  *
  * Receives real-time webhook events from Salla:
- *   - product.created / product.updated / product.deleted
- *   - order.created / order.updated / order.status.updated / order.cancelled
- *   - customer.created / customer.updated
+ *   - product.created / product.updated / product.deleted / product.publish / ...
+ *   - order.created / order.updated / order.status.updated / order.cancelled / ...
+ *   - customer.created / customer.updated / customer.login
+ *   - category.created / category.updated / category.deleted
+ *   - store.branch.* / abandoned.cart.* / app.uninstalled
+ *
+ * Bulk design: this handler does ONLY cheap checks + one indexed DB
+ * read/write, then returns 200 immediately. Salla retries on timeout, so any
+ * Salla API enrichment or heavy I/O here would cause duplicate storms.
+ * Thin payloads are enriched later inside the background queue worker
+ * (see processWebhookEvent in sync-engine.ts).
  *
  * Security: Salla includes an HMAC-SHA256 signature in the x-salla-signature header.
  */
 import crypto from 'crypto'
+
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { recordAudit } from '@/lib/audit-logs'
+import { SALLA_DEFAULT_WEBHOOK_EVENTS } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
-import { processWebhookEvent } from '@/lib/sync-engine'
-import { startSyncQueueRunner } from '@/lib/sync-queue-runner'
+
+// Events older than this are ignored (Salla redeliveries arriving late must
+// not overwrite newer state applied after them).
+const STALE_EVENT_MAX_AGE_MS = 15 * 60 * 1000
+
+/**
+ * Salla sends `merchant` as a number in most events, but as an object
+ * `{ id: ... }` in some app-lifecycle events. Accept number|string|object.
+ */
+function extractSallaMerchantId(payload: any): string {
+  const m = payload?.merchant ?? payload?.merchant_id ?? payload?.store_id ?? payload?.data?.merchant_id
+  if (m === null || m === undefined || m === '') return ''
+  if (typeof m === 'object') {
+    const id = (m as any).id ?? (m as any).merchant_id ?? (m as any).store_id
+    return id === null || id === undefined ? '' : String(id)
+  }
+  return String(m)
+}
+
+/** Best-effort webhook delivery id for idempotency (header or payload). */
+function extractSallaWebhookId(payload: any, getHeader: (name: string) => string | null): string {
+  const fromHeader =
+    getHeader('x-salla-webhook-id') ??
+    getHeader('x-salla-delivery-id') ??
+    ''
+  if (fromHeader) return fromHeader
+  return String(
+    payload?.uuid ?? payload?.webhook_id ?? payload?.delivery_id ?? payload?.event_id ?? ''
+  )
+}
 
 function verifySallaSignature(body: string, signature: string, secret: string): boolean {
+  if (!signature || !secret) return false
   try {
     const expected = crypto.createHmac('sha256', secret).update(body).digest('hex')
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+    const a = Buffer.from(signature)
+    const b = Buffer.from(expected)
+    if (a.length !== b.length) return false
+    return crypto.timingSafeEqual(a, b)
   } catch {
     return false
   }
 }
 
+function buildDedupKey(merchantId: string, event: string, webhookId: string): string {
+  return `salla:${merchantId}:${event}:${webhookId}`
+}
+
+/** Best-effort metric (count + last_at). Never throws — table may not exist yet. */
+async function recordSallaWebhookMetric(storeId: string, event: string): Promise<void> {
+  try {
+    const { data: existing } = await supabase
+      .from('webhook_metrics')
+      .select('count')
+      .eq('store_id', storeId)
+      .eq('event', event)
+      .eq('platform', 'salla')
+      .maybeSingle()
+    await supabase.from('webhook_metrics').upsert(
+      {
+        store_id: storeId,
+        event,
+        platform: 'salla',
+        count: (existing?.count ?? 0) + 1,
+        last_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'store_id,event,platform' }
+    )
+  } catch {
+    // Best-effort only (migration 20260910 may not be applied yet).
+  }
+}
+
 export async function POST(req: NextRequest) {
-  startSyncQueueRunner()
+  // لا setInterval هنا — المعالجة عبر GET /api/cron/sync-queue بمجدول خارجي.
   const rawBody = await req.text()
   const headersList = headers()
-  const signature = headersList.get('x-salla-signature') ?? headersList.get('salla-signature') ?? ''
+  const getHeader = (name: string) => headersList.get(name)
+  const signature = getHeader('x-salla-signature') ?? getHeader('salla-signature') ?? ''
   const webhookSecret = process.env.SALLA_WEBHOOK_SECRET ?? ''
 
-  // ── Verify signature (skip in development) ────────────────────────────────
-  if (process.env.NODE_ENV === 'production' && webhookSecret) {
+  // ── 1. Signature early-return (before any parsing or DB I/O) ─────────────
+  if (webhookSecret) {
     if (!verifySallaSignature(rawBody, signature, webhookSecret)) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Invalid signature', message_ar: 'توقيع الويب هوك غير صالح. تحقق من SALLA_WEBHOOK_SECRET.' },
+        { status: 401 }
+      )
     }
   }
 
@@ -44,89 +121,210 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(rawBody)
   } catch {
-    console.warn('[Salla Webhook] Invalid JSON payload received')
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Invalid JSON', message_ar: 'بيانات الويب هوك غير صالحة.' },
+      { status: 400 }
+    )
   }
 
-  const event = payload.event ?? ''
-  const merchantId = String(payload.merchant ?? '')
+  const event = String(payload.event ?? payload.topic ?? '')
+  const merchantId = extractSallaMerchantId(payload)
   const data = payload.data ?? {}
+  const webhookId = extractSallaWebhookId(payload, getHeader)
 
-  console.info('[Salla Webhook] ======================================')
-  console.info(`[Salla Webhook] Event resolved → "${event}"`)
-  console.info(`[Salla Webhook] merchantId=${merchantId} | entityId=${data.id}`)
-  console.info('[Salla Webhook] ======================================')
-
+  // ── 2. Missing merchant early-return ──────────────────────────────────────
   if (!merchantId) {
-    console.warn('[Salla Webhook] ⚠️  merchant ID not found in payload')
-    return NextResponse.json({ error: 'Merchant ID not found in payload' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Merchant ID not found in payload', message_ar: 'تعذر التعرف على المتجر في بيانات الويب هوك.' },
+      { status: 400 }
+    )
   }
 
-  // ── Get Salla token settings to check if enabled ───────────────────────────
-  try {
-    const { data: sallaToken, error: tokenErr } = await supabase
-      .from('salla_tokens')
-      .select('*')
-      .eq('merchant_id', merchantId)
+  // ── 3. App uninstalled → clean the token + pending jobs, fast 200 ─────────
+  // Must run BEFORE the token lookup so orphaned stores are removed even if
+  // sync settings would otherwise 404/skip.
+  if (event === 'app.uninstalled') {
+    await supabase.from('salla_tokens').delete().eq('merchant_id', merchantId)
+    // Drop pending Salla jobs so the runner stops retrying a dead token.
+    await supabase.from('sync_queue').delete().eq('store_id', merchantId).eq('platform', 'salla')
+    await recordAudit({
+      actorId: merchantId,
+      actorRole: 'system',
+      action: 'salla.app_uninstalled',
+      entityType: 'salla_store',
+      entityId: merchantId,
+    }).catch(() => {})
+    return NextResponse.json({ received: true, processed: true, reason: 'app_uninstalled' })
+  }
+
+  // ── 4. Missing/empty event early-return ───────────────────────────────────
+  if (!event) {
+    return NextResponse.json({ received: true, processed: false, reason: 'missing_event' })
+  }
+
+  // ── 5. Stale delivery early-return (late redelivery must not regress state)
+  const createdAtRaw = payload.created_at ?? payload.timestamp
+  if (createdAtRaw) {
+    const createdMs = new Date(String(createdAtRaw)).getTime()
+    if (Number.isFinite(createdMs) && Date.now() - createdMs > STALE_EVENT_MAX_AGE_MS) {
+      return NextResponse.json({ received: true, processed: false, reason: 'stale' })
+    }
+  }
+
+  // ── 6. Store-connected early-return (minimal column select) ───────────────
+  const { data: sallaToken, error: tokenErr } = await supabase
+    .from('salla_tokens')
+    .select('workspace_id, sync_settings')
+    .eq('merchant_id', merchantId)
+    .maybeSingle()
+
+  if (tokenErr || !sallaToken) {
+    return NextResponse.json(
+      { error: 'Salla store not connected', message_ar: 'متجر سلة غير مربوط. أعد ربط المتجر من صفحة ربط المتجر.' },
+      { status: 404 }
+    )
+  }
+
+  // ── 7. Disabled-event early-return ────────────────────────────────────────
+  const syncSettings = (sallaToken.sync_settings as Record<string, any>) || {}
+  const eventSettings = syncSettings[event]
+  const isEnabled = eventSettings?.salla2odoo === true
+
+  // Cheap SSE broadcast (in-memory only) for both paths.
+  const broadcastPayload: WebhookEventPayload = {
+    event: event as any,
+    store_id: merchantId,
+    data,
+    timestamp: payload.created_at ?? new Date().toISOString(),
+    receivedAt: new Date().toISOString(),
+  }
+  webhookEmitter.emit('zid-event', broadcastPayload)
+
+  if (!isEnabled) {
+    return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings' })
+  }
+
+  // ── 8. Idempotency: same delivery must never create a duplicate job ───────
+  // dedup_key has a partial UNIQUE index (migration 20260910), so concurrent
+  // double-deliveries collapse even if both pass the check below — the loser
+  // gets a 23505 conflict which we translate to `duplicate`.
+  const dedupKey = webhookId ? buildDedupKey(merchantId, event, webhookId) : null
+  if (dedupKey) {
+    const { data: dup, error: dupErr } = await supabase
+      .from('sync_queue')
+      .select('id')
+      .eq('dedup_key', dedupKey)
+      .limit(1)
       .maybeSingle()
-
-    if (tokenErr || !sallaToken) {
-      console.warn('[Salla Webhook] Salla store token not found or DB error', { merchantId, tokenErr })
-      return NextResponse.json({ error: 'Salla store not connected' }, { status: 404 })
+    if (dup) {
+      return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
     }
-
-    const syncSettings = (sallaToken.sync_settings as Record<string, any>) || {}
-    const eventSettings = syncSettings[event]
-    const isEnabled = eventSettings?.salla2odoo === true
-
-    if (!isEnabled) {
-      console.info(`[Salla Webhook] Event "${event}" is disabled in sync settings for merchant "${merchantId}". Skipping sync.`)
-      
-      // Still broadcast to browser console/SSE so the user can see it arrived but was skipped
-      const broadcastPayload: WebhookEventPayload = {
-        event: event as any,
-        store_id: merchantId,
-        data,
-        timestamp: payload.created_at ?? new Date().toISOString(),
-        receivedAt: new Date().toISOString(),
+    // Pre-migration fallback (no dedup_key column yet): legacy payload check.
+    if (dupErr) {
+      const { data: legacyDup } = await supabase
+        .from('sync_queue')
+        .select('id')
+        .eq('store_id', merchantId)
+        .eq('event', event)
+        .contains('payload', { salla_webhook_id: webhookId })
+        .limit(1)
+        .maybeSingle()
+      if (legacyDup) {
+        return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
       }
-      webhookEmitter.emit('zid-event', broadcastPayload)
-
-      return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings' })
     }
-
-    // ── Broadcast to SSE-connected browsers ───────────────────────────────────
-    const broadcastPayload: WebhookEventPayload = {
-      event: event as any,
-      store_id: merchantId,
-      data,
-      timestamp: payload.created_at ?? new Date().toISOString(),
-      receivedAt: new Date().toISOString(),
-    }
-    webhookEmitter.emit('zid-event', broadcastPayload)
-
-    // ── Enqueue the webhook in sync queue ─────────────────────────────────────
-    console.info(`[Salla Webhook] ▶ Enqueuing event="${event}" merchantId=${merchantId} to sync queue`)
-    const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-    await enqueueWebhookEvent({
-      workspaceId: sallaToken.workspace_id,
-      storeId: merchantId,
-      event,
-      platform: 'salla',
-      payload: data,
-    })
-
-    return NextResponse.json({ received: true, queued: true })
-  } catch (err: any) {
-    console.error('[Salla Webhook] handler error', { event, merchantId, err })
-    return NextResponse.json({ received: true, processed: false, error: err?.message || String(err) })
   }
+
+  // ── 9. Coalescing: collapse bursts for the same entity into one job ───────
+  // If a pending job already exists for this store+event+entity, merge the
+  // newest payload into it instead of enqueueing N jobs. The row keeps its
+  // FIRST dedup_key: a redelivery of a merged (superseded) id then either
+  // merges again (still pending → no duplicate) or re-applies identical data
+  // (already processed → harmless, never a stale overwrite).
+  const entityId = data && typeof data === 'object' && data.id !== undefined && data.id !== null
+    ? String(data.id)
+    : ''
+  if (entityId) {
+    const { data: recent } = await supabase
+      .from('sync_queue')
+      .select('id, payload, next_retry_at')
+      .eq('store_id', merchantId)
+      .eq('event', event)
+      .eq('platform', 'salla')
+      .order('created_at', { ascending: false })
+      .limit(10)
+    const pending = (recent || []).find(
+      (row: any) =>
+        row?.next_retry_at !== null &&
+        row?.payload &&
+        typeof row.payload === 'object' &&
+        String((row.payload as any).id ?? '') === entityId
+    ) as any
+    if (pending) {
+      const prevPayload = (pending.payload as Record<string, any>) || {}
+      const merged = {
+        ...prevPayload,
+        ...(data as Record<string, any>),
+        // Keep the FIRST delivery id for idempotency (see comment above).
+        salla_webhook_id: prevPayload.salla_webhook_id ?? (webhookId || undefined),
+        salla_coalesced_count: Number(prevPayload.salla_coalesced_count ?? 1) + 1,
+      }
+      await supabase
+        .from('sync_queue')
+        .update({ payload: merged, updated_at: new Date().toISOString() })
+        .eq('id', pending.id)
+      await recordSallaWebhookMetric(merchantId, event)
+      return NextResponse.json({ received: true, queued: true, coalesced: true })
+    }
+  }
+
+  // ── 10. Enqueue raw payload only (NO Salla API enrichment here) ───────────
+  const baseRow: Record<string, any> = {
+    workspace_id: sallaToken.workspace_id,
+    store_id: merchantId,
+    event,
+    platform: 'salla',
+    payload: webhookId ? { ...(data as Record<string, any>), salla_webhook_id: webhookId } : data,
+    retry_count: 0,
+    max_retries: 3,
+    next_retry_at: new Date().toISOString(),
+  }
+  if (dedupKey) baseRow.dedup_key = dedupKey
+
+  const { error: insertErr } = await supabase.from('sync_queue').insert(baseRow)
+  if (insertErr) {
+    // Race loser: another worker inserted the same delivery concurrently.
+    if ((insertErr as any).code === '23505') {
+      return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
+    }
+    // Migration not applied yet (no dedup_key column) → retry without it.
+    if ((insertErr as any).code === '42703' && dedupKey) {
+      const retryRow = { ...baseRow }
+      delete retryRow.dedup_key
+      const { error: retryErr } = await supabase.from('sync_queue').insert(retryRow)
+      if (retryErr) {
+        return NextResponse.json({ received: true, processed: false, error: 'enqueue_failed' })
+      }
+    } else {
+      return NextResponse.json({ received: true, processed: false, error: 'enqueue_failed' })
+    }
+  }
+
+  await recordSallaWebhookMetric(merchantId, event)
+
+  // Trigger non-blocking background queue drain
+  import('@/lib/sync-queue-runner').then(({ runSyncQueueOnce }) => {
+    runSyncQueueOnce().catch(() => {})
+  }).catch(() => {})
+
+  // Fast 200 — the queue runner + sync engine do the heavy lifting.
+  return NextResponse.json({ received: true, queued: true })
 }
 
 export async function GET() {
   return NextResponse.json({
     ok: true,
     message: 'Salla webhook endpoint is ready.',
-    events: ['product.created', 'product.updated'],
+    events: SALLA_DEFAULT_WEBHOOK_EVENTS,
   })
 }

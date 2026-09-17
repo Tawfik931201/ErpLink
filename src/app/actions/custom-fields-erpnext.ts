@@ -2,11 +2,13 @@
 
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
-import { supabase } from '@/lib/supabase'
-import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
-import { ErpNextClient } from '@/lib/sync-engine'
+
 import { decrypt } from '@/lib/crypto'
-import { CreateCustomFieldData } from './custom-fields'
+import { supabase } from '@/lib/supabase'
+import { ErpNextClient } from '@/lib/sync-engine'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
+
+import type { CreateCustomFieldData } from './custom-fields'
 
 // ─── Helper Functions ─────────────────────────────────────────────────────────
 

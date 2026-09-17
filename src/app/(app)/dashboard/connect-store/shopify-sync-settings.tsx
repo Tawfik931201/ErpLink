@@ -1,14 +1,16 @@
 'use client'
 
+import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp, Check, RefreshCw } from 'lucide-react'
 import { useState, Fragment } from 'react'
-import { Save, Loader2, CheckSquare, Plus, Minus, ChevronDown, ChevronUp, Check } from 'lucide-react'
 
+import { syncShopifyWebhooks, updateShopifySyncSettings } from '@/app/actions/workspaces'
+import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
-import { updateShopifySyncSettings } from '@/app/actions/workspaces'
-import { useLanguage } from '@/components/language-provider'
 import { cn } from '@/lib/utils'
 
+// Topic unification: keys here must match SHOPIFY_TOPIC_CATALOG in
+// src/lib/shopify-topics.ts (+ shopify.app.toml + mapping-constants SHOPIFY_EVENTS).
 const SHOPIFY_SYNC_GROUPS = [
   {
     title: 'Order (الطلبات)',
@@ -74,6 +76,23 @@ const SHOPIFY_SYNC_GROUPS = [
   }
 ]
 
+// P0 core preset: orders + products + customers (store → ERP) ON by default.
+// NOTE (direction unification): the reverse column (`odoo2shopify`, ERP → store)
+// is tracked in state and saved with the settings, but kept hidden in this table —
+// reverse sync is managed from Mapping Center / Data Transfer (see note below).
+const CORE_SHOPIFY_EVENTS = [
+  'orders/create',
+  'orders/updated',
+  'orders/cancelled',
+  'orders/fulfilled',
+  'orders/paid',
+  'products/create',
+  'products/update',
+  'products/delete',
+  'customers/create',
+  'customers/update',
+]
+
 function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {
   return (
     <button type="button" onClick={() => onChange(!checked)}
@@ -103,12 +122,14 @@ export default function ShopifySyncSettingsTable({ shopDomain, initialSettings }
     const parsedInitial = typeof initialSettings === 'string' 
       ? JSON.parse(initialSettings) 
       : (initialSettings || {})
+    // First run (no saved settings): enable the core preset in store → ERP direction.
+    const hasSaved = !!parsedInitial && Object.keys(parsedInitial).length > 0
 
     SHOPIFY_SYNC_GROUPS.forEach(group => {
       group.options.forEach(opt => {
         initial[opt.key] = {
-          odoo2shopify: parsedInitial[opt.key]?.odoo2shopify ?? false,
-          shopify2odoo: parsedInitial[opt.key]?.shopify2odoo ?? false,
+          odoo2shopify: hasSaved ? (parsedInitial[opt.key]?.odoo2shopify ?? false) : false,
+          shopify2odoo: hasSaved ? (parsedInitial[opt.key]?.shopify2odoo ?? false) : CORE_SHOPIFY_EVENTS.includes(opt.key),
         }
       })
     })
@@ -132,6 +153,30 @@ export default function ShopifySyncSettingsTable({ shopDomain, initialSettings }
     }))
   }
 
+  const applyCorePreset = () => {
+    setSettings(prev => {
+      const next = { ...prev }
+      SHOPIFY_SYNC_GROUPS.forEach(group => {
+        group.options.forEach(opt => {
+          next[opt.key] = { ...next[opt.key], shopify2odoo: CORE_SHOPIFY_EVENTS.includes(opt.key) }
+        })
+      })
+      return next
+    })
+  }
+
+  const applySelectAll = () => {
+    setSettings(prev => {
+      const next = { ...prev }
+      SHOPIFY_SYNC_GROUPS.forEach(group => {
+        group.options.forEach(opt => {
+          next[opt.key] = { ...next[opt.key], shopify2odoo: true }
+        })
+      })
+      return next
+    })
+  }
+
   const handleSave = async () => {
     setLoading(true)
     const res = await updateShopifySyncSettings(shopDomain, settings)
@@ -140,12 +185,35 @@ export default function ShopifySyncSettingsTable({ shopDomain, initialSettings }
     if (res.success) {
       toast({
         title: t('shopify.settingsSaved'),
-        description: lang === 'ar' ? 'تم تحديث خيارات المزامنة بين أودو وشوبيفاي بنجاح.' : 'Sync options updated between Odoo and Shopify successfully.',
+        // Toggle ON يسجّل webhook حقيقي و OFF يحذفه (workspaces.ts) — لا حاجة لخطوة يدوية.
+        description: lang === 'ar' ? 'تم الحفظ + مزامنة الاشتراكات (ON يسجّل webhook و OFF يحذفه).' : 'Saved + subscriptions synced (ON registers, OFF deletes).',
       })
     } else {
       toast({
         title: t('shopify.settingsFailed'),
-        description: res.error || (lang === 'ar' ? 'فشل حفظ الإعدادات، يرجى المحاولة لاحقاً.' : 'Failed to save settings, please try again later.'),
+        description: (res as any).error || (lang === 'ar' ? 'فشل حفظ الإعدادات، يرجى المحاولة لاحقاً.' : 'Failed to save settings, please try again later.'),
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const [syncing, setSyncing] = useState(false)
+  const handleSyncSubscriptions = async () => {
+    setSyncing(true)
+    const res = await syncShopifyWebhooks(shopDomain)
+    setSyncing(false)
+    if (res.success) {
+      toast({
+        title: lang === 'ar' ? 'تمت مزامنة الاشتراكات' : 'Subscriptions synced',
+        description:
+          lang === 'ar'
+            ? `سُجّل ${(res as any).registered ?? 0} وحُذف ${(res as any).removed ?? 0} حسب الإعدادات المحفوظة.`
+            : `Registered ${(res as any).registered ?? 0}, removed ${(res as any).removed ?? 0} per saved settings.`,
+      })
+    } else {
+      toast({
+        title: t('shopify.settingsFailed'),
+        description: (res as any).error || '',
         variant: 'destructive',
       })
     }
@@ -167,6 +235,18 @@ export default function ShopifySyncSettingsTable({ shopDomain, initialSettings }
 
       {isMainOpen && (
         <div className="space-y-4 animate-in fade-in-50 duration-200">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">{t('sync.presetCore')}</span>
+            <div className="ms-auto flex gap-2">
+              <Button onClick={applySelectAll} variant="outline" size="sm" className="h-7 text-[11px]">
+                {t('sync.selectAll')}
+              </Button>
+              <Button onClick={applyCorePreset} variant="outline" size="sm" className="h-7 text-[11px]">
+                {t('sync.coreOnly')}
+              </Button>
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{t('sync.reverseNote')}</p>
           <div className="overflow-x-auto border border-border bg-card">
             <table className="w-full border-collapse text-start">
               <thead>
@@ -213,7 +293,11 @@ export default function ShopifySyncSettingsTable({ shopDomain, initialSettings }
             </table>
           </div>
 
-          <div className="flex justify-end pt-3 border-t border-border">
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <Button onClick={handleSyncSubscriptions} disabled={syncing || loading} variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
+              {syncing ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+              {lang === 'ar' ? 'مزامنة الاشتراكات' : 'Sync subscriptions'}
+            </Button>
             <Button onClick={handleSave} disabled={loading} variant="outline" size="sm" className="h-7 text-[11px] gap-1.5">
               {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
               {t('shopify.saveSettings')}

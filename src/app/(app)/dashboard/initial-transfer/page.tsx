@@ -1,16 +1,29 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
-import { cookies } from 'next/headers'
 import { AlertCircle, ArrowRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
+import Link from 'next/link'
+
 import { getOdooModels, getOdooModelFields } from '@/app/actions/odoo'
-import TransferClient from './transfer-client'
-import { Language, translations } from '@/lib/translations'
+import { Button } from '@/components/ui/button'
+import { getActiveWorkspaceId } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
+import type { Language} from '@/lib/translations';
 import { cn } from '@/lib/utils'
+
+import TransferClient from './transfer-client'
 
 export const metadata: Metadata = {
   title: 'Initial Data Transfer — ErpLink',
   description: 'نقل البيانات من متجر زد إلى نظام أودو (Initial Data Transfer)',
+}
+
+export type ConnectedPlatform = 'zid' | 'salla' | 'shopify'
+
+export interface ConnectedStore {
+  platform: ConnectedPlatform
+  label: string
+  identifier: string // merchant_id or shop_domain
+  storeId?: string   // zid store_id (if available)
 }
 
 export default async function InitialTransferPage() {
@@ -33,7 +46,55 @@ export default async function InitialTransferPage() {
   const cookieStore = cookies()
   const lang = (cookieStore.get('lang')?.value || 'ar') as Language
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
-  const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
+
+  // Detect connected stores for the active workspace
+  const connectedStores: ConnectedStore[] = []
+  const workspaceId = await getActiveWorkspaceId()
+
+  if (workspaceId) {
+    // Check Zid
+    const { data: zidTok } = await supabase
+      .from('merchant_tokens')
+      .select('merchant_id, store_id, name')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (zidTok) {
+      connectedStores.push({
+        platform: 'zid',
+        label: zidTok.name || zidTok.merchant_id,
+        identifier: zidTok.merchant_id,
+        storeId: zidTok.store_id || undefined,
+      })
+    }
+
+    // Check Salla
+    const { data: sallaTok } = await supabase
+      .from('salla_tokens')
+      .select('merchant_id, store_name, name')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (sallaTok) {
+      connectedStores.push({
+        platform: 'salla',
+        label: sallaTok.store_name || sallaTok.name || sallaTok.merchant_id,
+        identifier: sallaTok.merchant_id,
+      })
+    }
+
+    // Check Shopify
+    const { data: shopifyTok } = await supabase
+      .from('shopify_tokens')
+      .select('shop_domain, name')
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (shopifyTok) {
+      connectedStores.push({
+        platform: 'shopify',
+        label: shopifyTok.name || shopifyTok.shop_domain,
+        identifier: shopifyTok.shop_domain,
+      })
+    }
+  }
 
   return (
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
@@ -61,8 +122,8 @@ export default async function InitialTransferPage() {
       <TransferClient 
         initialModels={initialModels || []} 
         hasOdooConnection={hasOdooConnection}
-        preloadedModel={preloadedModel}
         preloadedFields={preloadedFields}
+        connectedStores={connectedStores}
       />
     </div>
   )

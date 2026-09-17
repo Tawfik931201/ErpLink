@@ -1,10 +1,17 @@
-import crypto from 'crypto'
 import { auth } from '@clerk/nextjs/server'
-import { type NextRequest, NextResponse } from 'next/server'
 import axios from 'axios'
+import { type NextRequest, NextResponse } from 'next/server'
 
+import {
+  SHOPIFY_API_VERSION,
+  SHOPIFY_CORE_TOPICS,
+  SHOPIFY_GDPR_TOPICS,
+  SHOPIFY_SCOPES_UPDATE_TOPIC,
+  normalizeShopDomain,
+  registerShopifyWebhook,
+  verifyShopifyCallbackHmac,
+} from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
-import { registerShopifyWebhook } from '@/lib/shopify-client'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
   const appUrl =
@@ -19,63 +26,37 @@ function redirectToConnectStore(request: NextRequest, params: Record<string, str
   return NextResponse.redirect(url)
 }
 
-function verifyCallbackHmac(url: string, clientSecret: string): boolean {
-  const urlObj = new URL(url)
-  const hmac = urlObj.searchParams.get('hmac')
-  if (!hmac) return false
-
-  // Parse raw query parameters directly from search string to preserve URL encoding (e.g. commas, slashes)
-  const rawQuery = urlObj.search.startsWith('?') ? urlObj.search.slice(1) : urlObj.search
-  const pairs = rawQuery.split('&')
-  
-  const cleanPairs = pairs
-    .filter(pair => {
-      const key = pair.split('=')[0]
-      return key !== 'hmac' && key !== 'signature'
-    })
-    .sort()
-    
-  const message = cleanPairs.join('&')
-  const expectedHmac = crypto
-    .createHmac('sha256', clientSecret)
-    .update(message)
-    .digest('hex')
-
-  return expectedHmac === hmac
-}
-
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code')
-  const shop = request.nextUrl.searchParams.get('shop')
+  const shopParam = request.nextUrl.searchParams.get('shop')
   const state = request.nextUrl.searchParams.get('state')
   const storedState = request.cookies.get('shopify_oauth_state')?.value
 
-  if (!shop || !/^[a-zA-Z0-9.-]+\.myshopify\.com$/.test(shop)) {
-    console.warn('[Shopify OAuth] Callback received invalid shop parameter:', shop)
+  // تحقق النطاق أولاً (early-return يخفف السيرفر ويمنع الحقن).
+  const shop = shopParam ? normalizeShopDomain(shopParam) : ''
+  if (!shop) {
     return redirectToConnectStore(request, { error: 'invalid_shop' })
   }
 
   if (!state || !storedState || state !== storedState) {
-    console.warn('[Shopify OAuth] Callback state validation failed')
     return redirectToConnectStore(request, { error: 'invalid_state' })
   }
 
   if (!code) {
-    console.warn('[Shopify OAuth] Callback missing authorization code')
     return redirectToConnectStore(request, { error: 'shopify_missing_code' })
   }
 
   try {
     const clientId = process.env.SHOPIFY_CLIENT_ID!
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET!
-
-    // Verify HMAC signature from Shopify using raw URL
-    if (!verifyCallbackHmac(request.url, clientSecret)) {
-      console.warn('[Shopify OAuth] HMAC signature verification failed')
-      return redirectToConnectStore(request, { error: 'shopify_invalid_signature' })
+    if (!clientId || !clientSecret) {
+      return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
     }
 
-    console.info('[Shopify OAuth] Exchanging authorization code for permanent access token')
+    // تحقق HMAC على query (مقارنة ثابتة الزمن في shopify-client).
+    if (!verifyShopifyCallbackHmac(request.url, clientSecret)) {
+      return redirectToConnectStore(request, { error: 'shopify_invalid_signature' })
+    }
 
     // 1. Request access token
     const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -87,13 +68,11 @@ export async function GET(request: NextRequest) {
     const { access_token, scope } = tokenResponse.data
 
     if (!access_token) {
-      console.error('[Shopify OAuth] Token response did not contain access token:', tokenResponse.data)
       return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
     }
 
-    // 2. Fetch Shopify store details
-    console.info('[Shopify OAuth] Fetching shop profile details')
-    const shopDetailsResponse = await axios.get(`https://${shop}/admin/api/2024-01/shop.json`, {
+    // 2. Fetch Shopify store details (النسخة من الثابت الموحد — لا تكتبها يدوياً)
+    const shopDetailsResponse = await axios.get(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
       headers: {
         'X-Shopify-Access-Token': access_token,
       },
@@ -112,12 +91,11 @@ export async function GET(request: NextRequest) {
         .select('active_workspace_id')
         .eq('id', userId)
         .single()
-      
+
       workspaceId = userDb?.active_workspace_id ?? null
     }
 
     if (!workspaceId) {
-      console.warn('[Shopify OAuth] User has no active workspace selected')
       return redirectToConnectStore(request, { error: 'no_active_workspace' })
     }
 
@@ -130,6 +108,14 @@ export async function GET(request: NextRequest) {
       workspace_id: workspaceId,
       name: shopName,
       email,
+      // New connections start with the 5 core topics syncing store→ERP.
+      sync_settings: {
+        'products/create': { shopify2odoo: true },
+        'products/update': { shopify2odoo: true },
+        'orders/create': { shopify2odoo: true },
+        'orders/paid': { shopify2odoo: true },
+        'orders/fulfilled': { shopify2odoo: true },
+      },
     }
 
     const { data: existingToken } = await supabase
@@ -139,9 +125,12 @@ export async function GET(request: NextRequest) {
       .maybeSingle()
 
     if (existingToken) {
+      // Preserve the merchant's existing sync toggles on reconnect.
+      const { sync_settings: _ignore, ...updateData } = tokenData
+      void _ignore
       const { error: updateError } = await supabase
         .from('shopify_tokens')
-        .update(tokenData)
+        .update(updateData)
         .eq('shop_domain', shop)
 
       if (updateError) throw updateError
@@ -153,45 +142,26 @@ export async function GET(request: NextRequest) {
       if (insertError) throw insertError
     }
 
-    console.info('[Shopify OAuth] Shopify token saved successfully in DB')
-
-    // 5. Automatically Register Shopify Webhooks
+    // 5. Automatically register webhooks (non-blocking, best-effort).
+    // الأساسية + app/uninstalled (تنظيف التوكن) + GDPR الثلاثة + scopes_update
+    // (امتثال App Store — يجب أن تبقى مشتركة دائماً).
     const webhookTopics = [
-      'products/create',
-      'products/update',
-      'products/delete',
-      'orders/create',
-      'orders/updated',
-      'orders/cancelled',
-      'orders/fulfilled',
-      'orders/paid',
-      'orders/partially_fulfilled',
-      'orders/edited',
-      'orders/delete',
-      'customers/create',
-      'customers/update',
-      'customers/delete',
-      'collections/create',
-      'collections/update',
-      'collections/delete',
-      'carts/create',
-      'carts/update',
-      'checkouts/create',
-      'checkouts/update',
-      'checkouts/delete',
-      'inventory_levels/update',
-      'inventory_items/create',
-      'inventory_items/update',
-      'inventory_items/delete',
-      'refunds/create'
+      ...SHOPIFY_CORE_TOPICS,
+      'app/uninstalled',
+      ...SHOPIFY_GDPR_TOPICS,
+      SHOPIFY_SCOPES_UPDATE_TOPIC,
     ]
 
-    console.info('[Shopify OAuth] Auto-registering Shopify webhooks...')
     for (const topic of webhookTopics) {
       // Async webhook registration. We do not block the OAuth flow on this.
-      registerShopifyWebhook(shop, topic, access_token).catch((err) => {
-        console.error(`[Shopify OAuth] Failed to auto-register webhook for topic "${topic}":`, err)
-      })
+      registerShopifyWebhook(shop, topic, access_token).catch(() => {})
+    }
+
+    // Auto-bootstrap workspace defaults in background (zero-configuration)
+    if (workspaceId) {
+      import('@/lib/auto-bootstrap').then(({ autoBootstrapWorkspace }) => {
+        autoBootstrapWorkspace(workspaceId).catch(() => {})
+      }).catch(() => {})
     }
 
     const response = redirectToConnectStore(request, {
@@ -202,10 +172,7 @@ export async function GET(request: NextRequest) {
     response.cookies.delete('shopify_oauth_state')
     return response
 
-  } catch (error) {
-    console.error('[Shopify OAuth] Callback handler failed', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
+  } catch {
     return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
   }
 }

@@ -16,10 +16,8 @@ import {
   extendSubscription,
   cancelSubscription,
   searchUsersByEmail,
-  detectAffiliateForClient,
   type AdminSubscriptionRow,
   type UserPick,
-  type AffiliatePick,
 } from '@/app/actions/subscription-actions'
 import PaginationControls from '@/components/PaginationControls'
 import { cn } from '@/lib/utils'
@@ -27,7 +25,6 @@ import { cn } from '@/lib/utils'
 interface Props {
   rows: AdminSubscriptionRow[]
   error: string | null
-  affiliates: AffiliatePick[]
   lang: 'ar' | 'en'
 }
 
@@ -46,7 +43,7 @@ const inputCls =
 const actionBtn =
   'inline-flex items-center gap-1.5 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40'
 
-export default function AdminSubscriptionsClient({ rows, error, affiliates, lang }: Props) {
+export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
   const router = useRouter()
   const isAr = lang === 'ar'
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
@@ -65,10 +62,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
   const [workspaceId, setWorkspaceId] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [clientPhone, setClientPhone] = useState('')
-  const [affiliateId, setAffiliateId] = useState('')
-  const [autoAffiliate, setAutoAffiliate] = useState<AffiliatePick | null>(null)
-  const [manualAffiliate, setManualAffiliate] = useState(false)
-  const [detectingAffiliate, setDetectingAffiliate] = useState(false)
   const [startDate, setStartDate] = useState(today())
   const [months, setMonths] = useState(1)
   const [amount, setAmount] = useState('')
@@ -87,9 +80,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
     setWorkspaceId('')
     setNewWorkspaceName('')
     setClientPhone('')
-    setAffiliateId('')
-    setAutoAffiliate(null)
-    setManualAffiliate(false)
     setStartDate(today())
     setMonths(1)
     setAmount('')
@@ -97,31 +87,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
     setNotes('')
     setModalError(null)
   }
-
-  useEffect(() => {
-    if (!selectedUser) {
-      setAutoAffiliate(null)
-      setDetectingAffiliate(false)
-      return
-    }
-    let cancelled = false
-    setDetectingAffiliate(true)
-    detectAffiliateForClient({ userId: selectedUser.id, workspaceId: workspaceId || null }).then(
-      (res) => {
-        if (cancelled) return
-        setDetectingAffiliate(false)
-        if (res.success && res.affiliate) {
-          setAutoAffiliate(res.affiliate)
-          if (!manualAffiliate) setAffiliateId(res.affiliate!.id)
-        } else {
-          setAutoAffiliate(null)
-        }
-      },
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [selectedUser, workspaceId, manualAffiliate])
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -160,7 +125,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
       clientEmail: selectedUser.email,
       workspaceId: workspaceId || null,
       newWorkspaceName: newWorkspaceName.trim() || null,
-      affiliateId: affiliateId || null,
       startDate,
       monthsPaid: months,
       amountPaid: Number(amount) || 0,
@@ -279,8 +243,8 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
           </h1>
           <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
             {isAr
-              ? 'تسجيل اشتراكات العملاء يدوياً (عند التحويل) — يتم حفظها في قاعدة البيانات وتظهر للعميل وتُنشئ عمولة الأفلييت تلقائياً.'
-              : 'Manually register client subscriptions (on transfer) — saved to the database, shown to the client, and auto-generate the affiliate commission.'}
+              ? 'تسجيل اشتراكات العملاء يدوياً (عند التحويل) — يتم حفظها في قاعدة البيانات وتظهر للعميل.'
+              : 'Manually register client subscriptions (on transfer) — saved to the database and shown to the client.'}
           </p>
         </div>
         <button
@@ -344,7 +308,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                 <tr className="border-b border-border text-muted-foreground">
                   <th className="px-3 py-2 text-start font-medium">{isAr ? 'العميل' : 'Client'}</th>
                   <th className="px-3 py-2 text-start font-medium">{isAr ? 'المساحة' : 'Workspace'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'الأفلييت' : 'Affiliate'}</th>
                   <th className="px-3 py-2 text-start font-medium">{isAr ? 'البداية' : 'Start'}</th>
                   <th className="px-3 py-2 text-start font-medium">{isAr ? 'النهاية' : 'End'}</th>
                   <th className="px-3 py-2 text-start font-medium">{isAr ? 'الشهور' : 'Months'}</th>
@@ -375,7 +338,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                           </p>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{row.affiliate_name || '—'}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{row.start_date ? formatDate(row.start_date) : '—'}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{row.end_date ? formatDate(row.end_date) : '—'}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{row.status !== 'none' ? row.months_paid : '—'}</td>
@@ -405,12 +367,10 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                                     {
                                       id: row.workspace_id,
                                       name: row.workspace_name || '',
-                                      partner_id: row.affiliate_id,
                                     },
                                   ],
                                 })
                                 setWorkspaceId(row.workspace_id)
-                                setAffiliateId(row.affiliate_id || '')
                                 setModal({ type: 'register' })
                               }}
                               className={actionBtn}
@@ -536,7 +496,7 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
               </div>
             )}
 
-            {/* Step 2: workspace + affiliate */}
+            {/* Step 2: workspace */}
             {selectedUser && (
               <div className="space-y-3">
                 <div className="space-y-2">
@@ -564,7 +524,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                     {selectedUser.workspaces.map((ws) => (
                       <option key={ws.id} value={ws.id}>
                         {ws.name}
-                        {ws.partner_id ? (isAr ? ' (مرتبطة بأفلييت)' : ' (affiliate-linked)') : ''}
                       </option>
                     ))}
                   </select>
@@ -588,73 +547,6 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                         : 'Cancel previous active subscriptions on this workspace (leave unchecked to add the new one alongside the old one)'}
                     </span>
                   </label>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-medium text-muted-foreground">
-                    {isAr ? 'الأفلييت المرتبط (اكتشاف تلقائي)' : 'Linked Affiliate (auto-detected)'}
-                  </label>
-                  {detectingAffiliate ? (
-                    <div className="flex items-center gap-2 border border-border bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      {isAr ? 'جارٍ اكتشاف الأفلييت المرتبط...' : 'Detecting linked affiliate...'}
-                    </div>
-                  ) : autoAffiliate && !manualAffiliate ? (
-                    <div className="border border-border bg-muted/30 px-3 py-2.5 flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-foreground">{autoAffiliate.display_name}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">
-                          {Math.round(Number(autoAffiliate.commission_rate) * 100)}% ·{' '}
-                          {isAr
-                            ? 'مرتبط تلقائياً — العمولة تُحسب له'
-                            : 'auto-linked — commission will go to this affiliate'}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setManualAffiliate(true)}
-                        className="text-[10px] font-medium text-muted-foreground hover:text-foreground shrink-0"
-                      >
-                        {isAr ? 'تغيير' : 'Change'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <select
-                        value={affiliateId}
-                        onChange={(e) => setAffiliateId(e.target.value)}
-                        className={inputCls}
-                      >
-                        <option value="">{isAr ? '— بدون أفلييت —' : '— No affiliate —'}</option>
-                        {affiliates.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.display_name} · {Math.round(Number(a.commission_rate) * 100)}%
-                          </option>
-                        ))}
-                      </select>
-                      <div className="flex items-center justify-between gap-2">
-                        {autoAffiliate && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setManualAffiliate(false)
-                              setAffiliateId(autoAffiliate.id)
-                            }}
-                            className="text-[10px] font-medium text-muted-foreground hover:text-foreground"
-                          >
-                            {isAr ? 'رجوع للاكتشاف التلقائي' : 'Back to auto-detected'}
-                          </button>
-                        )}
-                        {!autoAffiliate && (
-                          <p className="text-[10px] text-muted-foreground">
-                            {isAr
-                              ? 'لا يوجد أفلييت مرتبط بهذا العميل — اختر يدوياً إن لزم'
-                              : 'No linked affiliate found for this client — pick manually if needed'}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -700,8 +592,8 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                     {Number(amount) === 0 && (
                       <p className="text-[10px] text-amber-600">
                         {isAr
-                          ? 'تنبيه: بمبلغ 0 لن تُسجل أي دفعة ولن تُنشأ عمولة للأفلييت.'
-                          : 'Note: with amount 0, no payment is recorded and no affiliate commission is created.'}
+                          ? 'تنبيه: بمبلغ 0 لن تُسجل أي دفعة.'
+                          : 'Note: with amount 0, no payment is recorded.'}
                       </p>
                     )}
                   </div>
@@ -807,8 +699,8 @@ export default function AdminSubscriptionsClient({ rows, error, affiliates, lang
                 {Number(extAmount) === 0 && (
                   <p className="text-[10px] text-amber-600">
                     {isAr
-                      ? 'تنبيه: بمبلغ 0 لن تُنشأ عمولة للأفلييت عن فترة التمديد.'
-                      : 'Note: with amount 0, no affiliate commission is created for the extension.'}
+                      ? 'تنبيه: بمبلغ 0 لن تُسجل أي دفعة عن فترة التمديد.'
+                      : 'Note: with amount 0, no payment is recorded for the extension.'}
                   </p>
                 )}
               </div>

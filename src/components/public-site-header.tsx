@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { type Language } from '@/lib/translations'
 
-export function PublicSiteHeader({ lang, isPartnersPage }: { lang: Language; isPartnersPage?: boolean }) {
+export function PublicSiteHeader({ lang }: { lang: Language }) {
   const { userId } = auth()
   const isSignedIn = !!userId
 
@@ -25,9 +25,6 @@ export function PublicSiteHeader({ lang, isPartnersPage }: { lang: Language; isP
           <Link href="/pricing" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'الأسعار' : 'Pricing'}
           </Link>
-          <Link href="/partners" className="transition-colors hover:text-foreground">
-            {lang === 'ar' ? 'الأفلييت' : 'Affiliates'}
-          </Link>
           <Link href="/contact" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'اتصل بنا' : 'Contact Us'}
           </Link>
@@ -44,24 +41,6 @@ export function PublicSiteHeader({ lang, isPartnersPage }: { lang: Language; isP
                 {lang === 'ar' ? 'لوحة التحكم' : 'Dashboard'}
               </Link>
             </Button>
-          ) : isPartnersPage ? (
-            <>
-              <Link
-                href="/sign-in"
-                className="text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-colors hidden sm:block"
-              >
-                {lang === 'ar' ? 'تسجيل الدخول' : 'Sign In'}
-              </Link>
-              <Button
-                asChild
-                size="sm"
-                className="bg-foreground text-background hover:bg-foreground/90 h-8 text-[11px] font-bold px-3.5"
-              >
-                <Link href="/api/sign-up-intent/set?intent=partner">
-                  {lang === 'ar' ? 'انضم الآن' : 'Join Now'}
-                </Link>
-              </Button>
-            </>
           ) : (
             <>
               <Link

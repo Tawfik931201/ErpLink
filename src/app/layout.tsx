@@ -1,5 +1,5 @@
-import type { Metadata } from 'next'
 import { ClerkProvider } from '@clerk/nextjs'
+import type { Metadata } from 'next'
 import { Tajawal, JetBrains_Mono } from 'next/font/google'
 import { cookies } from 'next/headers'
 

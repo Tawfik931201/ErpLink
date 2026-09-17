@@ -62,8 +62,6 @@ export async function zidRequest<TResponse = unknown>(
     requestHeaders.set('Content-Type', 'application/json')
   }
 
-  console.info('[Zid API] Request started', { path, method: init.method ?? 'GET' })
-
   let response: Response
   try {
     response = await fetch(buildUrl(path, query), {

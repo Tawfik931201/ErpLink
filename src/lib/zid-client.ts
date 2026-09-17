@@ -50,6 +50,9 @@ export interface ZidOAuthTokenResponse {
   token_type: 'Bearer'
   expires_in: number
   scope: string
+  /** Partner-level app token returned by Zid during OAuth — the permanent Authorization header */
+  Authorization?: string
+  authorization?: string
 }
 
 // ─── Product types (from OAS) ─────────────────────────────────────────────────
@@ -684,5 +687,80 @@ export const ZidAPI = {
     /** GET /v1/market/app/subscription — check app subscription status */
     subscription: (creds: ZidCredentials) =>
       zidClient.get('/v1/market/app/subscription', { headers: buildZidHeaders(creds) }),
+  },
+
+  // ── Reverse / Refund / Waybill (P2 foundation — documented stubs) ────────
+  // Endpoints below follow the Zid Manager naming convention. If Zid renames an
+  // endpoint, only this block needs updating — callers use these wrappers.
+  // All three return the raw axios response and never throw for 404 (the caller
+  // decides whether reverse/refund is supported for the store).
+  returns: {
+    /**
+     * POST /v1/managers/store/orders/{order-id}/reverse — request order reversal.
+     * STUB: verify path against the official docs before enabling in UI.
+     */
+    reverse: (creds: ZidCredentials, orderId: string, reason?: string) =>
+      zidClient.post(
+        `/v1/managers/store/orders/${orderId}/reverse`,
+        reason ? { reason } : {},
+        { headers: buildZidHeaders(creds) }
+      ),
+
+    /**
+     * POST /v1/managers/store/orders/{order-id}/refund — refund a paid order.
+     * STUB: verify path against the official docs before enabling in UI.
+     */
+    refund: (creds: ZidCredentials, orderId: string, amount?: number) =>
+      zidClient.post(
+        `/v1/managers/store/orders/${orderId}/refund`,
+        amount !== undefined ? { amount } : {},
+        { headers: buildZidHeaders(creds) }
+      ),
+
+    /**
+     * GET /v1/managers/store/orders/{order-id}/waybill — shipping waybill/PDF.
+     * STUB: verify path against the official docs before enabling in UI.
+     */
+    waybill: (creds: ZidCredentials, orderId: string) =>
+      zidClient.get(`/v1/managers/store/orders/${orderId}/waybill`, {
+        headers: buildZidHeaders(creds),
+      }),
+  },
+
+  // ── Store metadata (auto-fill mapping dropdowns) ─────────────────────────
+  storeMeta: {
+    /**
+     * GET delivery options — used to auto-fill shipping-method maps in the UI
+     * instead of hardcoding method codes. Returns [] on failure (non-fatal).
+     */
+    deliveryOptions: async (creds: ZidCredentials): Promise<any[]> => {
+      try {
+        const res = await zidClient.get('/v1/managers/store/delivery-options', {
+          headers: buildZidHeaders(creds),
+        })
+        const data = res.data?.data ?? res.data?.results ?? res.data ?? []
+        return Array.isArray(data) ? data : []
+      } catch (err: any) {
+        console.warn('[ZidAPI] delivery-options fetch failed (non-fatal):', err?.response?.data || err?.message)
+        return []
+      }
+    },
+
+    /**
+     * GET payment methods — used to auto-fill payment-method maps in the UI.
+     * Returns [] on failure (non-fatal).
+     */
+    paymentMethods: async (creds: ZidCredentials): Promise<any[]> => {
+      try {
+        const res = await zidClient.get('/v1/managers/store/payment-methods', {
+          headers: buildZidHeaders(creds),
+        })
+        const data = res.data?.data ?? res.data?.results ?? res.data ?? []
+        return Array.isArray(data) ? data : []
+      } catch (err: any) {
+        console.warn('[ZidAPI] payment-methods fetch failed (non-fatal):', err?.response?.data || err?.message)
+        return []
+      }
+    },
   },
 }

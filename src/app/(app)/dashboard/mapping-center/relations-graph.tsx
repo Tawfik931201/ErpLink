@@ -1,8 +1,8 @@
 'use client'
 
+import { motion, AnimatePresence } from 'framer-motion'
 import { useMemo, useState, useId, type CSSProperties } from 'react'
 
-import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
 export interface RelationEdge {

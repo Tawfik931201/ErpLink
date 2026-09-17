@@ -15,6 +15,8 @@ interface RawSubscription {
   id: string
   workspace_id: string
   user_id: string
+  // Legacy column kept for read-compatibility (SELECT *). Always NULL for new
+  // rows — the affiliate system was removed, never write to this column.
   affiliate_id: string | null
   start_date: string
   months_paid: number
@@ -63,6 +65,8 @@ export interface MySubscription {
   id: string
   workspace_id: string
   user_id: string
+  // Legacy read-only field (affiliate system removed). Kept so `...sub` spreads
+  // from `select('*')` stay type-compatible. Never written, never displayed.
   affiliate_id: string | null
   start_date: string
   months_paid: number
@@ -122,7 +126,8 @@ const RegisterSchema = z.object({
   clientEmail: z.string().email().max(255),
   workspaceId: z.string().uuid().optional().nullable(),
   newWorkspaceName: z.string().trim().max(120).optional().nullable(),
-  affiliateId: z.string().uuid().optional().nullable(),
+  // NOTE: affiliate system removed — no affiliateId accepted. The
+  // `affiliate_id` DB column is legacy read-only (always NULL for new rows).
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   monthsPaid: z.coerce.number().int().min(1).max(120),
   amountPaid: z.coerce.number().min(0).max(99_999_999),
@@ -134,20 +139,18 @@ const RegisterSchema = z.object({
 /**
  * Admin manually registers a subscription for a client (manual payment flow).
  * - Finds the client by email (must already have an account).
- * - Uses an existing workspace, or creates one (attributed to the chosen
- *   affiliate when provided — direct, no admin approval needed).
+ * - Uses an existing workspace, or creates one.
  * - end_date is computed; when `cancelExisting` is true, other active
  *   subscriptions on the workspace are cancelled, otherwise the new one is
  *   added alongside them.
  * - A payment row is created for the paid amount.
- * - If an affiliate + amount are set, a commission row is generated
- *   automatically using the affiliate's current commission rate.
+ * - No commission is created (affiliate system removed). `affiliate_id` is
+ *   always stored as NULL for compatibility with older rows.
  */
 export async function registerSubscription(input: {
   clientEmail: string
   workspaceId?: string | null
   newWorkspaceName?: string | null
-  affiliateId?: string | null
   startDate: string
   monthsPaid: number
   amountPaid: number
@@ -185,14 +188,13 @@ export async function registerSubscription(input: {
     // 2. Resolve the workspace (existing or newly created)
     let workspaceId = parsed.workspaceId ?? null
     let ownerUserId = client.id
-    let workspacePartnerId: string | null = null
     let workspaceName = parsed.newWorkspaceName?.trim() ?? ''
     let workspaceSubNumber: string | null = null
 
     if (workspaceId) {
       const { data: ws } = await supabase
         .from('workspaces')
-        .select('id, user_id, name, partner_id, subscription_number')
+        .select('id, user_id, name, subscription_number')
         .eq('id', workspaceId)
         .maybeSingle()
 
@@ -201,7 +203,6 @@ export async function registerSubscription(input: {
         return { success: false, error: 'workspace_not_owned_by_client' }
       }
       ownerUserId = ws.user_id
-      workspacePartnerId = ws.partner_id ?? null
       workspaceName = ws.name ?? workspaceName
       workspaceSubNumber = ws.subscription_number ?? null
     } else {
@@ -211,18 +212,13 @@ export async function registerSubscription(input: {
           {
             user_id: client.id,
             name: parsed.newWorkspaceName!.trim(),
-            partner_id: parsed.affiliateId ?? null,
-            partner_status: parsed.affiliateId ? 'active' : null,
-            partner_linked_at: parsed.affiliateId ? new Date().toISOString() : null,
-            partner_link_requested_by: parsed.affiliateId ? adminId : null,
           },
         ])
-        .select('id, partner_id, subscription_number')
+        .select('id, subscription_number')
         .single()
 
       if (wsErr || !ws) return { success: false, error: wsErr?.message ?? 'workspace_create_failed' }
       workspaceId = ws.id
-      workspacePartnerId = ws.partner_id ?? null
       workspaceSubNumber = ws.subscription_number ?? null
 
       // Make it the client's active workspace if they don't have one
@@ -234,54 +230,8 @@ export async function registerSubscription(input: {
       }
     }
 
-    // 3. Auto-detect the affiliate (workspace link → client history → client's other workspaces)
-    let affiliateId = workspacePartnerId ?? parsed.affiliateId ?? null
-
-    if (!affiliateId) {
-      const { data: linkedSubs } = await supabase
-        .from('subscriptions')
-        .select('affiliate_id')
-        .eq('user_id', client.id)
-        .not('affiliate_id', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      affiliateId = linkedSubs?.[0]?.affiliate_id ?? null
-    }
-
-    if (!affiliateId) {
-      const { data: linkedWs } = await supabase
-        .from('workspaces')
-        .select('partner_id')
-        .eq('user_id', client.id)
-        .not('partner_id', 'is', null)
-        .limit(1)
-      affiliateId = linkedWs?.[0]?.partner_id ?? null
-    }
-
-    // Validate the affiliate is still active before attribution/commission
-    if (affiliateId) {
-      const { data: affProfile } = await supabase
-        .from('partner_profiles')
-        .select('id, status')
-        .eq('id', affiliateId)
-        .maybeSingle()
-      if (!affProfile || affProfile.status !== 'active') {
-        affiliateId = null
-      }
-    }
-
-    // Backfill the workspace link so the client shows in the partner's dashboard
-    if (affiliateId && !workspacePartnerId) {
-      await supabase
-        .from('workspaces')
-        .update({
-          partner_id: affiliateId,
-          partner_status: 'active',
-          partner_linked_at: new Date().toISOString(),
-          partner_link_requested_by: adminId,
-        })
-        .eq('id', workspaceId)
-    }
+    // NOTE: affiliate auto-detect removed (affiliate system cancelled).
+    // New subscriptions are always stored with affiliate_id = NULL.
 
     const startDate = parsed.startDate
     const endDate = computeEndDate(startDate, parsed.monthsPaid)
@@ -304,14 +254,15 @@ export async function registerSubscription(input: {
       if (phoneErr) console.error('[subscriptions] phone update error:', phoneErr.message)
     }
 
-    // 5. Insert the subscription
+    // 5. Insert the subscription (manual payment only — no commission).
     const { data: sub, error: subErr } = await supabase
       .from('subscriptions')
       .insert([
         {
           workspace_id: workspaceId,
           user_id: ownerUserId,
-          affiliate_id: affiliateId,
+          // Legacy read-only column — always NULL for new rows.
+          affiliate_id: null,
           start_date: startDate,
           months_paid: parsed.monthsPaid,
           end_date: endDate,
@@ -342,53 +293,6 @@ export async function registerSubscription(input: {
       if (payErr) console.error('[subscriptions] payment insert error:', payErr.message)
     }
 
-    // 6. Auto-generate the affiliate commission (if active affiliate + amount)
-    if (affiliateId && parsed.amountPaid > 0) {
-      const { data: profile } = await supabase
-        .from('partner_profiles')
-        .select('commission_rate, status')
-        .eq('id', affiliateId)
-        .maybeSingle()
-
-      if (profile && profile.status === 'active') {
-        const rate = Number(profile.commission_rate)
-        const commissionAmount = Math.round(parsed.amountPaid * rate * 100) / 100
-
-        const { data: commission, error: commErr } = await supabase
-          .from('partner_commissions')
-          .insert([
-            {
-              partner_id: affiliateId,
-              workspace_id: workspaceId,
-              client_user_id: ownerUserId,
-              gross_amount: parsed.amountPaid,
-              commission_rate: rate,
-              commission_amount: commissionAmount,
-              currency: 'USD',
-              status: 'approved',
-              source: 'manual',
-              period_start: new Date(`${startDate}T00:00:00Z`).toISOString(),
-              period_end: new Date(`${endDate}T00:00:00Z`).toISOString(),
-              note: parsed.notes ?? 'تلقائي من تسجيل اشتراك',
-              created_by: adminId,
-            },
-          ])
-          .select('id')
-          .single()
-
-        if (!commErr && commission) {
-          await recordAudit({
-            actorId: adminId,
-            actorRole: 'admin',
-            action: 'commission.auto_from_subscription',
-            entityType: 'PartnerCommission',
-            entityId: commission.id,
-            metadata: { subscription_id: sub.id, workspace_id: workspaceId, amount: commissionAmount },
-          })
-        }
-      }
-    }
-
     await recordAudit({
       actorId: adminId,
       actorRole: 'admin',
@@ -398,7 +302,6 @@ export async function registerSubscription(input: {
       metadata: {
         workspace_id: workspaceId,
         client_user_id: ownerUserId,
-        affiliate_id: affiliateId,
         start_date: startDate,
         months: parsed.monthsPaid,
         end_date: endDate,
@@ -509,51 +412,8 @@ export async function extendSubscription(input: {
       if (payErr) console.error('[subscriptions] extension payment insert error:', payErr.message)
     }
 
-    // Commission for the extension period (if affiliate active + amount)
-    if (existing.affiliate_id && parsed.amountPaid > 0) {
-      const { data: profile } = await supabase
-        .from('partner_profiles')
-        .select('commission_rate, status')
-        .eq('id', existing.affiliate_id)
-        .maybeSingle()
-
-      if (profile && profile.status === 'active') {
-        const rate = Number(profile.commission_rate)
-        const commissionAmount = Math.round(parsed.amountPaid * rate * 100) / 100
-        const { data: commission, error: commErr } = await supabase
-          .from('partner_commissions')
-          .insert([
-            {
-              partner_id: existing.affiliate_id,
-              workspace_id: existing.workspace_id,
-              client_user_id: existing.user_id,
-              gross_amount: parsed.amountPaid,
-              commission_rate: rate,
-              commission_amount: commissionAmount,
-              currency: 'USD',
-              status: 'approved',
-              source: 'manual',
-              period_start: new Date(`${existing.end_date}T00:00:00Z`).toISOString(),
-              period_end: new Date(`${newEndDate}T00:00:00Z`).toISOString(),
-              note: parsed.notes ?? 'تلقائي من تمديد اشتراك',
-              created_by: adminId,
-            },
-          ])
-          .select('id')
-          .single()
-
-        if (!commErr && commission) {
-          await recordAudit({
-            actorId: adminId,
-            actorRole: 'admin',
-            action: 'commission.auto_from_subscription_extension',
-            entityType: 'PartnerCommission',
-            entityId: commission.id,
-            metadata: { subscription_id: existing.id, amount: commissionAmount },
-          })
-        }
-      }
-    }
+    // Record the extension payment (manual payment only — no commission;
+    // affiliate system removed).
 
     await recordAudit({
       actorId: adminId,
@@ -764,6 +624,8 @@ export interface AdminSubscriptionRow {
   id: string
   workspace_id: string
   user_id: string
+  // Legacy read-only (affiliate system removed). Kept for compatibility with
+  // older rows; always NULL for new subscriptions, never displayed.
   affiliate_id: string | null
   start_date: string
   months_paid: number
@@ -778,6 +640,7 @@ export interface AdminSubscriptionRow {
   workspace_name: string | null
   client_name: string | null
   client_email: string | null
+  // Legacy — always NULL (affiliate system removed, never displayed).
   affiliate_name: string | null
   subscription_number: string | null
   active_sub_count: number
@@ -788,16 +651,15 @@ export interface UserPick {
   email: string
   name: string | null
   active_workspace_id: string | null
-  workspaces: { id: string; name: string; partner_id: string | null }[]
+  workspaces: { id: string; name: string }[]
 }
 
-export interface AffiliatePick {
-  id: string
-  display_name: string
-  commission_rate: number | string
-}
+// NOTE: Affiliate system removed.
+// `AffiliatePick`, `getActiveAffiliates` and `detectAffiliateForClient` were
+// deleted. The `partner_*` tables are left untouched in the DB; a cleanup
+// migration will drop them later. See AGENTS.md.
 
-/** Admin: list all subscriptions with client / workspace / affiliate info. */
+/** Admin: list all subscriptions with client / workspace info (manual payments only). */
 export async function getAllSubscriptions() {
   try {
     await requireAdmin()
@@ -805,7 +667,7 @@ export async function getAllSubscriptions() {
     // 1. Fetch all workspaces (up to 1000)
     const { data: workspaces, error: wsErr } = await supabase
       .from('workspaces')
-      .select('id, name, subscription_number, user_id, partner_id, created_at')
+      .select('id, name, subscription_number, user_id, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -823,16 +685,7 @@ export async function getAllSubscriptions() {
 
     const userMap = new Map((users ?? []).map((u) => [u.id, u]))
 
-    // 3. Fetch affiliates in bulk
-    const partnerIds = Array.from(new Set(wsList.map((w) => w.partner_id).filter(Boolean)))
-    const { data: partners } = await supabase
-      .from('partner_profiles')
-      .select('id, display_name')
-      .in('id', partnerIds.length ? partnerIds : ['__none__'])
-
-    const partnerMap = new Map((partners ?? []).map((p) => [p.id, p]))
-
-    // 4. Fetch subscriptions in bulk
+    // 3. Fetch subscriptions in bulk
     const wsIds = wsList.map((w) => w.id)
     const { data: subs } = await supabase
       .from('subscriptions')
@@ -853,7 +706,6 @@ export async function getAllSubscriptions() {
     // 5. Construct rows
     const rows: AdminSubscriptionRow[] = wsList.map((ws) => {
       const user = ws.user_id ? userMap.get(ws.user_id) : null
-      const partner = ws.partner_id ? partnerMap.get(ws.partner_id) : null
       const wsSubs = subMap.get(ws.id) ?? []
       const activeSubCount = wsSubs.filter(
         (s) => s.status === 'active' && !isSubscriptionExpired(s),
@@ -873,7 +725,7 @@ export async function getAllSubscriptions() {
           id: activeSub.id,
           workspace_id: ws.id,
           user_id: ws.user_id || '',
-          affiliate_id: activeSub.affiliate_id || ws.partner_id,
+          affiliate_id: activeSub.affiliate_id ?? null,
           start_date: activeSub.start_date,
           months_paid: activeSub.months_paid,
           end_date: activeSub.end_date,
@@ -887,7 +739,7 @@ export async function getAllSubscriptions() {
           workspace_name: ws.name,
           client_name: user?.name ?? null,
           client_email: user?.email ?? null,
-          affiliate_name: partner?.display_name ?? null,
+          affiliate_name: null,
           subscription_number: ws.subscription_number || null,
           active_sub_count: activeSubCount,
         }
@@ -898,7 +750,7 @@ export async function getAllSubscriptions() {
         id: '',
         workspace_id: ws.id,
         user_id: ws.user_id || '',
-        affiliate_id: ws.partner_id,
+        affiliate_id: null,
         start_date: '',
         months_paid: 0,
         end_date: '',
@@ -912,7 +764,7 @@ export async function getAllSubscriptions() {
         workspace_name: ws.name,
         client_name: user?.name ?? null,
         client_email: user?.email ?? null,
-        affiliate_name: partner?.display_name ?? null,
+        affiliate_name: null,
         subscription_number: ws.subscription_number || null,
         active_sub_count: activeSubCount,
       }
@@ -942,7 +794,7 @@ export async function searchUsersByEmail(email: string) {
       (data ?? []).map(async (u) => {
         const { data: workspaces } = await supabase
           .from('workspaces')
-          .select('id, name, partner_id')
+          .select('id, name')
           .eq('user_id', u.id)
           .order('created_at', { ascending: false })
           .limit(20)
@@ -963,25 +815,6 @@ export async function searchUsersByEmail(email: string) {
   }
 }
 
-/** Admin: list active affiliates for attribution in the registration modal. */
-export async function getActiveAffiliates() {
-  try {
-    await requireAdmin()
-
-    const { data, error } = await supabase
-      .from('partner_profiles')
-      .select('id, display_name, commission_rate')
-      .eq('status', 'active')
-      .order('display_name', { ascending: true })
-
-    if (error) return { success: false as const, error: error.message, affiliates: [] }
-
-    return { success: true as const, affiliates: (data ?? []) as AffiliatePick[] }
-  } catch (err) {
-    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', affiliates: [] }
-  }
-}
-
 // ──────────────────────── Admin: financial stats (MRR) ────────────────────────
 
 export interface AdminStats {
@@ -989,6 +822,8 @@ export interface AdminStats {
   mrr: number
   totalRevenue: number
   monthRevenue: number
+  // Legacy affiliate fields (system removed). Kept for type-compatibility,
+  // always zero / empty — `partner_*` tables are no longer queried.
   commissionLiability: number
   pendingPayouts: number
   expiringSoon: number
@@ -996,7 +831,7 @@ export interface AdminStats {
   topAffiliates: { id: string; display_name: string; total_commission: number }[]
 }
 
-/** Admin: overview figures for the stats page (MRR, revenue, liability). */
+/** Admin: overview figures for the stats page (MRR, revenue). Manual payments only. */
 export async function getAdminStats() {
   try {
     await requireAdmin()
@@ -1040,51 +875,8 @@ export async function getAdminStats() {
     totalRevenue = Math.round(totalRevenue * 100) / 100
     monthRevenue = Math.round(monthRevenue * 100) / 100
 
-    const { data: commissions } = await supabase
-      .from('partner_commissions')
-      .select('commission_amount')
-      .eq('status', 'approved')
-      .is('paid_in_payout_id', null)
-
-    const commissionLiability =
-      Math.round(((commissions ?? []).reduce((s, c) => s + Number(c.commission_amount), 0)) * 100) / 100
-
-    const { data: payouts } = await supabase
-      .from('payout_requests')
-      .select('amount')
-      .in('status', ['pending', 'under_review', 'approved'])
-
-    const pendingPayouts = Math.round(((payouts ?? []).reduce((s, p) => s + Number(p.amount), 0)) * 100) / 100
-
-    const { data: topRows } = await supabase
-      .from('partner_commissions')
-      .select('partner_id, commission_amount')
-      .eq('status', 'approved')
-
-    const byPartner = new Map<string, number>()
-    for (const c of topRows ?? []) {
-      if (!c.partner_id) continue
-      byPartner.set(c.partner_id, (byPartner.get(c.partner_id) ?? 0) + Number(c.commission_amount))
-    }
-    const topIds = Array.from(byPartner.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([id]) => id)
-
-    let topAffiliates: AdminStats['topAffiliates'] = []
-    if (topIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('partner_profiles')
-        .select('id, display_name')
-        .in('id', topIds)
-      const nameMap = new Map((profiles ?? []).map((p) => [p.id, p.display_name]))
-      topAffiliates = topIds.map((id) => ({
-        id,
-        display_name: nameMap.get(id) ?? '—',
-        total_commission: Math.round((byPartner.get(id) ?? 0) * 100) / 100,
-      }))
-    }
-
+    // NOTE: affiliate system removed — no commission/payout queries.
+    // `partner_*` tables are left in the DB (cleanup migration later).
     return {
       success: true as const,
       stats: {
@@ -1092,11 +884,11 @@ export async function getAdminStats() {
         mrr,
         totalRevenue,
         monthRevenue,
-        commissionLiability,
-        pendingPayouts,
+        commissionLiability: 0,
+        pendingPayouts: 0,
         expiringSoon,
         expiredSubscriptions,
-        topAffiliates,
+        topAffiliates: [],
       } as AdminStats,
     }
   } catch (err) {
@@ -1104,69 +896,9 @@ export async function getAdminStats() {
   }
 }
 
-/** Admin: auto-detect the affiliate linked to a client (workspace link → history → other workspaces). */
-export async function detectAffiliateForClient(input: {
-  userId: string
-  workspaceId?: string | null
-}) {
-  try {
-    await requireAdmin()
-
-    const parsed = z
-      .object({ userId: z.string().min(1), workspaceId: z.string().uuid().optional().nullable() })
-      .parse(input)
-
-    let affiliateId: string | null = null
-
-    if (parsed.workspaceId) {
-      const { data: ws } = await supabase
-        .from('workspaces')
-        .select('partner_id')
-        .eq('id', parsed.workspaceId)
-        .maybeSingle()
-      if (ws?.partner_id) affiliateId = ws.partner_id
-    }
-
-    if (!affiliateId) {
-      const { data: subs } = await supabase
-        .from('subscriptions')
-        .select('affiliate_id')
-        .eq('user_id', parsed.userId)
-        .not('affiliate_id', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-      affiliateId = subs?.[0]?.affiliate_id ?? null
-    }
-
-    if (!affiliateId) {
-      const { data: ws } = await supabase
-        .from('workspaces')
-        .select('partner_id')
-        .eq('user_id', parsed.userId)
-        .not('partner_id', 'is', null)
-        .limit(1)
-      affiliateId = ws?.[0]?.partner_id ?? null
-    }
-
-    if (!affiliateId) return { success: true as const, affiliate: null }
-
-    const { data: profile } = await supabase
-      .from('partner_profiles')
-      .select('id, display_name, commission_rate, status')
-      .eq('id', affiliateId)
-      .maybeSingle()
-
-    if (!profile || profile.status !== 'active') return { success: true as const, affiliate: null }
-
-    return { success: true as const, affiliate: profile as AffiliatePick }
-  } catch (err) {
-    return {
-      success: false as const,
-      error: err instanceof Error ? err.message : 'unexpected',
-      affiliate: null,
-    }
-  }
-}
+// NOTE: `detectAffiliateForClient` removed — affiliate system cancelled.
+// `getActiveAffiliates` removed as well. `partner_*` tables stay in the DB
+// (cleanup migration later).
 
 // ──────────────────────── Admin: Clients (statements) ────────────────────────
 
@@ -1174,7 +906,6 @@ export interface AdminClientWorkspace {
   id: string
   name: string
   subscription_number: string | null
-  partner_id: string | null
   created_at: string
 }
 
@@ -1219,7 +950,7 @@ export async function getAllClients() {
 
     const { data: workspaces } = await supabase
       .from('workspaces')
-      .select('id, name, subscription_number, user_id, partner_id, created_at')
+      .select('id, name, subscription_number, user_id, created_at')
       .order('created_at', { ascending: false })
       .limit(1000)
 
@@ -1236,7 +967,6 @@ export async function getAllClients() {
         id: ws.id,
         name: ws.name,
         subscription_number: ws.subscription_number ?? null,
-        partner_id: ws.partner_id ?? null,
         created_at: ws.created_at,
       })
       wsByUser.set(ws.user_id, list)
@@ -1306,6 +1036,8 @@ export interface ClientStatementSubscription {
   workspace_id: string
   workspace_name: string | null
   subscription_number: string | null
+  // Legacy read-only (affiliate system removed). Kept for compatibility with
+  // older rows; never written for new subscriptions, never displayed.
   affiliate_id: string | null
   affiliate_name: string | null
   start_date: string
@@ -1372,13 +1104,6 @@ export async function getClientStatement(userId: string) {
       .in('workspace_id', wsIds.length ? wsIds : ['__none__'])
       .order('created_at', { ascending: false })
 
-    const partnerIds = Array.from(new Set((subs ?? []).map((s) => s.affiliate_id).filter(Boolean)))
-    const { data: partners } = await supabase
-      .from('partner_profiles')
-      .select('id, display_name')
-      .in('id', partnerIds.length ? partnerIds : ['__none__'])
-    const partnerMap = new Map((partners ?? []).map((p) => [p.id, p]))
-
     let totalPaid = 0
     let totalMonths = 0
     let activeCount = 0
@@ -1394,8 +1119,8 @@ export async function getClientStatement(userId: string) {
         workspace_id: s.workspace_id,
         workspace_name: ws?.name ?? null,
         subscription_number: ws?.subscription_number ?? null,
-        affiliate_id: s.affiliate_id,
-        affiliate_name: s.affiliate_id ? (partnerMap.get(s.affiliate_id)?.display_name ?? null) : null,
+        affiliate_id: s.affiliate_id ?? null,
+        affiliate_name: null,
         start_date: s.start_date,
         months_paid: s.months_paid,
         end_date: s.end_date,

@@ -43,7 +43,7 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
   async getTokens(merchantId = DEFAULT_TOKEN_KEY): Promise<StoredZidTokens | null> {
     const { data: merchantToken } = await supabase
       .from('merchant_tokens')
-      .select('*')
+      .select('access_token,refresh_token,expires_in,updated_at,token_type,authorization_token')
       .eq('merchant_id', merchantId)
       .single()
 
@@ -108,7 +108,6 @@ export class MemoryZidTokenStore implements ZidTokenStore {
 
 function createTokenStore(): ZidTokenStore {
   if (process.env.ZID_TOKEN_STORAGE === 'memory') {
-    console.warn('[Zid OAuth] Using in-memory token storage')
     return new MemoryZidTokenStore()
   }
 
@@ -116,6 +115,9 @@ function createTokenStore(): ZidTokenStore {
 }
 
 const tokenStore: ZidTokenStore = createTokenStore()
+
+/** Single-flight للـrefresh: دفعة ويب هوك واحدة = تبادل واحد مع زد. */
+const refreshInFlight = new Map<string, Promise<StoredZidTokens>>()
 
 export function isExpired(expiresAt: number): boolean {
   return Date.now() + EXPIRY_SKEW_MS >= expiresAt
@@ -137,8 +139,6 @@ export async function saveTokens(
       details: error,
     })
   }
-
-  console.info('[Zid OAuth] Tokens saved in server storage')
 
   return tokens
 }
@@ -174,8 +174,6 @@ export async function exchangeAuthorizationCodeForResponse(
     code,
   })
 
-  console.info('[Zid OAuth] Exchanging authorization code')
-
   let response: Response
   try {
     response = await fetch(config.tokenUrl, {
@@ -207,53 +205,63 @@ export async function exchangeAuthorizationCodeForResponse(
 }
 
 export async function refreshAccessToken(key = DEFAULT_TOKEN_KEY): Promise<StoredZidTokens> {
-  const storedTokens = await tokenStore.getTokens(key)
+  const running = refreshInFlight.get(key)
+  if (running) return running
 
-  if (!storedTokens?.refreshToken) {
-    throw new ZidOAuthError({
-      code: 'invalid_token',
-      message: 'No Zid refresh token is available in server storage.',
+  const task = (async (): Promise<StoredZidTokens> => {
+    const storedTokens = await tokenStore.getTokens(key)
+
+    if (!storedTokens?.refreshToken) {
+      throw new ZidOAuthError({
+        code: 'invalid_token',
+        message: 'No Zid refresh token is available in server storage.',
+      })
+    }
+
+    const config = getZidConfig()
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: storedTokens.refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
     })
-  }
 
-  const config = getZidConfig()
-  const body = new URLSearchParams({
-    grant_type: 'refresh_token',
-    refresh_token: storedTokens.refreshToken,
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-  })
+    let response: Response
+    try {
+      response = await fetch(config.tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+        cache: 'no-store',
+      })
+    } catch (error) {
+      throw new ZidOAuthError({
+        code: 'network_error',
+        message: 'Network error while refreshing Zid access token.',
+        details: error,
+      })
+    }
 
-  console.info('[Zid OAuth] Refreshing access token')
+    const payload = (await response.json().catch(() => ({}))) as RefreshTokenResponse
 
-  let response: Response
+    if (!response.ok) {
+      throw new ZidOAuthError({
+        code: response.status === 401 ? 'unauthorized' : 'expired_token',
+        message: 'Zid refresh token is invalid, expired, or unauthorized.',
+        status: response.status,
+        details: payload,
+      })
+    }
+
+    return saveTokens(payload, key)
+  })()
+
+  refreshInFlight.set(key, task)
   try {
-    response = await fetch(config.tokenUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-      cache: 'no-store',
-    })
-  } catch (error) {
-    throw new ZidOAuthError({
-      code: 'network_error',
-      message: 'Network error while refreshing Zid access token.',
-      details: error,
-    })
+    return await task
+  } finally {
+    refreshInFlight.delete(key)
   }
-
-  const payload = (await response.json().catch(() => ({}))) as RefreshTokenResponse
-
-  if (!response.ok) {
-    throw new ZidOAuthError({
-      code: response.status === 401 ? 'unauthorized' : 'expired_token',
-      message: 'Zid refresh token is invalid, expired, or unauthorized.',
-      status: response.status,
-      details: payload,
-    })
-  }
-
-  return saveTokens(payload, key)
 }
 
 export async function getAccessToken(key = DEFAULT_TOKEN_KEY): Promise<StoredZidTokens> {

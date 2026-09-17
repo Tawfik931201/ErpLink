@@ -35,7 +35,6 @@ export function SiteFooter() {
               </h4>
               <ul className="space-y-1.5">
                 <li><Link href="/pricing" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{t('landing.pricing')}</Link></li>
-                <li><Link href="/partners" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'الأفلييت' : 'Affiliates'}</Link></li>
               </ul>
             </div>
             <div>

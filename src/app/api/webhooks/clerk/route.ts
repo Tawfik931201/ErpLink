@@ -3,13 +3,7 @@
  *
  * Receives Clerk webhook events (Svix-signed).
  *
- * `user.created`:
- *   - Inserts the new user into the local `users` table.
- *   - If the user signed up through an affiliate invitation (the invitation
- *     `publicMetadata.affiliateWorkspace` is transferred into the user's
- *     `public_metadata`), auto-creates the workspace the affiliate registered
- *     (owner = the client, partner_id = the affiliate) and marks the pending
- *     invite as completed.
+ * `user.created`: inserts the new user into the local `users` table.
  *
  * Security: signatures are verified with the CLERK_WEBHOOK_SECRET.
  * Configure in Clerk Dashboard → Webhooks → add endpoint
@@ -66,13 +60,8 @@ function verifyClerkSignature(
   }
 }
 
-interface AffiliateWorkspaceMetadata {
-  partnerId?: string
-  workspaceName?: string
-}
-
-/** Auto-create the workspace that was registered via an affiliate invitation. */
-async function createAffiliateWorkspaceForUser(data: any) {
+/** Ensure the Clerk user exists in the local users table. */
+async function syncUserForUserCreated(data: any) {
   const userId = data.id as string | undefined
   if (!userId) return
 
@@ -82,102 +71,16 @@ async function createAffiliateWorkspaceForUser(data: any) {
   const email = emails[0]?.toLowerCase() ?? ''
   const firstName = (data.first_name as string) ?? ''
   const lastName = (data.last_name as string) ?? ''
-  const name = `${firstName} ${lastName}`.trim() || email || 'Zid Merchant'
+  const name = `${firstName} ${lastName}`.trim() || email || 'Merchant'
 
-  // 1. Ensure the user exists in the local users table (FK requirement)
-  if (email) {
-    const { error: userErr } = await supabase.from('users').insert([
-      { id: userId, email, name: name || 'Zid Merchant' },
-    ])
-    if (userErr && userErr.code !== '23505') {
-      console.error('[clerk-webhook] Failed to create user:', userErr)
-      return
-    }
+  if (!email) return
+
+  const { error: userErr } = await supabase.from('users').insert([
+    { id: userId, email, name },
+  ])
+  if (userErr && userErr.code !== '23505') {
+    console.error('[clerk-webhook] Failed to create user:', userErr)
   }
-
-  // 2. Resolve the affiliate link: from user public_metadata (invitation) → DB invite by email
-  let partnerId: string | undefined
-  let workspaceName: string | undefined
-
-  const meta = (data.public_metadata ?? {}) as Record<string, any>
-  const wsMeta = meta.affiliateWorkspace as AffiliateWorkspaceMetadata | undefined
-  if (wsMeta?.partnerId && wsMeta?.workspaceName) {
-    partnerId = wsMeta.partnerId
-    workspaceName = wsMeta.workspaceName
-  } else if (email) {
-    const { data: invite } = await supabase
-      .from('affiliate_client_invites')
-      .select('partner_id, workspace_name')
-      .eq('email', email)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle()
-
-    if (invite) {
-      partnerId = invite.partner_id
-      workspaceName = invite.workspace_name
-    }
-  }
-
-  if (!partnerId || !workspaceName) {
-    console.info(
-      `[clerk-webhook] User ${userId} has no pending affiliate workspace (email=${email})`,
-    )
-    return
-  }
-
-  // Verify the partner still exists and is active
-  const { data: partner } = await supabase
-    .from('partner_profiles')
-    .select('id')
-    .eq('id', partnerId)
-    .eq('status', 'active')
-    .maybeSingle()
-  if (!partner) {
-    console.warn(`[clerk-webhook] Partner ${partnerId} not active — skipping workspace`)
-    return
-  }
-
-  // 3. Create the workspace (owner = the client, attributed to the affiliate)
-  const { data: workspace, error: wsErr } = await supabase
-    .from('workspaces')
-    .insert([
-      {
-        user_id: userId,
-        name: workspaceName,
-        partner_id: partnerId,
-        partner_status: 'active',
-        partner_linked_at: new Date().toISOString(),
-        partner_link_requested_by: data.id,
-      },
-    ])
-    .select('id')
-    .single()
-
-  if (wsErr) {
-    console.error('[clerk-webhook] Failed to create workspace:', wsErr)
-    return
-  }
-
-  // 4. Set it as the client's active workspace
-  await supabase
-    .from('users')
-    .update({ active_workspace_id: workspace.id })
-    .eq('id', userId)
-
-  // 5. Mark pending invites completed
-  if (email) {
-    await supabase
-      .from('affiliate_client_invites')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
-      .eq('email', email)
-      .eq('status', 'pending')
-  }
-
-  console.info(
-    `[clerk-webhook] Created workspace "${workspaceName}" for ${email} attributed to partner ${partnerId}`,
-  )
 }
 
 export async function POST(req: NextRequest) {
@@ -214,7 +117,7 @@ export async function POST(req: NextRequest) {
 
   try {
     if (eventType === 'user.created') {
-      await createAffiliateWorkspaceForUser(evt.data)
+      await syncUserForUserCreated(evt.data)
     } else {
       console.info(`[clerk-webhook] Ignoring event type: ${eventType}`)
     }

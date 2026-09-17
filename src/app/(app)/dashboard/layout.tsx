@@ -1,4 +1,3 @@
-import { currentUser } from '@clerk/nextjs/server'
 import type { Metadata } from 'next'
 import { headers, cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
@@ -6,7 +5,9 @@ import { redirect } from 'next/navigation'
 import { getLayoutUserInfo } from '@/app/actions/layout-info'
 import { getCurrentUserPermissions, checkPendingInvitations } from '@/app/actions/workspace-members'
 import { hasAnyWorkspace } from '@/app/actions/workspaces'
+import MobileNav from '@/components/mobile-nav'
 import SidebarNav, { type NavSection } from '@/components/sidebar-nav'
+import SubscriptionBanner from '@/components/subscription/SubscriptionBanner'
 import UserMenu from '@/components/user-menu'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
 import { translations } from '@/lib/translations'
@@ -23,19 +24,6 @@ async function ensureWorkspaceAccess() {
 
   const pathname = headers().get('x-pathname') || ''
   if (pathname === '/dashboard/settings/workspace') return
-
-  // 1. Sync pending affiliate workspace if any (self-healing fallback in case Clerk webhook failed/was not running)
-  const { supabase } = await import('@/lib/supabase')
-  const { data: userRow } = await supabase
-    .from('users')
-    .select('email')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (userRow?.email) {
-    const { checkAndCreateAffiliateWorkspace } = await import('@/app/actions/affiliate-actions')
-    await checkAndCreateAffiliateWorkspace(userId, userRow.email)
-  }
 
   // Check active workspace first to skip existence check in 99% of requests
   const activeId = await getActiveWorkspaceId()
@@ -92,6 +80,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const permissionMap: Record<string, string> = {
     '/dashboard': 'dashboard',
+    '/dashboard/setup': 'dashboard',
     '/dashboard/connect-store': 'connect-store',
     '/dashboard/connect-odoo': 'connect-odoo',
     '/dashboard/mapping-center': 'mapping-center',
@@ -129,24 +118,42 @@ export default async function DashboardLayout({ children }: { children: React.Re
     return permKey ? permissions.includes(permKey) : false
   }
 
+  // P0 IA: 5 clear groups — Home, Connections, Sync, Support, Settings.
+  // All 9 pages are kept (no route/API change); advanced tools live under "Sync".
+  // NOTE: no dead `/dashboard/integrations` or `/dashboard/workspace` links exist
+  // in this nav; the canonical workspace page is `/dashboard/settings/workspace`.
   const rawSections: NavSection[] = [
     {
+      label: lang === 'ar' ? 'الرئيسية' : 'Home',
       items: [
         { href: '/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
+        { href: '/dashboard/setup', icon: 'setup', label: t('nav.setup') },
       ]
     },
     {
+      label: lang === 'ar' ? 'الربط' : 'Connections',
       items: [
         { href: '/dashboard/connect-store', icon: 'store', label: t('nav.connectZid') },
         { href: '/dashboard/connect-odoo', icon: 'database', label: t('nav.connectOdoo') },
+      ]
+    },
+    {
+      label: lang === 'ar' ? 'المزامنة' : 'Sync',
+      items: [
         { href: '/dashboard/mapping-center', icon: 'mapping', label: t('nav.fieldMapping') },
         { href: '/dashboard/mapping-center/orders', icon: 'order', label: t('nav.orderDashboard') },
         { href: '/dashboard/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
       ]
     },
     {
+      label: lang === 'ar' ? 'الدعم' : 'Support',
       items: [
         { href: '/dashboard/tickets', icon: 'ticket', label: t('nav.tickets') },
+      ]
+    },
+    {
+      label: lang === 'ar' ? 'الإعدادات' : 'Settings',
+      items: [
         { href: '/dashboard/settings', icon: 'settings', label: t('nav.settings') },
       ]
     },
@@ -160,23 +167,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
     }))
     .filter((section) => section.items.length > 0)
 
-  // Partner section: show in sidebar when partner is active
-  if (layoutInfo.appRole === 'partner' && layoutInfo.partnerStatus === 'active') {
-    navSections.push({
-      items: [
-        { href: `/partner/${layoutInfo.partnerId}`, icon: 'partner', label: t('nav.partnerDashboard') },
-      ],
-    })
-  }
-
   // Admin section: shown only to admin users
   if (layoutInfo.isAdmin) {
     navSections.push({
       items: [
-        { href: '/admin/partners', icon: 'admin', label: t('nav.adminPartners') },
-        { href: '/admin/clients', icon: 'users', label: lang === 'ar' ? 'روابط العملاء' : 'Client Links' },
-        { href: '/admin/commissions', icon: 'store', label: lang === 'ar' ? 'العمولات' : 'Commissions' },
-        { href: '/admin/payouts', icon: 'transfer', label: lang === 'ar' ? 'الصرف' : 'Payouts' },
+        { href: '/admin', icon: 'admin', label: lang === 'ar' ? 'الإحصائيات' : 'Stats' },
+        { href: '/admin/clients', icon: 'users', label: lang === 'ar' ? 'العملاء' : 'Clients' },
+        { href: '/admin/subscriptions', icon: 'card', label: lang === 'ar' ? 'الاشتراكات' : 'Subscriptions' },
       ],
     })
   }
@@ -211,7 +208,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         {/* ── Main Content ─────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto">
+          <MobileNav sections={navSections} dir={dir} />
           <div className="p-6 md:p-8 max-w-7xl mx-auto">
+            <SubscriptionBanner />
             {isPageRestricted ? (
               <div className="flex items-center justify-center h-full min-h-[60vh]">
                 <div className="text-center max-w-md">

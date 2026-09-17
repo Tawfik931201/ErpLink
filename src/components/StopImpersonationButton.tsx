@@ -1,9 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { stopImpersonation } from '@/app/actions/impersonate'
 import { ShieldAlert, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+
+import { stopImpersonation } from '@/app/actions/impersonate'
+
 
 export default function StopImpersonationButton() {
   const [loading, setLoading] = useState(false)

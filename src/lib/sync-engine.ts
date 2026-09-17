@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
+import { getSmartDefaultOrderState } from '@/lib/auto-bootstrap'
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
 import { notifySyncResult } from '@/lib/telegram-notifier'
@@ -458,8 +459,38 @@ export async function resolveSingleRelationId(
   }
 
   try {
+    // ─── Case 0: Resolve from previous sync_logs ───────────────────────────
+    if (platformId && workspaceId) {
+      try {
+        const { data: previousLog } = await supabaseAdmin
+          .from('sync_logs')
+          .select('odoo_record_id')
+          .eq('workspace_id', workspaceId)
+          .eq('zid_entity_id', String(platformId))
+          .eq('odoo_model', relation)
+          .eq('status', 'success')
+          .not('odoo_record_id', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (previousLog?.odoo_record_id) {
+          const idNum = Number(previousLog.odoo_record_id)
+          if (Number.isInteger(idNum) && idNum > 0) {
+            const exists = await client.search(relation, [['id', '=', idNum]], 1)
+            if (exists && exists.length > 0) {
+              console.info(`[SyncEngine] Case 0 (sync_logs): Resolved ${relation} #${idNum} for platform ID "${platformId}"`)
+              return idNum
+            }
+          }
+        }
+      } catch (logErr) {
+        console.warn(`[SyncEngine] sync_logs check failed for ${relation}:`, logErr)
+      }
+    }
+
     // Fetch target relation fields meta to verify field existence (avoiding Odoo RPC errors on non-existing columns)
-    const relationFields = await fetchFieldMeta(client, relation, ['x_zid_id', 'zid_id', 'x_salla_id', 'salla_id', 'x_shopify_id', 'shopify_id', 'name'])
+    const relationFields = await fetchFieldMeta(client, relation, ['name', 'x_zid_id', 'zid_id', 'x_salla_id', 'salla_id', 'x_shopify_id', 'shopify_id'])
 
     // â”€â”€â”€ Case 1: Search by Platform ID (Fixed Mapping check) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (platformId) {
@@ -506,14 +537,12 @@ export async function resolveSingleRelationId(
               .maybeSingle()
             if (stdRow?.settings) {
               const stdSettings = stdRow.settings as Record<string, any>
-              if (stdSettings.match_odoo_field && stdSettings.match_zid_field) {
-                const idLikeZidFields = ['id', 'uuid', 'category_id', 'product_id', 'customer_id', 'order_id', 'parent_id']
-                if (idLikeZidFields.includes(stdSettings.match_zid_field)) {
-                  const mfIds = await client.search(relation, [[stdSettings.match_odoo_field, '=', platformId]])
-                  if (mfIds && mfIds.length > 0) {
-                    console.info(`[SyncEngine] Case 1.5 (Match Field): Resolved ${relation} via ${stdSettings.match_odoo_field}="${platformId}" â†’ ID #${mfIds[0]}`)
-                    return mfIds[0]
-                  }
+              const odooMatchField = stdSettings.match_odoo_field
+              if (odooMatchField && (odooMatchField === 'id' || relationFields.has(odooMatchField))) {
+                const mfIds = await client.search(relation, [[odooMatchField, '=', platformId]])
+                if (mfIds && mfIds.length > 0) {
+                  console.info(`[SyncEngine] Case 1.5 (Match Field): Resolved ${relation} via ${odooMatchField}="${platformId}" â†’ ID #${mfIds[0]}`)
+                  return mfIds[0]
                 }
               }
             }
@@ -524,72 +553,85 @@ export async function resolveSingleRelationId(
       }
     }
 
-    // â”€â”€â”€ Case 2: Search by Name inside Odoo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined') {
+    // ─── Special Resolution for product.category (Parent Category) ─────────
+    if (relation === 'product.category' && platform === 'zid' && platformId && workspaceId) {
+      try {
+        const { data: tokenRow } = await supabaseAdmin
+          .from('merchant_tokens')
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .limit(1)
+          .maybeSingle()
+
+        if (tokenRow?.access_token && tokenRow?.authorization_token) {
+          const { ZidAPI } = await import('@/lib/zid-client')
+          const creds = {
+            authorization: tokenRow.authorization_token,
+            managerToken: tokenRow.access_token,
+            storeId: tokenRow.store_id || tokenRow.merchant_id,
+          }
+          const catRes = await ZidAPI.categories.get(creds, platformId)
+          const parentCat = (catRes.data as any)?.categories ?? (catRes.data as any)?.category ?? catRes.data
+          const catName = parentCat?.names?.ar || parentCat?.names?.en || parentCat?.name?.ar || parentCat?.name?.en || (typeof parentCat?.name === 'string' ? parentCat.name : null)
+          if (catName) {
+            console.info(`[SyncEngine] Fetched parent category "${catName}" from Zid for ID "${platformId}"`)
+            const found = await client.search('product.category', [['name', '=', catName]])
+            if (found && found.length > 0) {
+              try {
+                await supabaseAdmin.from('sync_logs').insert([{
+                  workspace_id: workspaceId,
+                  event: 'category.create',
+                  zid_entity_id: String(platformId),
+                  odoo_model: 'product.category',
+                  odoo_record_id: found[0],
+                  status: 'success',
+                  payload: parentCat,
+                }])
+              } catch {}
+              return found[0]
+            }
+            const createdParentId = await client.create('product.category', { name: catName })
+            if (createdParentId) {
+              console.info(`[SyncEngine] Created missing parent category "${catName}" in Odoo #${createdParentId}`)
+              try {
+                await supabaseAdmin.from('sync_logs').insert([{
+                  workspace_id: workspaceId,
+                  event: 'category.create',
+                  zid_entity_id: String(platformId),
+                  odoo_model: 'product.category',
+                  odoo_record_id: createdParentId,
+                  status: 'success',
+                  payload: parentCat,
+                }])
+              } catch {}
+              return createdParentId
+            }
+          } else {
+            console.warn(`[SyncEngine] Zid category API returned response without name for ID "${platformId}":`, catRes.data)
+          }
+        } else {
+          console.warn(`[SyncEngine] No merchant_token found for workspace "${workspaceId}" to resolve parent category`)
+        }
+      } catch (zidCatErr) {
+        console.warn(`[SyncEngine] Failed to resolve parent category from Zid for ID "${platformId}":`, zidCatErr)
+      }
+    }
+
+    const looksLikePlatformId = typeof nameVal === 'string' &&
+      (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameVal) ||
+       /^\d+$/.test(nameVal))
+
+    // â”€â”€â”€ Case 2: Search by Name inside Odoo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (nameVal && !looksLikePlatformId && nameVal !== '[object Object]' && nameVal !== 'undefined') {
       const ids = await client.search(relation, [['name', '=', nameVal]])
       if (ids && ids.length > 0) {
         console.info(`[SyncEngine] Case 2 (Name Match): Resolved ${relation} with name="${nameVal}" â†’ ID #${ids[0]}`)
-
-        // Proactive linking: if we found it by name and have a platform ID, let's link them!
-        if (platformId) {
-          let linkField: string | null = null
-          if (platform === 'zid') {
-            if (relationFields.has('x_zid_id')) linkField = 'x_zid_id'
-            else if (relationFields.has('zid_id')) linkField = 'zid_id'
-          } else if (platform === 'salla') {
-            if (relationFields.has('x_salla_id')) linkField = 'x_salla_id'
-            else if (relationFields.has('salla_id')) linkField = 'salla_id'
-          } else if (platform === 'shopify') {
-            if (relationFields.has('x_shopify_id')) linkField = 'x_shopify_id'
-            else if (relationFields.has('shopify_id')) linkField = 'shopify_id'
-          }
-
-          if (linkField) {
-            console.info(`[SyncEngine] Proactive Link: Linking existing ${relation}#${ids[0]} to platform ID "${platformId}"`)
-            await client.write(relation, [ids[0]], { [linkField]: platformId }).catch((err: any) => {
-              console.warn(`[SyncEngine] Proactive Link failed for ${relation}#${ids[0]}:`, err)
-            })
-          }
-        }
-
         return ids[0]
       }
     }
 
-    // â”€â”€â”€ Case 3: Create it if not found â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined') {
-      // Safety: do NOT auto-create a relation using a platform ID/Uuid-like
-      // string as the name. If we only have a platform id (no real human name)
-      // and no x_/zid field exists on the relation to link them, we have no
-      // way to verify identity â€” creating using a UUID/name would be wrong.
-      const looksLikePlatformId = typeof nameVal === 'string' &&
-        (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameVal) ||
-         /^\d+$/.test(nameVal))
-      const canLinkByPlatformId = Boolean(platformId) && (
-        (platform === 'zid'   && (relationFields.has('x_zid_id')   || relationFields.has('zid_id'))) ||
-        (platform === 'salla' && (relationFields.has('x_salla_id') || relationFields.has('salla_id'))) ||
-        (platform === 'shopify' && (relationFields.has('x_shopify_id') || relationFields.has('shopify_id')))
-      )
-      if (looksLikePlatformId && !canLinkByPlatformId) {
-        // Fallback: try to search by the platform-id field anyway. The field
-        // might exist even if fetchFieldMeta didn't find it (race, cache, or
-        // the field was just created). If the field truly doesn't exist, the
-        // Odoo RPC call will error and be caught by the outer try/catch.
-        const fallbackField = platform === 'zid' ? 'x_zid_id'
-          : platform === 'salla' ? 'x_salla_id'
-          : 'x_shopify_id'
-        try {
-          const fallbackIds = await client.search(relation, [[fallbackField, '=', platformId]])
-          if (fallbackIds && fallbackIds.length > 0) {
-            console.info(`[SyncEngine] Resolved ${relation} via fallback ${fallbackField}="${platformId}" â†’ ID #${fallbackIds[0]}`)
-            return fallbackIds[0]
-          }
-        } catch {
-          // Field doesn't exist â€” ignore and continue
-        }
-        console.warn(`[SyncEngine] Relation ${relation} has no platform-id field (x_*_id); cannot auto-resolve parent for "${nameVal}"`)
-        return null
-      }
+    // â”€â”€â”€ Case 3: Create it if not found â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (nameVal && !looksLikePlatformId && nameVal !== '[object Object]' && nameVal !== 'undefined') {
       console.info(`[SyncEngine] Case 3 (Creation): Record not found in "${relation}". Creating a new one with name="${nameVal}"`)
       
       const createData: Record<string, unknown> = {
@@ -1208,6 +1250,8 @@ const HARDCODED_FIELD_META: Record<string, { ttype: string; relation?: string }>
   // Custom / X fields (commonly used)
   x_zid_id: { ttype: 'char' },
   x_salla_id: { ttype: 'char' },
+  x_shopify_id: { ttype: 'char' },
+  shopify_id: { ttype: 'char' },
   x_store_id: { ttype: 'char' },
   x_cr_no: { ttype: 'char' },
   x_payment_method: { ttype: 'char' },
@@ -1231,6 +1275,23 @@ function derivePresetKey(event: string, platform: string): string | null {
   if (platform === 'shopify' || ev.includes('shopify')) {
     const m = ev.match(/shopify:(.+?)_(create|update)/)
     if (m) { model = m[1]; action = m[2] === 'create' ? 'create' : 'update' }
+    // Shopify slash topics (products/create, orders/paid, ...): حوّلها لنفس مفاتيح presets.
+    if (!model || !action) {
+      const slash = ev.match(/^(products|orders|customers|collections|carts|checkouts|inventory_levels|inventory_items|refunds)\/(.+)$/)
+      if (slash) {
+        const domain = slash[1]
+        const verb = slash[2]
+        if (domain === 'products') model = 'product'
+        else if (domain === 'orders') model = 'order'
+        else if (domain === 'customers') model = 'customer'
+        else if (domain === 'collections') model = 'category'
+        else model = domain
+        if (/(cancel|delete)/.test(verb)) action = verb.includes('cancel') ? 'cancel' : 'delete'
+        else if (/(fulfill|deliver|paid|partial)/.test(verb)) action = verb.includes('cancel') ? 'cancel' : (domain === 'orders' && /fulfill|partial/.test(verb) ? 'deliver' : 'update')
+        else if (/update|edit/.test(verb)) action = 'update'
+        else action = 'create'
+      }
+    }
   }
   if (!model || !action) {
     // Match both "<entity>.create" and "<entity>_create" (and the past-tense variants)
@@ -1344,7 +1405,9 @@ export async function applyFixedSettingsToValues(
   const inventoryCfg = settings.inventory
 
   if (!values.type) {
-    const defaultType = settings.product_type?.default_type
+    const defaultType = typeof settings.product_type === 'string'
+      ? settings.product_type
+      : settings.product_type?.default_type
 
     // Determine whether inventory should be tracked
     let wantsStorable: boolean
@@ -1672,7 +1735,7 @@ async function safeCreateOdooRecord(
   client: OdooClient,
   model: string,
   values: Record<string, unknown>,
-  fallbackValues: Record<string, unknown>,
+  _fallbackValues: Record<string, unknown>,
 ): Promise<number> {
   try {
     return await client.create(model, values)
@@ -1719,7 +1782,7 @@ async function safeWriteOdooRecord(
   model: string,
   id: number,
   values: Record<string, unknown>,
-  fallbackValues: Record<string, unknown>,
+  _fallbackValues: Record<string, unknown>,
 ): Promise<boolean> {
   try {
     await client.write(model, [id], values)
@@ -1796,7 +1859,7 @@ async function resolveOrderState(
   if (platform) query = query.eq('platform', platform)
   const { data } = await query.maybeSingle()
   if (data?.odoo_state) return data.odoo_state
-  return null
+  return getSmartDefaultOrderState(zidStatus, platform)
 }
 
 // â”€â”€â”€ Helper: extract fulfilled items from platform payload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2086,12 +2149,20 @@ export async function buildOdooValues(
       }
 
       const singleValue = Array.isArray(rawValue) ? rawValue[0] : rawValue
+
+      // If parent_id is empty or 0, it means it is a root category in Zid (no parent).
+      // In Odoo, setting parent_id to false clears the parent or keeps it empty.
+      if (item.erpField === 'parent_id' && (singleValue === null || singleValue === undefined || singleValue === '' || singleValue === 0 || singleValue === '0' || singleValue === 'null' || singleValue === 'None')) {
+        values[item.erpField] = false
+        continue
+      }
+
       const resolvedId = await resolveSingleRelationId(client, relation, singleValue, platform, undefined, undefined, workspaceId)
       if (resolvedId !== null) {
         values[item.erpField] = resolvedId
       } else {
         const nameStr = toNameString(singleValue)
-        console.warn(`[SyncEngine] Skipping "${item.erpField}" â€” could not resolve "${nameStr}" in ${relation}`)
+        console.warn(`[SyncEngine] Skipping "${item.erpField}" — could not resolve "${nameStr}" in ${relation}`)
       }
       continue
     }
@@ -2511,7 +2582,13 @@ export async function processWebhookEvent(
           }
         }
       } catch (err: any) {
-        console.warn(`[SyncEngine] Failed to fetch full Zid customer details for ID ${customerId}:`, err?.message ?? err)
+        const msg = err?.message ?? String(err)
+        const isTokenError = /401|403|unauthorized|token|expired|forbidden/i.test(msg)
+        if (isTokenError) {
+          console.error(`[SyncEngine] ⚠️ Zid token issue while fetching customer ${customerId} — sync will continue with minimal payload. Error: ${msg}`)
+        } else {
+          console.warn(`[SyncEngine] Failed to fetch full Zid customer details for ID ${customerId}:`, msg)
+        }
       }
     }
   }
@@ -2549,7 +2626,13 @@ export async function processWebhookEvent(
           }
         }
       } catch (err: any) {
-        console.warn(`[SyncEngine] Failed to fetch full Zid product details for ID ${productId}:`, err?.message ?? err)
+        const msg = err?.message ?? String(err)
+        const isTokenError = /401|403|unauthorized|token|expired|forbidden/i.test(msg)
+        if (isTokenError) {
+          console.error(`[SyncEngine] ⚠️ Zid token issue while fetching product ${productId} — sync will continue with minimal payload. Error: ${msg}`)
+        } else {
+          console.warn(`[SyncEngine] Failed to fetch full Zid product details for ID ${productId}:`, msg)
+        }
       }
     }
   }
@@ -2589,7 +2672,41 @@ export async function processWebhookEvent(
           }
         }
       } catch (err: any) {
-        console.warn(`[SyncEngine] Failed to fetch full Zid order details for ID ${orderId}:`, err?.message ?? err)
+        const msg = err?.message ?? String(err)
+        const isTokenError = /401|403|unauthorized|token|expired|forbidden/i.test(msg)
+        if (isTokenError) {
+          console.error(`[SyncEngine] ⚠️ Zid token issue while fetching order ${orderId} — sync will continue with minimal payload. Error: ${msg}`)
+        } else {
+          console.warn(`[SyncEngine] Failed to fetch full Zid order details for ID ${orderId}:`, msg)
+        }
+      }
+    }
+  }
+
+  // ── If Salla event, enrich thin payloads in the BACKGROUND ──
+  // (The Salla webhook route enqueues raw payloads only and returns 200
+  // immediately — Salla retries on timeout. Enrichment used to block the
+  // webhook response; it now happens here inside the queue worker.)
+  if (syncPlatform === 'salla') {
+    const keys = data && typeof data === 'object' ? Object.keys(data) : []
+    const entityId = (data as any)?.id
+    const isThin = entityId !== undefined && entityId !== null && keys.length <= 4
+    if (isThin) {
+      try {
+        const { getSallaOrder, getSallaCustomer, getSallaCategory } = await import('./salla-client')
+        if (normalizedEvent.startsWith('order.')) {
+          const full = await getSallaOrder(storeIdStr, String(entityId))
+          if (full) data = { ...full, ...data }
+        } else if (normalizedEvent.startsWith('customer.')) {
+          const full = await getSallaCustomer(storeIdStr, String(entityId))
+          if (full) data = { ...full, ...data }
+        } else if (normalizedEvent.startsWith('category.')) {
+          const full = await getSallaCategory(storeIdStr, String(entityId))
+          if (full) data = { ...full, ...data }
+        }
+        // product.* payloads are already full — no fetch needed.
+      } catch {
+        // Enrichment is best-effort — fall back to the raw payload.
       }
     }
   }
@@ -2846,20 +2963,17 @@ async function processFixedMappingFallback(
 
   const nonArchived = fieldPairs.filter((r: any) => r.odoo_field && r.platform_field && !r.archived)
   if (nonArchived.length === 0) {
-    // ——— Hardcoded fallback for known presets —————————————————————————————
+    // ——— Hardcoded fallback for known presets (Standard Odoo fields ONLY — NO custom x_* columns) ———
     const KNOWN_PRESET_FIELDS: Record<string, { odoo_field: string; platform_field: string }[]> = {
       'zid_category': [
-        { odoo_field: 'name', platform_field: 'name.ar' },
-        { odoo_field: 'parent_id', platform_field: 'parent_id' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'name', platform_field: 'names.ar || name.ar || name || names.en || name.en' },
+        { odoo_field: 'parent_id', platform_field: 'parent_id || parent.id || parent_category_id' },
       ],
       'salla_category': [
         { odoo_field: 'name', platform_field: 'name' },
-        { odoo_field: 'x_salla_id', platform_field: 'id' },
       ],
       'shopify_category': [
         { odoo_field: 'name', platform_field: 'title' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
       ],
       'zid_product_create': [
         { odoo_field: 'name', platform_field: 'name' },
@@ -2867,9 +2981,7 @@ async function processFixedMappingFallback(
         { odoo_field: 'barcode', platform_field: 'barcode' },
         { odoo_field: 'list_price', platform_field: 'price' },
         { odoo_field: 'standard_price', platform_field: 'cost' },
-        { odoo_field: 'description_sale', platform_field: 'description' },
-        { odoo_field: 'weight', platform_field: 'weight' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'weight', platform_field: 'weight.value' },
       ],
       'zid_product_update': [
         { odoo_field: 'name', platform_field: 'name' },
@@ -2877,93 +2989,130 @@ async function processFixedMappingFallback(
         { odoo_field: 'barcode', platform_field: 'barcode' },
         { odoo_field: 'list_price', platform_field: 'price' },
         { odoo_field: 'standard_price', platform_field: 'cost' },
-        { odoo_field: 'description_sale', platform_field: 'description' },
-        { odoo_field: 'weight', platform_field: 'weight' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'weight', platform_field: 'weight.value' },
       ],
       'zid_product_delete': [
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'default_code', platform_field: 'sku' },
+        { odoo_field: 'barcode', platform_field: 'barcode' },
+        { odoo_field: 'list_price', platform_field: 'price' },
+        { odoo_field: 'standard_price', platform_field: 'cost' },
+        { odoo_field: 'weight', platform_field: 'weight.value' },
+      ],
+      'salla_product_create': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'default_code', platform_field: 'sku' },
+        { odoo_field: 'barcode', platform_field: 'barcode' },
+        { odoo_field: 'list_price', platform_field: 'price.amount' },
+        { odoo_field: 'standard_price', platform_field: 'cost_price' },
+      ],
+      'salla_product_update': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'default_code', platform_field: 'sku' },
+        { odoo_field: 'barcode', platform_field: 'barcode' },
+        { odoo_field: 'list_price', platform_field: 'price.amount' },
+        { odoo_field: 'standard_price', platform_field: 'cost_price' },
+      ],
+      'salla_product_delete': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'default_code', platform_field: 'sku' },
+        { odoo_field: 'barcode', platform_field: 'barcode' },
+        { odoo_field: 'list_price', platform_field: 'price.amount' },
+        { odoo_field: 'standard_price', platform_field: 'cost_price' },
+      ],
+      'shopify_product_create': [
+        { odoo_field: 'name', platform_field: 'title' },
+        { odoo_field: 'default_code', platform_field: 'variants[0].sku' },
+        { odoo_field: 'barcode', platform_field: 'variants[0].barcode' },
+        { odoo_field: 'list_price', platform_field: 'variants[0].price' },
+      ],
+      'shopify_product_update': [
+        { odoo_field: 'name', platform_field: 'title' },
+        { odoo_field: 'default_code', platform_field: 'variants[0].sku' },
+        { odoo_field: 'barcode', platform_field: 'variants[0].barcode' },
+        { odoo_field: 'list_price', platform_field: 'variants[0].price' },
+      ],
+      'shopify_product_delete': [
+        { odoo_field: 'name', platform_field: 'title' },
+        { odoo_field: 'default_code', platform_field: 'variants[0].sku' },
+        { odoo_field: 'barcode', platform_field: 'variants[0].barcode' },
+        { odoo_field: 'list_price', platform_field: 'variants[0].price' },
       ],
       'zid_customer_create': [
         { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'email', platform_field: 'email' },
         { odoo_field: 'mobile', platform_field: 'mobile' },
         { odoo_field: 'phone', platform_field: 'telephone' },
-        { odoo_field: 'vat', platform_field: 'tax_number' },
-        { odoo_field: 'company_name', platform_field: 'business_name' },
-        { odoo_field: 'company_registry', platform_field: 'commercial_registration' },
-        { odoo_field: 'street', platform_field: 'default_address.address_street || addresses.0.address_street' },
-        { odoo_field: 'street2', platform_field: 'default_address.address_district || addresses.0.address_district' },
-        { odoo_field: 'city', platform_field: 'default_address.city.ar_name || addresses.0.city.ar_name || city.ar_name' },
-        { odoo_field: 'country_id', platform_field: 'default_address.country.ar_name || addresses.0.country.ar_name' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
       ],
       'zid_customer_update': [
         { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'email', platform_field: 'email' },
         { odoo_field: 'mobile', platform_field: 'mobile' },
         { odoo_field: 'phone', platform_field: 'telephone' },
-        { odoo_field: 'vat', platform_field: 'tax_number' },
-        { odoo_field: 'company_name', platform_field: 'business_name' },
-        { odoo_field: 'company_registry', platform_field: 'commercial_registration' },
-        { odoo_field: 'street', platform_field: 'default_address.address_street || addresses.0.address_street' },
-        { odoo_field: 'street2', platform_field: 'default_address.address_district || addresses.0.address_district' },
-        { odoo_field: 'city', platform_field: 'default_address.city.ar_name || addresses.0.city.ar_name || city.ar_name' },
-        { odoo_field: 'country_id', platform_field: 'default_address.country.ar_name || addresses.0.country.ar_name' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+      ],
+      'zid_customer_delete': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'email', platform_field: 'email' },
+        { odoo_field: 'mobile', platform_field: 'mobile' },
+        { odoo_field: 'phone', platform_field: 'telephone' },
       ],
       'salla_customer_create': [
         { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'email', platform_field: 'email' },
         { odoo_field: 'mobile', platform_field: 'mobile' },
-        { odoo_field: 'x_salla_id', platform_field: 'id' },
+      ],
+      'salla_customer_update': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'email', platform_field: 'email' },
+        { odoo_field: 'mobile', platform_field: 'mobile' },
+      ],
+      'salla_customer_delete': [
+        { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'email', platform_field: 'email' },
+        { odoo_field: 'mobile', platform_field: 'mobile' },
       ],
       'shopify_customer_create': [
         { odoo_field: 'name', platform_field: 'first_name' },
         { odoo_field: 'email', platform_field: 'email' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'phone', platform_field: 'phone' },
+      ],
+      'shopify_customer_update': [
+        { odoo_field: 'name', platform_field: 'first_name' },
+        { odoo_field: 'email', platform_field: 'email' },
+        { odoo_field: 'phone', platform_field: 'phone' },
+      ],
+      'shopify_customer_delete': [
+        { odoo_field: 'name', platform_field: 'first_name' },
+        { odoo_field: 'email', platform_field: 'email' },
+        { odoo_field: 'phone', platform_field: 'phone' },
       ],
       'zid_order_create': [
         { odoo_field: 'name', platform_field: 'code' },
-        { odoo_field: 'amount_total', platform_field: 'order_total' },
-        { odoo_field: 'date_order', platform_field: 'created_at' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+        { odoo_field: 'date_order', platform_field: 'order_date' },
       ],
       'salla_order_create': [
         { odoo_field: 'name', platform_field: 'reference_id' },
-        { odoo_field: 'amount_total', platform_field: 'total' },
-        { odoo_field: 'date_order', platform_field: 'created_at.date' },
-        { odoo_field: 'x_salla_id', platform_field: 'id' },
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+        { odoo_field: 'date_order', platform_field: 'date.date' },
       ],
       'shopify_order_create': [
         { odoo_field: 'name', platform_field: 'name' },
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
         { odoo_field: 'amount_total', platform_field: 'total_price' },
         { odoo_field: 'date_order', platform_field: 'created_at' },
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
       ],
-      'zid_order_cancel': [
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
-      ],
-      'zid_order_deliver': [
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
-      ],
-      'salla_order_cancel': [
-        { odoo_field: 'x_salla_id', platform_field: 'id' },
-      ],
-      'salla_order_deliver': [
-        { odoo_field: 'x_salla_id', platform_field: 'id' },
-      ],
-      'shopify_order_cancel': [
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
-      ],
-      'shopify_order_deliver': [
-        { odoo_field: 'x_zid_id', platform_field: 'id' },
-      ],
+      'zid_order_cancel': [],
+      'zid_order_deliver': [],
+      'salla_order_cancel': [],
+      'salla_order_deliver': [],
+      'shopify_order_cancel': [],
+      'shopify_order_deliver': [],
     }
     const fallbackRows = KNOWN_PRESET_FIELDS[presetKey]
     if (fallbackRows) {
       fieldPairs.push(...fallbackRows)
-      console.info(`[FixedMapping] Using hardcoded fallback fields for preset "${presetKey}"`)
+      console.info(`[FixedMapping] Using standard fallback fields for preset "${presetKey}"`)
     } else {
       console.info(`[FixedMapping] Preset "${presetKey}" has no mapped fields`)
       return null
@@ -3075,7 +3224,7 @@ async function processFixedMappingFallback(
   // Build Odoo values
   // Preserve Shopify as 'shopify' so relation lookups search x_shopify_id correctly.
   const syncPlatform: 'zid' | 'salla' | 'shopify' = platform
-  let odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, syncPlatform, workspaceId)
+  const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, syncPlatform, workspaceId)
 
   if (Object.keys(odooValues).length === 0 && odooOperation !== 'delete') {
     console.warn(`[FixedMapping] No values extracted for preset="${presetKey}"`)
@@ -3105,7 +3254,7 @@ async function processFixedMappingFallback(
       mapping: virtualMapping,
       event,
       storeId: storeIdStr,
-      zidEntityId: String(zidData.id ?? zidData.product_id ?? ''),
+      zidEntityId: String(zidData.id ?? zidData.category_id ?? zidData.product_id ?? zidData.customer_id ?? zidData.order_id ?? ''),
       zidData,
       odooModel,
       odooOperation,
@@ -3371,7 +3520,7 @@ export async function processSingleMapping(
   }
 
   // ——— 2. Use mapping field pairs ——————————————————————————————————————————
-  let mappingItems: FieldMappingItem[] = mapping.mappings?.[odooModel] ?? []
+  const mappingItems: FieldMappingItem[] = mapping.mappings?.[odooModel] ?? []
 
   if (mappingItems.length === 0 && odooOperation !== 'delete') {
     console.warn(`[SyncEngine] No field items configured for model "${odooModel}"`)
@@ -3463,6 +3612,39 @@ export async function processSingleMapping(
   }
 }
 
+/**
+ * Persist the store-side unique ID (x_zid_id / x_salla_id / x_shopify_id, with
+ * the legacy zid_id/salla_id/shopify_id fallback) on a freshly created Odoo record.
+ * This gives future webhooks a stable match key independent of sync_logs or SKU.
+ */
+async function persistPlatformIdOnRecord(
+  client: OdooClient,
+  model: string,
+  recordId: number,
+  platform: 'zid' | 'salla' | 'shopify',
+  idValue: string
+) {
+  if (!idValue) return
+  const platformIdField = platform === 'salla' ? 'x_salla_id'
+    : platform === 'shopify' ? 'x_shopify_id'
+    : 'x_zid_id'
+  const legacyIdField = platform === 'salla' ? 'salla_id'
+    : platform === 'shopify' ? 'shopify_id'
+    : 'zid_id'
+  try {
+    const meta = await fetchFieldMeta(client, model, [platformIdField, legacyIdField])
+    if (meta.has(platformIdField)) {
+      await client.write(model, [recordId], { [platformIdField]: idValue })
+      console.info(`[SyncEngine] ✅ Stored ${platformIdField}="${idValue}" on ${model} #${recordId}`)
+    } else if (meta.has(legacyIdField)) {
+      await client.write(model, [recordId], { [legacyIdField]: idValue })
+      console.info(`[SyncEngine] ✅ Stored ${legacyIdField}="${idValue}" on ${model} #${recordId}`)
+    }
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Failed to persist ${platformIdField} on ${model} #${recordId}:`, err?.message || err)
+  }
+}
+
 async function syncAsSeparateProducts(
   client: OdooClient,
   mapping: FieldMappingRow,
@@ -3496,6 +3678,9 @@ async function syncAsSeparateProducts(
   } else {
     console.info(`[SyncEngine] ➕ جاري إنشاء المنتج الرئيسي "${mainProductName}" في أودو...`)
     mainRecordId = await client.create('product.template', odooValues)
+    if (zidData.id) {
+      await persistPlatformIdOnRecord(client, 'product.template', mainRecordId, platform, String(zidData.id))
+    }
   }
   results.push(mainRecordId)
 
@@ -3509,7 +3694,7 @@ async function syncAsSeparateProducts(
     const variantOdooValues: Record<string, any> = {
       ...odooValues,
       name: variantName,
-      default_code: variant.sku || odooValues.default_code,
+      default_code: variant.sku || undefined,
     }
 
     if (variant.barcode) {
@@ -3562,12 +3747,31 @@ async function syncAsSeparateProducts(
     } else {
       console.info(`[SyncEngine] ➕ جاري إنشاء متغير كمنتج منفصل "${variantName}" في أودو...`)
       recordId = await client.create('product.template', variantOdooValues)
+      if (variant.id) {
+        await persistPlatformIdOnRecord(client, 'product.template', recordId, platform, String(variant.id))
+      }
     }
 
     // Trigger stock/inventory update if quantity is provided
     if (variant.quantity !== undefined) {
       await updateOdooStock(client, recordId, variant.quantity, defaultLocationId, infiniteValue).catch(err => {
         console.warn(`[SyncEngine] Failed to update stock for standalone variant #${recordId}:`, err)
+      })
+    }
+
+    if (variant.id) {
+      await logSync({
+        workspace_id: mapping.workspace_id,
+        field_mapping_id: mapping.id,
+        event,
+        store_id: storeId,
+        zid_entity_id: String(variant.id),
+        odoo_model: 'product.template',
+        odoo_record_id: recordId,
+        status: 'success',
+        error_message: null,
+        payload: { ...zidData, variant: variantMockData },
+        trigger_type: triggerType
       })
     }
 
@@ -3632,6 +3836,9 @@ async function syncAsVariants(
   } else {
     console.info(`[SyncEngine] ➕ جاري إنشاء المنتج الرئيسي في أودو...`)
     templateId = await client.create('product.template', odooValues)
+    if (zidData.id) {
+      await persistPlatformIdOnRecord(client, 'product.template', templateId, platform, String(zidData.id))
+    }
   }
 
   if (mergedSettings) {
@@ -3783,7 +3990,6 @@ async function syncAsVariants(
   const varZidField = (mapping as any).variant_zid_match_field || settings.variantZidMatchField || ''
 
   // Step 6: Variant Update (Update matching product.product records)
-  const basePrice = parseFloat(String(odooValues.list_price || zidData.price || '0')) || 0
   let updatedCount = 0
   for (const variant of variants) {
     let matchingOdooVar = null
@@ -3876,6 +4082,36 @@ async function syncAsVariants(
       updatedCount++
     } else {
       console.warn(`[SyncEngine] No matching Odoo variant found for attributes:`, JSON.stringify(variant.attributes))
+      try {
+        const createVariantPayload: Record<string, any> = {
+          product_tmpl_id: templateId,
+          name: `${toNameString(zidData.name || odooValues.name)} - ${Object.values(variant.attributes).join(' / ')}`,
+          default_code: variant.sku || undefined,
+        }
+        if (variant.barcode) {
+          createVariantPayload.barcode = variant.barcode
+        }
+        if (variant.price > 0) {
+          createVariantPayload.list_price = variant.price
+        }
+        if (variant.cost !== undefined && variant.cost > 0) {
+          createVariantPayload.standard_price = variant.cost
+        }
+        if (variant.weight !== undefined && variant.weight > 0) {
+          createVariantPayload.weight = variant.weight
+        }
+        if (variant.description) {
+          createVariantPayload.description_sale = variant.description
+        }
+        const createdVarId = await client.create('product.product', createVariantPayload)
+        console.info(`[SyncEngine] Created missing Odoo variant product.product #${createdVarId} under template #${templateId}`)
+        if (variant.quantity !== undefined) {
+          await updateOdooStock(client, createdVarId, variant.quantity, defaultLocationId, infiniteValue).catch(() => {})
+        }
+        updatedCount++
+      } catch (createErr: any) {
+        console.warn(`[SyncEngine] Failed to create missing Odoo variant for ${JSON.stringify(variant.attributes)}: ${createErr?.message ?? createErr}`)
+      }
     }
   }
 
@@ -3977,8 +4213,6 @@ async function syncChildVariantAsVariant(
 
   const templateId = parentIds[0]
   console.info(`[SyncEngine] Found parent product template ID: #${templateId} in Odoo.`)
-  const templateRead = await client.read<any>('product.template', [templateId], ['list_price']).catch(() => [])
-  const basePrice = templateRead.length > 0 ? (templateRead[0].list_price || 0) : 0
 
   const rawAttrs = zidData.attributes || zidData.features || zidData.option_values || []
   const attributes: Record<string, string> = {}
@@ -4046,6 +4280,20 @@ async function syncChildVariantAsVariant(
         attribute_id: attrId,
         value_ids: [[6, 0, [desiredValId]]]
       })
+    }
+  }
+
+  const allLineIds = await client.search('product.template.attribute.line', [
+    ['product_tmpl_id', '=', templateId]
+  ], 1000)
+  if (allLineIds.length > 0) {
+    try {
+      await client.write('product.template', [templateId], {
+        attribute_line_ids: [[6, 0, allLineIds]]
+      })
+      console.info(`[SyncEngine] Wrote attribute_line_ids [[6,0,[${allLineIds.join(',')}]]] to template #${templateId} to trigger variant generation.`)
+    } catch (err: any) {
+      console.warn(`[SyncEngine] Failed to trigger variant generation via write (non-critical): ${err?.message ?? err}`)
     }
   }
 
@@ -4220,8 +4468,85 @@ async function syncChildVariantAsVariant(
       message: successMsg
     }
   } else {
-    const errorMsg = `Could not match variant with attributes: ${JSON.stringify(attributes)}`
-    console.warn(`[SyncEngine] âš ï¸  ${errorMsg}`)
+    const createVariantPayload: Record<string, any> = {
+      product_tmpl_id: templateId,
+      name: toNameString(zidData.name) || `Variant #${zidEntityId}`,
+      default_code: zidData.sku || undefined,
+    }
+    if (zidData.barcode) {
+      createVariantPayload.barcode = zidData.barcode
+    }
+    const createCostVal = parseFloat(String(zidData.cost || zidData.cost_price || '0')) || 0
+    const createRawWeight = zidData.weight
+    let createWeightVal = 0
+    if (typeof createRawWeight === 'object' && createRawWeight !== null) {
+      createWeightVal = parseFloat((createRawWeight as any).value || (createRawWeight as any).weight || '0') || 0
+    } else {
+      createWeightVal = parseFloat(String(createRawWeight || '0')) || 0
+    }
+    const createDescVal = toNameString(zidData.description || zidData.short_description || '')
+    const createPriceVal = parseFloat(String(zidData.price || zidData.sale_price || '0'))
+    if (createPriceVal > 0) {
+      createVariantPayload.list_price = createPriceVal
+    }
+    if (createCostVal > 0) {
+      createVariantPayload.standard_price = createCostVal
+    }
+    if (createWeightVal > 0) {
+      createVariantPayload.weight = createWeightVal
+    }
+    if (createDescVal) {
+      createVariantPayload.description_sale = createDescVal
+    }
+    const createVariantImgUrl = (zidData as any).image?.src || (zidData as any).main_image || (zidData as any).image_url
+      || (Array.isArray((zidData as any).images) ? (zidData as any).images[0]?.url : null) || ''
+    if (createVariantImgUrl) {
+      const imgBase64 = await resolveBinaryField(createVariantImgUrl).catch(() => null)
+      if (imgBase64) createVariantPayload.image_variant_1920 = imgBase64
+    }
+
+    let createdVarId: number | null = null
+    try {
+      createdVarId = await client.create('product.product', createVariantPayload)
+      console.info(`[SyncEngine] Created missing Odoo variant product.product #${createdVarId} under parent template #${templateId}`)
+      const createQtyVal = zidData.quantity !== undefined ? Number(zidData.quantity)
+        : (zidData.stock_quantity !== undefined ? Number(zidData.stock_quantity)
+        : (zidData.qty !== undefined ? Number(zidData.qty) : undefined))
+      if (createQtyVal !== undefined && !isNaN(createQtyVal)) {
+        await updateOdooStock(client, createdVarId, createQtyVal, defaultLocationId, infiniteValue).catch(() => {})
+      }
+    } catch (createErr: any) {
+      console.warn(`[SyncEngine] Failed to create missing child Odoo variant: ${createErr?.message ?? createErr}`)
+    }
+
+    if (createdVarId !== null) {
+      const successMsg = `Created missing child variant product.product #${createdVarId} under parent template #${templateId}.`
+      console.info(`[SyncEngine] ✅ ${successMsg}`)
+      await logSync({
+        id: existingLogId,
+        workspace_id: mapping.workspace_id,
+        field_mapping_id: mapping.id,
+        event,
+        store_id: storeId,
+        zid_entity_id: zidEntityId,
+        odoo_model: 'product.product',
+        odoo_record_id: createdVarId,
+        status: 'success',
+        payload: zidData,
+        trigger_type: triggerType
+      })
+      return {
+        mappingId: mapping.id,
+        mappingName: mapping.name,
+        model: 'product.product',
+        status: 'success',
+        odooRecordId: createdVarId,
+        message: successMsg
+      }
+    }
+
+    const errorMsg = `Could not match or create Odoo variant for ${zidEntityId}: ${JSON.stringify(attributes)}`
+    console.warn(`[SyncEngine] ${errorMsg}`)
     await logSync({
       id: existingLogId,
       workspace_id: mapping.workspace_id,
@@ -4230,7 +4555,7 @@ async function syncChildVariantAsVariant(
       store_id: storeId,
       zid_entity_id: zidEntityId,
       odoo_model: 'product.product',
-      status: 'failed',
+      status: 'skipped',
       error_message: errorMsg,
       payload: zidData,
       trigger_type: triggerType
@@ -4239,7 +4564,7 @@ async function syncChildVariantAsVariant(
       mappingId: mapping.id,
       mappingName: mapping.name,
       model: 'product.product',
-      status: 'failed',
+      status: 'skipped',
       message: errorMsg
     }
   }
@@ -4349,7 +4674,7 @@ async function executeOdooOperation(params: {
           }
         }
         if (Object.keys(override).length > 0) {
-          ms = { ...override, ...ms }
+          ms = { ...ms, ...override }
           mergedSettings = ms
           if (entityType !== 'products') {
             console.info(`[SyncEngine] Merged standard_mapping_settings for ${storeType}/${entityType}:`, override)
@@ -4463,6 +4788,34 @@ async function executeOdooOperation(params: {
         pSettings,
         fixedMatch
       )
+    }
+
+    if (isChild && variantSyncMode === 'AS_SEPARATE_PRODUCTS') {
+      // Zid child products (structure='child') are already included in the parent's
+      // variants array, which syncAsSeparateProducts handles as standalone templates.
+      // Processing the child event through the generic path would create a duplicate template.
+      const childSkipMsg = `Skipping Zid child product (ID: ${zidEntityId}, Parent: ${String(zidData.parent_id || (zidData.parent as any)?.id)}): variants are synced as separate products via the parent's variants array.`
+      console.info(`[SyncEngine] ${childSkipMsg}`)
+      await logSync({
+        id: existingLogId,
+        workspace_id: mapping.workspace_id,
+        field_mapping_id: mapping.id,
+        event,
+        store_id: storeId,
+        zid_entity_id: zidEntityId,
+        odoo_model: 'product.template',
+        status: 'skipped',
+        error_message: childSkipMsg,
+        payload: zidData,
+        trigger_type: triggerType
+      })
+      return {
+        mappingId: mapping.id,
+        mappingName: mapping.name,
+        model: 'product.template',
+        status: 'skipped',
+        message: childSkipMsg
+      }
     }
 
     const variants = extractGenericVariants(zidData, platform)
@@ -4867,6 +5220,18 @@ async function executeOdooOperation(params: {
       })
     }
 
+    // Persist a stable platform ID (x_zid_id/x_salla_id/x_shopify_id) on the new record
+    // so future webhooks can re-match it without relying on sync_logs or SKU.
+    if ((odooModel === 'product.template' || odooModel === 'res.partner')) {
+      const platformIdFields = execPlatform === 'salla' ? ['x_salla_id', 'salla_id']
+        : execPlatform === 'shopify' ? ['x_shopify_id', 'shopify_id']
+        : ['x_zid_id', 'zid_id']
+      const alreadyStored = platformIdFields.some(f => effectiveOdooValues[f] !== undefined || odooValues[f] !== undefined)
+      if (!alreadyStored) {
+        await persistPlatformIdOnRecord(client, odooModel, newId, execPlatform, String(zidData.id || zidEntityId))
+      }
+    }
+
     // Auto-confirm: convert draft/sent order to a confirmed sales order (action_confirm)
     const autoConfirm = (mergedSettings as any)?.order?.auto_confirm
     if (odooModel === 'sale.order' && autoConfirm) {
@@ -4902,11 +5267,23 @@ async function executeOdooOperation(params: {
   }
 
   let existingId: number | null = null
+  let deleteModel = odooModel
   if (odooModel === 'product.category' && (mergedSettings as any)?.odoo_category_id) {
     existingId = Number((mergedSettings as any).odoo_category_id)
     console.info(`[SyncEngine] Using manual category mapping Odoo ID for update: ${existingId}`)
   } else {
-    existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+    // Zid child product delete: search product.product (not template) since variants are product.product records
+    if (odooOperation === 'delete' && odooModel === 'product.template' && (zidData.parent_id || (zidData.parent as any)?.id)) {
+      const childId = await findExistingOdooRecord(client, 'product.product', zidData, odooValues, mapping, matchStrategy, fixedMatch)
+      if (childId !== null) {
+        existingId = childId
+        deleteModel = 'product.product'
+        console.info(`[SyncEngine] Resolved child product delete to product.product #${childId}`)
+      }
+    }
+    if (existingId === null) {
+      existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+    }
   }
   if (existingId === null) {
     const msg = `No matching ${odooModel} record found in Odoo for ${odooOperation}`
@@ -4929,16 +5306,16 @@ async function executeOdooOperation(params: {
   }
 
   // odooOperation is 'delete' here
-  // Priority: FixedMappingSettings.delete.strategy > DynamicMapping __settings.deleteBehavior > 'delete'
+  // Priority: FixedMappingSettings.delete.strategy > DynamicMapping __settings.deleteBehavior > 'try_delete_archive'
   const deleteStrategy = (mergedSettings as any)?.delete?.strategy
     || (mapping.mappings as any)?.__settings?.deleteBehavior
-    || 'delete'
+    || 'try_delete_archive'
   
   // Skip strategy: gracefully skip deletion without error
   if (deleteStrategy === 'skip') {
-    console.info(`[SyncEngine] Skip delete for ${odooModel} #${existingId} (strategy=skip)`)
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'skipped', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', odooRecordId: existingId }
+    console.info(`[SyncEngine] Skip delete for ${deleteModel} #${existingId} (strategy=skip)`)
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: deleteModel, odoo_record_id: existingId, status: 'skipped', payload: zidData, trigger_type: triggerType })
+    return { mappingId: mapping.id, mappingName: mapping.name, model: deleteModel, status: 'skipped', odooRecordId: existingId }
   }
 
   const behaviorArray: string[] = deleteStrategy === 'archive'
@@ -4953,24 +5330,24 @@ async function executeOdooOperation(params: {
   let deleteError: any = null
 
   if (behaviorArray.includes('delete')) {
-    console.info(`[SyncEngine] Attempting to delete Odoo record ${odooModel} #${existingId}...`)
+    console.info(`[SyncEngine] Attempting to delete Odoo record ${deleteModel} #${existingId}...`)
     try {
-      const ok = await client.unlink(odooModel, [existingId])
+      const ok = await client.unlink(deleteModel, [existingId])
       if (ok) {
         deleteSucceeded = true
-        console.info(`[SyncEngine] âœ… Deleted ${odooModel} #${existingId} from Odoo (zid_id="${zidEntityId}")`)
+        console.info(`[SyncEngine] ✅ Deleted ${deleteModel} #${existingId} from Odoo (zid_id="${zidEntityId}")`)
       } else {
-        deleteError = new Error(`Odoo unlink returned false for ${odooModel} #${existingId}`)
+        deleteError = new Error(`Odoo unlink returned false for ${deleteModel} #${existingId}`)
       }
     } catch (err: any) {
       deleteError = err
-      console.warn(`[SyncEngine] Delete failed for Odoo ${odooModel} #${existingId}:`, err?.message || err)
+      console.warn(`[SyncEngine] Delete failed for Odoo ${deleteModel} #${existingId}:`, err?.message || err)
     }
   }
 
   if (deleteSucceeded) {
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: existingId }
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: deleteModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
+    return { mappingId: mapping.id, mappingName: mapping.name, model: deleteModel, status: 'success', odooRecordId: existingId }
   }
 
   // Fallbacks: If we didn't try to delete or delete failed, check archive and run_map
@@ -4991,31 +5368,31 @@ async function executeOdooOperation(params: {
   if (behaviorArray.includes('archive')) {
     console.info(`[SyncEngine] Executing archive strategy for Odoo ${odooModel} #${existingId}...`)
     try {
-      if (odooModel === 'product.category') {
+      if (deleteModel === 'product.category') {
         // product.category in standard Odoo has NO 'active' field.
         // First try to delete (unlink). If unlink fails (e.g. products belong to category),
         // update the category name to prefix with "[Archived] ".
         let ok = false
         try {
-          ok = await client.unlink(odooModel, [existingId])
-          if (ok) console.info(`[SyncEngine] ✅ Deleted ${odooModel} #${existingId} from Odoo`)
+          ok = await client.unlink(deleteModel, [existingId])
+          if (ok) console.info(`[SyncEngine] ✅ Deleted ${deleteModel} #${existingId} from Odoo`)
         } catch (unlinkErr) {
-          console.info(`[SyncEngine] Unlink for ${odooModel} #${existingId} failed (products may be linked), fallback to rename:`, unlinkErr)
+          console.info(`[SyncEngine] Unlink for ${deleteModel} #${existingId} failed (products may be linked), fallback to rename:`, unlinkErr)
         }
 
         if (!ok) {
-          const recs = await client.searchRead<any>(odooModel, [['id', '=', existingId]], ['name'])
+          const recs = await client.searchRead<any>(deleteModel, [['id', '=', existingId]], ['name'])
           const currentName = recs?.[0]?.name || ''
           const archivedName = currentName.startsWith('[Archived]') || currentName.startsWith('[ملغي]')
             ? currentName
             : `[Archived] ${currentName}`
-          ok = await client.write(odooModel, [existingId], { name: archivedName })
-          if (ok) console.info(`[SyncEngine] ✅ Archived ${odooModel} #${existingId} by renaming to "${archivedName}"`)
+          ok = await client.write(deleteModel, [existingId], { name: archivedName })
+          if (ok) console.info(`[SyncEngine] ✅ Archived ${deleteModel} #${existingId} by renaming to "${archivedName}"`)
         }
         if (!ok) throw new Error(`Failed to archive or rename product.category #${existingId}`)
         fallbacksExecuted.push('archive')
       } else {
-        const ok = await client.write(odooModel, [existingId], { active: false })
+        const ok = await client.write(deleteModel, [existingId], { active: false })
         if (!ok) throw new Error(`Odoo write (active: false) returned false`)
         fallbacksExecuted.push('archive')
 
@@ -5034,15 +5411,15 @@ async function executeOdooOperation(params: {
         }
       }
 
-      console.info(`[SyncEngine] ✅ Archive executed successfully for Odoo ${odooModel} #${existingId}`)
+      console.info(`[SyncEngine] ✅ Archive executed successfully for Odoo ${deleteModel} #${existingId}`)
     } catch (err: any) {
-      console.error(`[SyncEngine] Archive failed for Odoo ${odooModel} #${existingId}:`, err?.message || err)
+      console.error(`[SyncEngine] Archive failed for Odoo ${deleteModel} #${existingId}:`, err?.message || err)
     }
   }
 
   if (fallbacksExecuted.length > 0) {
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: existingId }
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: deleteModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
+    return { mappingId: mapping.id, mappingName: mapping.name, model: deleteModel, status: 'success', odooRecordId: existingId }
   }
 
   // If we attempted to delete and failed, and no fallbacks were run/successful, throw the delete error
@@ -5070,7 +5447,41 @@ export async function findExistingOdooRecord(
   // Build candidates â€” highest priority first
   const candidates: unknown[][] = []
 
-  // 1) FixedMatch from FixedMappingSettings (user-configured Odoo field â†” Zid field pair)
+  // 0) Priority check: If this entity was already synced, check sync_logs first.
+  // This matches previously synced records accurately with ZERO reliance on custom Odoo columns.
+  if (zidId) {
+    try {
+      const { data: previousLog } = await supabaseAdmin
+        .from('sync_logs')
+        .select('odoo_record_id')
+        .eq('zid_entity_id', zidId)
+        .eq('odoo_model', model)
+        .eq('status', 'success')
+        .not('odoo_record_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (previousLog?.odoo_record_id) {
+        const idNum = Number(previousLog.odoo_record_id)
+        if (Number.isInteger(idNum) && idNum > 0) {
+          try {
+            const exists = await client.search(model, [['id', '=', idNum]], 1)
+            if (exists.length > 0) {
+              console.info(`[SyncEngine] Resolved ${model} #${idNum} from sync_logs for zid_entity_id="${zidId}"`)
+              return idNum
+            }
+          } catch {
+            // Record might have been deleted in Odoo, continue with other candidates
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] Early sync_logs lookup failed:', err)
+    }
+  }
+
+  // 1) FixedMatch from FixedMappingSettings (user-configured Odoo field ↔ Zid field pair)
   if (fixedMatch?.odoo_field && fixedMatch?.zid_field) {
     const rawVal = resolveZidMatchValue(zidData, fixedMatch.zid_field)
     if (rawVal !== undefined && rawVal !== null && rawVal !== '') {
@@ -5109,18 +5520,26 @@ export async function findExistingOdooRecord(
     }
   }
 
-  // 4) Fallback candidates â€” only tried when no explicit match strategy is configured,
+  // 4) Fallback candidates — only tried when no explicit match strategy is configured,
   //    OR when the fallback field matches the configured strategy.
   //    This prevents finding a wrong record via an unrelated field.
   if (Number.isInteger(numericId) && numericId > 0) candidates.push(['id', '=', numericId])
-  if (zidId && (!matchStrategy || matchStrategy === 'x_zid_id')) {
+  if (zidId) {
     if (odooValues.x_zid_id !== undefined) candidates.push(['x_zid_id', '=', zidId])
     if (odooValues.zid_id !== undefined) candidates.push(['zid_id', '=', zidId])
   }
   if (sku && (!matchStrategy || matchStrategy === 'sku')) candidates.push(['default_code', '=', sku])
   if (barcode && (!matchStrategy || matchStrategy === 'barcode')) candidates.push(['barcode', '=', barcode])
 
-  // product.category has no x_zid_id/custom field by default â€” always include name match
+  // product.template and product.product: name fallback
+  if (model === 'product.template' || model === 'product.product') {
+    const name = toNameString(zidData.name || odooValues.name)
+    if (name && !candidates.some(c => c[0] === 'name')) {
+      candidates.push(['name', '=', name])
+    }
+  }
+
+  // product.category has no custom fields by default — match on name or complete_name
   if (model === 'product.category') {
     const name = toNameString(zidData.name || odooValues.name)
     if (name && !candidates.some(c => c[0] === 'name')) {
@@ -5129,9 +5548,6 @@ export async function findExistingOdooRecord(
       if (!candidates.some(c => c[0] === 'complete_name')) {
         candidates.push(['complete_name', 'ilike', name])
       }
-    }
-    if (zidId && !candidates.some(c => c[0] === 'x_zid_id_categ')) {
-      candidates.push(['x_zid_id_categ', '=', zidId])
     }
   }
 
@@ -5159,12 +5575,19 @@ export async function findExistingOdooRecord(
     }
   }
 
-  // Filter candidates to only include valid fields (if checkedFieldMeta successfully returned some fields)
+  // Filter candidates to only include valid fields:
+  // - Always allow 'id'
+  // - If checkedFieldMeta has records, verify presence
+  // - If a field starts with 'x_' (custom studio field), NEVER query it unless explicitly confirmed by checkedFieldMeta
   const validCandidates = candidates.filter(domain => {
     const fieldName = domain[0] as string
     if (fieldName === 'id') return true
     if (checkedFieldMeta.size > 0 && !checkedFieldMeta.has(fieldName)) {
-      console.info(`[SyncEngine] Skipping candidate search for invalid field "${fieldName}" on ${model}`)
+      console.info(`[SyncEngine] Skipping candidate search for missing field "${fieldName}" on ${model}`)
+      return false
+    }
+    if (fieldName.startsWith('x_') && !checkedFieldMeta.has(fieldName)) {
+      console.info(`[SyncEngine] Skipping candidate search for unverified custom field "${fieldName}" on ${model}`)
       return false
     }
     return true
@@ -5180,34 +5603,6 @@ export async function findExistingOdooRecord(
       }
     } catch (err) {
       console.warn(`[SyncEngine] Duplicate check failed for ${model} with domain ${JSON.stringify(domain)}:`, err)
-    }
-  }
-
-  // 5) Fallback lookup in sync_logs: if direct search candidates didn't match
-  // (e.g., category delete payload lacks name & x_zid_id field doesn't exist in Odoo),
-  // check sync_logs for a previously synced odoo_record_id for this zid_entity_id.
-  if (zidId) {
-    try {
-      const { data: previousLog } = await supabaseAdmin
-        .from('sync_logs')
-        .select('odoo_record_id')
-        .eq('zid_entity_id', zidId)
-        .eq('odoo_model', model)
-        .eq('status', 'success')
-        .not('odoo_record_id', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (previousLog?.odoo_record_id) {
-        const idNum = Number(previousLog.odoo_record_id)
-        if (Number.isInteger(idNum) && idNum > 0) {
-          console.info(`[SyncEngine] Resolved ${model} #${idNum} from previous sync_logs for zid_entity_id="${zidId}"`)
-          return idNum
-        }
-      }
-    } catch (err) {
-      console.warn('[SyncEngine] sync_logs lookup failed:', err)
     }
   }
 

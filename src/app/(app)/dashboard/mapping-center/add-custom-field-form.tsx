@@ -1,14 +1,12 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Trash2, Check, Loader2, AlertTriangle, ChevronDown,
   Info, Wand2, X, RefreshCw, Database, ArrowRight, Calendar, Edit
 } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { useLanguage } from '@/components/language-provider'
+import React, { useState, useEffect, useCallback } from 'react'
+
 import {
   createCustomOdooField,
   getCustomOdooFields,
@@ -24,9 +22,14 @@ import {
   deleteCustomErpNextField,
   updateCustomErpNextField,
 } from '@/app/actions/custom-fields-erpnext'
-import { sanitizeTechnicalName, sanitizeTechnicalNameErpNext } from '@/lib/field-utils'
-import SearchableSelect from './searchable-select'
 import { getOdooGroups } from '@/app/actions/odoo'
+import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
+import { sanitizeTechnicalName, sanitizeTechnicalNameErpNext } from '@/lib/field-utils'
+import { cn } from '@/lib/utils'
+
+import SearchableSelect from './searchable-select'
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,12 +68,6 @@ const FIELD_TYPES = [
   { value: 'many2one',  label: 'Many2one (many2one)',   descAr: 'ارتباط بسجل',       descEn: 'Link to record' },
   { value: 'selection', label: 'Selection (selection)', descAr: 'قائمة اختيارات',    descEn: 'Dropdown list' },
   { value: 'monetary',  label: 'Monetary (monetary)',   descAr: 'قيمة نقدية',        descEn: 'Currency amount' },
-]
-
-const VIEW_OPTIONS: { value: CustomFieldView; labelAr: string; labelEn: string }[] = [
-  { value: 'list', labelAr: 'قائمة', labelEn: 'List' },
-  { value: 'form', labelAr: 'نموذج', labelEn: 'Form' },
-  { value: 'both', labelAr: 'الاثنين', labelEn: 'Both' },
 ]
 
 const TYPE_COLORS: Record<string, string> = {

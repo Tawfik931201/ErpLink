@@ -1,18 +1,18 @@
 'use server'
 
 import { auth } from '@clerk/nextjs/server'
+import axios from 'axios'
 import { revalidatePath } from 'next/cache'
 
+import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
+import { decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
+import { getSallaAccessToken } from '@/lib/salla-client'
+import { SHOPIFY_API_VERSION, getShopifyAccessToken } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser } from '@/lib/users'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
-import { getSallaAccessToken } from '@/lib/salla-client'
-import { getShopifyAccessToken } from '@/lib/shopify-client'
-import axios from 'axios'
-import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
-import { OdooClient } from '@/lib/odoo-client'
-import { decrypt } from '@/lib/crypto'
 
 export interface CategoryMappingRow {
   id: string
@@ -271,11 +271,12 @@ export async function fetchStoreCategories(platform: string = 'zid') {
       if (!shopifyTok) throw new Error('Shopify store not connected')
 
       const token = await getShopifyAccessToken(shopifyTok.shop_domain)
+      // API version from shared constant (was hardcoded 2024-01 → now 2025-07 via SHOPIFY_API_VERSION).
       const [customRes, smartRes] = await Promise.all([
-        axios.get(`https://${shopifyTok.shop_domain}/admin/api/2024-01/custom_collections.json`, {
+        axios.get(`https://${shopifyTok.shop_domain}/admin/api/${SHOPIFY_API_VERSION}/custom_collections.json`, {
           headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
         }),
-        axios.get(`https://${shopifyTok.shop_domain}/admin/api/2024-01/smart_collections.json`, {
+        axios.get(`https://${shopifyTok.shop_domain}/admin/api/${SHOPIFY_API_VERSION}/smart_collections.json`, {
           headers: { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' },
         }),
       ])

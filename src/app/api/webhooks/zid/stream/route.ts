@@ -1,10 +1,10 @@
 /**
- * GET /api/webhooks/zid/stream
+ * GET /api/webhooks/zid/stream — بث SSE خفيف لمتابعة الويب هوك من المتصفح.
  *
- * Server-Sent Events (SSE) endpoint.
- * The browser connects here and keeps the connection open.
- * Whenever the webhook handler receives a Zid event, it emits it through
- * the shared webhookEmitter — which this handler forwards to the client.
+ * يبث الخادم فقط الأحداث المفعّلة (route الأساسي لا يبث المعطّل أصلاً).
+ * فلترة اختيارية من العميل لتقليل الحركة:
+ *   /api/webhooks/zid/stream?store_id=123&event=product.created
+ * يمكن تكرار event= عدة مرات. بدون فلاتر تُبث كل الأحداث المفعّلة.
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
@@ -16,6 +16,8 @@ export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   const encoder = new TextEncoder()
+  const filterStore = req.nextUrl.searchParams.get('store_id') ?? req.nextUrl.searchParams.get('storeId')
+  const filterEvents = new Set(req.nextUrl.searchParams.getAll('event').filter(Boolean))
 
   const stream = new ReadableStream({
     start(controller) {
@@ -32,9 +34,11 @@ export async function GET(req: NextRequest) {
         }
       }, 20_000)
 
-      // Listen for Zid webhook events
+      // Listen for webhook events (filtered server-side — SSE خفيف)
       const onEvent = (payload: WebhookEventPayload) => {
         try {
+          if (filterStore && String(payload.store_id) !== filterStore) return
+          if (filterEvents.size > 0 && !filterEvents.has(payload.event)) return
           const msg = `data: ${JSON.stringify(payload)}\n\n`
           controller.enqueue(encoder.encode(msg))
         } catch {

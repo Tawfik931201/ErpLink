@@ -1,40 +1,23 @@
 /**
- * GET /api/auth/zid/authorize
+ * GET /api/auth/zid/authorize — مسار قديم (DEPRECATED).
  *
- * Initiates the Zid OAuth 2.0 flow.
- * Redirects the merchant to https://oauth.zid.sa to grant consent.
- *
- * Zid App Registration details:
- *   Client ID       : 6784
- *   OAuth Base      : https://oauth.zid.sa
- *   Redirect URI    : https://pseudolegendary-conchological-ngan.ngrok-free.dev/api/auth/zid/callback
- *
- * Query params:
- *   - organizationId : the organization connecting Zid (from our DB)
+ * Canonical: GET /api/zid/connect — كل منطق OAuth يعيش هناك (state + كوكي
+ * CSRF بصيغة موحدة). هذا الملف مجرد shim يعيد التوجيه مع الحفاظ على
+ * ?organizationId= — لا تبنِ OAuth URL هنا حتى لا ينشأ state mismatch.
  */
-import crypto from 'crypto'
-
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { buildZidOAuthUrl } from '@/lib/zid-client'
+import { getActiveUserId } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-  // TEMPORARY: Bypass authentication to allow testing the Zid integration directly.
-  // const session = await getServerSession(authOptions)
-  // if (!session?.user?.id) {
-  //   return NextResponse.redirect(new URL('/auth/login', req.url))
-  // }
+  const userId = await getActiveUserId()
+  if (!userId) {
+    return NextResponse.redirect(new URL('/sign-in', req.url))
+  }
 
-  const organizationId = req.nextUrl.searchParams.get('organizationId') || 'default'
+  const organizationId = req.nextUrl.searchParams.get('organizationId')?.trim()
+  const target = new URL('/api/zid/connect', req.url)
+  if (organizationId) target.searchParams.set('organizationId', organizationId)
 
-  // CSRF state token — format: "<orgId>:<random_hex>"
-  const state = `${organizationId}:${crypto.randomBytes(16).toString('hex')}`
-
-  const authorizeUrl = buildZidOAuthUrl({
-    clientId: process.env.ZID_CLIENT_ID || process.env.NEXT_PUBLIC_ZID_CLIENT_ID!,   // 6784
-    redirectUri: process.env.ZID_OAUTH_REDIRECT_URI!,   // https://pseudolegendary-conchological-ngan.ngrok-free.dev/api/auth/zid/callback
-    state,
-  })
-
-  return NextResponse.redirect(authorizeUrl)
+  return NextResponse.redirect(target, 307)
 }

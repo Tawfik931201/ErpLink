@@ -1,13 +1,5 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import CreateTicketForm from '@/components/CreateTicketForm'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { useLanguage } from '@/components/language-provider'
-import { cn } from '@/lib/utils'
 import { 
   Ticket as TicketIcon, 
   Plus, 
@@ -16,8 +8,6 @@ import {
   Search, 
   Calendar, 
   Tag, 
-  Clock, 
-  RefreshCw, 
   AlertCircle, 
   HelpCircle,
   MessageSquare,
@@ -30,7 +20,17 @@ import {
   X,
   CheckCircle2
 } from 'lucide-react'
-import { Ticket, OdooMessage, OdooAttachment, getTicketMessages, sendTicketMessage, closeTicket } from '@/app/actions/tickets'
+import { useState, useEffect } from 'react'
+
+import type { Ticket, OdooMessage, OdooAttachment} from '@/app/actions/tickets';
+import { getTicketMessages, sendTicketMessage, closeTicket } from '@/app/actions/tickets'
+import CreateTicketForm from '@/components/CreateTicketForm'
+import { useLanguage } from '@/components/language-provider'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 interface TicketsClientProps {
   initialTickets: Ticket[]

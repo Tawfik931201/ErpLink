@@ -206,6 +206,10 @@ export const SALLA_EVENTS = [
   { id: 'app.settings.updated',       name: 'App Settings Updated (تحديث إعدادات التطبيق)', targetModel: 'res.company', group: 'App Events (أحداث التطبيق)' },
 ]
 
+// NOTE (Shopify topic unification): SHOPIFY_EVENTS keys must stay in sync with
+// src/lib/shopify-topics.ts (SHOPIFY_TOPIC_CATALOG) + shopify.app.toml +
+// shopify-sync-settings.tsx. Admin API version is SHOPIFY_API_VERSION (2025-07)
+// — do not hardcode older versions (e.g. 2024-01) in API calls.
 export const SHOPIFY_EVENTS = [
   // Products
   { id: 'products/create', name: 'Product Created (إنشاء منتج)', targetModel: 'product.template', group: 'Products (المنتجات)' },

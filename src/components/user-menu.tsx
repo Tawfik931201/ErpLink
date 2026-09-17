@@ -1,9 +1,6 @@
 'use client'
 
-import React, { useState, useRef, useEffect } from 'react'
 import { useClerk, useUser } from '@clerk/nextjs'
-import { useTheme } from 'next-themes'
-import { useLanguage } from '@/components/language-provider'
 import { 
   User, 
   Globe, 
@@ -16,9 +13,13 @@ import {
   Check,
   Loader2
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useTheme } from 'next-themes'
+import React, { useState, useRef, useEffect } from 'react'
+
 import { updateUserSettings } from '@/app/actions/settings'
 import { getWorkspaces, setActiveWorkspace } from '@/app/actions/workspaces'
+import { useLanguage } from '@/components/language-provider'
+import { cn } from '@/lib/utils'
 
 export default function UserMenu({ 
   displayName, 

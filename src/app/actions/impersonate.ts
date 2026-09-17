@@ -1,9 +1,10 @@
 'use server'
 
-import { cookies } from 'next/headers'
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { auth } from '@clerk/nextjs/server'
+import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+
 import { isAdmin } from '@/lib/auth'
 
 /**

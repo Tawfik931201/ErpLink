@@ -1,13 +1,14 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
-import { getActiveUserId } from '@/lib/auth'
+import crypto from 'crypto'
+
 import { revalidatePath } from 'next/cache'
-import { supabase } from '@/lib/supabase'
-import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
+
+import { getActiveUserId } from '@/lib/auth'
 import { decrypt } from '@/lib/crypto'
 import { registerOdooWebhook, unregisterOdooWebhook } from '@/lib/odoo-webhook'
-import crypto from 'crypto'
+import { supabase } from '@/lib/supabase'
+import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
 async function getOrCreateDbUser() {
   console.log('[getFieldMappings/saveFieldMapping] Calling Clerk auth()...')

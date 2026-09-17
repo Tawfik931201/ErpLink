@@ -1,6 +1,7 @@
-import React from 'react'
 import { cookies } from 'next/headers'
-import { Language } from '@/lib/translations'
+import React from 'react'
+
+import type { Language } from '@/lib/translations'
 
 export default function Loading() {
   const cookieStore = cookies()

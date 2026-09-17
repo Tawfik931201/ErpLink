@@ -1,9 +1,7 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
 import {
   Play,
-  RotateCcw,
   Plus,
   Trash2,
   X,
@@ -14,30 +12,28 @@ import {
   AlertCircle,
   History,
   Info,
-  Layers,
   ArrowRightLeft,
-  ChevronRight,
-  Database,
-  Calendar,
   AlertTriangle,
   Clock
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import SearchableSelect from '../mapping-center/searchable-select'
+import React, { useState, useEffect, useRef } from 'react'
+
 import { getOdooModelFields, getOdooFieldValueOptions } from '@/app/actions/odoo'
 import { startInitialTransfer, getTransfers } from '@/app/actions/transfers'
 import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
 import { formatFieldLabel } from '@/lib/translations'
+
+import SearchableSelect from '../mapping-center/searchable-select'
+
+import type { ConnectedStore } from './page'
 
 interface TransferClientProps {
   initialModels: Array<{ model: string; name: string }>
   hasOdooConnection: boolean
-  preloadedModel: string
   preloadedFields: any[]
+  connectedStores: ConnectedStore[]
 }
-
-const EMPTY_SELECT_OPTION = { value: '', label: 'فارغ (Clear)' }
 
 const ZID_CATEGORY_FIELDS = [
   { value: 'id', label: 'Category ID (id)', type: 'number' },
@@ -78,6 +74,57 @@ const ZID_CUSTOMER_FIELDS = [
   { value: 'is_active', label: 'Is Active (is_active)', type: 'boolean' },
 ]
 
+const SALLA_CATEGORY_FIELDS = [
+  { value: 'id', label: 'Category ID (id)', type: 'number' },
+  { value: 'name', label: 'Category Name (name)', type: 'string' },
+  { value: 'slug', label: 'Slug (slug)', type: 'string' },
+  { value: 'parent_id', label: 'Parent Category ID (parent_id)', type: 'number' },
+  { value: 'is_published', label: 'Is Published (is_published)', type: 'boolean' },
+]
+
+const SALLA_PRODUCT_FIELDS = [
+  { value: 'id', label: 'Product ID (id)', type: 'number' },
+  { value: 'sku', label: 'SKU (sku)', type: 'string' },
+  { value: 'name', label: 'Product Name (name)', type: 'string' },
+  { value: 'price', label: 'Price (price)', type: 'number' },
+  { value: 'quantity', label: 'Stock Quantity (quantity)', type: 'number' },
+  { value: 'barcode', label: 'Barcode (barcode)', type: 'string' },
+]
+
+const SALLA_CUSTOMER_FIELDS = [
+  { value: 'id', label: 'Customer ID (id)', type: 'number' },
+  { value: 'name', label: 'Full Name (name)', type: 'string' },
+  { value: 'email', label: 'Email (email)', type: 'string' },
+  { value: 'phone', label: 'Phone (phone)', type: 'string' },
+  { value: 'gender', label: 'Gender (gender)', type: 'string' },
+]
+
+const SHOPIFY_COLLECTION_FIELDS = [
+  { value: 'id', label: 'Collection ID (id)', type: 'number' },
+  { value: 'title', label: 'Title (title)', type: 'string' },
+  { value: 'handle', label: 'Handle (handle)', type: 'string' },
+  { value: 'body_html', label: 'Description (body_html)', type: 'string' },
+]
+
+const SHOPIFY_PRODUCT_FIELDS = [
+  { value: 'id', label: 'Product ID (id)', type: 'number' },
+  { value: 'title', label: 'Title (title)', type: 'string' },
+  { value: 'variants.0.sku', label: 'SKU (variants.0.sku)', type: 'string' },
+  { value: 'variants.0.price', label: 'Price (variants.0.price)', type: 'number' },
+  { value: 'variants.0.barcode', label: 'Barcode (variants.0.barcode)', type: 'string' },
+  { value: 'variants.0.inventory_quantity', label: 'Stock Qty (variants.0.inventory_quantity)', type: 'number' },
+  { value: 'body_html', label: 'Description (body_html)', type: 'string' },
+]
+
+const SHOPIFY_CUSTOMER_FIELDS = [
+  { value: 'id', label: 'Customer ID (id)', type: 'number' },
+  { value: 'name', label: 'Full Name (name)', type: 'string' },
+  { value: 'email', label: 'Email (email)', type: 'string' },
+  { value: 'phone', label: 'Phone (phone)', type: 'string' },
+  { value: 'orders_count', label: 'Orders Count (orders_count)', type: 'number' },
+  { value: 'total_spent', label: 'Total Spent (total_spent)', type: 'number' },
+]
+
 const MOCK_ODOO_CATEGORY_FIELDS = [
   { value: 'name', label: 'Name (الاسم)', type: 'char' },
   { value: 'parent_id', label: 'Parent Category (التصنيف الأب)', type: 'many2one', relation: 'product.category' },
@@ -113,14 +160,18 @@ type MappingLine = {
 export default function TransferClient({
   initialModels,
   hasOdooConnection,
-  preloadedModel,
-  preloadedFields
+  preloadedFields,
+  connectedStores
 }: TransferClientProps) {
   const { t, lang, dir } = useLanguage()
 
+  // Platform state — auto-select if only one store connected
+  const defaultPlatform = connectedStores.length === 1 ? connectedStores[0].platform : (connectedStores.find(s => s.platform === 'zid')?.platform || 'zid')
+  const [platform, setPlatform] = useState<'zid' | 'salla' | 'shopify'>(defaultPlatform)
+
   // Basic Settings State
   const [transferName, setTransferName] = useState(lang === 'ar' ? 'عملية نقل أولية' : 'Initial Transfer')
-  const [directionState, setDirectionState] = useState<'zid_to_odoo' | 'odoo_to_zid'>('zid_to_odoo')
+  const [directionState, setDirectionState] = useState<'store_to_odoo' | 'odoo_to_store'>('store_to_odoo')
   const [dataType, setDataType] = useState<'categories' | 'products' | 'customers'>('categories')
   const [odooModel, setOdooModel] = useState('product.category')
 
@@ -132,7 +183,7 @@ export default function TransferClient({
 
   // Fields and Loading State
   const [odooFields, setOdooFields] = useState<any[]>(preloadedFields || [])
-  const [isLoadingFields, setIsLoadingFields] = useState(false)
+  const [, setIsLoadingFields] = useState(false)
   const [staticOptions, setStaticOptions] = useState<Record<string, any[]>>({})
   const [isLoadingStaticOptions, setIsLoadingStaticOptions] = useState<Record<string, boolean>>({})
 
@@ -346,12 +397,25 @@ export default function TransferClient({
     }
   }, [dataType])
 
-  // Get active fields for Zid depending on selected datatype
-  const currentZidFields = dataType === 'categories'
-    ? ZID_CATEGORY_FIELDS
-    : dataType === 'products'
-      ? ZID_PRODUCT_FIELDS
-      : ZID_CUSTOMER_FIELDS
+  // Get active fields depending on selected platform and datatype
+  const currentStoreFields = (() => {
+    if (platform === 'salla') {
+      if (dataType === 'categories') return SALLA_CATEGORY_FIELDS
+      if (dataType === 'products') return SALLA_PRODUCT_FIELDS
+      return SALLA_CUSTOMER_FIELDS
+    }
+    if (platform === 'shopify') {
+      if (dataType === 'categories') return SHOPIFY_COLLECTION_FIELDS
+      if (dataType === 'products') return SHOPIFY_PRODUCT_FIELDS
+      return SHOPIFY_CUSTOMER_FIELDS
+    }
+    // Zid (default)
+    if (dataType === 'categories') return ZID_CATEGORY_FIELDS
+    if (dataType === 'products') return ZID_PRODUCT_FIELDS
+    return ZID_CUSTOMER_FIELDS
+  })()
+
+  const platformLabel = platform === 'zid' ? 'Zid' : platform === 'salla' ? 'Salla' : 'Shopify'
 
 
 
@@ -504,6 +568,7 @@ export default function TransferClient({
         name: transferName,
         dataType: dataType as any,
         direction: directionState as any,
+        platform,
         odooModel,
         mappings: payloadMappings
       })
@@ -581,8 +646,8 @@ export default function TransferClient({
         </h1>
         <p className="mt-1 text-muted-foreground text-[11px] leading-relaxed">
           {lang === 'ar' 
-            ? 'استيراد وتحديث البيانات الموجودة مسبقاً في متجر زد إلى نظام أودو لأول مرة مباشرة عبر الـ APIs وبدون الحاجة لانتظار Webhooks.' 
-            : 'Import and update existing data from Zid store to Odoo ERP for the first time directly via APIs without waiting for webhooks.'}
+            ? `استيراد وتحديث البيانات الموجودة مسبقاً في متجر ${platformLabel} إلى نظام أودو لأول مرة مباشرة عبر الـ APIs وبدون الحاجة لانتظار Webhooks.` 
+            : `Import and update existing data from ${platformLabel} store to Odoo ERP for the first time directly via APIs without waiting for webhooks.`}
         </p>
       </div>
 
@@ -594,6 +659,24 @@ export default function TransferClient({
         </h3>
 
         <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 text-xs">
+          {/* Platform Selector */}
+          {connectedStores.length > 1 && (
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                {lang === 'ar' ? 'المنصة' : 'Platform'}
+              </label>
+              <SearchableSelect
+                value={platform}
+                onChange={(val) => setPlatform(val as any)}
+                options={connectedStores.map(s => ({
+                  value: s.platform,
+                  label: `${s.platform === 'zid' ? 'Zid' : s.platform === 'salla' ? 'Salla' : 'Shopify'} — ${s.label}`
+                }))}
+                placeholder={lang === 'ar' ? 'اختر المنصة...' : 'Select platform...'}
+              />
+            </div>
+          )}
+
           {/* Transfer Name Input */}
           <div className="space-y-1.5">
             <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -617,10 +700,9 @@ export default function TransferClient({
               value={directionState}
               onChange={(val) => setDirectionState(val as any)}
               options={[
-                { value: 'zid_to_odoo', label: lang === 'ar' ? 'زد ➔ أودو (الافتراضي)' : 'Zid ➔ Odoo (Default)' },
-                { value: 'odoo_to_zid', label: lang === 'ar' ? 'أودو ➔ زد (قريباً)' : 'Odoo ➔ Zid (Soon)', desc: lang === 'ar' ? 'مغلق مؤقتاً لتحديثات مستقبلية' : 'Temporarily locked for future updates' }
+                { value: 'store_to_odoo', label: `${platformLabel} ➔ Odoo` },
+                { value: 'odoo_to_store', label: `Odoo ➔ ${platformLabel}` }
               ]}
-              disabled={true}
               placeholder={lang === 'ar' ? 'اختر اتجاه النقل...' : 'Select sync direction...'}
             />
           </div>
@@ -689,7 +771,7 @@ export default function TransferClient({
             <thead>
               <tr className="bg-muted/50 text-[10px] uppercase font-bold text-muted-foreground border-b border-border">
                 <th className="py-2.5 px-4 font-bold text-start">{lang === 'ar' ? 'حقل أودو ERP' : 'Odoo ERP Field'}</th>
-                <th className="py-2.5 px-4 font-bold text-start">{lang === 'ar' ? 'حقل زد' : 'Zid Field'}</th>
+                <th className="py-2.5 px-4 font-bold text-start">{lang === 'ar' ? `حقل ${platformLabel}` : `${platformLabel} Field`}</th>
                 <th className="py-2.5 px-4 font-bold text-start">{t('map.staticValue')}</th>
                 <th className="py-2.5 px-4 w-12 text-right"></th>
               </tr>
@@ -720,7 +802,7 @@ export default function TransferClient({
                         onChange={(val) => handleFieldChange(line.id, 'zidField', val)}
                         options={[
                           { value: '', label: t('map.clear') },
-                          ...currentZidFields.map(opt => ({
+                          ...currentStoreFields.map(opt => ({
                             ...opt,
                             label: formatFieldLabel(opt.label, lang)
                           }))
@@ -892,7 +974,7 @@ export default function TransferClient({
                               : (lang === 'ar' ? 'العملاء' : 'Customers')}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-muted-foreground font-mono text-[10px] text-start">{item.direction === 'zid_to_odoo' ? 'Zid → Odoo' : 'Odoo → Zid'}</td>
+                      <td className="py-3 px-4 text-muted-foreground font-mono text-[10px] text-start">{item.direction === 'store_to_odoo' || item.direction === 'zid_to_odoo' ? 'Store → Odoo' : 'Odoo → Store'}</td>
                       <td className="py-3 px-4 text-start">
                         <div className="flex flex-col gap-0.5">
                           <span className="text-muted-foreground font-medium">{date}</span>

@@ -1,0 +1,30 @@
+# spec-kit — lightweight config (no project re-init)
+# Source: https://github.com/github/spec-kit
+# This project uses only the documentation structure of spec-kit
+# (.specify/ + specs/); no spec-kit CLI scaffolding was applied
+# so the existing Next.js project stays untouched.
+
+project: erplink
+description: "SaaS platform linking Odoo ERP with Zid / Salla / Shopify stores"
+
+languages:
+  - ar
+  - en
+default_language: ar
+
+integrations:
+  - claude
+  - copilot
+  - opencode
+
+paths:
+  constitution: ".specify/memory/constitution.md"
+  architecture: ".specify/memory/architecture.md"
+  specs: "specs/"
+  prompts: ".github/prompts/"
+
+conventions:
+  # SQL migrations are the DB source of truth, Prisma is tracking-only
+  db_source_of_truth: "supabase/migrations/"
+  # Docs-only change: markdown/yml must never break `npm run type-check`
+  safe_change: "md-and-yml-only"

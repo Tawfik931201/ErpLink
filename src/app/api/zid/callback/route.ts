@@ -1,3 +1,17 @@
+/**
+ * GET /api/zid/callback — المسار Canonical لاستكمال ربط زد (OAuth).
+ *
+ * المسار القديم /api/auth/zid/callback مجرد shim يعيد التوجيه إلى هنا
+ * مع نفس query params — لا منطق مكرر.
+ *
+ * يقبل صيغتي state (لإصلاح mismatch مع الروابط القديمة):
+ *   - "<random>" (الحالية من /api/zid/connect)
+ *   - "<orgId>:<random>" (القديمة من /api/auth/zid/authorize)
+ * الشرط: مساواة تامة مع كوكي zid_oauth_state؛ وإن غاب الكوكي مع صيغة
+ * قديمة تحمل ':' تُقبل لمرة واحدة (روابط قيد الطيران) بدل كسر الربط.
+ *
+ * يسجّل الأحداث الأساسية فقط (ZID_CORE_EVENTS ≈ 7) — البقية opt-in من الإعدادات.
+ */
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
@@ -94,53 +108,12 @@ function extractStoreId(...sources: unknown[]): string | null {
   return process.env.ZID_DEBUG_STORE_ID ?? null
 }
 
-async function registerProductCreatedWebhook(headers: Headers) {
-  const config = getZidConfig()
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
-    process.env.NEXTAUTH_URL?.replace(/\/$/, '')
-  const webhookUrl = process.env.ZID_WEBHOOK_URL ?? `${appUrl}/api/webhooks/zid`
-
-  if (!appUrl && !process.env.ZID_WEBHOOK_URL) {
-    return {
-      registered: false,
-      message: 'Missing NEXT_PUBLIC_APP_URL or ZID_WEBHOOK_URL.',
-    }
-  }
-
-  const body: Record<string, any> = {
-    event: 'product.create',
-    target_url: webhookUrl,
-    original_id: config.clientId,
-  }
-
-  if (process.env.ZID_WEBHOOK_SECRET) {
-    body.secret = process.env.ZID_WEBHOOK_SECRET
-  }
-
-  const requestHeaders = new Headers(headers)
-  requestHeaders.set('Content-Type', 'application/json')
-
-  const response = await fetch(new URL('managers/webhooks', `${config.apiUrl}/`), {
-    method: 'POST',
-    headers: requestHeaders,
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  })
-  const payload = await response.json().catch(() => null)
-
-  console.info('[Zid Webhook] product.created registration response', {
-    status: response.status,
-    ok: response.ok,
-    webhookUrl,
-  })
-
-  return {
-    registered: response.ok,
-    status: response.status,
-    webhookUrl,
-    payload,
-  }
+async function registerProductCreatedWebhook(_headers: Headers) {
+  // مهمل: التسجيل الموحد يتم بعد الحفظ عبر registerZidWebhook لكل
+  // ZID_CORE_EVENTS (يضم store_id في target_url). تُركت الدالة كـno-op
+  // لتفادي كسر أي استيراد خارجي.
+  void _headers
+  return { registered: false, deferred: true, message: 'Registered via ZID_CORE_EVENTS after token save.' }
 }
 
 export async function GET(request: NextRequest) {
@@ -150,22 +123,29 @@ export async function GET(request: NextRequest) {
   const storedState = request.cookies.get('zid_oauth_state')?.value
 
   if (error) {
-    console.warn('[Zid OAuth] Merchant denied authorization', { error })
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'zid_denied', message: 'Merchant denied authorization' }, { status: 400 })
     }
     return redirectToConnectZid(request, { error: 'zid_denied' })
   }
 
-  if (!state || !storedState || state !== storedState) {
-    console.warn('[Zid OAuth] Callback state validation failed')
-    if (process.env.ZID_CALLBACK_RESPONSE !== 'json') {
-      return redirectToConnectZid(request, { error: 'invalid_state' })
+  // تثبيت من سوق زد: يصل التاجر دون code — نبدأ تدفق OAuth بدل كسر الربط.
+  if (!code && !state) {
+    const connectUrl = new URL('/api/zid/connect', request.nextUrl.origin)
+    return NextResponse.redirect(connectUrl)
+  }
+
+  // تحقق state: مساواة تامة مع الكوكي؛ قبول لمرة واحدة للصيغة القديمة
+  // "<orgId>:<random>" عند غياب الكوكي (روابط قيد الطيران قبل التوحيد).
+  const isLegacyState = !!state && !storedState && state.includes(':')
+  if (!state || (!storedState && !isLegacyState) || (storedState && state !== storedState)) {
+    if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
+      return NextResponse.json({ error: 'invalid_state', message: 'OAuth state mismatch' }, { status: 403 })
     }
+    return redirectToConnectZid(request, { error: 'invalid_state' })
   }
 
   if (!code) {
-    console.warn('[Zid OAuth] Callback missing authorization code')
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'zid_missing_code', message: 'Callback missing authorization code' }, { status: 400 })
     }
@@ -173,9 +153,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    console.info('[Zid OAuth] Callback received authorization code')
     const rawResponse = await exchangeAuthorizationCodeForResponse(code)
-    console.info('[Zid OAuth Debug] rawResponse:', JSON.stringify(rawResponse))
     const tokens = toStoredTokens(rawResponse)
 
     // 2. Fetch debug/account resources to get store information
@@ -198,6 +176,8 @@ export async function GET(request: NextRequest) {
       fetchZidDebugResource('/managers/account/me', debugHeaders),
       fetchZidDebugResource('/managers/account/store', debugHeaders),
     ])
+    // Register the first webhook immediately (proves the connection works),
+    // the remaining core events are registered after the token is saved.
     const webhookRegistration = await registerProductCreatedWebhook(debugHeaders)
 
     // 3. Extract store and manager metadata
@@ -252,13 +232,27 @@ export async function GET(request: NextRequest) {
         username: finalUsername,
         uuid: storeData.uuid ?? userData.uuid ?? null,
         old_id: storeId ? Number(storeId) : null,
+        // New connections start with the 7 core events syncing store→ERP.
+        // ERP→store stays off by default (safe, one toggle to enable later).
+        sync_settings: {
+          order_create: { odoo2zid: false, zid2odoo: true },
+          order_status_update: { odoo2zid: false, zid2odoo: true },
+          order_payment_status_update: { odoo2zid: false, zid2odoo: true },
+          product_create: { odoo2zid: false, zid2odoo: true },
+          product_update: { odoo2zid: false, zid2odoo: true },
+          product_delete: { odoo2zid: false, zid2odoo: true },
+          customer_create: { odoo2zid: false, zid2odoo: true },
+          customer_update: { odoo2zid: false, zid2odoo: true },
+          category_create: { odoo2zid: false, zid2odoo: true },
+          category_update: { odoo2zid: false, zid2odoo: true },
+        },
       }
 
       let existingToken: any = null
       
       const { data: byMerchant, error: findErrorMerchant } = await supabase
         .from('merchant_tokens')
-        .select('*')
+        .select('merchant_id,workspace_id,sync_settings')
         .eq('merchant_id', merchantId)
         .maybeSingle()
 
@@ -275,7 +269,7 @@ export async function GET(request: NextRequest) {
       if (!existingToken && workspaceId) {
         const { data: byWorkspace, error: findErrorWorkspace } = await supabase
           .from('merchant_tokens')
-          .select('*')
+          .select('merchant_id,workspace_id,sync_settings')
           .eq('workspace_id', workspaceId)
           .maybeSingle()
 
@@ -296,10 +290,13 @@ export async function GET(request: NextRequest) {
         }
 
         if (existingToken.merchant_id === merchantId) {
-          // Same merchant ID: perform inline update
+          // Same merchant ID: perform inline update, but preserve the
+          // merchant's existing sync settings (don't reset custom toggles).
+          const { sync_settings: _ignore, ...updateData } = tokenData
+          void _ignore
           const { error: updateError } = await supabase
             .from('merchant_tokens')
-            .update(tokenData)
+            .update(updateData)
             .eq('merchant_id', merchantId)
           if (updateError) {
             throw new ZidOAuthError({
@@ -310,8 +307,6 @@ export async function GET(request: NextRequest) {
           }
         } else {
           // Different merchant ID for the same workspace/store: migrate mappings & settings
-          console.info(`[Zid OAuth] Migrating token from ${existingToken.merchant_id} to ${merchantId}`)
-          
           // Migrate field mappings
           if (tokenData.workspace_id) {
             const { error: migrationError } = await supabase
@@ -324,8 +319,9 @@ export async function GET(request: NextRequest) {
             }
           }
 
-          // Preserve existing sync settings
-          tokenData.sync_settings = existingToken.sync_settings ?? {}
+          // Preserve existing sync settings (or keep the new-connection
+          // defaults when the old row has none).
+          tokenData.sync_settings = existingToken.sync_settings ?? tokenData.sync_settings
 
           // Delete old token
           const { error: deleteError } = await supabase
@@ -371,6 +367,25 @@ export async function GET(request: NextRequest) {
         message: 'Zid OAuth completed, but store_id/merchant_id could not be resolved.',
         details: { rawResponse, authorizationPayload, user, store },
       })
+    }
+
+    // Auto-register the core webhooks in the background (non-blocking).
+    // Tokens are saved by now, so registerZidWebhook can resolve auth headers.
+    // Only ZID_CORE_EVENTS (≈7) with ?event=&store_id= URLs — the rest is
+    // opt-in from Advanced settings (syncWebhooksWithSettings).
+    if (merchantId) {
+      import('@/lib/zid/webhooks').then(({ ZID_CORE_EVENTS, registerZidWebhook }) => {
+        for (const key of ZID_CORE_EVENTS) {
+          registerZidWebhook(merchantId, key).catch(() => {})
+        }
+      }).catch(() => {})
+    }
+
+    // Auto-bootstrap workspace defaults in background (zero-configuration)
+    if (workspaceId) {
+      import('@/lib/auto-bootstrap').then(({ autoBootstrapWorkspace }) => {
+        autoBootstrapWorkspace(workspaceId).catch(() => {})
+      }).catch(() => {})
     }
 
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {

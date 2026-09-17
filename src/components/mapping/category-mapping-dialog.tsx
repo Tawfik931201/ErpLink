@@ -3,13 +3,13 @@
 import { Plus, Pencil, Trash2, Loader2, X, Check, Search, Download, AlertTriangle, RefreshCw } from 'lucide-react'
 import React, { useState, useEffect, useCallback } from 'react'
 
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { useLanguage } from '@/components/language-provider'
-import { useToast } from '@/hooks/use-toast'
 import SearchableSelect from '@/app/(app)/dashboard/mapping-center/searchable-select'
 import { getCategoryMappings, saveCategoryMapping, deleteCategoryMapping, fetchStoreCategories, batchImportCategoryMappings } from '@/app/actions/category-mappings'
 import { searchOdooCategories } from '@/app/actions/odoo'
+import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
 interface CategoryMappingDialogProps {
@@ -33,7 +33,7 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [storeCategories, setStoreCategories] = useState<any[]>([])
-  const [isLoadingStore, setIsLoadingStore] = useState(false)
+  const [, setIsLoadingStore] = useState(false)
   const [isBatchImporting, setIsBatchImporting] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [dirty, setDirty] = useState(false)

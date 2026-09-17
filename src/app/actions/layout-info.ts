@@ -16,7 +16,7 @@ export interface LayoutUserInfo {
 
 /**
  * Lightweight query for building the dashboard layout's navbar.
- * Returns role, partner status, name, and email in a single call (no joins).
+ * Returns role, name, and email in a single call (no joins).
  */
 export const getLayoutUserInfo = cache(async (): Promise<LayoutUserInfo> => {
   const userId = await getActiveUserId()
@@ -33,30 +33,13 @@ export const getLayoutUserInfo = cache(async (): Promise<LayoutUserInfo> => {
     .maybeSingle()
 
   const appRole = (userRow?.app_role as string) || 'user'
-  const name = userRow?.name || null
-  const email = userRow?.email || null
 
-  let partnerId: string | null = null
-  let partnerStatus: string | null = null
-
-  if (appRole === 'partner') {
-    const { data: pp } = await supabase
-      .from('partner_profiles')
-      .select('id, status')
-      .eq('user_id', userId)
-      .maybeSingle()
-    if (pp) {
-      partnerId = pp.id
-      partnerStatus = pp.status
-    }
-  }
-
-  return { 
-    appRole: admin ? 'admin' : appRole, 
-    partnerId, 
-    partnerStatus, 
+  return {
+    appRole: admin ? 'admin' : appRole,
+    partnerId: null,
+    partnerStatus: null,
     isAdmin: admin,
-    name,
-    email
+    name: userRow?.name || null,
+    email: userRow?.email || null,
   }
 })

@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer'
 
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY
 const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@erplink.app'
+const EMAIL_MOCK_MODE = process.env.EMAIL_MOCK_MODE === 'true'
 
 const SMTP_HOST = process.env.SMTP_HOST
 const SMTP_PORT = process.env.SMTP_PORT
@@ -35,7 +36,10 @@ function ensureConfigured() {
     return
   }
   
-  console.warn('[email] Neither SendGrid nor SMTP env variables are configured — emails will be logged only')
+  console.warn('[email] Neither SendGrid nor SMTP env variables are configured')
+  if (EMAIL_MOCK_MODE) {
+    console.info('[email] EMAIL_MOCK_MODE=true — emails will be logged only (development mode)')
+  }
 }
 
 export interface SendEmailInput {
@@ -96,6 +100,11 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; e
     }
   }
   
-  console.info('[email] [MOCK] would send to', input.to, 'subject:', input.subject)
-  return { ok: true }
+  if (EMAIL_MOCK_MODE) {
+    console.info('[email] [MOCK] would send to', input.to, 'subject:', input.subject)
+    return { ok: true }
+  }
+
+  console.error('[email] Email NOT sent — no SendGrid/SMTP providers configured and EMAIL_MOCK_MODE is not set.')
+  return { ok: false, error: 'email_not_configured' }
 }

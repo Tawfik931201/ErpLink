@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, RefreshCw, Store } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+
+import { triggerStockSync, getStockSyncHistory } from '@/app/actions/stock-sync'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import { triggerStockSync, getStockSyncHistory } from '@/app/actions/stock-sync'
 
 interface StockSyncClientProps {
   hasErp: boolean

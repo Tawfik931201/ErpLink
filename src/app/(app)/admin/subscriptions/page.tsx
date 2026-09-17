@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
-import { getAllSubscriptions, getActiveAffiliates } from '@/app/actions/subscription-actions'
+import { getAllSubscriptions } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 import type { Language } from '@/lib/translations'
 
@@ -16,16 +16,12 @@ export default async function AdminSubscriptionsPage() {
   const cookieStore = cookies()
   const lang = (cookieStore.get('lang')?.value || 'ar') as Language
 
-  const [subsRes, affiliatesRes] = await Promise.all([
-    getAllSubscriptions(),
-    getActiveAffiliates(),
-  ])
+  const subsRes = await getAllSubscriptions()
 
   return (
     <AdminSubscriptionsClient
       rows={subsRes.success ? subsRes.rows : []}
       error={subsRes.success ? null : subsRes.error}
-      affiliates={affiliatesRes.success ? affiliatesRes.affiliates : []}
       lang={lang}
     />
   )

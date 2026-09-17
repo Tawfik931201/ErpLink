@@ -5,13 +5,13 @@ import { revalidatePath } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
-import { supabase } from '@/lib/supabase'
-import { getAccessToken } from '@/lib/zid/token'
-import { ZidAPI } from '@/lib/zid-client'
 import { listSallaProducts } from '@/lib/salla-client'
 import { listShopifyProducts } from '@/lib/shopify-client'
+import { supabase } from '@/lib/supabase'
 import { updateOdooStock } from '@/lib/sync-engine'
 import { getOrCreateDbUser } from '@/lib/users'
+import { getAccessToken } from '@/lib/zid/token'
+import { ZidAPI } from '@/lib/zid-client'
 
 interface StockSyncResult {
   platform: string
@@ -52,7 +52,7 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
     const result: StockSyncResult = { platform, total: 0, updated: 0, failed: 0, skipped: 0, errors: [] }
 
     // 2. Fetch products with stock from platform
-    let platformProducts: { sku: string; quantity: number }[] = []
+    const platformProducts: { sku: string; quantity: number }[] = []
 
     if (platform === 'zid') {
       const { data: merchantTok } = await supabase

@@ -1,13 +1,14 @@
 'use client'
 
+import { AlertCircle, CheckCircle2, Loader2, Send, X, Paperclip, FileText } from 'lucide-react'
 import { useState } from 'react'
+
 import { createTicket } from '@/app/actions/tickets'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
-import { AlertCircle, CheckCircle2, Loader2, Send, X, Paperclip, FileText } from 'lucide-react'
 
 interface CreateTicketFormProps {
   onSuccess?: () => void;

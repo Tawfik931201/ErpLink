@@ -1,10 +1,20 @@
 import type { Language } from './translations'
 
+// ─────────────────────────────────────────────────────────────
+// Affiliate system removed (2026-09-10).
+// The interfaces and templates below are kept as deprecated stubs so old
+// imports don't break type-check. Do not use them for new code.
+// The `partner_*` DB tables are left untouched; a cleanup migration will
+// drop them later.
+// ─────────────────────────────────────────────────────────────
+
+/** @deprecated Affiliate system removed — do not use. */
 export interface PartnerApplicationEmailData {
   partnerName: string
   reviewUrl: string
 }
 
+/** @deprecated Affiliate system removed — do not use. */
 export interface PartnerApprovedEmailData {
   partnerName: string
   displayName: string
@@ -13,11 +23,13 @@ export interface PartnerApprovedEmailData {
   dashboardUrl: string
 }
 
+/** @deprecated Affiliate system removed — do not use. */
 export interface PartnerRejectedEmailData {
   partnerName: string
   reason?: string
 }
 
+/** @deprecated Affiliate system removed — do not use. */
 export interface ClientActivationEmailData {
   clientName: string
   email: string
@@ -26,6 +38,7 @@ export interface ClientActivationEmailData {
   workspaceName: string
 }
 
+/** @deprecated Affiliate system removed — do not use. */
 export interface PayoutStatusEmailData {
   partnerName: string
   action: 'approved' | 'paid' | 'rejected'
@@ -53,14 +66,14 @@ const wrap = (lang: Language, body: string) => {
 <html lang="${lang === 'ar' ? 'ar' : 'en'}" dir="${dir}">
 <head>
   <meta charset="utf-8" />
-  <title>ErpLink Affiliates</title>
+  <title>ErpLink</title>
 </head>
 <body style="margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f7f8fa;color:#0f172a;">
   <table cellpadding="0" cellspacing="0" border="0" align="center" style="max-width:560px;background:#fff;border-radius:16px;border:1px solid #e5e7eb;padding:24px;">
-    <tr><td><h2 style="margin:0 0 12px 0;font-size:20px;font-weight:800;">ErpLink Affiliates</h2></td></tr>
+    <tr><td><h2 style="margin:0 0 12px 0;font-size:20px;font-weight:800;">ErpLink</h2></td></tr>
     <tr><td style="font-size:14px;line-height:1.6;color:#334155;">${body}</td></tr>
   </table>
-  <p style="text-align:center;font-size:11px;color:#94a3b8;margin-top:16px;">ErpLink · Powered by Affiliate Program</p>
+  <p style="text-align:center;font-size:11px;color:#94a3b8;margin-top:16px;">ErpLink</p>
 </body>
 </html>`
 }
@@ -72,6 +85,7 @@ const arCta = (url: string, label: string) =>
 const arBr = '<br/>'
 const arStrong = (s: string) => `<strong style="color:#0f172a;">${s}</strong>`
 
+/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
 export function partnerApplicationEmail(
   data: PartnerApplicationEmailData,
   lang: Language = 'ar',
@@ -90,6 +104,7 @@ export function partnerApplicationEmail(
   }
 }
 
+/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
 export function partnerApprovedEmail(
   data: PartnerApprovedEmailData,
   lang: Language = 'ar',
@@ -108,6 +123,7 @@ export function partnerApprovedEmail(
   }
 }
 
+/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
 export function partnerRejectedEmail(
   data: PartnerRejectedEmailData,
   lang: Language = 'ar',
@@ -126,6 +142,7 @@ export function partnerRejectedEmail(
   }
 }
 
+/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
 export function clientActivationEmail(
   data: ClientActivationEmailData,
   lang: Language = 'ar',
@@ -144,6 +161,7 @@ export function clientActivationEmail(
   }
 }
 
+/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
 export function payoutStatusEmail(
   data: PayoutStatusEmailData,
   lang: Language = 'ar',

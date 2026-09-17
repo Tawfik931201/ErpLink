@@ -1,7 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { createPortal } from 'react-dom'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   SlidersHorizontal,
   Trash2,
@@ -14,15 +13,31 @@ import {
   Loader2,
   X
 } from 'lucide-react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import { getOdooFieldValueOptions, getOdooModelFields, refreshOdooCache } from '@/app/actions/odoo'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+
 import { saveFieldMapping } from '@/app/actions/field-mappings'
+import { getOdooFieldValueOptions, getOdooModelFields, refreshOdooCache } from '@/app/actions/odoo'
+import { useLanguage } from '@/components/language-provider'
+import { Button } from '@/components/ui/button'
+import {
+  ODOO_MODELS,
+  ODOO_FIELDS,
+  STORE_VARIANT_FIELDS,
+  ZID_EVENTS,
+  SALLA_EVENTS,
+  SHOPIFY_EVENTS,
+  ZID_FIELDS,
+  ZID_SUB_FIELDS,
+  SALLA_FIELDS,
+  SHOPIFY_FIELDS,
+} from '@/lib/mapping-constants'
+import { formatFieldLabel } from '@/lib/translations'
+import { cn } from '@/lib/utils'
+
 import RelationsGraph from './relations-graph'
 import SearchableSelect from './searchable-select'
-import { useLanguage } from '@/components/language-provider'
-import { formatFieldLabel } from '@/lib/translations'
+
 
 // Fallback relations map for preview mode
 const FALLBACK_RELATIONS: Record<string, Array<{ model: string; label: string; fieldName: string }>> = {
@@ -37,18 +52,6 @@ const FALLBACK_RELATIONS: Record<string, Array<{ model: string; label: string; f
   ]
 }
 
-import {
-  ODOO_MODELS,
-  ODOO_FIELDS,
-  STORE_VARIANT_FIELDS,
-  ZID_EVENTS,
-  SALLA_EVENTS,
-  SHOPIFY_EVENTS,
-  ZID_FIELDS,
-  ZID_SUB_FIELDS,
-  SALLA_FIELDS,
-  SHOPIFY_FIELDS,
-} from '@/lib/mapping-constants'
 export {
   ODOO_MODELS,
   ODOO_FIELDS,
@@ -232,7 +235,7 @@ export default function FieldMappingForm({
   const [activeTab, setActiveTab] = useState<string>(initialOdooModel || defaultModel)
 
   // Relations linkage configuration
-  const [relations, setRelations] = useState<Array<{ sourceModel: string; relationField: string; targetModel: string }>>(() => {
+  const [relations] = useState<Array<{ sourceModel: string; relationField: string; targetModel: string }>>(() => {
     return (initialMappings as any)?.__settings?.relations || []
   })
 
@@ -286,62 +289,6 @@ export default function FieldMappingForm({
       setIsSaved(false)
       return next
     })
-  }
-
-  const updatePayloadPath = (model: string, path: string) => {
-    setPayloadPaths(prev => ({ ...prev, [model]: path }))
-    setIsSaved(false)
-  }
-
-  const updateModelRelation = (model: string, targetModel: string, relationField: string, isDelete = false) => {
-    setRelations(prev => {
-      if (isDelete || !targetModel || !relationField) {
-        return prev.filter(r => !(r.sourceModel === model && r.targetModel === targetModel && r.relationField === relationField))
-      }
-
-      const fieldsOfCurrent = modelFields[model] || ODOO_FIELDS[model] || []
-      const hasFieldInCurrent = fieldsOfCurrent.some(f => f.value === relationField)
-
-      const newRelation = {
-        sourceModel: hasFieldInCurrent ? model : targetModel,
-        relationField: relationField,
-        targetModel: hasFieldInCurrent ? targetModel : model
-      }
-
-      return [...prev, newRelation]
-    })
-    setIsSaved(false)
-  }
-
-  const getRelationshipOptions = (modelA: string, modelB: string) => {
-    const fieldsA = modelFields[modelA] || ODOO_FIELDS[modelA] || []
-    const fieldsB = modelFields[modelB] || ODOO_FIELDS[modelB] || []
-
-    const options: Array<{ sourceModel: string; relationField: string; targetModel: string; label: string }> = []
-
-    for (const f of fieldsA) {
-      if (f.relation === modelB && (f.type === 'many2one' || f.type === 'many2many' || f.type === 'one2many')) {
-        options.push({
-          sourceModel: modelA,
-          relationField: f.value,
-          targetModel: modelB,
-          label: `${modelA}.${f.value} ➔ ${modelB}`
-        })
-      }
-    }
-
-    for (const f of fieldsB) {
-      if (f.relation === modelA && (f.type === 'many2one' || f.type === 'many2many' || f.type === 'one2many')) {
-        options.push({
-          sourceModel: modelB,
-          relationField: f.value,
-          targetModel: modelA,
-          label: `${modelB}.${f.value} ➔ ${modelA}`
-        })
-      }
-    }
-
-    return options
   }
 
   // Fields loaded from Odoo connection (grouped by model) - initialized with preloaded server fields
@@ -702,7 +649,6 @@ export default function FieldMappingForm({
 
   const currentZidFields = (() => {
     const activeTabLower = currentModelKey.toLowerCase()
-    const activeFields = platform === 'salla' ? SALLA_FIELDS : platform === 'shopify' ? SHOPIFY_FIELDS : ZID_FIELDS
 
     // 1b. If we are on Zid and mapping a related model, dynamically resolve sub-fields of the mapped group
     // ⚠️ This MUST come first — before the sale.order.line check — so that child tabs like
@@ -1268,7 +1214,7 @@ export default function FieldMappingForm({
     if (!refreshRes.success) {
       console.error('Failed to refresh Odoo cache:', refreshRes.error)
     }
-    const res = await getOdooModelFields(currentModelKey)
+    const res = await getOdooModelFields(currentModelKey, true)
     if (res.success && res.fields) {
       setModelFields(prev => ({ ...prev, [currentModelKey]: res.fields }))
     }

@@ -1,7 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { isAdmin } from '@/lib/auth'
 import { cookies } from 'next/headers'
+import type { NextRequest} from 'next/server';
+import { NextResponse } from 'next/server'
+
+import { isAdmin } from '@/lib/auth'
+
 
 /**
  * API route to start user impersonation.
