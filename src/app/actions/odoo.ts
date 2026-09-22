@@ -1252,3 +1252,42 @@ export async function searchOdooCategories(searchTerm: string = '') {
   }
 }
 
+export async function searchOdooProducts(searchTerm: string = '') {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
+    }
+
+    const { url, db_name, username, password, erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, options: [] }
+    }
+
+    const decryptedPassword = decrypt(password)
+    const client = new OdooClient({
+      url,
+      db: db_name || '',
+      username,
+      apiKey: decryptedPassword,
+    })
+
+    const records = await client.execute<Array<[number, string]>>(
+      'product.template',
+      'name_search',
+      [searchTerm, [], 'ilike', 300]
+    )
+
+    return {
+      success: true,
+      options: records.map(([id, label]) => ({
+        value: String(id),
+        label: label || String(id),
+      })),
+    }
+  } catch (error: any) {
+    console.error(`[Odoo Action] searchOdooProducts failed:`, error)
+    return { success: false, error: error.message || 'Failed to search products', options: [] }
+  }
+}
+

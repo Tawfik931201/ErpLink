@@ -4,6 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
+import { getInventorySyncSettings } from '@/lib/inventory-sync-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import { listSallaProducts } from '@/lib/salla-client'
 import { listShopifyProducts } from '@/lib/shopify-client'
@@ -20,6 +21,7 @@ interface StockSyncResult {
   failed: number
   skipped: number
   errors: string[]
+  skippedBecauseInventorySync?: boolean
 }
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)) }
@@ -38,6 +40,26 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
     if (!odooConn) throw new Error('ERP not connected')
+
+    // عندما تكون «مزامنة المخزون (من أودو إلى زد)» مفعّلة على متجر زد، يصبح أودو
+    // مصدر الحقيقة للمخزون وتُمنع عملية النقل الجماعي زد → أودو بالكامل.
+    if (platform === 'zid') {
+      const inventorySettings = await getInventorySyncSettings(user.active_workspace_id)
+      if (inventorySettings.sync_enabled) {
+        return {
+          success: true,
+          result: {
+            platform,
+            total: 0,
+            updated: 0,
+            failed: 0,
+            skipped: 0,
+            errors: [],
+            skippedBecauseInventorySync: true,
+          },
+        }
+      }
+    }
 
     const decrypted = decrypt(odooConn.password)
     const odooClient = new OdooClient({

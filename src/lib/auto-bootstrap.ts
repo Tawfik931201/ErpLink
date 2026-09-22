@@ -186,6 +186,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
             platform,
             zid_status: key,
             odoo_state: odooState,
+            enabled: true,
           })
         }
       }

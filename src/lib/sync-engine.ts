@@ -13,6 +13,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { getSmartDefaultOrderState } from '@/lib/auto-bootstrap'
 import { decrypt } from '@/lib/crypto'
+import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import { notifySyncResult } from '@/lib/telegram-notifier'
 import type { SyncRecordSummary } from '@/lib/telegram-notifier'
@@ -825,10 +826,19 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
   })
 }
 
-export async function updateOdooStock(client: OdooClient, productId: number, qty: number, locationId?: number, infiniteValue?: number): Promise<boolean> {
+export async function updateOdooStock(client: OdooClient, productId: number, qty: number, locationId?: number, infiniteValue?: number, workspaceId?: string): Promise<boolean> {
   if (infiniteValue !== undefined && infiniteValue > 0 && qty >= infiniteValue) {
     console.info(`[SyncEngine] Skipping stock update for product #${productId}: qty ${qty} >= infinite value ${infiniteValue}`)
     return true
+  }
+  // عندما يُفعَّل «مزامنة المخزون (من أودو إلى زد)» في مركز الربط، أودو
+  // هو مصدر الحقيقة لكميات المخزون — تُمنع أي كتابة مخزون عكسية زد → أودو.
+  if (workspaceId) {
+    const suppressed = await isInventorySyncErpToStoreEnabled(workspaceId)
+    if (suppressed) {
+      console.info(`[SyncEngine] Skipping Zid→Odoo stock write for product #${productId}: Odoo→Zid inventory sync is enabled.`)
+      return true
+    }
   }
   console.info(`[SyncEngine] Attempting stock update for product #${productId} to quantity=${qty} locationId=${locationId ?? 'auto'}`)
   try {
@@ -898,6 +908,155 @@ export async function updateOdooStock(client: OdooClient, productId: number, qty
 
 // â”€â”€â”€ Helper: build sale.order.line items for sale.order mappings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// ──── Helper: resolve shipping/delivery fee from a Zid order payload ─────
+
+/**
+ * Zid order payloads put the delivery fee under different keys depending on the
+ * payload version / store setup. Try every known path and return the first
+ * non-zero value found.
+ */
+function resolveZidShippingCost(zidData: Record<string, unknown>): number {
+  // Zid's official order schema carries the fee breakdown in payment.invoice[]
+  // (real order payloads have NO `amounts` key). Scan for the shipping/delivery row first.
+  try {
+    const payment = zidData.payment as Record<string, unknown> | undefined
+    const invoice = payment?.invoice
+    if (Array.isArray(invoice)) {
+      for (const row of invoice) {
+        const r = (row && typeof row === 'object') ? row as Record<string, unknown> : {}
+        const code = String(r.code ?? '')
+        const title = String(r.title ?? '')
+        if (/ship|deliver|freight|postage|شحن|توصيل/i.test(code) || /ship|deliver|freight|postage|شحن|توصيل/i.test(title)) {
+          const raw = r.value ?? r.value_string
+          if (raw !== undefined && raw !== null && typeof raw !== 'object') {
+            const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+            if (!isNaN(num) && num > 0) return num
+          }
+        }
+      }
+    }
+  } catch { /* fall through to path candidates */ }
+  const candidates = [
+    'amounts.shipping_cost.amount',
+    'amounts.delivery_cost.amount',
+    'shipping_cost',
+    'delivery_cost',
+    'shipping.price',
+    'shipping.cost',
+    'shipping.amount',
+    'amounts.shipping_cost',
+  ]
+  for (const path of candidates) {
+    const raw = resolvePath(zidData, path)
+    if (raw === undefined || raw === null) continue
+    let num = 0
+    if (typeof raw === 'object') {
+      const nested = resolvePath(raw as Record<string, unknown>, 'amount')
+      num = parseFloat(String(nested ?? '')) || 0
+    } else {
+      num = parseFloat(String(raw)) || 0
+    }
+    if (num > 0) return num
+  }
+  return 0
+}
+
+// ──── Helper: resolve COD collection-fee amount from a Zid order payload ─────
+// Zid has NO dedicated COD-fee key. A store/carrier-configured COD surcharge
+// surfaces (if at all) as an extra payment.invoice[] row, so scan invoice rows
+// first — strong COD identifiers, then generic fee words (excluding shipping /
+// tax / discount / total rows so the shipping fee is never double-counted) —
+// then try named keys. Returns 0 when Zid sends no fee.
+function resolveZidCodAmount(zidData: Record<string, unknown>): number {
+  const parseNum = (raw: unknown): number => {
+    if (raw === undefined || raw === null || typeof raw === 'object') return 0
+    const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+    return !isNaN(num) && num > 0 ? num : 0
+  }
+  try {
+    const payment = zidData.payment as Record<string, unknown> | undefined
+    const invoice = payment?.invoice
+    if (Array.isArray(invoice)) {
+      const strong = /cod|cash|عند الاستلام|الدفع عند|تحصيل|collect/i
+      const weak = /payment.?fee|handling|surcharge|service.?fee|رسوم/i
+      const notFeeRow = /ship|deliver|شحن|توصيل|tax|vat|ضريب|discount|خصم|coupon|كوبون|total|subtotal|إجمالي/i
+      for (const pattern of [strong, weak]) {
+        for (const row of invoice) {
+          const r = (row && typeof row === 'object') ? row as Record<string, unknown> : {}
+          const code = String(r.code ?? '')
+          const title = String(r.title ?? '')
+          if (!(pattern.test(code) || pattern.test(title))) continue
+          if (pattern === weak && (notFeeRow.test(code) || notFeeRow.test(title))) continue
+          const num = parseNum(r.value ?? r.value_string)
+          if (num > 0) return num
+        }
+      }
+    }
+  } catch { /* fall through to named keys */ }
+  const candidates = [
+    'cod_fee', 'cod_amount', 'payment.cod_fee', 'payment.payment_fee',
+    'payment_fee', 'collection_fee', 'handling_fee', 'surcharge',
+    'service_fee', 'additional_fees', 'amounts.cod_fee',
+    'amounts.payment_fee', 'shipping.cod_fee',
+  ]
+  for (const path of candidates) {
+    const num = parseNum(resolvePath(zidData, path))
+    if (num > 0) return num
+  }
+  return 0
+}
+
+// ──── Helper: normalize sale.order lines for update writes ─────
+// Converts (0,0,...) line creates into a full replace [(5,0,0), ...] so Zid
+// edits (including line changes) mirror into Odoo without duplicating lines.
+// Replace happens ONLY when all of these hold:
+//   - the payload actually carries products AND at least one line resolved;
+//   - the Odoo order is still a quotation (draft/sent).
+// Otherwise order_line is dropped → header-only update, existing Odoo lines
+// untouched (protects confirmed/invoiced orders, partial payloads and
+// transient product-resolution failures).
+async function normalizeOrderLinesForUpdate(
+  client: OdooClient,
+  odooRecordId: number,
+  zidData: Record<string, unknown>,
+  effectiveOdooValues: Record<string, unknown>,
+): Promise<void> {
+  if (!('order_line' in effectiveOdooValues)) return
+  const drop = (reason: string) => {
+    delete effectiveOdooValues.order_line
+    console.info(`[SyncEngine] Order lines left untouched on Odoo #${odooRecordId}: ${reason}`)
+  }
+  const cmds: unknown = effectiveOdooValues.order_line
+  const creates = (Array.isArray(cmds) ? cmds : []).filter(
+    (c): c is [number, number, Record<string, unknown>] => Array.isArray(c) && c[0] === 0
+  )
+  if (creates.length === 0) {
+    drop('no lines built from payload')
+    return
+  }
+  const payloadHasProducts = ['products', 'items', 'order_items', 'line_items', 'order_items_list'].some((k) => {
+    const arr: unknown = zidData[k]
+    return Array.isArray(arr) && arr.length > 0
+  })
+  if (!payloadHasProducts) {
+    drop('no products in payload')
+    return
+  }
+  let state = ''
+  try {
+    const recs = await client.searchRead<any>('sale.order', [['id', '=', odooRecordId]], ['state'])
+    state = String(recs?.[0]?.state || '')
+  } catch {
+    state = ''
+  }
+  if (state !== 'draft' && state !== 'sent') {
+    drop(`order state is "${state || 'unknown'}" (lines are replaced only on draft/sent quotations)`)
+    return
+  }
+  effectiveOdooValues.order_line = [[5, 0, 0], ...creates]
+  console.info(`[SyncEngine] Order update will REPLACE ${creates.length} line(s) on Odoo #${odooRecordId} (no duplicates)`)
+}
+
 /**
  * Build order_line array from Zid payload with discount + shipping support.
  *
@@ -942,6 +1101,11 @@ async function buildOrderLineItems(
 
   // 2. Read line-level mappings for sale.order.line
   const lineMappings: FieldMappingItem[] = (mapping.mappings as any)?.['sale.order.line'] ?? []
+  // Standard fallback: when there is no line-level mapping (fixed/standard mapping
+  // path), resolve the Odoo product by the Zid line SKU so lines are actually created.
+  const effectiveLineMappings = lineMappings.length > 0
+    ? lineMappings
+    : [{ id: 'std_product_id', erpField: 'product_id', zidField: 'sku' }]
   const settings: Record<string, any> = (mapping.mappings as any)?.['__settings'] ?? {}
   const settingsKeys = new Set(Object.keys(settings))
 
@@ -954,6 +1118,10 @@ async function buildOrderLineItems(
     discountProductId: 'discount_product_id',
     discountProductSku: 'discount_product_sku',
     discountMode: 'discount_mode',
+    addCodAsLine: 'add_cod_as_line',
+    codProductId: 'cod_product_id',
+    codProductSku: 'cod_product_sku',
+    codAmount: 'cod_amount',
   }
   const orDefault = (camelKey: string, fallback: any) => {
     if (settingsKeys.has(camelKey)) return settings[camelKey]
@@ -971,10 +1139,19 @@ async function buildOrderLineItems(
   const discountProductSku = String(orDefault('discountProductSku', '') || '')
   const discountMode = String(orDefault('discountMode', 'fixed') || 'fixed')
 
-  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode}`)
+  const addCodAsLine = !!orDefault('addCodAsLine', false)
+  const codProductId = String(orDefault('codProductId', '') || '')
+  const codProductSku = String(orDefault('codProductSku', '') || '')
+  const codAmount = parseFloat(String(orDefault('codAmount', 0) ?? 0)) || 0
+  // COD fee comes from the Zid payload first (payment.invoice[] COD row or named
+  // keys); the settings amount is only a fallback when Zid sends none.
+  const codFeeAmount = resolveZidCodAmount(zidData) || codAmount
+
+  const shippingCost = resolveZidShippingCost(zidData)
+  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount}`)
 
   // 3. Fetch line field meta (for many2one resolution)
-  const lineFieldNames = lineMappings.map(m => m.erpField)
+  const lineFieldNames = effectiveLineMappings.map(m => m.erpField)
   const lineFieldMeta = lineFieldNames.length > 0
     ? await fetchFieldMeta(client, 'sale.order.line', lineFieldNames)
     : new Map<string, OdooFieldMeta>()
@@ -982,10 +1159,21 @@ async function buildOrderLineItems(
   // 4. Build each line
   let subtotalBeforeDiscount = 0
   let totalDiscountAmount = 0
-  const shippingCost = parseFloat(resolvePath(zidData, 'amounts.shipping_cost.amount') as string ?? '0') || 0
+
+  // First positive number from candidate keys (Zid price keys vary by payload
+  // version and values may be numeric strings like "150.00 SAR").
+  const numFromKeys = (source: Record<string, unknown>, keys: string[]): number => {
+    for (const key of keys) {
+      const raw = resolvePath(source, key)
+      if (raw === undefined || raw === null || typeof raw === 'object') continue
+      const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+      if (!isNaN(num) && num > 0) return num
+    }
+    return 0
+  }
 
   // Check if user mapped a discount field at line level (Option A)
-  const hasLineDiscountMapping = lineMappings.some(m => m.erpField === 'discount')
+  const hasLineDiscountMapping = effectiveLineMappings.some(m => m.erpField === 'discount')
   // Track whether any product will actually carry discount to satisfy Option C rule
   let anyProductHasDiscount = false
 
@@ -993,7 +1181,7 @@ async function buildOrderLineItems(
     const productData = (product && typeof product === 'object') ? product as Record<string, unknown> : {}
     const line: Record<string, unknown> = {}
 
-    for (const fm of lineMappings) {
+    for (const fm of effectiveLineMappings) {
       if (!fm.erpField) continue
       if (fm.erpField === 'discount') {
         // Option A handled below
@@ -1034,9 +1222,17 @@ async function buildOrderLineItems(
     }
 
     // Apply line-level discount (Option A)
-    const zidPrice = parseFloat(String(productData.price ?? productData.unit_price ?? productData.amount ?? 0)) || 0
-    const zidSalePrice = parseFloat(String(productData.sale_price ?? productData.price_after_discount ?? productData.discounted_price ?? zidPrice)) || 0
-    const zidDiscountDirect = parseFloat(String(productData.discount ?? 0)) || 0
+    // Zid order-line price keys vary by payload version (price / net_sale_price /
+    // gross_sale_price / price_before / net_price / total ...). Prefer explicit
+    // unit keys, then derive the unit from line totals / quantity.
+    const qty = parseFloat(String(productData.quantity ?? productData.qty ?? 1)) || 1
+    const zidPrice = numFromKeys(productData, ['price_before', 'net_price', 'gross_price', 'price', 'unit_price', 'amount'])
+      || numFromKeys(productData, ['total_before', 'total']) / qty
+    const zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
+      || numFromKeys(productData, ['discounted_total', 'total']) / qty
+      || zidPrice
+    const zidDiscountDirect = numFromKeys(productData, ['discount', 'discount_percentage'])
+    console.info(`[SyncEngine] Order line sku=${String(productData.sku ?? '')} qty=${qty} price=${zidPrice} salePrice=${zidSalePrice} discountDirect=${zidDiscountDirect}`)
 
     if (zidDiscountDirect > 0 || (zidSalePrice > 0 && zidSalePrice < zidPrice)) {
       anyProductHasDiscount = true
@@ -1064,13 +1260,12 @@ async function buildOrderLineItems(
       line['price_unit'] = zidPrice
     }
 
-    const qty = parseFloat(String(productData.quantity ?? productData.qty ?? 1)) || 1
     subtotalBeforeDiscount += zidPrice * qty
     totalDiscountAmount += Math.max(0, zidPrice - zidSalePrice) * qty
 
     // Auto-set product_uom_qty if user didn't map it explicitly
     if (!('product_uom_qty' in line)) {
-      const hasQtyMapping = lineMappings.some(m => m.erpField === 'product_uom_qty')
+      const hasQtyMapping = effectiveLineMappings.some(m => m.erpField === 'product_uom_qty')
       if (!hasQtyMapping) {
         line['product_uom_qty'] = qty
       }
@@ -1096,14 +1291,19 @@ async function buildOrderLineItems(
       }
     }
 
+    // Without a resolvable product there is no valid sale.order.line in Odoo
+    if (lineMappings.length === 0 && !line['product_id']) {
+      console.warn(`[SyncEngine] Skipping order line without a resolvable Odoo product (zid item id=${String(productData.id ?? '')}, sku=${String(productData.sku ?? '')})`)
+      continue
+    }
     lines.push(line)
   }
 
   // â”€â”€â”€ Shipping as Line Item â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  if (addShippingAsLine && shippingCost > 0) {
+  if (addShippingAsLine) {
     const shippingLine: Record<string, unknown> = {
       name: 'Shipping (Ø´Ø­Ù†)',
-      quantity: 1,
+      product_uom_qty: 1,
       price_unit: shippingCost,
     }
 
@@ -1129,7 +1329,13 @@ async function buildOrderLineItems(
       try {
         const carrier = await resolveShippingCarrier(mapping.workspace_id, zidShippingName, platform)
         if (carrier?.carrier_id) {
-          shippingLine['carrier_id'] = carrier.carrier_id
+          // carrier_id lives on sale.order, NOT on sale.order.line — putting it on
+          // the line makes the whole create fail. Promote it to the parent order
+          // values instead; safeWriteOdooRecord strips it if the delivery field
+          // does not exist in this Odoo database.
+          if (parentOdooValues && !('carrier_id' in parentOdooValues)) {
+            parentOdooValues['carrier_id'] = carrier.carrier_id
+          }
         }
         if (carrier?.product_id && !shippingLine['product_id']) {
           shippingLine['product_id'] = carrier.product_id
@@ -1139,7 +1345,13 @@ async function buildOrderLineItems(
       }
     }
 
-    lines.push(shippingLine)
+    // Only push the line when an Odoo product could actually be resolved; a
+    // sale.order.line without product_id would make the whole order fail.
+    if (shippingProductId || shippingProductSku || shippingLine['product_id']) {
+      lines.push(shippingLine)
+    } else {
+      console.warn('[SyncEngine] Shipping line skipped: add_shipping_as_line is enabled but no shipping product was resolved. Set shipping_product_id or shipping_product_sku in Standard Mapping settings.')
+    }
   }
 
   // â”€â”€â”€ Discount as Order Line (Option B) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1161,7 +1373,7 @@ async function buildOrderLineItems(
 
     const discountLine: Record<string, unknown> = {
       name: nameStr,
-      quantity: 1,
+      product_uom_qty: 1,
       price_unit: discountValue,
     }
 
@@ -1183,6 +1395,63 @@ async function buildOrderLineItems(
     } else {
       lines.push(discountLine)
       console.info(`[SyncEngine] Discount line item appended: name="${nameStr}" price_unit=${discountValue}`)
+    }
+  }
+
+  // ──── Cash on Delivery fee as Order Line ────
+  // Zid payloads carry NO separate COD fee field, so the fee is a fixed amount
+  // from Standard Mapping settings. Only added when the payment method is COD.
+  const payMethodTitle = String(
+    resolvePath(zidData, 'payment_method.title')
+    || resolvePath(zidData, 'payment_gateway.title')
+    || resolvePath(zidData, 'payment.method.name')
+    || resolvePath(zidData, 'payment_method')
+    || ''
+  )
+  const payMethodCode = String(resolvePath(zidData, 'payment_method.code') || '')
+  const isCodPayment = payMethodCode === 'zid_cod'
+    || /cod|cash.?on.?delivery|الدفع عند الاستلام|عند الاستلام/i.test(payMethodTitle)
+    || (zidData as any)?.cod_confirmed === true
+  if (addCodAsLine && isCodPayment && codFeeAmount > 0) {
+    const codLine: Record<string, unknown> = {
+      name: 'Cash on Delivery (الدفع عند الاستلام)',
+      product_uom_qty: 1,
+      price_unit: codFeeAmount,
+    }
+    if (codProductId) {
+      codLine['product_id'] = parseInt(codProductId)
+    } else if (codProductSku) {
+      try {
+        const ids = await client.execute<number[]>('product.product', 'search', [
+          [['default_code', '=', codProductSku]]
+        ], { limit: 1 })
+        if (ids.length > 0) codLine['product_id'] = ids[0]
+      } catch (err) {
+        console.warn(`[SyncEngine] Failed to resolve COD product by SKU=${codProductSku}:`, err)
+      }
+    }
+    if (codLine['product_id']) {
+      lines.push(codLine)
+      console.info(`[SyncEngine] COD line item appended: price_unit=${codFeeAmount}`)
+    } else {
+      console.warn('[SyncEngine] COD line skipped: add_cod_as_line is enabled and payment is COD but no COD product was resolved. Set cod_product_id or cod_product_sku in Standard Mapping settings.')
+    }
+  }
+
+  // Defensive: Odoo rejects the WHOLE order when a line carries an unknown key,
+  // and safeWriteOdooRecord cannot strip nested one2many keys (it retried the
+  // same failing payload 3 times in production). Drop anything outside the
+  // known-good set — but keep live-validated mapped fields and custom x_ fields.
+  const ALLOWED_LINE_KEYS = new Set([
+    'product_id', 'name', 'product_uom_qty', 'product_uom',
+    'price_unit', 'discount', 'tax_id',
+  ])
+  for (const built of lines) {
+    for (const key of Object.keys(built)) {
+      if (!ALLOWED_LINE_KEYS.has(key) && !lineFieldMeta.has(key) && !key.startsWith('x_')) {
+        console.warn(`[SyncEngine] Dropping unsupported sale.order.line key "${key}" to avoid a failed order create`)
+        delete built[key]
+      }
     }
   }
 
@@ -1404,7 +1673,7 @@ export async function applyFixedSettingsToValues(
   const isV18Plus = (odooMajorVersion ?? 0) >= 18
   const inventoryCfg = settings.inventory
 
-  if (!values.type) {
+  if (odooModel === 'product.template' && !values.type) {
     const defaultType = typeof settings.product_type === 'string'
       ? settings.product_type
       : settings.product_type?.default_type
@@ -1860,6 +2129,145 @@ async function resolveOrderState(
   const { data } = await query.maybeSingle()
   if (data?.odoo_state) return data.odoo_state
   return getSmartDefaultOrderState(zidStatus, platform)
+}
+
+// ──── Helper: read the order status value from a platform payload ─────
+function resolveZidStatus(zidData: Record<string, unknown>): string {
+  return String(
+    (zidData as any)?.status
+    || (zidData as any)?.order_status
+    || (zidData as any)?.financial_status
+    || (zidData as any)?.orderStatus
+    || (zidData as any)?.current_status
+    || (zidData as any)?.new_status
+    || ''
+  )
+}
+
+// ──── Helper: read the status-mapping row (state + enabled flag) ─────
+async function getOrderStatusRow(
+  workspaceId: string,
+  zidStatus: string,
+  platform?: 'zid' | 'salla' | 'shopify',
+): Promise<{ odoo_state: string; enabled: boolean } | null> {
+  try {
+    let query = supabaseAdmin
+      .from('order_status_mappings')
+      .select('odoo_state, enabled')
+      .eq('workspace_id', workspaceId)
+      .eq('zid_status', zidStatus) as any
+    if (platform) query = query.eq('platform', platform)
+    const { data, error } = await query.maybeSingle()
+    if (error) throw error
+    if (!data?.odoo_state) return null
+    return { odoo_state: data.odoo_state, enabled: data.enabled !== false }
+  } catch {
+    // Pre-migration DBs without the `enabled` column: fall back to a select
+    // without it and treat every row as enabled (backward compatible).
+    try {
+      let fallback = supabaseAdmin
+        .from('order_status_mappings')
+        .select('odoo_state')
+        .eq('workspace_id', workspaceId)
+        .eq('zid_status', zidStatus) as any
+      if (platform) fallback = fallback.eq('platform', platform)
+      const { data } = await fallback.maybeSingle()
+      if (!data?.odoo_state) return null
+      return { odoo_state: data.odoo_state, enabled: true }
+    } catch {
+      return null
+    }
+  }
+}
+
+// ──── Helper: perform the real Odoo workflow transition for a mapped state ─────
+// sale   → action_confirm (from draft/sent only)
+// cancel → action_cancel, with direct-write fallback for old versions
+// done   → action_done (from sale only; locks the order)
+// draft/sent → no-op (never downgrade; new orders are draft by nature)
+// Never throws: status actions must not fail an otherwise successful sync.
+async function applyOrderStatusAction(
+  client: OdooClient,
+  odooRecordId: number,
+  odooState: string,
+  zidStatus: string,
+): Promise<void> {
+  try {
+    const recs = await client.searchRead<any>('sale.order', [['id', '=', odooRecordId]], ['state'])
+    const cur = String(recs?.[0]?.state || '')
+    if (odooState === 'sale') {
+      if (cur === 'sale' || cur === 'done') {
+        console.info(`[SyncEngine] Order #${odooRecordId} already "${cur}"; confirm skipped (zid status "${zidStatus}")`)
+        return
+      }
+      if (cur !== 'draft' && cur !== 'sent') {
+        console.info(`[SyncEngine] Order #${odooRecordId} state "${cur || 'unknown'}" — confirm skipped (zid status "${zidStatus}")`)
+        return
+      }
+      await client.execute('sale.order', 'action_confirm', [odooRecordId])
+      console.info(`[SyncEngine] Order #${odooRecordId} CONFIRMED (zid status "${zidStatus}")`)
+      return
+    }
+    if (odooState === 'cancel') {
+      if (cur === 'cancel') {
+        console.info(`[SyncEngine] Order #${odooRecordId} already cancelled; cancel skipped (zid status "${zidStatus}")`)
+        return
+      }
+      try {
+        await client.execute('sale.order', 'action_cancel', [odooRecordId])
+      } catch {
+        await client.write('sale.order', [odooRecordId], { state: 'cancel' })
+      }
+      console.info(`[SyncEngine] Order #${odooRecordId} CANCELLED (zid status "${zidStatus}")`)
+      return
+    }
+    if (odooState === 'done') {
+      if (cur === 'done' || cur === 'cancel') {
+        console.info(`[SyncEngine] Order #${odooRecordId} already "${cur}"; lock skipped (zid status "${zidStatus}")`)
+        return
+      }
+      if (cur !== 'sale') {
+        console.info(`[SyncEngine] Order #${odooRecordId} state "${cur || 'unknown'}" — lock skipped, only confirmed orders can be locked (zid status "${zidStatus}")`)
+        return
+      }
+      await client.execute('sale.order', 'action_done', [odooRecordId])
+      console.info(`[SyncEngine] Order #${odooRecordId} LOCKED (zid status "${zidStatus}")`)
+      return
+    }
+    console.info(`[SyncEngine] No status action for target "${odooState}" (zid status "${zidStatus}")`)
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Status action "${odooState}" failed for order #${odooRecordId} (zid status "${zidStatus}"):`, err?.message || err)
+  }
+}
+
+// ──── Helper: dispatch the configured status action after the record write ─────
+// Looks up the order_status_mappings row for the payload status:
+//   - no row      → nothing (legacy passive state write already applied upstream)
+//   - disabled    → Odoo fully untouched for this status
+//   - enabled     → real workflow transition via applyOrderStatusAction
+async function maybeApplyOrderStatusAction(
+  client: OdooClient,
+  odooRecordId: number,
+  zidData: Record<string, unknown>,
+  workspaceId: string,
+  platform?: 'zid' | 'salla' | 'shopify',
+): Promise<void> {
+  try {
+    const zidStatus = resolveZidStatus(zidData)
+    if (!zidStatus) return
+    const row = await getOrderStatusRow(workspaceId, zidStatus, platform)
+    if (!row) {
+      console.info(`[SyncEngine] No status mapping row for "${zidStatus}" — status action skipped`)
+      return
+    }
+    if (!row.enabled) {
+      console.info(`[SyncEngine] Status "${zidStatus}" mapping is DISABLED — Odoo untouched (#${odooRecordId})`)
+      return
+    }
+    await applyOrderStatusAction(client, odooRecordId, row.odoo_state, zidStatus)
+  } catch (err: any) {
+    console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
+  }
 }
 
 // â”€â”€â”€ Helper: extract fulfilled items from platform payload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3043,12 +3451,18 @@ async function processFixedMappingFallback(
         { odoo_field: 'email', platform_field: 'email' },
         { odoo_field: 'mobile', platform_field: 'mobile' },
         { odoo_field: 'phone', platform_field: 'telephone' },
+        { odoo_field: 'vat', platform_field: 'tax_number || vat' },
+        { odoo_field: 'company_registry', platform_field: 'commercial_registration' },
+        { odoo_field: 'company_name', platform_field: 'business_name || company_name' },
       ],
       'zid_customer_update': [
         { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'email', platform_field: 'email' },
         { odoo_field: 'mobile', platform_field: 'mobile' },
         { odoo_field: 'phone', platform_field: 'telephone' },
+        { odoo_field: 'vat', platform_field: 'tax_number || vat' },
+        { odoo_field: 'company_registry', platform_field: 'commercial_registration' },
+        { odoo_field: 'company_name', platform_field: 'business_name || company_name' },
       ],
       'zid_customer_delete': [
         { odoo_field: 'name', platform_field: 'name' },
@@ -3087,20 +3501,38 @@ async function processFixedMappingFallback(
         { odoo_field: 'phone', platform_field: 'phone' },
       ],
       'zid_order_create': [
-        { odoo_field: 'name', platform_field: 'code' },
         { odoo_field: 'client_order_ref', platform_field: 'id' },
-        { odoo_field: 'date_order', platform_field: 'order_date' },
+        { odoo_field: 'date_order', platform_field: 'order_date || created_at' },
+      ],
+      'zid_order_update': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+        { odoo_field: 'date_order', platform_field: 'order_date || created_at' },
+      ],
+      'zid_order_delete': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
       ],
       'salla_order_create': [
-        { odoo_field: 'name', platform_field: 'reference_id' },
         { odoo_field: 'client_order_ref', platform_field: 'id' },
         { odoo_field: 'date_order', platform_field: 'date.date' },
       ],
+      'salla_order_update': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+        { odoo_field: 'date_order', platform_field: 'date.date' },
+      ],
+      'salla_order_delete': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+      ],
       'shopify_order_create': [
-        { odoo_field: 'name', platform_field: 'name' },
         { odoo_field: 'client_order_ref', platform_field: 'id' },
         { odoo_field: 'amount_total', platform_field: 'total_price' },
         { odoo_field: 'date_order', platform_field: 'created_at' },
+      ],
+      'shopify_order_update': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
+        { odoo_field: 'date_order', platform_field: 'created_at' },
+      ],
+      'shopify_order_delete': [
+        { odoo_field: 'client_order_ref', platform_field: 'id' },
       ],
       'zid_order_cancel': [],
       'zid_order_deliver': [],
@@ -3669,7 +4101,7 @@ async function syncAsSeparateProducts(
   const results: number[] = []
 
   // Also create/update the main product template itself (not just the variants)
-  const mainDuplicateId = await findExistingOdooRecord(client, 'product.template', zidData, odooValues, mapping, matchStrategy, fixedMatch)
+  const mainDuplicateId = await findExistingOdooRecord(client, 'product.template', zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, platform)
   let mainRecordId: number | null = null
   if (mainDuplicateId !== null) {
     console.info(`[SyncEngine] 🔄 المنتج الرئيسي موجود بالفعل (ID: #${mainDuplicateId}). جاري تحديث البيانات...`)
@@ -3738,7 +4170,7 @@ async function syncAsSeparateProducts(
       sku: variant.sku,
       barcode: variant.barcode
     }
-    const duplicateId = await findExistingOdooRecord(client, 'product.template', variantMockData, variantOdooValues, mapping, matchStrategy, fixedMatch)
+    const duplicateId = await findExistingOdooRecord(client, 'product.template', variantMockData, variantOdooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, platform)
 
     let recordId: number
     if (duplicateId !== null) {
@@ -3754,7 +4186,7 @@ async function syncAsSeparateProducts(
 
     // Trigger stock/inventory update if quantity is provided
     if (variant.quantity !== undefined) {
-      await updateOdooStock(client, recordId, variant.quantity, defaultLocationId, infiniteValue).catch(err => {
+      await updateOdooStock(client, recordId, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
         console.warn(`[SyncEngine] Failed to update stock for standalone variant #${recordId}:`, err)
       })
     }
@@ -3826,7 +4258,7 @@ async function syncAsVariants(
   console.info(`[SyncEngine] 📦 مزامنة ${variants.length} متغيرات تحت منتج رئيسي واحد في أودو.`)
 
   // Step 1: Create or update the main product.template
-  const duplicateId = await findExistingOdooRecord(client, 'product.template', zidData, odooValues, mapping, matchStrategy, fixedMatch)
+  const duplicateId = await findExistingOdooRecord(client, 'product.template', zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, platform)
   
   let templateId: number
   if (duplicateId !== null) {
@@ -4075,7 +4507,7 @@ async function syncAsVariants(
       await client.write('product.product', [matchingOdooVar.id], updatePayload)
 
       if (variant.quantity !== undefined) {
-        await updateOdooStock(client, matchingOdooVar.id, variant.quantity, defaultLocationId, infiniteValue).catch(err => {
+        await updateOdooStock(client, matchingOdooVar.id, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
           console.warn(`[SyncEngine] Failed to update stock for variant product #${matchingOdooVar.id}:`, err)
         })
       }
@@ -4106,7 +4538,7 @@ async function syncAsVariants(
         const createdVarId = await client.create('product.product', createVariantPayload)
         console.info(`[SyncEngine] Created missing Odoo variant product.product #${createdVarId} under template #${templateId}`)
         if (variant.quantity !== undefined) {
-          await updateOdooStock(client, createdVarId, variant.quantity, defaultLocationId, infiniteValue).catch(() => {})
+          await updateOdooStock(client, createdVarId, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(() => {})
         }
         updatedCount++
       } catch (createErr: any) {
@@ -4437,7 +4869,7 @@ async function syncChildVariantAsVariant(
 
     const qtyVal = zidData.quantity !== undefined ? Number(zidData.quantity) : (zidData.stock_quantity !== undefined ? Number(zidData.stock_quantity) : (zidData.qty !== undefined ? Number(zidData.qty) : undefined))
     if (qtyVal !== undefined && !isNaN(qtyVal)) {
-      await updateOdooStock(client, matchingOdooVar.id, qtyVal, defaultLocationId, infiniteValue).catch(err => {
+      await updateOdooStock(client, matchingOdooVar.id, qtyVal, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
         console.warn(`[SyncEngine] Failed to update stock for variant product #${matchingOdooVar.id}:`, err)
       })
     }
@@ -4513,7 +4945,7 @@ async function syncChildVariantAsVariant(
         : (zidData.stock_quantity !== undefined ? Number(zidData.stock_quantity)
         : (zidData.qty !== undefined ? Number(zidData.qty) : undefined))
       if (createQtyVal !== undefined && !isNaN(createQtyVal)) {
-        await updateOdooStock(client, createdVarId, createQtyVal, defaultLocationId, infiniteValue).catch(() => {})
+        await updateOdooStock(client, createdVarId, createQtyVal, defaultLocationId, infiniteValue, mapping.workspace_id).catch(() => {})
       }
     } catch (createErr: any) {
       console.warn(`[SyncEngine] Failed to create missing child Odoo variant: ${createErr?.message ?? createErr}`)
@@ -4568,6 +5000,46 @@ async function syncChildVariantAsVariant(
       message: errorMsg
     }
   }
+}
+
+function readNonEmptyString(...values: unknown[]): string {
+  for (const v of values) {
+    if (v === undefined || v === null) continue
+    const s = String(v).trim()
+    if (s && s !== 'None' && s !== 'null' && s !== 'undefined') return s
+  }
+  return ''
+}
+
+/**
+ * Auto-inject company/tax fields from the platform payload onto a res.partner
+ * write, so tax number (الرقم الضريبي) + commercial registry (السجل التجاري)
+ * always reach Odoo even when the workspace has no mapping row for them.
+ * Explicitly-mapped values win — this only fills gaps.
+ */
+function injectCustomerCompanyFields(
+  odooValues: Record<string, unknown>,
+  zidData: Record<string, unknown>
+): Record<string, unknown> {
+  const values = { ...odooValues }
+  const taxNumber = readNonEmptyString(zidData.tax_number, zidData.vat, zidData.tax_id, zidData.vat_number)
+  const commercialReg = readNonEmptyString(
+    zidData.commercial_registration,
+    zidData.cr_number,
+    zidData.commercial_registration_number,
+    zidData.company_registry
+  )
+  const businessName = readNonEmptyString(zidData.business_name, zidData.company_name)
+
+  if (taxNumber && values.vat === undefined) values.vat = taxNumber
+  if (commercialReg && values.company_registry === undefined) values.company_registry = commercialReg
+  if (businessName && values.company_name === undefined) values.company_name = businessName
+
+  const isCompany = !!taxNumber || !!commercialReg || !!businessName
+  if (isCompany && values.company_type === undefined) {
+    values.company_type = 'company'
+  }
+  return values
 }
 
 async function executeOdooOperation(params: {
@@ -4759,6 +5231,41 @@ async function executeOdooOperation(params: {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
     effectiveOdooValues = await applyFixedSettingsToValues(odooValues, mergedSettings, zidData, majorVersion, mapping.workspace_id, platform, odooModel)
 
+    // ── Auto-resolve category when not mapped by field presets ──
+    // The standard preset may not include categ_id → categories in its field_rows.
+    // When category.sync_mode is 'auto' or 'map_existing', resolve from zidData and inject.
+    if (effectiveOdooValues.categ_id === undefined) {
+      const _catCfg = (mergedSettings as any)?.category
+      const _catSyncMode = _catCfg?.sync_mode || 'auto'
+      if (_catSyncMode !== 'skip') {
+        const _catRawValue = zidData.categories ?? (zidData as any).category
+        if (_catRawValue !== undefined && _catRawValue !== null) {
+          const _catSingle = Array.isArray(_catRawValue) ? _catRawValue[0] : _catRawValue
+          try {
+            if (_catSyncMode === 'map_existing') {
+              // Only link to existing categories — do not create new ones
+              const _catName = toNameString(_catSingle)
+              if (_catName && !_catName.startsWith('{')) {
+                const _found = await client.search('product.category', [['name', '=', _catName]], 1)
+                if (_found && _found.length > 0) {
+                  effectiveOdooValues.categ_id = _found[0]
+                  console.info(`[SyncEngine] Category sync (map_existing): linked existing "${_catName}" → product.category #${_found[0]}`)
+                }
+              }
+            } else {
+              // 'auto' — resolve and create in Odoo if not found
+              const _resolved = await resolveSingleRelationId(client, 'product.category', _catSingle, platform, undefined, undefined, mapping.workspace_id)
+              if (_resolved) {
+                effectiveOdooValues.categ_id = _resolved
+              }
+            }
+          } catch (_catErr: any) {
+            console.warn(`[SyncEngine] Failed to resolve category for product:`, _catErr?.message ?? _catErr)
+          }
+        }
+      }
+    }
+
     // Apply conditional rules and currency conversion
     effectiveOdooValues = await applyRulesToValues(
       effectiveOdooValues,
@@ -4924,6 +5431,9 @@ async function executeOdooOperation(params: {
       zidData,
       client
     )
+
+    // Company fields always persist, even without explicit mapping rows
+    effectiveOdooValues = injectCustomerCompanyFields(effectiveOdooValues, zidData)
   }
 
   // â”€â”€ Order-specific settings (sale.order) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -4935,6 +5445,14 @@ async function executeOdooOperation(params: {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
     effectiveOdooValues = await applyFixedSettingsToValues(odooValues, mergedSettings, zidData, majorVersion, mapping.workspace_id, platform, odooModel)
 
+    // NEVER send the technical `name` field on sale.order (create or update):
+    // Odoo owns the SO... sequence. Sending it overrides the sequence and breaks
+    // numbering, so strip it unconditionally here (covers presets, dynamic
+    // mappings, and the duplicate-create-update branch below).
+    if ('name' in effectiveOdooValues) {
+      delete effectiveOdooValues.name
+    }
+
     const orderSettings = (mergedSettings as any)?.order
     // ── Auto-resolve partner_id from customer data ──────────────
     if (!effectiveOdooValues.partner_id) {
@@ -4944,7 +5462,8 @@ async function executeOdooOperation(params: {
       const custPhone = String(customerData.phone || customerData.mobile || '')
       const custTaxId = String(customerData.tax_number || customerData.vat || '')
       const custCommercialReg = String(customerData.commercial_registration || '')
-      if (custName || custEmail || custPhone || custTaxId) {
+      const custBusinessName = String(customerData.business_name || '')
+      if (custName || custEmail || custPhone || custTaxId || custCommercialReg) {
         try {
           let partnerId: number | null = null
           // Priority 1: Search by tax_id/vat (most reliable identifier)
@@ -4956,7 +5475,7 @@ async function executeOdooOperation(params: {
           }
           // Priority 2: Search by email
           if (custEmail && !partnerId) {
-            const ids = await client.search('res.partner', [[['email', '=', custEmail]]], 1)
+            const ids = await client.search('res.partner', [['email', '=', custEmail]], 1)
             if (ids.length > 0) partnerId = ids[0]
           }
           // Priority 3: Search by phone with ilike
@@ -4968,21 +5487,24 @@ async function executeOdooOperation(params: {
           }
           // Priority 4: Search by name with ilike
           if (custName && !partnerId) {
-            const ids = await client.search('res.partner', [[['name', 'ilike', custName]]], 1)
+            const ids = await client.search('res.partner', [['name', 'ilike', custName]], 1)
             if (ids.length > 0) partnerId = ids[0]
           }
           // Priority 5: Search by commercial registration
           if (custCommercialReg && !partnerId) {
-            const ids = await client.search('res.partner', [[['company_registry', '=', custCommercialReg]]], 1)
+            const ids = await client.search('res.partner', [['company_registry', '=', custCommercialReg]], 1)
             if (ids.length > 0) partnerId = ids[0]
           }
           // If no partner found, create one
-          if (!partnerId && custName) {
-            const partnerVals: Record<string, any> = { name: custName }
+          if (!partnerId && (custName || custBusinessName)) {
+            const partnerVals: Record<string, any> = { name: custName || custBusinessName }
             if (custEmail) partnerVals.email = custEmail
             if (custPhone) partnerVals.phone = custPhone
             if (custPhone) partnerVals.mobile = custPhone
             if (custTaxId) partnerVals.vat = custTaxId
+            if (custCommercialReg) partnerVals.company_registry = custCommercialReg
+            if (custBusinessName) partnerVals.company_name = custBusinessName
+            if (custTaxId || custCommercialReg || custBusinessName) partnerVals.company_type = 'company'
             const newId = await client.create('res.partner', partnerVals)
             if (newId) {
               partnerId = newId
@@ -5004,20 +5526,31 @@ async function executeOdooOperation(params: {
       }
     }
     // Resolve order state from DB mapping or fallback
-    const zidStatus = String(
-      (zidData as any)?.status
-      || (zidData as any)?.order_status
-      || (zidData as any)?.financial_status
-      || ''
-    )
+    const zidStatus = resolveZidStatus(zidData)
+    if (!zidStatus) {
+      console.info(`[SyncEngine] No order status in payload (top keys: ${Object.keys((zidData as any) || {}).slice(0, 25).join(',')})`)
+    }
+    // Status mapping with teeth: when a mapping row exists AND is enabled, skip
+    // the passive `state` write (Odoo state is workflow-driven — direct writes
+    // fake the state without creating pickings) and let
+    // maybeApplyOrderStatusAction perform the real transition after the record
+    // write. Disabled rows leave Odoo fully untouched for this status;
+    // unmapped statuses keep the legacy smart-default passive write.
     if (zidStatus && !effectiveOdooValues.state) {
-      const resolvedState = await resolveOrderState(
-        mapping.workspace_id,
-        zidStatus,
-        platform
-      )
-      if (resolvedState) {
-        effectiveOdooValues.state = resolvedState
+      const statusRow = await getOrderStatusRow(mapping.workspace_id, zidStatus, platform)
+      if (!statusRow) {
+        const resolvedState = await resolveOrderState(
+          mapping.workspace_id,
+          zidStatus,
+          platform
+        )
+        if (resolvedState) {
+          effectiveOdooValues.state = resolvedState
+        }
+      } else if (statusRow.enabled) {
+        console.info(`[SyncEngine] Status "${zidStatus}" → Odoo "${statusRow.odoo_state}" action armed (mapping enabled)`)
+      } else {
+        console.info(`[SyncEngine] Status "${zidStatus}" mapping is DISABLED — Odoo state untouched`)
       }
     }
     if (orderSettings) {
@@ -5121,11 +5654,48 @@ async function executeOdooOperation(params: {
         }
       }
     }
+    // ── Build order_lines (products + shipping + discount) for create operations ──
+    // The fixed/standard mapping path never built lines (only the dynamic mapping
+    // path did), so orders were created header-only. Rows follow the standard
+    // mapping settings (add_shipping_as_line / add_discount_as_line, product ids).
+    // Built for create AND update; update writes convert the (0,0) creates into a
+    // full replace [(5,0,0), ...] via normalizeOrderLinesForUpdate (mirror Zid, no dups).
+    if ((odooOperation === 'create' || odooOperation === 'update') && !('order_line' in effectiveOdooValues)) {
+      let orderStdSettings: Record<string, any> | null = null
+      if (mapping.workspace_id && platform) {
+        try {
+          const { data: stdRow } = await supabaseAdmin
+            .from('standard_mapping_settings')
+            .select('settings')
+            .eq('workspace_id', mapping.workspace_id)
+            .eq('store_type', platform)
+            .eq('entity_type', 'orders')
+            .maybeSingle()
+          if (stdRow?.settings) {
+            orderStdSettings = stdRow.settings as Record<string, any>
+          }
+        } catch (err) {
+          console.warn('[SyncEngine] Failed to load standard mapping settings for order lines:', err)
+        }
+      }
+      const orderLines = await buildOrderLineItems(
+        client,
+        mapping,
+        zidData,
+        new Map<string, OdooFieldMeta>(),
+        effectiveOdooValues,
+        platform,
+        orderStdSettings
+      )
+      if (orderLines.length > 0) {
+        effectiveOdooValues.order_line = orderLines.map(item => [0, 0, item])
+      }
+    }
   }
 
   // â”€â”€ Cancel operation (sale.order only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (odooOperation === 'cancel') {
-    const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+    const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     if (existingId === null) {
       const msg = `No matching ${odooModel} record found in Odoo for cancel`
       console.warn(`[SyncEngine] ${msg}`)
@@ -5147,7 +5717,7 @@ async function executeOdooOperation(params: {
 
   // â”€â”€ Deliver operation (sale.order only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (odooOperation === 'deliver') {
-    const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+    const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     if (existingId === null) {
       const msg = `No matching ${odooModel} record found in Odoo for deliver`
       console.warn(`[SyncEngine] ${msg}`)
@@ -5196,12 +5766,19 @@ async function executeOdooOperation(params: {
       duplicateId = Number((mergedSettings as any).odoo_category_id)
       console.info(`[SyncEngine] Using manual category mapping Odoo ID for create check: ${duplicateId}`)
     } else {
-      duplicateId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+      duplicateId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     }
     if (duplicateId !== null) {
       console.info(`[SyncEngine] Matching ${odooModel} #${duplicateId} already exists in Odoo. Updating existing record...`)
+      // Mirror Zid lines into the existing order (replace, never append → no duplicates)
+      if (odooModel === 'sale.order') {
+        await normalizeOrderLinesForUpdate(client, duplicateId, zidData, effectiveOdooValues)
+      }
       const ok = await safeWriteOdooRecord(client, odooModel, duplicateId, effectiveOdooValues, odooValues)
       if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${duplicateId}`)
+      if (odooModel === 'sale.order') {
+        await maybeApplyOrderStatusAction(client, duplicateId, zidData, mapping.workspace_id, execPlatform)
+      }
       console.info(`[SyncEngine] ✅ Updated existing ${odooModel} #${duplicateId} in Odoo (zid_id="${zidEntityId}")`)
       if (odooModel === 'product.template') {
         await syncProductBom(client, duplicateId, zidData, mergedSettings, execPlatform, mapping.workspace_id).catch(err => {
@@ -5214,6 +5791,9 @@ async function executeOdooOperation(params: {
 
     const newId = await safeCreateOdooRecord(client, odooModel, effectiveOdooValues, odooValues)
     console.info(`[SyncEngine] ✅ Created ${odooModel} #${newId} in Odoo (zid_id="${zidEntityId}")`)
+    if (odooModel === 'sale.order') {
+      await maybeApplyOrderStatusAction(client, newId, zidData, mapping.workspace_id, execPlatform)
+    }
     if (odooModel === 'product.template') {
       await syncProductBom(client, newId, zidData, mergedSettings, execPlatform, mapping.workspace_id).catch(err => {
         console.warn(`[SyncEngine] Failed to sync BoM for new template:`, err)
@@ -5274,7 +5854,7 @@ async function executeOdooOperation(params: {
   } else {
     // Zid child product delete: search product.product (not template) since variants are product.product records
     if (odooOperation === 'delete' && odooModel === 'product.template' && (zidData.parent_id || (zidData.parent as any)?.id)) {
-      const childId = await findExistingOdooRecord(client, 'product.product', zidData, odooValues, mapping, matchStrategy, fixedMatch)
+      const childId = await findExistingOdooRecord(client, 'product.product', zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
       if (childId !== null) {
         existingId = childId
         deleteModel = 'product.product'
@@ -5282,7 +5862,7 @@ async function executeOdooOperation(params: {
       }
     }
     if (existingId === null) {
-      existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch)
+      existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     }
   }
   if (existingId === null) {
@@ -5293,8 +5873,15 @@ async function executeOdooOperation(params: {
   }
 
   if (odooOperation === 'update') {
+    // Mirror Zid lines into the existing order (replace, never append → no duplicates)
+    if (odooModel === 'sale.order') {
+      await normalizeOrderLinesForUpdate(client, existingId, zidData, effectiveOdooValues)
+    }
     const ok = await safeWriteOdooRecord(client, odooModel, existingId, effectiveOdooValues, odooValues)
     if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${existingId}`)
+    if (odooModel === 'sale.order') {
+      await maybeApplyOrderStatusAction(client, existingId, zidData, mapping.workspace_id, execPlatform)
+    }
     console.info(`[SyncEngine] ✅ Updated ${odooModel} #${existingId} in Odoo (zid_id="${zidEntityId}")`)
     if (odooModel === 'product.template') {
       await syncProductBom(client, existingId, zidData, mergedSettings, execPlatform, mapping.workspace_id).catch(err => {
@@ -5437,7 +6024,9 @@ export async function findExistingOdooRecord(
   odooValues: Record<string, unknown>,
   mapping?: { odoo_match_field?: string | null; zid_match_field?: string | null },
   matchStrategy?: string,
-  fixedMatch?: { odoo_field: string; zid_field: string }
+  fixedMatch?: { odoo_field: string; zid_field: string },
+  workspaceId?: string,
+  platform?: string
 ): Promise<number | null> {
   const sku = toNameString(zidData.sku || odooValues.default_code)
   const barcode = toNameString(zidData.barcode || odooValues.barcode)
@@ -5478,6 +6067,48 @@ export async function findExistingOdooRecord(
       }
     } catch (err) {
       console.warn('[SyncEngine] Early sync_logs lookup failed:', err)
+    }
+  }
+
+  // 0.5) Priority check: manual product mapping (product_mappings table).
+  // This lets the admin hand-pick the Odoo product a store product MUST sync into.
+  if (workspaceId && (model === 'product.template' || model === 'product.product') && (zidId || sku)) {
+    try {
+      let q = supabaseAdmin
+        .from('product_mappings')
+        .select('odoo_product_id')
+        .eq('workspace_id', workspaceId)
+        .not('odoo_product_id', 'is', null)
+      if (platform) q = q.eq('platform', platform)
+      if (zidId) q = q.eq('source_product_id', zidId)
+      const { data: pmRow } = await q.maybeSingle()
+
+      let pmRecordId: number | null = pmRow ? Number(pmRow.odoo_product_id) : null
+      if (pmRecordId === null && sku) {
+        let qs = supabaseAdmin
+          .from('product_mappings')
+          .select('odoo_product_id')
+          .eq('workspace_id', workspaceId)
+          .eq('source_sku', sku)
+          .not('odoo_product_id', 'is', null)
+        if (platform) qs = qs.eq('platform', platform)
+        const { data: pmRowSku } = await qs.maybeSingle()
+        if (pmRowSku?.odoo_product_id) pmRecordId = Number(pmRowSku.odoo_product_id)
+      }
+
+      if (pmRecordId && Number.isInteger(pmRecordId) && pmRecordId > 0) {
+        try {
+          const exists = await client.search(model, [['id', '=', pmRecordId]], 1)
+          if (exists.length > 0) {
+            console.info(`[SyncEngine] Resolved ${model} #${pmRecordId} from manual product_mappings (source_id="${zidId}", sku="${sku}")`)
+            return pmRecordId
+          }
+        } catch {
+          // Record might have been deleted in Odoo, continue with other candidates
+        }
+      }
+    } catch (err) {
+      console.warn('[SyncEngine] product_mappings lookup failed:', err)
     }
   }
 

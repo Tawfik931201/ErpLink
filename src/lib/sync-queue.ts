@@ -22,6 +22,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 
+import { processOdooStockEvent } from './stock-sync-engine'
 import { processWebhookEvent } from './sync-engine'
 
 const supabase = createClient(
@@ -264,8 +265,59 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     .maybeSingle()
 
   if (error) return { skipped: true }
+
+  // ── مصالحة ما بعد الإدراج (تسد ثغرة التسابق) ──────────────────────────
+  // لو وصل تسليمان متطابقان في نفس اللحظة، قد يُدرج كلاهما قبل أن يرى
+  // الآخر في فحص ما قبل الإدراج أعلاه. هنا يبحث الصف الجديد عن أخ معلّق
+  // أقدم لنفس الكيان: إن وُجد وما زال مستحقاً وغير محجوز، تُدمج البيانات
+  // فيه (الأحدث يفوز، نفس قاعدة الدمج) ويُحذف الصف الجديد — فيبقى صف واحد.
+  const myId = (data as { id?: string } | null)?.id
+  if (entityId && myId) {
+    try {
+      const nowIso = new Date().toISOString()
+      const { data: siblings } = await supabase
+        .from('sync_queue')
+        .select('id,payload,created_at')
+        .eq('workspace_id', params.workspaceId)
+        .eq('store_id', params.storeId)
+        .eq('event', params.event)
+        .eq('platform', params.platform)
+        .not('next_retry_at', 'is', null)
+        .lte('next_retry_at', nowIso)
+        .neq('id', myId)
+        .order('created_at', { ascending: true })
+        .limit(10)
+      const target = (siblings ?? []).find(
+        (r: { payload: unknown }) =>
+          extractEntityId((r.payload ?? {}) as Record<string, unknown>) === entityId
+      ) as { id: string; payload: unknown } | undefined
+      if (target) {
+        const rowPayload = (target.payload ?? {}) as Record<string, unknown>
+        const oldTs = extractPayloadUpdatedAt(rowPayload)
+        const newTs = extractPayloadUpdatedAt(params.payload)
+        const merged = newTs >= oldTs ? params.payload : rowPayload
+        // تحديث مشروط: ينجح فقط لو ما زال الصف الهدف معلّقاً ومستحقاً
+        // (لو حجزه عامل معالجة آخر في هذه اللحظة، لا نلمسه — نُبقي صفّنا).
+        const { data: updated } = await supabase
+          .from('sync_queue')
+          .update({ payload: merged, updated_at: new Date().toISOString() })
+          .eq('id', target.id)
+          .not('next_retry_at', 'is', null)
+          .lte('next_retry_at', nowIso)
+          .select('id')
+        if (updated && updated.length > 0) {
+          await supabase.from('sync_queue').delete().eq('id', myId)
+          metrics.coalesced += 1
+          return { id: target.id, coalesced: true }
+        }
+      }
+    } catch {
+      // غير قاتل — يُبقي الصف الجديد ويُعالج لاحقاً.
+    }
+  }
+
   metrics.enqueued += 1
-  return { id: (data as { id?: string } | null)?.id }
+  return { id: myId }
 }
 
 // ─── Processing ──────────────────────────────────────────────────────────────
@@ -359,9 +411,33 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH) {
 
   const batch = toProcess.slice(0, maxItems)
 
+  // ── حجز ذري (claim): يمنع عاملين متداخلين من معالجة نفس الصف ─────────
+  // runSyncQueueOnce يُستدعى بعد كل ويبهوك + cron، فتتداخل الدفعات. قبل
+  // المعالجة نحجز كل صف بتحديث مشروط (ينجح فقط لو ما زال مستحقاً): الفائز
+  // يتابَع، والخاسر يتخطى الصف. مدة الحجز 15 دقيقة — كافية لأبطأ حدث،
+  // ولو تعطل العامل يُعاد الصف تلقائياً بعدها. الصف المحجوز يختفي أيضاً
+  // من جلبات الدفعات الأخرى (next_retry_at مستقبلي).
+  const CLAIM_LEASE_MS = 15 * 60 * 1000
+  const claimed: QueueItem[] = []
+  for (const item of batch) {
+    try {
+      const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
+      const { data: locked } = await supabase
+        .from('sync_queue')
+        .update({ next_retry_at: leaseUntil })
+        .eq('id', item.id)
+        .not('next_retry_at', 'is', null)
+        .lte('next_retry_at', new Date().toISOString())
+        .select('id')
+      if (locked && locked.length > 0) claimed.push(item)
+    } catch {
+      // فشل الحجز غير قاتل — تخطَّ هذا الصف في هذه الدفعة.
+    }
+  }
+
   // ── حد التوازي ──
-  for (let i = 0; i < batch.length; i += SYNC_QUEUE_CONCURRENCY) {
-    const chunk = batch.slice(i, i + SYNC_QUEUE_CONCURRENCY)
+  for (let i = 0; i < claimed.length; i += SYNC_QUEUE_CONCURRENCY) {
+    const chunk = claimed.slice(i, i + SYNC_QUEUE_CONCURRENCY)
     await Promise.allSettled(chunk.map((item) => processOneItem(item)))
   }
 
@@ -373,19 +449,33 @@ async function processOneItem(item: QueueItem) {
   metrics.processed += 1
   try {
     // isQueueExecution=true لمنع إعادة الإدراج المكررة من داخل المحرك.
-    const result = await processWebhookEvent(
-      item.event,
-      item.store_id,
-      item.payload as Record<string, unknown>,
-      item.platform as 'zid' | 'salla' | 'shopify',
-      true
-    )
+    // أحداث platform='odoo' (مخزون Odoo → المتاجر) تُعالج بمحرك المخزون
+    // المنفصل بدلاً من processWebhookEvent (الذي هو store → ERP).
+    const result =
+      item.platform === 'odoo'
+        ? await processOdooStockEvent(item.payload as Record<string, unknown>)
+        : await processWebhookEvent(
+            item.event,
+            item.store_id,
+            item.payload as Record<string, unknown>,
+            item.platform as 'zid' | 'salla' | 'shopify',
+            true
+          )
 
-    if (result.failed === 0) {
+    if ('ok' in result) {
+      // Odoo stock event: engine returns { ok } (throws on fatal failure).
+      if (result.ok) {
+        await supabase.from('sync_queue').delete().eq('id', item.id)
+        metrics.succeeded += 1
+      } else {
+        metrics.retried += 1
+        await incrementRetry(item, 'Stock sync failed')
+      }
+    } else if (result.failed === 0) {
       await supabase.from('sync_queue').delete().eq('id', item.id)
       metrics.succeeded += 1
     } else {
-      const errorRecord = result.records.find((r) => r.status === 'failed')
+      const errorRecord = result.records.find((r: { status: string }) => r.status === 'failed')
       metrics.retried += 1
       await incrementRetry(item, errorRecord?.message || 'Sync failed')
     }

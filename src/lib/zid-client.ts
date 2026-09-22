@@ -277,8 +277,8 @@ export interface ZidCreateWebhookBody {
 // ─── Stock / Location types ───────────────────────────────────────────────────
 
 export interface ZidStockUpdateBody {
-  quantity: number
-  location_id?: string
+  available_quantity: number
+  is_infinite?: boolean
 }
 
 // ─── Axios instance ───────────────────────────────────────────────────────────

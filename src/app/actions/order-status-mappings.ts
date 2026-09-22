@@ -8,7 +8,7 @@ import { getOrCreateDbUser } from '@/lib/users'
 
 export async function saveOrderStatusMappings(
   platform: string,
-  mappings: Record<string, string>
+  mappings: Record<string, { state: string; enabled: boolean }>
 ) {
   try {
     const { userId } = await auth()
@@ -27,12 +27,19 @@ export async function saveOrderStatusMappings(
       .eq('platform', platform)
 
     // Upsert new/changed mappings (safe: old data preserved if this fails)
+    // Accepts the object shape { state, enabled }; legacy plain-string values
+    // are tolerated and treated as enabled.
+    const stateOf = (v: unknown): string => {
+      const s = typeof v === 'string' ? v : (v as { state?: unknown } | null)?.state
+      return String(s || '').trim()
+    }
     const rows = Object.entries(mappings)
-      .filter(([, odooState]) => odooState && String(odooState).trim() !== '')
-      .map(([zidStatus, odooState]) => ({
+      .filter(([, v]) => stateOf(v) !== '')
+      .map(([zidStatus, v]) => ({
         workspace_id: workspaceId,
         zid_status: zidStatus,
-        odoo_state: String(odooState).trim(),
+        odoo_state: stateOf(v),
+        enabled: typeof v === 'string' ? true : ((v as { enabled?: unknown } | null)?.enabled ?? true),
         platform,
       }))
 
@@ -48,7 +55,10 @@ export async function saveOrderStatusMappings(
 
     // Delete mappings no longer in the new set (safe: if this fails, stale rows remain harmlessly)
     const newStatuses = Object.entries(mappings)
-      .filter(([, odooState]) => odooState && String(odooState).trim() !== '')
+      .filter(([, v]) => {
+        const s = typeof v === 'string' ? v : (v as { state?: unknown } | null)?.state
+        return s && String(s).trim() !== ''
+      })
       .map(([zidStatus]) => zidStatus)
     const toDelete = (existing || [])
       .filter(e => !newStatuses.includes(e.zid_status))
@@ -82,15 +92,15 @@ export async function getOrderStatusMappings(platform: string) {
 
     const { data, error } = await supabase
       .from('order_status_mappings')
-      .select('zid_status, odoo_state')
+      .select('zid_status, odoo_state, enabled')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
 
     if (error) throw error
 
-    const mappings: Record<string, string> = {}
+    const mappings: Record<string, { state: string; enabled: boolean }> = {}
     for (const row of data || []) {
-      if (row.odoo_state) mappings[row.zid_status] = row.odoo_state
+      if (row.odoo_state) mappings[row.zid_status] = { state: row.odoo_state, enabled: (row as { enabled?: unknown }).enabled !== false }
     }
 
     return { success: true, mappings }

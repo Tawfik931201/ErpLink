@@ -1,5 +1,12 @@
 import { OdooClient, type OdooConfig } from './odoo-client'
 
+export interface RegisterOdooWebhookOptions {
+  /** Override the destination path (default: `/api/webhooks/odoo?field_mapping_id=<id>`). */
+  webhookPath?: string
+  /** Optional suffix to distinguish the automation name. */
+  labelSuffix?: string
+}
+
 /**
  * Registers an Automated Action (Webhook) in Odoo for a given model.
  * Handles differences between Odoo 17+ and older versions (Odoo 16 and below) dynamically.
@@ -11,7 +18,8 @@ export async function registerOdooWebhook(
   config: OdooConfig,
   odooModel: string,
   fieldMappingId: string,
-  fieldNames: string[]
+  fieldNames: string[],
+  options?: RegisterOdooWebhookOptions
 ): Promise<{ baseAutomationId: number; serverActionId?: number }> {
   const client = new OdooClient(config)
 
@@ -81,7 +89,10 @@ export async function registerOdooWebhook(
     throw new Error('[OdooWebhook] NEXT_PUBLIC_APP_URL environment variable is required for webhook registration')
   }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
-  const webhookUrl = `${appUrl}/api/webhooks/odoo?field_mapping_id=${fieldMappingId}`
+  const webhookUrl = options?.webhookPath
+    ? `${appUrl}${options.webhookPath}`
+    : `${appUrl}/api/webhooks/odoo?field_mapping_id=${fieldMappingId}`
+  const labelSuffix = options?.labelSuffix ? `: ${options.labelSuffix}` : ''
 
   // 4. Inspect base.automation to detect Odoo 17+ vs 16-
   console.log('[OdooWebhook] Checking base.automation fields to detect Odoo version...')
@@ -141,7 +152,7 @@ export async function registerOdooWebhook(
       // Native Webhook Action (No Python code validation, bypasses safe_eval)
       console.log('[OdooWebhook] Registering native Webhook Server Action...')
       const srvActionData: Record<string, any> = {
-        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
+        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})${labelSuffix}`,
         model_id: modelId,
         state: 'webhook',
         [urlFieldName]: webhookUrl,
@@ -170,7 +181,7 @@ except Exception:
     pass`
 
       serverActionId = await client.create('ir.actions.server', {
-        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
+        name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})${labelSuffix}`,
         model_id: modelId,
         state: 'code',
         code: pythonCode,
@@ -181,7 +192,7 @@ except Exception:
     // Create automated action (base.automation) and link it
     console.log('[OdooWebhook] Creating base.automation...')
     const baseAutomationData: Record<string, any> = {
-      name: `ErpLink Automated Action: ${odooModel} (${fieldMappingId})`,
+      name: `ErpLink Automated Action: ${odooModel} (${fieldMappingId})${labelSuffix}`,
       model_id: modelId,
       trigger: 'on_create_or_write',
       action_server_ids: [[6, 0, [serverActionId]]], // Many2many link syntax
@@ -212,7 +223,7 @@ except Exception:
 
     console.log('[OdooWebhook] Creating base.automation directly (delegated inheritance)...')
     const baseAutomationData: Record<string, any> = {
-      name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})`,
+      name: `ErpLink Webhook: ${odooModel} (${fieldMappingId})${labelSuffix}`,
       model_id: modelId,
       trigger: 'on_create_or_write',
       state: 'code',
@@ -228,6 +239,42 @@ except Exception:
 
     return { baseAutomationId }
   }
+}
+
+/**
+ * Registers an Automated Action on `stock.quant` so Odoo notifies us whenever
+ * a product's stock balance changes (purchases, sales, inventory adjustments …).
+ * Uses the same version detection as `registerOdooWebhook`, targeting the
+ * dedicated stock receiver route with `workspace_id`.
+ */
+export async function registerOdooStockWebhook(
+  config: OdooConfig,
+  workspaceId: string,
+  odooModel = 'stock.quant'
+): Promise<{ baseAutomationId: number; serverActionId?: number }> {
+  const fieldNames = ['product_id', 'location_id', 'quantity', 'inventory_quantity']
+  return registerOdooWebhook(
+    config,
+    odooModel,
+    workspaceId,
+    fieldNames,
+    {
+      webhookPath: `/api/webhooks/odoo/stock?workspace_id=${workspaceId}`,
+      labelSuffix: 'Stock',
+    }
+  )
+}
+
+/**
+ * Removes the stock Automated Action (and its server action) from Odoo.
+ */
+export async function unregisterOdooStockWebhook(
+  config: OdooConfig,
+  baseAutomationId?: number,
+  serverActionId?: number
+): Promise<boolean> {
+  if (!baseAutomationId) return true
+  return unregisterOdooWebhook(config, baseAutomationId, serverActionId)
 }
 
 /**

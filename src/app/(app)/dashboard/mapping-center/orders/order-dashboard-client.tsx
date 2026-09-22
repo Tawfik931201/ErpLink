@@ -76,7 +76,6 @@ export default function OrderDashboardClient() {
   const [isErrorSummaryOpen, setIsErrorSummaryOpen] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
   const [detailStoreId, setDetailStoreId] = useState<string | undefined>(undefined)
-  const [autoRefresh, setAutoRefresh] = useState(true)
   const pageSize = 20
 
   const load = useCallback(async () => {
@@ -104,13 +103,6 @@ export default function OrderDashboardClient() {
   }, [statusFilter, platformFilter, searchQuery, page])
 
   useEffect(() => { load() }, [load])
-
-  // Auto-refresh every 30 seconds
-  useEffect(() => {
-    if (!autoRefresh) return
-    const interval = setInterval(() => { load() }, 30_000)
-    return () => clearInterval(interval)
-  }, [autoRefresh, load])
 
   const retryAllFailed = async () => {
     const failedIds = logs.filter(l => l.status === 'failed').map(l => l.id)
@@ -268,18 +260,6 @@ export default function OrderDashboardClient() {
           </p>
         </div>
         <div className="mr-auto flex items-center gap-2">
-          {/* Auto-refresh toggle */}
-          <button
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
-              autoRefresh ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-muted text-muted-foreground'
-            }`}
-          >
-            <RefreshCw className={`h-3 w-3 ${autoRefresh ? 'text-green-600' : ''}`} />
-            {autoRefresh
-              ? (lang === 'ar' ? 'تلقائي' : 'Auto')
-              : (lang === 'ar' ? 'إيقاف' : 'Off')}
-          </button>
           {/* Retry All Failed */}
           {stats && stats.failed > 0 && (
             <Button

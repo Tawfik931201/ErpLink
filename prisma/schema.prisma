@@ -586,6 +586,7 @@ model OrderStatusMapping {
   workspace_id String   @db.Uuid
   zid_status   String // platform status key: 'new', 'preparing', 'ready', etc.
   odoo_state   String // Odoo state: 'draft', 'sale', 'done', 'cancel'
+  enabled      Boolean @default(true) // per-status toggle: disabled statuses leave Odoo untouched
   platform     String   @default("zid") // 'zid' | 'salla' | 'shopify'
   created_at   DateTime @default(now()) @db.Timestamptz(6)
   updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz(6)

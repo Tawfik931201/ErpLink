@@ -87,12 +87,15 @@ export default function SyncLogModal({
   }
 
   // Sync selectedMappingIds when mappingsList or mappingId changes
+  // Only updates state when the actual content differs (no re-fetch loops on re-renders)
   useEffect(() => {
-    if (mappingId) {
-      setSelectedMappingIds([mappingId])
-    } else {
-      setSelectedMappingIds(mappingsList.map(m => m.id))
-    }
+    const target = mappingId
+      ? [mappingId]
+      : mappingsList.map(m => m.id)
+    setSelectedMappingIds(prev => {
+      const same = prev.length === target.length && prev.every((id, i) => target[i] === id)
+      return same ? prev : target
+    })
   }, [mappingsList, mappingId])
   
   // Pagination
@@ -298,13 +301,16 @@ export default function SyncLogModal({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Reload logs when modal opens or filters change
+  // Reload logs only when the modal opens or the user changes a filter.
+  // filtersKey is a stable primitive so background re-renders never re-trigger a fetch.
+  const filtersKey = [...selectedStatuses].sort().join(',') + '|' + [...selectedPlatforms].sort().join(',') + '|' + [...selectedMappingIds].sort().join(',')
   useEffect(() => {
     if (isOpen) {
       fetchLogs()
       setExpandedPayloadIds(new Set())
     }
-  }, [isOpen, selectedStatuses, selectedPlatforms, selectedMappingIds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, filtersKey])
 
   if (!isOpen) return null
 

@@ -28,11 +28,15 @@ import { useRouter } from 'next/navigation'
 import React, { useState, useEffect, useCallback } from 'react'
 
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
-import { getOdooFieldValueOptions } from '@/app/actions/odoo'
+import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
+import { getOdooFieldValueOptions, getOdooLocations } from '@/app/actions/odoo'
 import { saveOrderStatusMappings, getOrderStatusMappings } from '@/app/actions/order-status-mappings'
 import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
+import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
+import { getZidLocations, type ZidLocation } from '@/app/actions/zid'
 import { useLanguage } from '@/components/language-provider'
 import CategoryMappingDialog from '@/components/mapping/category-mapping-dialog'
+import ProductMappingDialog from '@/components/mapping/product-mapping-dialog'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/hooks/use-toast'
@@ -128,6 +132,24 @@ export default function FieldMappingClient({
   const [productType, setProductType] = useState('')
   const [trackInventory, setTrackInventory] = useState(true)
   const [trackingMethod, setTrackingMethod] = useState('')
+
+  // ── Odoo → Zid Inventory Sync (مزامنة المخزون) ──
+  const [invSyncEnabled, setInvSyncEnabled] = useState(false)
+  const [invSyncMode, setInvSyncMode] = useState<'actual' | 'forecast'>('actual')
+  const [odooStockWebhook, setOdooStockWebhook] = useState<OdooStockWebhookRefs | null>(null)
+  const [invSyncPairs, setInvSyncPairs] = useState<{
+    id?: string
+    source_location_id: string
+    source_location_name: string
+    odoo_location_id: string
+    _removed?: boolean
+  }[]>([])
+  const [zidLocations, setZidLocations] = useState<ZidLocation[]>([])
+  const [odooLocations, setOdooLocations] = useState<Array<{ id: number; name: string; complete_name: string; usage: string }>>([])
+  const [isLoadingInvSync, setIsLoadingInvSync] = useState(false)
+  const [isSavingPairs, setIsSavingPairs] = useState(false)
+  const [isSyncingWebhook, setIsSyncingWebhook] = useState(false)
+  const [invSyncWebhookError, setInvSyncWebhookError] = useState('')
   const [markupPercent, setMarkupPercent] = useState(0)
   const [costSource, setCostSource] = useState('cost')
   const [priceSource, setPriceSource] = useState('price')
@@ -198,13 +220,17 @@ export default function FieldMappingClient({
   const [orderAddShipping, setOrderAddShipping] = useState(false)
   const [orderShippingProductId, setOrderShippingProductId] = useState('')
   const [orderShippingProductSku, setOrderShippingProductSku] = useState('')
+  const [orderAddCod, setOrderAddCod] = useState(false)
+  const [orderCodProductId, setOrderCodProductId] = useState('')
+  const [orderCodProductSku, setOrderCodProductSku] = useState('')
+  const [orderCodAmount, setOrderCodAmount] = useState('')
   const [orderAddDiscount, setOrderAddDiscount] = useState(false)
   const [orderDiscountProductId, setOrderDiscountProductId] = useState('')
   const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
   const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
 
   // Status mapping
-  const [orderStateMapping, setOrderStateMapping] = useState<Record<string, string>>({})
+  const [orderStateMapping, setOrderStateMapping] = useState<Record<string, { state: string; enabled: boolean }>>({})
 
   // Odoo fields and options loading states
   const [odooOrderFields, setOdooOrderFields] = useState<{ value: string; label: string }[]>([])
@@ -510,6 +536,10 @@ export default function FieldMappingClient({
           setOrderAddShipping(false)
           setOrderShippingProductId('')
           setOrderShippingProductSku('')
+          setOrderAddCod(false)
+          setOrderCodProductId('')
+          setOrderCodProductSku('')
+          setOrderCodAmount('')
           setOrderAddDiscount(false)
           setOrderDiscountProductId('')
           setOrderDiscountProductSku('')
@@ -522,6 +552,10 @@ export default function FieldMappingClient({
           setProductVariantSyncMode('AS_VARIANTS')
           setBomEnabled(false)
           setBomType('phantom')
+          setInvSyncEnabled(false)
+          setInvSyncMode('actual')
+          setOdooStockWebhook(null)
+          setInvSyncPairs([])
         }
         return
       }
@@ -565,6 +599,9 @@ export default function FieldMappingClient({
         setProductVariantSyncMode(s.variant?.sync_mode || 'AS_VARIANTS')
         setBomEnabled(!!s.bom?.enabled)
         setBomType(s.bom?.type || 'phantom')
+        setInvSyncEnabled(s.inventory?.sync_enabled === true)
+        setInvSyncMode(s.inventory?.sync_mode === 'forecast' ? 'forecast' : 'actual')
+        setOdooStockWebhook(s.inventory?.odoo_stock_webhook || null)
       } else if (standardSubTab === 'customers') {
         setCustomerOnDelete(s.on_delete || 'nothing')
         setCustomerMatchZidField(s.match_zid_field || '')
@@ -594,6 +631,10 @@ export default function FieldMappingClient({
         setOrderAddShipping(s.add_shipping_as_line || false)
         setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
         setOrderShippingProductSku(s.shipping_product_sku || '')
+        setOrderAddCod(s.add_cod_as_line || false)
+        setOrderCodProductId(s.cod_product_id ? String(s.cod_product_id) : '')
+        setOrderCodProductSku(s.cod_product_sku || '')
+        setOrderCodAmount(s.cod_amount ? String(s.cod_amount) : '')
         setOrderAddDiscount(s.add_discount_as_line || false)
         setOrderDiscountProductId(s.discount_product_id ? String(s.discount_product_id) : '')
         setOrderDiscountProductSku(s.discount_product_sku || '')
@@ -604,10 +645,55 @@ export default function FieldMappingClient({
     // Load order status mappings from the dedicated table for Orders
     if (standardSubTab === 'orders') {
       getOrderStatusMappings(standardStoreTab).then(res => {
-        setOrderStateMapping(res.success ? (res.mappings || {}) : {})
+        const raw: Record<string, unknown> = (res.success ? (res.mappings || {}) : {}) as Record<string, unknown>
+        const normalized: Record<string, { state: string; enabled: boolean }> = {}
+        for (const [k, v] of Object.entries(raw)) {
+          if (typeof v === 'string') normalized[k] = { state: v, enabled: true }
+          else if (v && typeof v === 'object') {
+            const o = v as { state?: unknown; enabled?: unknown }
+            normalized[k] = { state: String(o.state || ''), enabled: o.enabled !== false }
+          }
+        }
+        setOrderStateMapping(normalized)
       })
     }
   }, [standardStoreTab, standardSubTab])
+
+  // Load Zid locations, Odoo internal locations & existing pairing rows
+  // for the Odoo → Zid inventory sync (Products tab, Zid store only).
+  const loadInventorySyncData = useCallback(async () => {
+    if (standardStoreTab !== 'zid' || standardSubTab !== 'products') return
+    setIsLoadingInvSync(true)
+    try {
+      const [zRes, oRes, wRes] = await Promise.all([
+        getZidLocations(),
+        getOdooLocations('internal'),
+        getStaticMappings('warehouse_mappings', 'zid'),
+      ])
+      if (zRes.success && zRes.locations) setZidLocations(zRes.locations)
+      if (oRes.success && oRes.locations) setOdooLocations(oRes.locations)
+      if (wRes.success && wRes.mappings) {
+        setInvSyncPairs(
+          (wRes.mappings as any[])
+            .filter((m: any) => m.odoo_location_id && m.source_location_id)
+            .map((m: any) => ({
+              id: String(m.id || ''),
+              source_location_id: String(m.source_location_id || ''),
+              source_location_name: String(m.source_location_name || ''),
+              odoo_location_id: String(m.odoo_location_id || ''),
+            }))
+        )
+      }
+    } catch (err) {
+      console.error('[InventorySync] Failed to load locations/pairs:', err)
+    } finally {
+      setIsLoadingInvSync(false)
+    }
+  }, [standardStoreTab, standardSubTab])
+
+  useEffect(() => {
+    loadInventorySyncData()
+  }, [loadInventorySyncData])
 
   const handleSave = useCallback(async () => {
     setIsSaving(true)
@@ -646,6 +732,10 @@ export default function FieldMappingClient({
       inventory: {
         track_inventory: trackInventory,
         tracking: trackingMethod,
+        // مزامنة المخزون (من أودو إلى زد) — أودو مصدر الحقيقة عند التفعيل
+        sync_enabled: invSyncEnabled,
+        sync_mode: invSyncMode,
+        odoo_stock_webhook: odooStockWebhook,
       },
       price: {
         markup_percent: markupPercent,
@@ -686,7 +776,42 @@ export default function FieldMappingClient({
       link_company: productLinkCompany,
     }
     const res = await saveStandardMappingSettings(standardStoreTab, standardSubTab, settingsPayload)
-    if (res?.success) {
+    const saveOk = !!res?.success
+
+    // Webhook lifecycle: register the stock.quant automation when the toggle
+    // turns ON, unregister it when the toggle turns OFF (Zid store only).
+    if (saveOk && standardStoreTab === 'zid') {
+      if (invSyncEnabled && !odooStockWebhook) {
+        setIsSyncingWebhook(true)
+        setInvSyncWebhookError('')
+        try {
+          const wRes = await enableOdooStockWebhook()
+          if (wRes.success && wRes.refs) {
+            setOdooStockWebhook(wRes.refs)
+          } else {
+            setInvSyncWebhookError(wRes.error || 'Failed to register stock webhook')
+          }
+        } catch (err: any) {
+          setInvSyncWebhookError(String(err?.message || err))
+        } finally {
+          setIsSyncingWebhook(false)
+        }
+      } else if (!invSyncEnabled && odooStockWebhook) {
+        setIsSyncingWebhook(true)
+        setInvSyncWebhookError('')
+        try {
+          const wRes = await disableOdooStockWebhook()
+          if (wRes.success) setOdooStockWebhook(null)
+          else setInvSyncWebhookError(wRes.error || 'Failed to remove stock webhook')
+        } catch (err: any) {
+          setInvSyncWebhookError(String(err?.message || err))
+        } finally {
+          setIsSyncingWebhook(false)
+        }
+      }
+    }
+
+    if (saveOk) {
       toast({
         title: lang === 'ar' ? 'تم الحفظ' : 'Saved',
         description: lang === 'ar'
@@ -703,6 +828,7 @@ export default function FieldMappingClient({
     setIsSavingProducts(false)
   }, [
     productType, trackInventory, trackingMethod,
+    invSyncEnabled, invSyncMode, odooStockWebhook,
     markupPercent, costSource, priceSource, rounding, decimalPlaces,
     nameLanguage, nameFallback, descLanguage, descFallback, descCustomText,
     imageSyncMode, categorySyncMode, uomAutoCreate,
@@ -713,6 +839,129 @@ export default function FieldMappingClient({
     productCompanyId, productLinkCompany,
     standardStoreTab, standardSubTab, lang, toast,
   ])
+
+  // ── Odoo → Zid inventory-sync pair handlers ────────────────────────────────
+
+  const handleAddPair = useCallback(() => {
+    setInvSyncPairs(prev => [
+      ...prev,
+      { source_location_id: '', source_location_name: '', odoo_location_id: '', _removed: false },
+    ])
+  }, [])
+
+  const handlePairChange = useCallback((
+    index: number,
+    field: 'source_location_id' | 'source_location_name' | 'odoo_location_id',
+    value: string
+  ) => {
+    setInvSyncPairs(prev => prev.map((row, i) => {
+      if (i !== index) return row
+      const next = { ...row, [field]: value }
+      if (field === 'source_location_id') {
+        const loc = zidLocations.find(l => l.id === value)
+        next.source_location_name = loc ? loc.name : ''
+      }
+      return next
+    }))
+  }, [zidLocations])
+
+  const handleRemovePair = useCallback((index: number) => {
+    setInvSyncPairs(prev => prev.map((row, i) => i === index ? { ...row, _removed: true } : row))
+  }, [])
+
+  const handleSavePairs = useCallback(async () => {
+    setIsSavingPairs(true)
+    setInvSyncWebhookError('')
+    let failed = 0
+    try {
+      for (const row of invSyncPairs) {
+        if (row._removed) {
+          if (row.id) {
+            const del = await deleteStaticMapping('warehouse_mappings', row.id)
+            if (!del.success) failed++
+          }
+          continue
+        }
+        const src = String(row.source_location_id || '').trim()
+        const odoo = String(row.odoo_location_id || '').trim()
+        if (!src || !odoo) continue
+        const save = await saveStaticMapping(
+          'warehouse_mappings',
+          {
+            id: row.id || undefined,
+            source_location_id: src,
+            source_location_name: row.source_location_name || row.source_location_id,
+            odoo_location_id: Number(odoo),
+          },
+          'zid'
+        )
+        if (!save.success) failed++
+      }
+      await loadInventorySyncData()
+      if (failed === 0) {
+        toast({
+          title: lang === 'ar' ? 'تم الحفظ' : 'Saved',
+          description: lang === 'ar' ? 'تم حفظ ربط المواقع بنجاح' : 'Location pairing saved successfully',
+        })
+      } else {
+        setInvSyncWebhookError(lang === 'ar' ? 'فشل حفظ بعض أزواج المواقع' : 'Some pairs failed to save')
+      }
+    } catch (err: any) {
+      setInvSyncWebhookError(String(err?.message || err))
+    } finally {
+      setIsSavingPairs(false)
+    }
+  }, [invSyncPairs, loadInventorySyncData, lang, toast])
+
+  // ── Odoo stock Webhook (إنشاء/حذف استقبال تغييرات الكميات) ─────────────────
+
+  const handleCreateOdooWebhook = useCallback(async () => {
+    setIsSyncingWebhook(true)
+    setInvSyncWebhookError('')
+    try {
+      const wRes = await enableOdooStockWebhook()
+      if (wRes.success && wRes.refs) {
+        setOdooStockWebhook(wRes.refs)
+        toast({
+          title: lang === 'ar' ? 'تم إنشاء Webhook أودو' : 'Odoo Webhook created',
+          description: lang === 'ar'
+            ? 'سيُراسل أودو ErpLink تلقائيًا عند أي تغيير على كميات الأصناف.'
+            : 'Odoo will notify ErpLink automatically on any product quantity change.',
+        })
+      } else {
+        setInvSyncWebhookError(wRes.error || (lang === 'ar' ? 'فشل إنشاء الـ Webhook' : 'Failed to create webhook'))
+      }
+    } catch (err: any) {
+      console.error('[InventorySync] Create webhook failed:', err)
+      setInvSyncWebhookError(String(err?.message || err))
+    } finally {
+      setIsSyncingWebhook(false)
+    }
+  }, [lang, toast])
+
+  const handleDeleteOdooWebhook = useCallback(async () => {
+    setIsSyncingWebhook(true)
+    setInvSyncWebhookError('')
+    try {
+      const wRes = await disableOdooStockWebhook()
+      if (wRes.success) {
+        setOdooStockWebhook(null)
+        toast({
+          title: lang === 'ar' ? 'تم حذف Webhook أودو' : 'Odoo Webhook deleted',
+          description: lang === 'ar'
+            ? 'لن يرسل أودو تحديثات المخزون بعد الآن.'
+            : 'Odoo will no longer send stock updates.',
+        })
+      } else {
+        setInvSyncWebhookError(wRes.error || (lang === 'ar' ? 'فشل حذف الـ Webhook' : 'Failed to delete webhook'))
+      }
+    } catch (err: any) {
+      console.error('[InventorySync] Delete webhook failed:', err)
+      setInvSyncWebhookError(String(err?.message || err))
+    } finally {
+      setIsSyncingWebhook(false)
+    }
+  }, [lang, toast])
 
   const handleSaveCustomers = useCallback(async () => {
     setIsSavingCustomers(true)
@@ -777,6 +1026,9 @@ export default function FieldMappingClient({
     if (orderAddShipping && !orderShippingProductId && !orderShippingProductSku) {
       warnings.push(lang === 'ar' ? 'تم تفعيل الشحن كبند لكن لم يتم تحديد منتج الشحن أو SKU' : 'Shipping as line item is enabled but no shipping product or SKU set')
     }
+    if (orderAddCod && !orderCodProductId && !orderCodProductSku) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل رسوم الدفع عند الاستلام لكن لم يتم تحديد المنتج أو SKU' : 'COD fee line is enabled but no COD product or SKU set')
+    }
     if (orderAddDiscount && !orderDiscountProductId && !orderDiscountProductSku) {
       warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled but no discount product or SKU set')
     }
@@ -791,6 +1043,10 @@ export default function FieldMappingClient({
       add_shipping_as_line: orderAddShipping,
       shipping_product_id: orderShippingProductId ? Number(orderShippingProductId) : null,
       shipping_product_sku: orderShippingProductSku,
+      add_cod_as_line: orderAddCod,
+      cod_product_id: orderCodProductId ? Number(orderCodProductId) : null,
+      cod_product_sku: orderCodProductSku,
+      cod_amount: orderCodAmount ? Number(orderCodAmount) : null,
       add_discount_as_line: orderAddDiscount,
       discount_product_id: orderDiscountProductId ? Number(orderDiscountProductId) : null,
       discount_product_sku: orderDiscountProductSku,
@@ -838,6 +1094,7 @@ export default function FieldMappingClient({
     orderDisabled, orderEnabledActions, orderMatchZidField, orderMatchOdooField,
     orderCompanyId, orderLinkCompany, orderWarehouseId, orderPricelistId, orderPaymentTermId,
     orderAutoConfirm, orderAutoInvoice, orderPartialFulfillment, storeWarehouseMappings, orderAddShipping, orderShippingProductId, orderShippingProductSku,
+    orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
     orderStateMapping, standardStoreTab, standardSubTab, lang, toast
   ])
@@ -858,6 +1115,9 @@ export default function FieldMappingClient({
 
   // Per-Category Mapping dialog
   const [isCategoryMappingOpen, setIsCategoryMappingOpen] = useState(false)
+
+  // Per-Product Mapping dialog
+  const [isProductMappingOpen, setIsProductMappingOpen] = useState(false)
 
   // Load mappings on mount
   const loadMappings = async () => {
@@ -1368,16 +1628,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={categoryLinkCompany}
                                         onClick={() => setCategoryLinkCompany(!categoryLinkCompany)}
                                         className={cn(
-                                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          categoryLinkCompany ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          categoryLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          categoryLinkCompany ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          categoryLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs text-muted-foreground">
@@ -1500,17 +1761,18 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={!disabled}
                                         onClick={() => setDisabled(!disabled)}
                                         className={cn(
-                                          'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          !disabled ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          !disabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span
                                           className={cn(
-                                            'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            !disabled ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            !disabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )}
                                         />
                                       </button>
@@ -1605,16 +1867,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={trackInventory}
                                         onClick={() => setTrackInventory(!trackInventory)}
                                         className={cn(
-                                          'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          trackInventory ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          trackInventory ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          trackInventory ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          trackInventory ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs text-muted-foreground">
@@ -1688,16 +1951,17 @@ export default function FieldMappingClient({
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={productLinkCompany}
                                           onClick={() => setProductLinkCompany(!productLinkCompany)}
                                           className={cn(
-                                            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            productLinkCompany ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            productLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            productLinkCompany ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            productLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs text-muted-foreground">
@@ -1816,16 +2080,17 @@ export default function FieldMappingClient({
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={nameFallback}
                                           onClick={() => setNameFallback(!nameFallback)}
                                           className={cn(
-                                            'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            nameFallback ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            nameFallback ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            nameFallback ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            nameFallback ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs text-muted-foreground">
@@ -2008,14 +2273,24 @@ export default function FieldMappingClient({
                                     </span>
                                     
                                     <div className="flex items-center gap-3 p-3.5 rounded-xl border bg-background border-border shadow-sm">
-                                      <input
-                                        type="checkbox"
-                                        id="bomEnabled"
-                                        checked={bomEnabled}
-                                        onChange={(e) => setBomEnabled(e.target.checked)}
-                                        className="h-4 w-4 rounded text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <label htmlFor="bomEnabled" className="space-y-1 cursor-pointer">
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                          dir="ltr"
+                                        aria-checked={bomEnabled}
+                                        aria-label={lang === 'ar' ? 'تفعيل إنشاء قائمة المواد BoM' : 'Enable BoM Creation'}
+                                        onClick={() => setBomEnabled(!bomEnabled)}
+                                        className={cn(
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          bomEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          bomEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                        )} />
+                                      </button>
+                                      <button type="button" onClick={() => setBomEnabled(!bomEnabled)} className="space-y-1 cursor-pointer text-start">
                                         <span className="font-semibold block text-xs">
                                           {lang === 'ar' ? 'تفعيل إنشاء قائمة المواد BoM' : 'Enable BoM Creation'}
                                         </span>
@@ -2024,7 +2299,7 @@ export default function FieldMappingClient({
                                             ? 'عند التفعيل، سيقوم النظام تلقائياً بإنشاء قائمة المواد BoM بالنوع المحدد أدناه.' 
                                             : 'When enabled, the system will automatically create a BoM with the type specified below.'}
                                         </span>
-                                      </label>
+                                      </button>
                                     </div>
 
                                     {bomEnabled && (
@@ -2132,16 +2407,17 @@ export default function FieldMappingClient({
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={uomAutoCreate}
                                           onClick={() => setUomAutoCreate(!uomAutoCreate)}
                                           className={cn(
-                                            'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            uomAutoCreate ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            uomAutoCreate ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            uomAutoCreate ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            uomAutoCreate ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs text-muted-foreground">
@@ -2233,16 +2509,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={!productDisabled}
                                         onClick={() => setProductDisabled(!productDisabled)}
                                         className={cn(
-                                          'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          !productDisabled ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          !productDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          !productDisabled ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          !productDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs font-semibold text-muted-foreground">
@@ -2286,6 +2563,249 @@ export default function FieldMappingClient({
                                   </div>
                                 </div>
 
+                                {standardStoreTab === 'zid' && (
+                                  <div className="border-t border-border/80 pt-5">
+                                    <h3 className="text-sm font-bold text-muted-foreground">
+                                      {lang === 'ar' ? 'مزامنة المخزون (من أودو إلى زد)' : 'Inventory Sync (Odoo → Zid)'}
+                                    </h3>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                      {lang === 'ar'
+                                        ? 'عند التفعيل: أي تغيير في مخزون أودو (مشتريات/مبيعات/جرد) يُحدّث مخزون زد تلقائيًا. أودو هو مصدر الحقيقة للمخزون، ولا تُرسل الكميات من زد إلى أودو.'
+                                        : 'When enabled: any Odoo stock change (purchases/sales/stock counts) updates Zid automatically. Odoo is the source of truth — quantities are never pushed Zid → Odoo.'}
+                                    </p>
+
+                                    {/* Toggle */}
+                                    <div className="flex items-center justify-between gap-3 mt-4">
+                                      <div>
+                                        <div className="text-xs font-semibold text-foreground">
+                                          {lang === 'ar' ? 'تفعيل مزامنة المخزون' : 'Enable inventory sync'}
+                                        </div>
+                                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                                          {lang === 'ar' ? 'مزامنة تلقائية فورية عند تغيّر الكميات في أودو' : 'Instant automatic sync when Odoo quantities change'}
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                          dir="ltr"
+                                        aria-checked={invSyncEnabled}
+                                        onClick={() => setInvSyncEnabled(!invSyncEnabled)}
+                                        className={cn(
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          invSyncEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          invSyncEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                        )} />
+                                      </button>
+                                    </div>
+
+                                    {/* Odoo stock Webhook buttons */}
+                                    <div className="mt-3 rounded-lg border border-border/80 bg-inputBg/40 p-3">
+                                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div className="min-w-[220px]">
+                                          <div className="text-xs font-semibold text-foreground">
+                                            {lang === 'ar' ? 'استقبال تحديثات الكميات من أودو' : 'Odoo stock Webhook'}
+                                          </div>
+                                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                                            {odooStockWebhook?.base_automation_id ? (
+                                              lang === 'ar'
+                                                ? `تم إنشاؤه — القاعدة الآلية #${odooStockWebhook.base_automation_id}`
+                                                : `Created — base automation #${odooStockWebhook.base_automation_id}`
+                                            ) : (
+                                              lang === 'ar'
+                                                ? 'لإرسال أي تغيير على كميات الأصناف من أودو تلقائيًا، أنشئ الـ Webhook ثم فعّل المزامنة.'
+                                                : 'Create the Webhook so Odoo sends every product quantity change, then enable sync.'
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleCreateOdooWebhook}
+                                            disabled={isSyncingWebhook || !!odooStockWebhook}
+                                          >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            {lang === 'ar' ? 'إنشاء Webhook' : 'Create Webhook'}
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleDeleteOdooWebhook}
+                                            disabled={isSyncingWebhook || !odooStockWebhook}
+                                            className="text-destructive hover:text-destructive"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                            {lang === 'ar' ? 'حذف' : 'Delete'}
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {isSyncingWebhook && (
+                                      <div className="flex items-center gap-2 mt-3 text-[11px] text-muted-foreground">
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                        {lang === 'ar'
+                                          ? 'جاري إعداد الاستقبال الآلي للمخزون في أودو...'
+                                          : 'Registering the Odoo stock webhook…'}
+                                      </div>
+                                    )}
+                                    {invSyncWebhookError && (
+                                      <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+                                        {invSyncWebhookError}
+                                      </div>
+                                    )}
+
+                                    {invSyncEnabled && (
+                                      <>
+                                        {/* Balance mode */}
+                                        <div className="mt-5">
+                                          <div className="text-xs font-semibold text-muted-foreground mb-2">
+                                            {lang === 'ar' ? 'الرصيد المراد مزامنته' : 'Balance to sync'}
+                                          </div>
+                                          <div className="flex flex-col gap-2">
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                              <input
+                                                type="radio"
+                                                name="invSyncMode"
+                                                checked={invSyncMode === 'actual'}
+                                                onChange={() => setInvSyncMode('actual')}
+                                                className="accent-foreground"
+                                              />
+                                              <span className="text-xs text-foreground">
+                                                {lang === 'ar' ? 'الرصيد الفعلي (On Hand)' : 'Actual balance (On Hand)'}
+                                              </span>
+                                            </label>
+                                            <label className="flex items-center gap-2 cursor-pointer">
+                                              <input
+                                                type="radio"
+                                                name="invSyncMode"
+                                                checked={invSyncMode === 'forecast'}
+                                                onChange={() => setInvSyncMode('forecast')}
+                                                className="accent-foreground"
+                                              />
+                                              <span className="text-xs text-foreground">
+                                                {lang === 'ar' ? 'الفوركاست المتوقع (Forecasted)' : 'Forecasted balance'}
+                                              </span>
+                                            </label>
+                                            {invSyncMode === 'forecast' && (
+                                              <p className="text-[11px] text-muted-foreground">
+                                                {lang === 'ar'
+                                                  ? 'الرصيد الفعلي + الوارد – الصادر (كما يظهر في تقرير المخزون المتوقع بأودو).'
+                                                  : 'On hand + incoming − outgoing (as shown in the Odoo Forecasted report).'}
+                                              </p>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Location pairing */}
+                                        <div className="mt-5">
+                                          <div className="text-xs font-semibold text-muted-foreground">
+                                            {lang === 'ar' ? 'ربط المستودعات/المواقع' : 'Warehouse / Location pairing'}
+                                          </div>
+                                          <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
+                                            {lang === 'ar'
+                                              ? 'اربط موقع زد بموقع أودو — يُحدَّث مخزون زد في هذا الموقع حسب رصيد أودو فقط.'
+                                              : 'Pair a Zid location with an Odoo location — Zid stock at that location is updated from the paired Odoo balance only.'}
+                                          </p>
+
+                                          {isLoadingInvSync ? (
+                                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                              <Loader2 className="h-3 w-3 animate-spin" />
+                                              {lang === 'ar' ? 'جاري تحميل المواقع...' : 'Loading locations…'}
+                                            </div>
+                                          ) : (
+                                            <div className="space-y-2">
+                                              {invSyncPairs.map((row, index) =>
+                                                row._removed ? null : (
+                                                  <div key={row.id || `new-${index}`} className="flex items-center gap-2">
+                                                    <select
+                                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                      value={row.source_location_id}
+                                                      onChange={(e) => handlePairChange(index, 'source_location_id', e.target.value)}
+                                                    >
+                                                      <option value="">
+                                                        {lang === 'ar' ? '— موقع زد —' : '— Zid location —'}
+                                                      </option>
+                                                      {zidLocations.map(loc => (
+                                                        <option key={loc.id} value={loc.id}>
+                                                          {loc.name || loc.id}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                    <ArrowRightLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                    <select
+                                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                      value={row.odoo_location_id}
+                                                      onChange={(e) => handlePairChange(index, 'odoo_location_id', e.target.value)}
+                                                    >
+                                                      <option value="">
+                                                        {lang === 'ar' ? '— موقع أودو —' : '— Odoo location —'}
+                                                      </option>
+                                                      {odooLocations.map(loc => (
+                                                        <option key={loc.id} value={String(loc.id)}>
+                                                          {loc.complete_name || loc.name}
+                                                        </option>
+                                                      ))}
+                                                    </select>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => handleRemovePair(index)}
+                                                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1"
+                                                      title={lang === 'ar' ? 'حذف' : 'Remove'}
+                                                    >
+                                                      <Trash2 className="h-4 w-4" />
+                                                    </button>
+                                                  </div>
+                                                )
+                                              )}
+                                              {invSyncPairs.filter(p => !p._removed).length === 0 && (
+                                                <p className="text-[11px] text-muted-foreground">
+                                                  {lang === 'ar'
+                                                    ? 'لا توجد أزواج بعد — أضف زوجًا لبدء المزامنة.'
+                                                    : 'No pairs yet — add one to start syncing.'}
+                                                </p>
+                                              )}
+                                            </div>
+                                          )}
+
+                                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={handleAddPair}
+                                            >
+                                              <Plus className="h-3.5 w-3.5" />
+                                              {lang === 'ar' ? 'إضافة زوج' : 'Add pair'}
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              size="sm"
+                                              onClick={handleSavePairs}
+                                              disabled={isSavingPairs || isLoadingInvSync}
+                                            >
+                                              {isSavingPairs ? (
+                                                <>
+                                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                  {lang === 'ar' ? 'حفظ...' : 'Saving…'}
+                                                </>
+                                              ) : (
+                                                lang === 'ar' ? 'حفظ مواقع الربط' : 'Save location pairs'
+                                              )}
+                                            </Button>
+                                          </div>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+
                                 {/* ── Save & Log Buttons ───────────────── */}
                                 <div className="border-t border-border/80 pt-5 flex items-center gap-2">
                                   <Button
@@ -2298,6 +2818,15 @@ export default function FieldMappingClient({
                                     ) : (
                                       <>{lang === 'ar' ? 'حفظ إعدادات المنتجات' : 'Save Product Settings'}</>
                                     )}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => setIsProductMappingOpen(true)}
+                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                    {lang === 'ar' ? 'ربط يدوي' : 'Manual Mapping'}
                                   </Button>
                                   <Button
                                     type="button"
@@ -2430,16 +2959,17 @@ export default function FieldMappingClient({
                                        <button
                                          type="button"
                                          role="switch"
+                                          dir="ltr"
                                          aria-checked={customerLinkCompany}
                                          onClick={() => setCustomerLinkCompany(!customerLinkCompany)}
                                          className={cn(
-                                           'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                           customerLinkCompany ? 'bg-foreground' : 'bg-muted'
+                                           'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                           customerLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                          )}
                                        >
                                          <span className={cn(
-                                           'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                           customerLinkCompany ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                           'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                           customerLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                          )} />
                                        </button>
                                        <span className="text-xs text-muted-foreground">
@@ -2561,16 +3091,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={!customerDisabled}
                                         onClick={() => setCustomerDisabled(!customerDisabled)}
                                         className={cn(
-                                          'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          !customerDisabled ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          !customerDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          !customerDisabled ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          !customerDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs font-semibold text-muted-foreground">
@@ -2631,16 +3162,17 @@ export default function FieldMappingClient({
                                     <button
                                       type="button"
                                       role="switch"
+                                          dir="ltr"
                                       aria-checked={!orderDisabled}
                                       onClick={() => setOrderDisabled(!orderDisabled)}
                                       className={cn(
-                                        'relative inline-flex h-6 w-10 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                        !orderDisabled ? 'bg-foreground' : 'bg-muted'
+                                        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                        !orderDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                       )}
                                     >
                                       <span className={cn(
-                                        'inline-block h-4 w-4 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                        !orderDisabled ? 'translate-x-[22px]' : 'translate-x-[2px]'
+                                        'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                        !orderDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                       )} />
                                     </button>
                                     <span className="text-xs font-semibold text-muted-foreground">
@@ -2788,16 +3320,17 @@ export default function FieldMappingClient({
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={orderLinkCompany}
                                           onClick={() => setOrderLinkCompany(!orderLinkCompany)}
                                           className={cn(
-                                            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            orderLinkCompany ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            orderLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            orderLinkCompany ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            orderLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs text-muted-foreground">
@@ -2809,16 +3342,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={orderAutoConfirm}
                                         onClick={() => setOrderAutoConfirm(!orderAutoConfirm)}
                                         className={cn(
-                                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          orderAutoConfirm ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderAutoConfirm ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          orderAutoConfirm ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderAutoConfirm ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs font-semibold text-muted-foreground">
@@ -2829,16 +3363,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={orderAutoInvoice}
                                         onClick={() => setOrderAutoInvoice(!orderAutoInvoice)}
                                         className={cn(
-                                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          orderAutoInvoice ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderAutoInvoice ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          orderAutoInvoice ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderAutoInvoice ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs font-semibold text-muted-foreground">
@@ -2849,16 +3384,17 @@ export default function FieldMappingClient({
                                       <button
                                         type="button"
                                         role="switch"
+                                          dir="ltr"
                                         aria-checked={orderPartialFulfillment}
                                         onClick={() => setOrderPartialFulfillment(!orderPartialFulfillment)}
                                         className={cn(
-                                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                          orderPartialFulfillment ? 'bg-foreground' : 'bg-muted'
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderPartialFulfillment ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                         )}
                                       >
                                         <span className={cn(
-                                          'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                          orderPartialFulfillment ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderPartialFulfillment ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                         )} />
                                       </button>
                                       <span className="text-xs font-semibold text-muted-foreground">
@@ -2949,16 +3485,17 @@ export default function FieldMappingClient({
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={orderAddShipping}
                                           onClick={() => setOrderAddShipping(!orderAddShipping)}
                                           className={cn(
-                                            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            orderAddShipping ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            orderAddShipping ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            orderAddShipping ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            orderAddShipping ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs font-bold text-foreground">
@@ -2995,22 +3532,90 @@ export default function FieldMappingClient({
                                       )}
                                     </div>
 
+                                    {/* COD section */}
+                                    <div className="space-y-4 p-4 rounded-xl border border-border bg-muted/10">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          type="button"
+                                          role="switch"
+                                          dir="ltr"
+                                          aria-checked={orderAddCod}
+                                          onClick={() => setOrderAddCod(!orderAddCod)}
+                                          className={cn(
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            orderAddCod ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                          )}
+                                        >
+                                          <span className={cn(
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            orderAddCod ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                          )} />
+                                        </button>
+                                        <span className="text-xs font-bold text-foreground">
+                                          {lang === 'ar' ? 'إضافة رسوم الدفع عند الاستلام كبند' : 'Add COD Fee as Line Item'}
+                                        </span>
+                                      </div>
+                                      {orderAddCod && (
+                                        <div className="space-y-3 pt-2">
+                                          <div className="space-y-1.5">
+                                            <label className="block text-[11px] font-semibold text-muted-foreground">
+                                              {lang === 'ar' ? 'منتج رسوم الدفع عند الاستلام في أودو' : 'Odoo COD Fee Product'}
+                                            </label>
+                                            <SearchableSelect
+                                              options={productOptions}
+                                              value={orderCodProductId}
+                                              onChange={setOrderCodProductId}
+                                              placeholder={lang === 'ar' ? '— اختر منتج رسوم COD —' : '— Select COD Fee Product —'}
+                                              disabled={isLoadingProducts}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <label className="block text-[11px] font-semibold text-muted-foreground">
+                                              {lang === 'ar' ? 'رمز المنتج المرجعي (SKU)' : 'COD Product SKU Fallback'}
+                                            </label>
+                                            <input
+                                              type="text"
+                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                              value={orderCodProductSku}
+                                              onChange={e => setOrderCodProductSku(e.target.value)}
+                                              placeholder={lang === 'ar' ? 'مثال: cod-fee-product' : 'e.g. cod-fee-product'}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <label className="block text-[11px] font-semibold text-muted-foreground">
+                                              {lang === 'ar' ? 'مبلغ احتياطي (يُستخدم عند غياب المبلغ من زد)' : 'Fallback Amount (used when Zid sends none)'}
+                                            </label>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="0.01"
+                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                              value={orderCodAmount}
+                                              onChange={e => setOrderCodAmount(e.target.value)}
+                                              placeholder={lang === 'ar' ? 'مثال: 10' : 'e.g. 10'}
+                                            />
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+
                                     {/* Discount section */}
                                     <div className="space-y-4 p-4 rounded-xl border border-border bg-muted/10">
                                       <div className="flex items-center gap-2">
                                         <button
                                           type="button"
                                           role="switch"
+                                          dir="ltr"
                                           aria-checked={orderAddDiscount}
                                           onClick={() => setOrderAddDiscount(!orderAddDiscount)}
                                           className={cn(
-                                            'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-border transition-colors duration-200',
-                                            orderAddDiscount ? 'bg-foreground' : 'bg-muted'
+                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                            orderAddDiscount ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
                                           )}
                                         >
                                           <span className={cn(
-                                            'inline-block h-3 w-3 transform rounded-full bg-background shadow-sm transition-transform duration-200',
-                                            orderAddDiscount ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                            orderAddDiscount ? 'translate-x-[20px]' : 'translate-x-[2px]'
                                           )} />
                                         </button>
                                         <span className="text-xs font-bold text-foreground">
@@ -3082,6 +3687,9 @@ export default function FieldMappingClient({
                                           <th className="px-4 py-2.5 font-bold">
                                             {lang === 'ar' ? 'الحالة المقابلة في أودو' : 'Odoo Target State'}
                                           </th>
+                                          <th className="px-4 py-2.5 font-bold w-20 text-center">
+                                            {lang === 'ar' ? 'تفعيل' : 'Enabled'}
+                                          </th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-border/40">
@@ -3104,12 +3712,12 @@ export default function FieldMappingClient({
                                               <td className="px-4 py-2">
                                                 <select
                                                   className="w-full h-8 px-2 rounded-md border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                  value={orderStateMapping[status.key] || ''}
+                                                  value={orderStateMapping[status.key]?.state || ''}
                                                   onChange={(e) => {
                                                     const val = e.target.value
                                                     setOrderStateMapping(prev => ({
                                                       ...prev,
-                                                      [status.key]: val,
+                                                      [status.key]: { state: val, enabled: prev[status.key]?.enabled ?? true },
                                                     }))
                                                   }}
                                                 >
@@ -3122,6 +3730,31 @@ export default function FieldMappingClient({
                                                     </option>
                                                   ))}
                                                 </select>
+                                              </td>
+                                              <td className="px-4 py-2 text-center">
+                                                <button
+                                                  type="button"
+                                                  role="switch"
+                                          dir="ltr"
+                                                  aria-checked={orderStateMapping[status.key]?.enabled ?? true}
+                                                  title={lang === 'ar' ? 'تفعيل/تعطيل هذه الحالة — المعطلة لا تؤثر في أودو' : 'Enable/disable this status — disabled statuses leave Odoo untouched'}
+                                                  onClick={() => {
+                                                    const cur = orderStateMapping[status.key]
+                                                    setOrderStateMapping(prev => ({
+                                                      ...prev,
+                                                      [status.key]: { state: cur?.state || '', enabled: !(cur?.enabled ?? true) },
+                                                    }))
+                                                  }}
+                                                  className={cn(
+                                                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                                    (orderStateMapping[status.key]?.enabled ?? true) ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                                  )}
+                                                >
+                                                  <span className={cn(
+                                                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                                    (orderStateMapping[status.key]?.enabled ?? true) ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                                  )} />
+                                                </button>
                                               </td>
                                             </tr>
                                           )
@@ -3601,6 +4234,11 @@ export default function FieldMappingClient({
       <CategoryMappingDialog
         isOpen={isCategoryMappingOpen}
         onClose={() => setIsCategoryMappingOpen(false)}
+        platform={standardStoreTab}
+      />
+      <ProductMappingDialog
+        isOpen={isProductMappingOpen}
+        onClose={() => setIsProductMappingOpen(false)}
         platform={standardStoreTab}
       />
       <SyncLogModal 
