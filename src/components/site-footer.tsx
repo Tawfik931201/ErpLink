@@ -1,11 +1,11 @@
 'use client'
 
-import { Layers } from 'lucide-react'
 import Link from 'next/link'
 
 import { useLanguage } from '@/components/language-provider'
 import LanguageSwitcher from '@/components/language-switcher'
 import ThemeSwitcher from '@/components/theme-switcher'
+import { Logo } from '@/components/ui/logo'
 
 export function SiteFooter() {
   const { lang, t } = useLanguage()
@@ -15,13 +15,8 @@ export function SiteFooter() {
       <div className="max-w-7xl mx-auto px-6 md:px-12">
         <div className="flex flex-col md:flex-row items-start justify-between gap-8 mb-8">
           <div>
-            <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded bg-foreground text-background">
-                <Layers className="h-3.5 w-3.5" />
-              </div>
-              <span className="text-sm font-bold text-foreground">
-                ERP Link
-              </span>
+            <Link href="/" className="flex items-center" aria-label="ErpLink Home">
+              <Logo variant="horizontal" size="sm" />
             </Link>
             <p className="text-[11px] text-muted-foreground leading-relaxed mt-2 max-w-xs">
               {t('landing.heroSubtitle')}
