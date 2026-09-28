@@ -10,11 +10,11 @@ import { useLanguage } from '@/components/language-provider'
 import { cn } from '@/lib/utils'
 
 const SETTINGS_PERMISSION_MAP: Record<string, string | null> = {
-  '/dashboard/settings': 'settings',
-  '/dashboard/settings/notifications': 'settings-notifications',
-  '/dashboard/settings/workspace': null, // always accessible
-  '/dashboard/settings/team': 'settings-team',
-  '/dashboard/settings/billing': null, // always accessible
+  '/app/settings': 'settings',
+  '/app/settings/notifications': 'settings-notifications',
+  '/app/settings/workspace': null, // always accessible
+  '/app/settings/team': 'settings-team',
+  '/app/settings/billing': null, // always accessible
 }
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -32,31 +32,31 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   const allNavItems = [
     {
-      href: '/dashboard/settings',
+      href: '/app/settings',
       label: lang === 'ar' ? 'الإعدادات العامة' : 'General Settings',
       icon: Sliders,
       exact: true
     },
     {
-      href: '/dashboard/settings/notifications',
+      href: '/app/settings/notifications',
       label: lang === 'ar' ? 'الإشعارات' : 'Notifications',
       icon: Bell,
       exact: false
     },
     {
-      href: '/dashboard/settings/workspace',
+      href: '/app/settings/workspace',
       label: lang === 'ar' ? 'بيئات العمل' : 'Workspaces',
       icon: Briefcase,
       exact: false
     },
     {
-      href: '/dashboard/settings/team',
+      href: '/app/settings/team',
       label: lang === 'ar' ? 'فريق العمل' : 'Team',
       icon: Users,
       exact: false
     },
     {
-      href: '/dashboard/settings/billing',
+      href: '/app/settings/billing',
       label: lang === 'ar' ? 'الاشتراكات والفواتير' : 'Billing',
       icon: CreditCard,
       exact: false
@@ -90,7 +90,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
             const Icon = item.icon
             const isActive = item.exact 
               ? pathname === item.href 
-              : pathname.startsWith(item.href) && pathname !== '/dashboard/settings'
+              : pathname.startsWith(item.href) && pathname !== '/app/settings'
 
             return (
               <Link

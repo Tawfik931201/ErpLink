@@ -159,7 +159,7 @@ export default async function DashboardPage() {
 
         {(!storeConnected || !isOdooConnected) && (
           <Link
-            href="/dashboard/setup"
+            href="/app/setup"
             className="flex items-center gap-2 text-xs font-semibold bg-muted text-foreground border px-4 py-2.5 rounded-lg shrink-0 hover:bg-muted/70 transition-colors"
           >
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -352,7 +352,7 @@ export default async function DashboardPage() {
               <h3 className="text-sm font-bold">{t('db.recentTransfers', dict)}</h3>
             </div>
             <Link
-              href="/dashboard/initial-transfer"
+              href="/app/initial-transfer"
               className="text-[11px] font-semibold text-foreground hover:text-muted-foreground transition-colors flex items-center gap-1"
             >
               {t('db.viewAll', dict)}
@@ -405,7 +405,7 @@ export default async function DashboardPage() {
             <span className="text-[10px] text-muted-foreground">{t('db.lastSync', dict)} 72h</span>
           </div>
           <Link
-            href="/dashboard/mapping-center"
+            href="/app/mapping-center"
             className="text-[11px] font-semibold text-foreground hover:text-muted-foreground transition-colors flex items-center gap-1"
           >
             {t('db.viewAll', dict)}

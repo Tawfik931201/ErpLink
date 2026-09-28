@@ -79,8 +79,8 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
           <div className="flex flex-col gap-0.5">
             {section.items.map(({ href, icon, label, hasBadge }) => {
               const Icon = ICON_MAP[icon] || LayoutDashboard
-              // Handle active state: Exact match, or sub-path (e.g. /dashboard/connect-store/settings matches /dashboard/connect-store)
-              const isActive = cleanPathname === href || (href !== '/dashboard' && cleanPathname.startsWith(href + '/'))
+              // Handle active state: Exact match, or sub-path (e.g. /app/settings/workspace matches /app/settings)
+              const isActive = cleanPathname === href || (href !== '/app/dashboard' && cleanPathname.startsWith(href + '/'))
 
               return (
                 <Link
@@ -114,7 +114,7 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
                   <span className="flex-1 truncate">{label}</span>
 
                   {/* Pulsing Pending-Status Dot */}
-                  {href === '/dashboard/tickets' ? (
+                  {href === '/app/tickets' ? (
                     <PendingTicketsBadge />
                   ) : hasBadge && (
                     <span className="relative flex h-1.5 w-1.5 shrink-0">

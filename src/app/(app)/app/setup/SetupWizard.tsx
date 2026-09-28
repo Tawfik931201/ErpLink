@@ -256,7 +256,7 @@ export default function SetupWizard({
               </div>
               <p className="text-[10px] text-muted-foreground">{t('setup.addStoreLater')}</p>
               <Button asChild variant="outline" size="sm" className="rounded-lg h-8 text-[11px] gap-1.5">
-                <Link href="/dashboard/connect-store">
+                <Link href="/app/connect-store">
                   <Store className="h-3.5 w-3.5" />
                   {t('setup.manageStores')}
                 </Link>
@@ -323,7 +323,7 @@ export default function SetupWizard({
               </div>
 
               <Button asChild variant="ghost" size="sm" className="rounded-lg h-8 text-[11px] gap-1.5 text-muted-foreground">
-                <Link href="/dashboard/connect-store">
+                <Link href="/app/connect-store">
                   <Store className="h-3.5 w-3.5" />
                   {t('setup.manageStores')}
                 </Link>
@@ -362,7 +362,7 @@ export default function SetupWizard({
                 <span className="text-[9px] text-muted-foreground shrink-0">{t('db.connected')}</span>
               </div>
               <Button asChild variant="outline" size="sm" className="rounded-lg h-8 text-[11px] gap-1.5">
-                <Link href="/dashboard/connect-odoo">
+                <Link href="/app/connect-odoo">
                   <Database className="h-3.5 w-3.5" />
                   {t('setup.manageErp')}
                 </Link>
@@ -370,7 +370,7 @@ export default function SetupWizard({
             </div>
           ) : (
             <Button asChild size="lg" className="rounded-xl gap-2 bg-foreground text-background hover:opacity-90">
-              <Link href="/dashboard/connect-odoo">
+              <Link href="/app/connect-odoo">
                 <Database className="h-4 w-4" />
                 {t('setup.connectErp')}
               </Link>
@@ -394,7 +394,7 @@ export default function SetupWizard({
             <>
               <p className="text-[11px] text-muted-foreground leading-relaxed">{t('setup.startSyncDesc')}</p>
               <Button asChild size="lg" className="rounded-xl gap-2 bg-foreground text-background hover:opacity-90">
-                <Link href="/dashboard/initial-transfer">
+<Link href="/app/initial-transfer">
                   <Rocket className="h-4 w-4" />
                   {t('setup.startSync')}
                 </Link>
@@ -426,7 +426,7 @@ export default function SetupWizard({
             </div>
           </div>
           <Button asChild size="sm" className="rounded-lg gap-1.5 bg-emerald-700 text-white hover:bg-emerald-800 h-9 shrink-0">
-            <Link href="/dashboard">{t('setup.goDashboard')}</Link>
+            <Link href="/app/dashboard">{t('setup.goDashboard')}</Link>
           </Button>
         </div>
       )}

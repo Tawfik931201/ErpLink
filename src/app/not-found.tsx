@@ -56,14 +56,14 @@ export default function GlobalNotFound() {
             {/* Quick links buttons */}
             <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 w-full max-w-xs mx-auto">
               <Link 
-                href="/dashboard"
+                href="/app/dashboard"
                 className="flex items-center justify-center gap-1.5 w-full rounded border border-foreground/20 bg-background hover:bg-muted px-3 h-8 text-[11px] font-medium text-foreground transition-colors"
               >
                 <Home className="h-3.5 w-3.5" />
                 <span>{isAr ? 'الرئيسية' : 'Home'}</span>
               </Link>
               <Link 
-                href="/dashboard/tickets"
+                href="/app/tickets"
                 className="flex items-center justify-center gap-1.5 w-full rounded border border-border bg-background hover:bg-muted px-3 h-8 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
               >
                 <LifeBuoy className="h-3.5 w-3.5" />

@@ -15,21 +15,45 @@ import {
   ArrowRightLeft,
   FolderTree,
   Package,
+  PackagePlus,
+  PackageX,
+  PackageCheck,
   Users,
+  UserPlus,
+  UserX,
+  UserCheck,
   ShoppingCart,
   Activity,
   X,
   Search,
   Pencil,
   RefreshCw,
+  Zap,
+  Receipt,
+  Wand2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 
+import {
+  createZidOrderStatusFieldInOdoo,
+  checkZidOrderStatusField,
+} from '@/app/actions/order-custom-status'
+import {
+  DEFAULT_ZID_ORDER_STATUSES,
+  type ZidStatusOption,
+} from '@/lib/order-custom-status-constants'
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
 import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
-import { getOdooFieldValueOptions, getOdooLocations } from '@/app/actions/odoo'
+import { 
+  getOdooFieldValueOptions, 
+  getOdooLocations, 
+  getOdooWarehouses, 
+  getOdooCustomers, 
+  getOdooProducts,
+  getOdooTaxes,
+} from '@/app/actions/odoo'
 import { saveOrderStatusMappings, getOrderStatusMappings } from '@/app/actions/order-status-mappings'
 import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
 import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
@@ -147,6 +171,7 @@ export default function FieldMappingClient({
   const [zidLocations, setZidLocations] = useState<ZidLocation[]>([])
   const [odooLocations, setOdooLocations] = useState<Array<{ id: number; name: string; complete_name: string; usage: string }>>([])
   const [isLoadingInvSync, setIsLoadingInvSync] = useState(false)
+  const [isRefreshingInvLocations, setIsRefreshingInvLocations] = useState(false)
   const [isSavingPairs, setIsSavingPairs] = useState(false)
   const [isSyncingWebhook, setIsSyncingWebhook] = useState(false)
   const [invSyncWebhookError, setInvSyncWebhookError] = useState('')
@@ -168,7 +193,7 @@ export default function FieldMappingClient({
   const [productMatchZidField, setProductMatchZidField] = useState('')
   const [productMatchOdooField, setProductMatchOdooField] = useState('')
   const [productOnDelete, setProductOnDelete] = useState('nothing')
-  const [productEnabledActions, setProductEnabledActions] = useState<string[]>([])
+  const [productEnabledActions, setProductEnabledActions] = useState<string[]>(['create', 'update', 'delete'])
   const [productDisabled, setProductDisabled] = useState(false)
   const [productVariantSyncMode, setProductVariantSyncMode] = useState<'AS_VARIANTS' | 'AS_SEPARATE_PRODUCTS'>('AS_VARIANTS')
   const [bomEnabled, setBomEnabled] = useState<boolean>(false)
@@ -181,7 +206,7 @@ export default function FieldMappingClient({
   const [customerMatchZidField, setCustomerMatchZidField] = useState('')
   const [customerMatchOdooField, setCustomerMatchOdooField] = useState('')
   const [customerOnDelete, setCustomerOnDelete] = useState('nothing')
-  const [customerEnabledActions, setCustomerEnabledActions] = useState<string[]>([])
+  const [customerEnabledActions, setCustomerEnabledActions] = useState<string[]>(['create', 'update', 'delete'])
   const [customerDisabled, setCustomerDisabled] = useState(false)
   const [customerDefaultType, setCustomerDefaultType] = useState('auto')
   const [receivableAccountId, setReceivableAccountId] = useState('')
@@ -203,7 +228,7 @@ export default function FieldMappingClient({
 
   // ── Order States ──
   const [orderDisabled, setOrderDisabled] = useState(false)
-  const [orderEnabledActions, setOrderEnabledActions] = useState<string[]>([])
+  const [orderEnabledActions, setOrderEnabledActions] = useState<string[]>(['create', 'update', 'cancel', 'deliver'])
   const [orderMatchZidField, setOrderMatchZidField] = useState('')
   const [orderMatchOdooField, setOrderMatchOdooField] = useState('')
   const [orderCompanyId, setOrderCompanyId] = useState('')
@@ -214,7 +239,15 @@ export default function FieldMappingClient({
   const [orderAutoConfirm, setOrderAutoConfirm] = useState(false)
   const [orderAutoInvoice, setOrderAutoInvoice] = useState(false)
   const [orderPartialFulfillment, setOrderPartialFulfillment] = useState(false)
-  const [storeWarehouseMappings, setStoreWarehouseMappings] = useState<Record<string, string>>({})
+  // Multi-warehouse rules: Zid location ↔ Odoo warehouse. Row-based so the
+  // Zid side is a stable row key rather than an object key (a Record can't
+  // represent two half-filled rows without clobbering one of them).
+  const [storeWarehouseRules, setStoreWarehouseRules] = useState<Array<{
+    rowKey: string
+    zid_location_id: string
+    odoo_warehouse_id: string
+  }>>([])
+  const [isRefreshingOrderWarehouses, setIsRefreshingOrderWarehouses] = useState(false)
 
   // Shipping & Discount Line items
   const [orderAddShipping, setOrderAddShipping] = useState(false)
@@ -229,8 +262,22 @@ export default function FieldMappingClient({
   const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
   const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
 
+  // VAT (ضريبة القيمة المضافة)
+  const [orderEnableVat, setOrderEnableVat] = useState(false)
+  const [orderVatSaudiTaxId, setOrderVatSaudiTaxId] = useState('')
+  const [orderVatNonSaudiTaxId, setOrderVatNonSaudiTaxId] = useState('')
+  const [orderTaxOptions, setOrderTaxOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
+
   // Status mapping
   const [orderStateMapping, setOrderStateMapping] = useState<Record<string, { state: string; enabled: boolean }>>({})
+
+  // Zid Order Status Custom Field in Odoo
+  const [orderUpdateCustomStatus, setOrderUpdateCustomStatus] = useState<boolean>(false)
+  const [orderStatusCustomField, setOrderStatusCustomField] = useState<string>('')
+  const [isCreatingStatusField, setIsCreatingStatusField] = useState<boolean>(false)
+  const [statusFieldExists, setStatusFieldExists] = useState<boolean>(false)
+  const [statusFieldOptions, setStatusFieldOptions] = useState<ZidStatusOption[]>(DEFAULT_ZID_ORDER_STATUSES)
 
   // Odoo fields and options loading states
   const [odooOrderFields, setOdooOrderFields] = useState<{ value: string; label: string }[]>([])
@@ -245,7 +292,68 @@ export default function FieldMappingClient({
   const [isLoadingProducts, setIsLoadingProducts] = useState(false)
   const [isSavingOrders, setIsSavingOrders] = useState(false)
 
+  // Customer & Product Fallback Matching Policies
+  const [orderCustomerFallbackPolicy, setOrderCustomerFallbackPolicy] = useState<'create_new' | 'skip_order' | 'default_customer'>('create_new')
+  const [orderDefaultCustomerId, setOrderDefaultCustomerId] = useState('')
+  const [customerOptions, setCustomerOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false)
+
+  const [orderProductFallbackPolicy, setOrderProductFallbackPolicy] = useState<'create_new' | 'skip_order' | 'default_product'>('create_new')
+  const [orderDefaultProductId, setOrderDefaultProductId] = useState('')
+
   const { toast } = useToast()
+
+  const handleRefreshCustomers = useCallback(async (force = true) => {
+    if (!hasOdooConnection) return
+    setIsLoadingCustomers(true)
+    try {
+      const res = await getOdooCustomers(force)
+      if (res.success && res.options) {
+        setCustomerOptions(res.options)
+      } else if (res.error) {
+        toast({
+          title: lang === 'ar' ? 'فشل تحميل العملاء' : 'Failed to load customers',
+          description: res.error,
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      console.error('Failed to refresh customers:', err)
+      toast({
+        title: lang === 'ar' ? 'خطأ' : 'Error',
+        description: err?.message || (lang === 'ar' ? 'فشل الاتصال بأودو' : 'Failed to connect to Odoo'),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingCustomers(false)
+    }
+  }, [hasOdooConnection, lang, toast])
+
+  const handleRefreshProducts = useCallback(async (force = true) => {
+    if (!hasOdooConnection) return
+    setIsLoadingProducts(true)
+    try {
+      const res = await getOdooProducts(force)
+      if (res.success && res.options) {
+        setProductOptions(res.options)
+      } else if (res.error) {
+        toast({
+          title: lang === 'ar' ? 'فشل تحميل المنتجات' : 'Failed to load products',
+          description: res.error,
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      console.error('Failed to refresh products:', err)
+      toast({
+        title: lang === 'ar' ? 'خطأ' : 'Error',
+        description: err?.message || (lang === 'ar' ? 'فشل الاتصال بأودو' : 'Failed to connect to Odoo'),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingProducts(false)
+    }
+  }, [hasOdooConnection, lang, toast])
 
   const categoryFields = (standardStoreTab === 'salla' ? SALLA_FIELDS['product.category']
     : standardStoreTab === 'shopify' ? SHOPIFY_FIELDS['collections/create']
@@ -480,40 +588,112 @@ export default function FieldMappingClient({
     setIsLoadingPricelists(true)
     setIsLoadingPaymentTerms(true)
     setIsLoadingProducts(true)
+    setIsLoadingCustomers(true)
 
     fetchOdooOrderFields(false)
 
-    import('@/app/actions/odoo').then(({ getOdooFieldValueOptions, getOdooWarehouses }) => {
+    // 1. Get customers (for default customer selection)
+    getOdooCustomers(false)
+      .then(res => {
+        if (res.success && res.options) {
+          setCustomerOptions(res.options)
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load customers:', err)
+      })
+      .finally(() => setIsLoadingCustomers(false))
 
-      // 2. Get warehouses
-      getOdooWarehouses().then(res => {
+    // 2. Get warehouses
+    getOdooWarehouses(false)
+      .then(res => {
         if (res.success && res.warehouses) {
           setWarehouseOptions(res.warehouses.map((w: any) => ({ value: String(w.id), label: w.name })))
         }
-      }).finally(() => setIsLoadingWarehouses(false))
+      })
+      .catch(err => {
+        console.error('Failed to load warehouses:', err)
+      })
+      .finally(() => setIsLoadingWarehouses(false))
 
-      // 3. Get pricelists
-      getOdooFieldValueOptions('sale.order', 'pricelist_id').then(res => {
+    // 3. Get pricelists
+    getOdooFieldValueOptions('sale.order', 'pricelist_id')
+      .then(res => {
         if (res.success && res.options) {
           setPricelistOptions(res.options)
         }
-      }).finally(() => setIsLoadingPricelists(false))
+      })
+      .catch(err => {
+        console.error('Failed to load pricelists:', err)
+      })
+      .finally(() => setIsLoadingPricelists(false))
 
-      // 4. Get payment terms
-      getOdooFieldValueOptions('sale.order', 'payment_term_id').then(res => {
+    // 4. Get payment terms
+    getOdooFieldValueOptions('sale.order', 'payment_term_id')
+      .then(res => {
         if (res.success && res.options) {
           setPaymentTermOptions(res.options)
         }
-      }).finally(() => setIsLoadingPaymentTerms(false))
+      })
+      .catch(err => {
+        console.error('Failed to load payment terms:', err)
+      })
+      .finally(() => setIsLoadingPaymentTerms(false))
 
-      // 5. Get products (for shipping & discount selection)
-      getOdooFieldValueOptions('sale.order.line', 'product_id').then(res => {
+    // 5. Get products (for shipping & discount & default product selection)
+    getOdooProducts(false)
+      .then(res => {
         if (res.success && res.options) {
           setProductOptions(res.options)
         }
-      }).finally(() => setIsLoadingProducts(false))
-    })
-  }, [hasOdooConnection, standardSubTab])
+      })
+      .catch(err => {
+        console.error('Failed to load products:', err)
+      })
+      .finally(() => setIsLoadingProducts(false))
+
+    // 6. Get taxes (for VAT Saudi / Non-Saudi customer selection)
+    setIsLoadingOrderTaxes(true)
+    getOdooTaxes(false)
+      .then(res => {
+        if (res.success && res.taxes) {
+          setOrderTaxOptions([
+            { value: '', label: lang === 'ar' ? '— بدون ضريبة (0%) —' : '— No Tax (0%) —' },
+            ...res.taxes,
+          ])
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load taxes for orders:', err)
+      })
+      .finally(() => setIsLoadingOrderTaxes(false))
+  }, [hasOdooConnection, standardSubTab, fetchOdooOrderFields, lang])
+
+  // Trigger customer fetch when switching to default_customer if not loaded yet
+  useEffect(() => {
+    if (
+      standardSubTab === 'orders' &&
+      orderCustomerFallbackPolicy === 'default_customer' &&
+      customerOptions.length === 0 &&
+      !isLoadingCustomers &&
+      hasOdooConnection
+    ) {
+      handleRefreshCustomers(false)
+    }
+  }, [standardSubTab, orderCustomerFallbackPolicy, customerOptions.length, isLoadingCustomers, hasOdooConnection, handleRefreshCustomers])
+
+  // Trigger product fetch when switching to default_product if not loaded yet
+  useEffect(() => {
+    if (
+      standardSubTab === 'orders' &&
+      orderProductFallbackPolicy === 'default_product' &&
+      productOptions.length === 0 &&
+      !isLoadingProducts &&
+      hasOdooConnection
+    ) {
+      handleRefreshProducts(false)
+    }
+  }, [standardSubTab, orderProductFallbackPolicy, productOptions.length, isLoadingProducts, hasOdooConnection, handleRefreshProducts])
 
   // Load saved settings
   useEffect(() => {
@@ -544,10 +724,19 @@ export default function FieldMappingClient({
           setOrderDiscountProductId('')
           setOrderDiscountProductSku('')
           setOrderDiscountMode('fixed')
+          setOrderEnableVat(false)
+          setOrderVatSaudiTaxId('')
+          setOrderVatNonSaudiTaxId('')
           setOrderAutoInvoice(false)
           setOrderPartialFulfillment(false)
-          setStoreWarehouseMappings({})
+          setStoreWarehouseRules([])
+          setOrderCustomerFallbackPolicy('create_new')
+          setOrderDefaultCustomerId('')
+          setOrderProductFallbackPolicy('create_new')
+          setOrderDefaultProductId('')
           setOrderStateMapping({})
+          setOrderUpdateCustomStatus(false)
+          setOrderStatusCustomField('')
         } else if (standardSubTab === 'products') {
           setProductVariantSyncMode('AS_VARIANTS')
           setBomEnabled(false)
@@ -592,7 +781,11 @@ export default function FieldMappingClient({
         setProductMatchZidField(s.match_zid_field || '')
         setProductMatchOdooField(s.match_odoo_field || '')
         setProductOnDelete(s.on_delete || 'nothing')
-        setProductEnabledActions(s.enabled_actions || (s.disabled ? [] : ['create', 'update', 'delete']))
+        setProductEnabledActions(
+          Array.isArray(s.enabled_actions) && s.enabled_actions.length > 0
+            ? s.enabled_actions
+            : (s.disabled ? [] : ['create', 'update', 'delete'])
+        )
         setProductDisabled(s.disabled || false)
         setProductCompanyId(s.company_id ? String(s.company_id) : '')
         setProductLinkCompany(s.link_company !== false)
@@ -606,7 +799,11 @@ export default function FieldMappingClient({
         setCustomerOnDelete(s.on_delete || 'nothing')
         setCustomerMatchZidField(s.match_zid_field || '')
         setCustomerMatchOdooField(s.match_odoo_field || '')
-        setCustomerEnabledActions(s.enabled_actions || (s.disabled ? [] : ['create', 'update', 'delete']))
+        setCustomerEnabledActions(
+          Array.isArray(s.enabled_actions) && s.enabled_actions.length > 0
+            ? s.enabled_actions
+            : (s.disabled ? [] : ['create', 'update', 'delete'])
+        )
         setCustomerDisabled(s.disabled || false)
         setCustomerDefaultType(s.customer_type || 'auto')
         setReceivableAccountId(s.receivable_account_id ? String(s.receivable_account_id) : '')
@@ -615,7 +812,11 @@ export default function FieldMappingClient({
         setCustomerLinkCompany(s.link_company !== false)
       } else if (standardSubTab === 'orders') {
         setOrderDisabled(s.disabled || false)
-        setOrderEnabledActions(s.enabled_actions || (s.disabled ? [] : ['create', 'update', 'cancel', 'deliver']))
+        setOrderEnabledActions(
+          Array.isArray(s.enabled_actions) && s.enabled_actions.length > 0
+            ? s.enabled_actions
+            : (s.disabled ? [] : ['create', 'update', 'cancel', 'deliver'])
+        )
         setOrderMatchZidField(s.match_zid_field || '')
         setOrderMatchOdooField(s.match_odoo_field || '')
         setOrderCompanyId(s.company_id ? String(s.company_id) : '')
@@ -626,7 +827,15 @@ export default function FieldMappingClient({
         setOrderAutoConfirm(s.order?.auto_confirm || false)
         setOrderAutoInvoice(s.order?.auto_invoice || false)
         setOrderPartialFulfillment(s.order?.partial_fulfillment || false)
-        setStoreWarehouseMappings(s.order?.store_warehouse_mappings || {})
+        setStoreWarehouseRules(
+          Object.entries((s.order?.store_warehouse_mappings || {}) as Record<string, unknown>).map(
+            ([locId, whId], i) => ({
+              rowKey: `rule_${i}_${locId}`,
+              zid_location_id: locId,
+              odoo_warehouse_id: String(whId ?? ''),
+            })
+          )
+        )
 
         setOrderAddShipping(s.add_shipping_as_line || false)
         setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
@@ -639,6 +848,31 @@ export default function FieldMappingClient({
         setOrderDiscountProductId(s.discount_product_id ? String(s.discount_product_id) : '')
         setOrderDiscountProductSku(s.discount_product_sku || '')
         setOrderDiscountMode(s.discount_mode || 'fixed')
+        setOrderEnableVat(s.enable_vat ?? s.order?.enable_vat ?? false)
+        setOrderVatSaudiTaxId(s.vat_saudi_tax_id ? String(s.vat_saudi_tax_id) : (s.order?.vat_saudi_tax_id ? String(s.order.vat_saudi_tax_id) : ''))
+        setOrderVatNonSaudiTaxId(s.vat_non_saudi_tax_id ? String(s.vat_non_saudi_tax_id) : (s.order?.vat_non_saudi_tax_id ? String(s.order.vat_non_saudi_tax_id) : ''))
+
+        setOrderCustomerFallbackPolicy(s.customer_fallback_policy || s.order?.customer_fallback_policy || 'create_new')
+        setOrderDefaultCustomerId(s.default_customer_id ? String(s.default_customer_id) : (s.order?.default_customer_id ? String(s.order.default_customer_id) : ''))
+        setOrderProductFallbackPolicy(s.product_fallback_policy || s.order?.product_fallback_policy || 'create_new')
+        setOrderDefaultProductId(s.default_product_id ? String(s.default_product_id) : (s.order?.default_product_id ? String(s.order.default_product_id) : ''))
+
+        const customStatusEnabled = !!(s.update_custom_status_field ?? s.order?.update_custom_status_field ?? false)
+        const customFieldName = s.order_status_custom_field || s.order?.order_status_custom_field || ''
+        setOrderUpdateCustomStatus(customStatusEnabled)
+        setOrderStatusCustomField(customFieldName)
+
+        if (hasOdooConnection) {
+          checkZidOrderStatusField(customFieldName || 'x_zid_order_status').then(chk => {
+            if (chk.exists) {
+              setStatusFieldExists(true)
+              if (!customFieldName) setOrderStatusCustomField(chk.fieldName)
+              if (chk.options && chk.options.length > 0) setStatusFieldOptions(chk.options)
+            } else {
+              setStatusFieldExists(false)
+            }
+          })
+        }
 
       }
     })
@@ -694,6 +928,16 @@ export default function FieldMappingClient({
   useEffect(() => {
     loadInventorySyncData()
   }, [loadInventorySyncData])
+
+  // Load the Zid locations used by the Orders tab multi-warehouse rules.
+  // The Odoo warehouses for those rules come from `warehouseOptions`, already
+  // loaded by the Orders tab bootstrap.
+  useEffect(() => {
+    if (standardStoreTab !== 'zid' || standardSubTab !== 'orders') return
+    getZidLocations().then(res => {
+      if (res.success && res.locations) setZidLocations(res.locations)
+    }).catch(err => console.error('[OrderWarehouseRules] Failed to load Zid locations:', err))
+  }, [standardStoreTab, standardSubTab])
 
   const handleSave = useCallback(async () => {
     setIsSaving(true)
@@ -770,7 +1014,7 @@ export default function FieldMappingClient({
       on_delete: productOnDelete,
       match_zid_field: productMatchZidField,
       match_odoo_field: productMatchOdooField,
-      enabled_actions: productEnabledActions,
+      enabled_actions: (!productDisabled && productEnabledActions.length === 0) ? ['create', 'update', 'delete'] : productEnabledActions,
       disabled: productDisabled,
       company_id: productCompanyId ? Number(productCompanyId) : null,
       link_company: productLinkCompany,
@@ -848,6 +1092,100 @@ export default function FieldMappingClient({
       { source_location_id: '', source_location_name: '', odoo_location_id: '', _removed: false },
     ])
   }, [])
+
+  // ── Orders tab: multi-warehouse rules (Zid location ↔ Odoo warehouse) ───────
+
+  const zidLocationOptions = useMemo(
+    () => zidLocations.map(loc => ({ value: String(loc.id), label: loc.name || String(loc.id) })),
+    [zidLocations]
+  )
+
+  const handleAddWarehouseRule = useCallback(() => {
+    setStoreWarehouseRules(prev => [
+      ...prev,
+      { rowKey: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, zid_location_id: '', odoo_warehouse_id: '' },
+    ])
+  }, [])
+
+  const handleWarehouseRuleChange = useCallback((
+    rowKey: string,
+    field: 'zid_location_id' | 'odoo_warehouse_id',
+    value: string
+  ) => {
+    setStoreWarehouseRules(prev => prev.map(rule => {
+      if (rule.rowKey === rowKey) return { ...rule, [field]: value }
+      // One rule per Zid location — picking an already-used location on
+      // another row clears it there instead of silently dropping a rule.
+      if (field === 'zid_location_id' && value && rule.zid_location_id === value) {
+        return { ...rule, zid_location_id: '', odoo_warehouse_id: '' }
+      }
+      return rule
+    }))
+  }, [])
+
+  const handleRemoveWarehouseRule = useCallback((rowKey: string) => {
+    setStoreWarehouseRules(prev => prev.filter(rule => rule.rowKey !== rowKey))
+  }, [])
+
+  // Re-pull Zid locations + Odoo warehouses with no cache, so a warehouse
+  // created in Odoo after opening the tab is selectable.
+  const handleRefreshOrderWarehouses = useCallback(async () => {
+    setIsRefreshingOrderWarehouses(true)
+    try {
+      const [zRes, wRes] = await Promise.all([
+        getZidLocations(true),
+        getOdooWarehouses(true),
+      ])
+      if (zRes.success && zRes.locations) setZidLocations(zRes.locations)
+      if (wRes.success && wRes.warehouses) {
+        setWarehouseOptions(wRes.warehouses.map((w: any) => ({ value: String(w.id), label: w.name })))
+      }
+      toast({
+        title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+        description: lang === 'ar'
+          ? 'تم تحديث مستودعات زد وأودو'
+          : 'Zid locations and Odoo warehouses reloaded',
+      })
+    } catch (err: any) {
+      console.error('[OrderWarehouseRules] Refresh failed:', err)
+      toast({
+        title: lang === 'ar' ? 'خطأ' : 'Error',
+        description: lang === 'ar' ? 'فشل تحديث المستودعات' : 'Failed to refresh warehouses',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsRefreshingOrderWarehouses(false)
+    }
+  }, [lang, toast])
+
+  // Re-pull Zid + Odoo locations straight from the APIs (no cache), so a
+  // warehouse/location created in Odoo after opening the tab shows up.
+  // Only the dropdown lists are touched — unsaved pair rows are left alone.
+  const handleRefreshInvLocations = useCallback(async () => {
+    setIsRefreshingInvLocations(true)
+    setInvSyncWebhookError('')
+    try {
+      const [zRes, oRes] = await Promise.all([
+        getZidLocations(true),
+        getOdooLocations('internal', true),
+      ])
+      if (zRes.success && zRes.locations) setZidLocations(zRes.locations)
+      if (oRes.success && oRes.locations) setOdooLocations(oRes.locations)
+      toast({
+        title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+        description: lang === 'ar'
+          ? 'تم تحديث مواقع زد وأودو'
+          : 'Zid and Odoo locations reloaded',
+      })
+    } catch (err: any) {
+      console.error('[InventorySync] Refresh failed:', err)
+      setInvSyncWebhookError(
+        lang === 'ar' ? 'فشل تحديث المواقع' : 'Failed to refresh locations'
+      )
+    } finally {
+      setIsRefreshingInvLocations(false)
+    }
+  }, [lang, toast])
 
   const handlePairChange = useCallback((
     index: number,
@@ -970,7 +1308,7 @@ export default function FieldMappingClient({
       on_delete: customerOnDelete,
       match_zid_field: customerMatchZidField,
       match_odoo_field: customerMatchOdooField,
-      enabled_actions: customerEnabledActions,
+      enabled_actions: (!customerDisabled && customerEnabledActions.length === 0) ? ['create', 'update', 'delete'] : customerEnabledActions,
       disabled: customerDisabled,
       receivable_account_id: receivableAccountId ? Number(receivableAccountId) : null,
       payable_account_id: payableAccountId ? Number(payableAccountId) : null,
@@ -1032,14 +1370,24 @@ export default function FieldMappingClient({
     if (orderAddDiscount && !orderDiscountProductId && !orderDiscountProductSku) {
       warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled but no discount product or SKU set')
     }
+    if (orderCustomerFallbackPolicy === 'default_customer' && !orderDefaultCustomerId) {
+      warnings.push(lang === 'ar' ? 'تم اختيار اعتماد عميل افتراضي لكن لم يتم تحديد العميل' : 'Default customer policy is selected but no customer selected')
+    }
+    if (orderProductFallbackPolicy === 'default_product' && !orderDefaultProductId) {
+      warnings.push(lang === 'ar' ? 'تم اختيار اعتماد منتج افتراضي لكن لم يتم تحديد المنتج' : 'Default product policy is selected but no product selected')
+    }
 
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
-      enabled_actions: orderEnabledActions,
+      enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
       match_zid_field: orderMatchZidField,
       match_odoo_field: orderMatchOdooField,
       company_id: orderCompanyId ? Number(orderCompanyId) : null,
       link_company: orderLinkCompany,
+      customer_fallback_policy: orderCustomerFallbackPolicy,
+      default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
+      product_fallback_policy: orderProductFallbackPolicy,
+      default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
       add_shipping_as_line: orderAddShipping,
       shipping_product_id: orderShippingProductId ? Number(orderShippingProductId) : null,
       shipping_product_sku: orderShippingProductSku,
@@ -1051,6 +1399,11 @@ export default function FieldMappingClient({
       discount_product_id: orderDiscountProductId ? Number(orderDiscountProductId) : null,
       discount_product_sku: orderDiscountProductSku,
       discount_mode: orderDiscountMode,
+      enable_vat: orderEnableVat,
+      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
+      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+      update_custom_status_field: orderUpdateCustomStatus,
+      order_status_custom_field: orderStatusCustomField,
       order: {
         default_warehouse_id: orderWarehouseId ? Number(orderWarehouseId) : null,
         default_pricelist_id: orderPricelistId ? Number(orderPricelistId) : null,
@@ -1058,7 +1411,23 @@ export default function FieldMappingClient({
         auto_confirm: orderAutoConfirm,
         auto_invoice: orderAutoInvoice,
         partial_fulfillment: orderPartialFulfillment,
-        store_warehouse_mappings: storeWarehouseMappings,
+        customer_fallback_policy: orderCustomerFallbackPolicy,
+        default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
+        product_fallback_policy: orderProductFallbackPolicy,
+        default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
+        enable_vat: orderEnableVat,
+        vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
+        vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+        update_custom_status_field: orderUpdateCustomStatus,
+        order_status_custom_field: orderStatusCustomField,
+        // Persisted as a plain Record (Zid location id → Odoo warehouse id);
+        // half-filled rows are dropped so they never shadow a real rule.
+        store_warehouse_mappings: storeWarehouseRules.reduce<Record<string, string>>((acc, rule) => {
+          const src = String(rule.zid_location_id || '').trim()
+          const wh = String(rule.odoo_warehouse_id || '').trim()
+          if (src && wh) acc[src] = wh
+          return acc
+        }, {}),
       }
     }
     // Save settings first, then mappings (if settings fails, stop early)
@@ -1093,11 +1462,57 @@ export default function FieldMappingClient({
   }, [
     orderDisabled, orderEnabledActions, orderMatchZidField, orderMatchOdooField,
     orderCompanyId, orderLinkCompany, orderWarehouseId, orderPricelistId, orderPaymentTermId,
-    orderAutoConfirm, orderAutoInvoice, orderPartialFulfillment, storeWarehouseMappings, orderAddShipping, orderShippingProductId, orderShippingProductSku,
+    orderAutoConfirm, orderAutoInvoice, orderPartialFulfillment, storeWarehouseRules,
+    orderCustomerFallbackPolicy, orderDefaultCustomerId, orderProductFallbackPolicy, orderDefaultProductId,
+    orderAddShipping, orderShippingProductId, orderShippingProductSku,
     orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
+    orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
+    orderUpdateCustomStatus, orderStatusCustomField,
     orderStateMapping, standardStoreTab, standardSubTab, lang, toast
   ])
+
+  const handleCreateStatusField = useCallback(async () => {
+    if (!hasOdooConnection) {
+      toast({
+        title: lang === 'ar' ? 'غير متصل بنظام ERP' : 'ERP Not Connected',
+        description: lang === 'ar' ? 'يرجى ربط نظام أودو أولاً لتتمكن من إنشاء الحقل' : 'Please connect to Odoo first',
+        variant: 'destructive',
+      })
+      return
+    }
+    setIsCreatingStatusField(true)
+    try {
+      const res = await createZidOrderStatusFieldInOdoo(orderStatusCustomField || 'x_zid_order_status')
+      if (res.success && res.fieldName) {
+        setOrderStatusCustomField(res.fieldName)
+        setOrderUpdateCustomStatus(true)
+        setStatusFieldExists(true)
+        if (res.options) setStatusFieldOptions(res.options)
+        await fetchOdooOrderFields(true)
+        toast({
+          title: lang === 'ar' ? 'تم إنشاء الحقل بنجاح' : 'Field Created Successfully',
+          description: lang === 'ar'
+            ? `تم إنشاء الحقل (${res.fieldName}) من نوع Selection داخل أودو بنجاح وربطه بجميع حالات زد.`
+            : `Custom field (${res.fieldName}) created in Odoo on sale.order with all Zid statuses.`,
+        })
+      } else {
+        toast({
+          title: lang === 'ar' ? 'خطأ في إنشاء الحقل' : 'Field Creation Failed',
+          description: res.error || (lang === 'ar' ? 'تعذر إنشاء الحقل في أودو' : 'Failed to create field in Odoo'),
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      toast({
+        title: lang === 'ar' ? 'خطأ' : 'Error',
+        description: err?.message || 'Error creating custom field',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsCreatingStatusField(false)
+    }
+  }, [hasOdooConnection, orderStatusCustomField, fetchOdooOrderFields, lang, toast])
 
   const storeTabs = [
     { key: 'zid', labelAr: 'زد', labelEn: 'Zid', connected: isZidConnected },
@@ -1436,7 +1851,7 @@ export default function FieldMappingClient({
                       </span>
                     </button>
                     <Link
-                      href="/dashboard/mapping-center/stock"
+                      href="/app/mapping-center/stock"
                       className="relative flex items-center gap-1.5 px-3 h-10 text-xs font-semibold transition-all duration-200 border-b-2 text-amber-600 border-transparent hover:text-amber-700 hover:border-amber-400/50"
                     >
                       <Activity className="h-3.5 w-3.5" />
@@ -2779,6 +3194,18 @@ export default function FieldMappingClient({
                                               type="button"
                                               variant="outline"
                                               size="sm"
+                                              className="h-9 w-9 shrink-0 p-0"
+                                              onClick={handleRefreshInvLocations}
+                                              disabled={isRefreshingInvLocations || isLoadingInvSync}
+                                              title={lang === 'ar' ? 'تحديث المواقع من زد وأودو' : 'Refresh locations from Zid & Odoo'}
+                                              aria-label={lang === 'ar' ? 'تحديث المواقع' : 'Refresh locations'}
+                                            >
+                                              <RefreshCw className={cn('h-3.5 w-3.5', isRefreshingInvLocations && 'animate-spin')} />
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
                                               onClick={handleAddPair}
                                             >
                                               <Plus className="h-3.5 w-3.5" />
@@ -2825,8 +3252,8 @@ export default function FieldMappingClient({
                                     onClick={() => setIsProductMappingOpen(true)}
                                     className="gap-1.5 rounded-lg h-9 text-xs px-4"
                                   >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'ربط يدوي' : 'Manual Mapping'}
+                                    <Zap className="h-3.5 w-3.5" />
+                                    {lang === 'ar' ? 'ربط يدوي وتلقائي' : 'Manual & Auto Mapping'}
                                   </Button>
                                   <Button
                                     type="button"
@@ -3256,6 +3683,318 @@ export default function FieldMappingClient({
                                   </div>
                                 </div>
 
+                                {/* ═══ Customer Matching Policy ═══ */}
+                                <div className="border-t border-border/80 pt-5">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <h3 className="text-sm font-bold text-muted-foreground flex items-center gap-2">
+                                        <Users className="h-4 w-4 text-foreground/80" />
+                                        <span>{lang === 'ar' ? 'سلوك مطابقة العميل في الطلب' : 'Order Customer Matching Policy'}</span>
+                                      </h3>
+                                      <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
+                                        {lang === 'ar'
+                                          ? 'حدد الإجراء المطلوب تنفيذه عند استلام طلب ولم يتم العثور على العميل في أودو'
+                                          : 'Specify what to do when an incoming order has a customer that is not matched in Odoo'}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {/* Option 1: Create New Customer */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderCustomerFallbackPolicy === 'create_new'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderCustomerFallbackPolicy"
+                                        value="create_new"
+                                        checked={orderCustomerFallbackPolicy === 'create_new'}
+                                        onChange={() => setOrderCustomerFallbackPolicy('create_new')}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs">
+                                          <UserPlus className="h-3.5 w-3.5 text-emerald-600" />
+                                          <span>{lang === 'ar' ? 'تسجيل عميل جديد' : 'Create New Customer'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'إنشاء سجل عميل جديد تلقائياً في أودو باستخدام بيانات العميل المرسلة مع الطلب.'
+                                            : 'Automatically create a new customer record in Odoo with the customer details received.'}
+                                        </span>
+                                      </div>
+                                    </label>
+
+                                    {/* Option 2: Cancel/Skip Order */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderCustomerFallbackPolicy === 'skip_order'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderCustomerFallbackPolicy"
+                                        value="skip_order"
+                                        checked={orderCustomerFallbackPolicy === 'skip_order'}
+                                        onChange={() => setOrderCustomerFallbackPolicy('skip_order')}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-600 dark:text-amber-400">
+                                          <UserX className="h-3.5 w-3.5" />
+                                          <span>{lang === 'ar' ? 'إلغاء تسجيل الأوردر' : 'Cancel Order Registration'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'إلغاء وتخطي تسجيل الطلب في أودو إذا لم يكن العميل مسجلاً مسبقاً.'
+                                            : 'Skip and cancel order registration in Odoo if the customer does not already exist.'}
+                                        </span>
+                                      </div>
+                                    </label>
+
+                                    {/* Option 3: Choose Default Customer */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderCustomerFallbackPolicy === 'default_customer'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderCustomerFallbackPolicy"
+                                        value="default_customer"
+                                        checked={orderCustomerFallbackPolicy === 'default_customer'}
+                                        onChange={() => {
+                                          setOrderCustomerFallbackPolicy('default_customer')
+                                          if (customerOptions.length === 0 && !isLoadingCustomers) {
+                                            handleRefreshCustomers(false)
+                                          }
+                                        }}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-blue-600 dark:text-blue-400">
+                                          <UserCheck className="h-3.5 w-3.5" />
+                                          <span>{lang === 'ar' ? 'اختيار عميل افتراضي' : 'Assign Default Customer'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'ربط الطلب بعميل عام أو افتراضي من أودو عند عدم التعرف على العميل.'
+                                            : 'Assign the order to a pre-selected default customer in Odoo when not matched.'}
+                                        </span>
+                                      </div>
+                                    </label>
+                                  </div>
+
+                                  {/* If default_customer is selected, show dropdown */}
+                                  {orderCustomerFallbackPolicy === 'default_customer' && (
+                                    <div className="mt-3 p-4 rounded-xl border border-border bg-muted/10 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-semibold text-foreground">
+                                          {lang === 'ar' ? 'العميل الافتراضي في أودو (Odoo Customer)' : 'Default Customer in Odoo'}
+                                          <span className="text-red-500 mx-1">*</span>
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRefreshCustomers(true)}
+                                          disabled={isLoadingCustomers}
+                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 text-[11px] flex items-center gap-1"
+                                          title={lang === 'ar' ? 'تحديث قائمة العملاء' : 'Refresh Customers'}
+                                        >
+                                          <RefreshCw className={cn("h-3 w-3", isLoadingCustomers && "animate-spin")} />
+                                          <span>{lang === 'ar' ? 'تحديث' : 'Refresh'}</span>
+                                        </button>
+                                      </div>
+                                      <SearchableSelect
+                                        options={customerOptions}
+                                        value={orderDefaultCustomerId}
+                                        onChange={setOrderDefaultCustomerId}
+                                        placeholder={isLoadingCustomers
+                                          ? (lang === 'ar' ? 'جاري تحميل العملاء من أودو...' : 'Loading customers from Odoo...')
+                                          : (lang === 'ar' ? '— اختر العميل من العملاء المسجلين في أودو —' : '— Select customer from Odoo registered customers —')}
+                                        disabled={isLoadingCustomers}
+                                      />
+                                      {!isLoadingCustomers && customerOptions.length === 0 && (
+                                        <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
+                                          <span>{lang === 'ar' ? 'لم يتم العثور على عملاء في أودو أو تعذر جلبهم.' : 'No customers found or failed to load.'}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRefreshCustomers(true)}
+                                            className="underline font-semibold hover:text-amber-700"
+                                          >
+                                            {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                                          </button>
+                                        </div>
+                                      )}
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {lang === 'ar'
+                                          ? 'سيتم تعيين هذا العميل كعميل للطلب في أودو عند عدم مطابقة بيانات العميل الواردة في الطلب.'
+                                          : 'This customer will be assigned to orders whose customer is not matched in Odoo.'}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* ═══ Product Matching Policy ═══ */}
+                                <div className="border-t border-border/80 pt-5">
+                                  <div className="flex items-center justify-between">
+                                    <div>
+                                      <h3 className="text-sm font-bold text-muted-foreground flex items-center gap-2">
+                                        <Package className="h-4 w-4 text-foreground/80" />
+                                        <span>{lang === 'ar' ? 'سلوك مطابقة المنتجات في الطلب' : 'Order Product Matching Policy'}</span>
+                                      </h3>
+                                      <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
+                                        {lang === 'ar'
+                                          ? 'حدد الإجراء المطلوب تنفيذه عند احتواء الطلب على منتج غير مطابق في أودو (عدم تطابق الـ SKU أو الباركود)'
+                                          : 'Specify what to do when an order contains a product not matched in Odoo (SKU or barcode mismatch)'}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    {/* Option 1: Create New Product */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderProductFallbackPolicy === 'create_new'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderProductFallbackPolicy"
+                                        value="create_new"
+                                        checked={orderProductFallbackPolicy === 'create_new'}
+                                        onChange={() => setOrderProductFallbackPolicy('create_new')}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs">
+                                          <PackagePlus className="h-3.5 w-3.5 text-emerald-600" />
+                                          <span>{lang === 'ar' ? 'تسجيل منتج جديد' : 'Create New Product'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'إنشاء منتج جديد تلقائياً في أودو بالاسم والـ SKU والسعر الوارد في الطلب.'
+                                            : 'Automatically create a new product in Odoo with the item name, SKU, and price.'}
+                                        </span>
+                                      </div>
+                                    </label>
+
+                                    {/* Option 2: Cancel/Skip Order */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderProductFallbackPolicy === 'skip_order'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderProductFallbackPolicy"
+                                        value="skip_order"
+                                        checked={orderProductFallbackPolicy === 'skip_order'}
+                                        onChange={() => setOrderProductFallbackPolicy('skip_order')}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-600 dark:text-amber-400">
+                                          <PackageX className="h-3.5 w-3.5" />
+                                          <span>{lang === 'ar' ? 'إلغاء تسجيل الأوردر' : 'Cancel Order Registration'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'إلغاء وتخطي تسجيل الطلب في أودو إذا كان يحتوي على أي منتج غير مسجل مسبقاً.'
+                                            : 'Skip and cancel order registration in Odoo if any item in the order is not matched.'}
+                                        </span>
+                                      </div>
+                                    </label>
+
+                                    {/* Option 3: Choose Default Product */}
+                                    <label className={cn(
+                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                                      orderProductFallbackPolicy === 'default_product'
+                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
+                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
+                                    )}>
+                                      <input
+                                        type="radio"
+                                        name="orderProductFallbackPolicy"
+                                        value="default_product"
+                                        checked={orderProductFallbackPolicy === 'default_product'}
+                                        onChange={() => {
+                                          setOrderProductFallbackPolicy('default_product')
+                                          if (productOptions.length === 0 && !isLoadingProducts) {
+                                            handleRefreshProducts(false)
+                                          }
+                                        }}
+                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
+                                      />
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-blue-600 dark:text-blue-400">
+                                          <PackageCheck className="h-3.5 w-3.5" />
+                                          <span>{lang === 'ar' ? 'اختيار منتج افتراضي' : 'Assign Default Product'}</span>
+                                        </div>
+                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
+                                          {lang === 'ar'
+                                            ? 'استخدام منتج افتراضي محدد مسبقاً من أودو للبنود التي لا يتوفر لها منتج مطابق.'
+                                            : 'Assign unmapped order lines to a pre-selected default product in Odoo.'}
+                                        </span>
+                                      </div>
+                                    </label>
+                                  </div>
+
+                                  {/* If default_product is selected, show dropdown */}
+                                  {orderProductFallbackPolicy === 'default_product' && (
+                                    <div className="mt-3 p-4 rounded-xl border border-border bg-muted/10 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <label className="block text-xs font-semibold text-foreground">
+                                          {lang === 'ar' ? 'المنتج الافتراضي في أودو (Odoo Product)' : 'Default Product in Odoo'}
+                                          <span className="text-red-500 mx-1">*</span>
+                                        </label>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRefreshProducts(true)}
+                                          disabled={isLoadingProducts}
+                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 text-[11px] flex items-center gap-1"
+                                          title={lang === 'ar' ? 'تحديث قائمة المنتجات' : 'Refresh Products'}
+                                        >
+                                          <RefreshCw className={cn("h-3 w-3", isLoadingProducts && "animate-spin")} />
+                                          <span>{lang === 'ar' ? 'تحديث' : 'Refresh'}</span>
+                                        </button>
+                                      </div>
+                                      <SearchableSelect
+                                        options={productOptions}
+                                        value={orderDefaultProductId}
+                                        onChange={setOrderDefaultProductId}
+                                        placeholder={isLoadingProducts
+                                          ? (lang === 'ar' ? 'جاري تحميل المنتجات من أودو...' : 'Loading products from Odoo...')
+                                          : (lang === 'ar' ? '— اختر المنتج من منتجات أودو المسجلة —' : '— Select product from Odoo registered products —')}
+                                        disabled={isLoadingProducts}
+                                      />
+                                      {!isLoadingProducts && productOptions.length === 0 && (
+                                        <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
+                                          <span>{lang === 'ar' ? 'لم يتم العثور على منتجات في أودو أو تعذر جلبها.' : 'No products found or failed to load.'}</span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRefreshProducts(true)}
+                                            className="underline font-semibold hover:text-amber-700"
+                                          >
+                                            {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                                          </button>
+                                        </div>
+                                      )}
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {lang === 'ar'
+                                          ? 'سيتم استخدام هذا المنتج في بنود الطلب لأي منتج لا يتطابق الـ SKU أو الباركود الخاص به مع منتجات أودو، مع الاحتفاظ باسم المنتج الأصلي في الوصف.'
+                                          : 'This product will be used in sales order lines when an item is not found in Odoo, preserving the original item name in line description.'}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+
                                 {/* ═══ 3. Defaults ═══ */}
                                 <div className="border-t border-border/80 pt-5">
                                   <h3 className="text-sm font-bold text-muted-foreground">
@@ -3411,61 +4150,154 @@ export default function FieldMappingClient({
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
                                     {lang === 'ar'
-                                      ? 'تحديد مستودع مختلف لكل متجر (الخيار الافتراضي أعلاه يُستخدم إن لم يُحدد)'
-                                      : 'Assign a specific warehouse per store (the default warehouse above is used when no rule matches)'}
+                                      ? 'اختر موقع زد والمستودع المقابل له في أودو — يُستخدم المستودع المحدد عند وصول طلب من ذلك الموقع (وإلا فالمستودع الافتراضي أعلاه)'
+                                      : 'Pick a Zid location and its matching Odoo warehouse — that warehouse is used for orders coming from that location (otherwise the default above)'}
                                   </p>
                                   <div className="space-y-2">
-                                    {Object.entries(storeWarehouseMappings).map(([storeId, whId]) => (
-                                      <div key={storeId} className="flex items-center gap-2">
-                                        <input
-                                          type="text"
-                                          value={storeId}
-                                          onChange={(e) => {
-                                            const next: Record<string, string> = {}
-                                            for (const [k, v] of Object.entries(storeWarehouseMappings)) {
-                                              if (k === storeId) continue
-                                              next[k] = v
-                                            }
-                                            next[e.target.value] = whId
-                                            setStoreWarehouseMappings(next)
-                                          }}
-                                          placeholder={lang === 'ar' ? 'معرف المتجر' : 'Store ID'}
-                                          className="flex-1 h-8 px-2.5 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/50 transition-colors"
+                                    {storeWarehouseRules.map((rule) => (
+                                      <div key={rule.rowKey} className="flex items-center gap-2">
+                                        <SearchableSelect
+                                          className="flex-1 min-w-0"
+                                          options={zidLocationOptions}
+                                          value={rule.zid_location_id}
+                                          onChange={(v: string) => handleWarehouseRuleChange(rule.rowKey, 'zid_location_id', String(v ?? ''))}
+                                          placeholder={lang === 'ar' ? '— موقع زد —' : '— Zid location —'}
                                         />
-                                        <input
-                                          type="number"
-                                          value={whId}
-                                          onChange={(e) => setStoreWarehouseMappings(prev => ({ ...prev, [storeId]: e.target.value }))}
-                                          placeholder={lang === 'ar' ? 'معرف المستودع' : 'Warehouse ID'}
-                                          className="w-[120px] h-8 px-2.5 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/50 transition-colors"
+                                        <ArrowRightLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                        <SearchableSelect
+                                          className="flex-1 min-w-0"
+                                          options={warehouseOptions}
+                                          value={rule.odoo_warehouse_id}
+                                          onChange={(v: string) => handleWarehouseRuleChange(rule.rowKey, 'odoo_warehouse_id', String(v ?? ''))}
+                                          placeholder={lang === 'ar' ? '— مستودع أودو —' : '— Odoo warehouse —'}
+                                          disabled={isLoadingWarehouses}
                                         />
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            const next = { ...storeWarehouseMappings }
-                                            delete next[storeId]
-                                            setStoreWarehouseMappings(next)
-                                          }}
-                                          className="h-7 w-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                          onClick={() => handleRemoveWarehouseRule(rule.rowKey)}
+                                          title={lang === 'ar' ? 'حذف القاعدة' : 'Remove rule'}
+                                          className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
                                         >
-                                          <X className="h-3.5 w-3.5" />
+                                          <Trash2 className="h-3.5 w-3.5" />
                                         </button>
                                       </div>
                                     ))}
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        const key = `store_${Date.now()}`
-                                        setStoreWarehouseMappings(prev => ({ ...prev, [key]: '' }))
-                                      }}
-                                      className="h-7 text-[10px] gap-1"
-                                    >
-                                      <Plus className="h-3 w-3" />
-                                      {lang === 'ar' ? 'إضافة قاعدة' : 'Add Rule'}
-                                    </Button>
+                                    {storeWarehouseRules.length === 0 && (
+                                      <p className="text-[11px] text-muted-foreground">
+                                        {lang === 'ar'
+                                          ? 'لا توجد قواعد — كل الطلبات ستذهب للمستودع الافتراضي.'
+                                          : 'No rules yet — every order goes to the default warehouse.'}
+                                      </p>
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 w-7 shrink-0 p-0"
+                                        onClick={handleRefreshOrderWarehouses}
+                                        disabled={isRefreshingOrderWarehouses || isLoadingWarehouses}
+                                        title={lang === 'ar' ? 'تحديث مواقع زد ومستودعات أودو' : 'Refresh Zid locations & Odoo warehouses'}
+                                        aria-label={lang === 'ar' ? 'تحديث المستودعات' : 'Refresh warehouses'}
+                                      >
+                                        <RefreshCw className={cn('h-3 w-3', isRefreshingOrderWarehouses && 'animate-spin')} />
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleAddWarehouseRule}
+                                        className="h-7 text-[10px] gap-1"
+                                      >
+                                        <Plus className="h-3 w-3" />
+                                        {lang === 'ar' ? 'إضافة قاعدة' : 'Add Rule'}
+                                      </Button>
+                                    </div>
                                   </div>
+                                </div>
+
+                                {/* ═══ ضريبة القيمة المضافة (VAT) ═══ */}
+                                <div className="border-t border-border/80 pt-5">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div>
+                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                                        <Receipt className="h-4 w-4 text-emerald-500" />
+                                        {lang === 'ar' ? 'ضريبة القيمة المضافة (VAT)' : 'Value Added Tax (VAT)'}
+                                      </h3>
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {lang === 'ar'
+                                          ? 'تحديد ضريبة الطلب في أودو بناءً على عنوان شحن العميل (سعودي أو غير سعودي)'
+                                          : 'Configure order taxes in Odoo based on the customer shipping destination'}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                        dir="ltr"
+                                        aria-checked={orderEnableVat}
+                                        onClick={() => setOrderEnableVat(!orderEnableVat)}
+                                        className={cn(
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderEnableVat ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderEnableVat ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                        )} />
+                                      </button>
+                                      <span className="text-xs font-semibold text-foreground">
+                                        {lang === 'ar' ? 'تفعيل ضريبة القيمة المضافة' : 'Enable Value Added Tax'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {orderEnableVat ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl border border-border bg-muted/10">
+                                      <div className="space-y-1.5">
+                                        <label className="block text-xs font-semibold text-foreground">
+                                          {lang === 'ar' ? 'العميل السعودي' : 'Saudi Customer'}
+                                        </label>
+                                        <SearchableSelect
+                                          options={orderTaxOptions}
+                                          value={orderVatSaudiTaxId}
+                                          onChange={setOrderVatSaudiTaxId}
+                                          placeholder={lang === 'ar' ? '— اختر ضريبة العميل السعودي من أودو —' : '— Select Saudi Tax from Odoo —'}
+                                          disabled={isLoadingOrderTaxes}
+                                        />
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {lang === 'ar'
+                                            ? 'يتم تطبيق هذه الضريبة على بنود الطلب في أودو إذا كان عنوان الشحن داخل السعودية'
+                                            : 'Applied to Odoo order lines when the shipping address is in Saudi Arabia'}
+                                        </p>
+                                      </div>
+
+                                      <div className="space-y-1.5">
+                                        <label className="block text-xs font-semibold text-foreground">
+                                          {lang === 'ar' ? 'عميل غير سعودي' : 'Non-Saudi Customer'}
+                                        </label>
+                                        <SearchableSelect
+                                          options={orderTaxOptions}
+                                          value={orderVatNonSaudiTaxId}
+                                          onChange={setOrderVatNonSaudiTaxId}
+                                          placeholder={lang === 'ar' ? '— اختر ضريبة العميل غير السعودي من أودو —' : '— Select Non-Saudi Tax from Odoo —'}
+                                          disabled={isLoadingOrderTaxes}
+                                        />
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {lang === 'ar'
+                                            ? 'يتم تطبيق هذه الضريبة على بنود الطلب في أودو إذا كان عنوان الشحن خارج السعودية'
+                                            : 'Applied to Odoo order lines when the shipping address is outside Saudi Arabia'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-muted-foreground mt-2">
+                                      {lang === 'ar'
+                                        ? 'الضريبة غير مفعلة: سيتم إرسال الطلبات إلى أودو بدون أي ضرائب على البنود.'
+                                        : 'VAT disabled: Orders will be sent to Odoo without taxes on line items.'}
+                                    </p>
+                                  )}
                                 </div>
 
                                 {/* ═══ 4. Shipping & Discount Options ═══ */}
@@ -3667,6 +4499,147 @@ export default function FieldMappingClient({
                                   </div>
                                 </div>
 
+                                {/* ═══ 4.5 Zid Order Status Custom Field in Odoo ═══ */}
+                                <div className="border-t border-border/80 pt-5">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                    <div>
+                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                                        <Activity className="h-4 w-4 text-primary" />
+                                        <span>{lang === 'ar' ? 'تحديث حالة طلب زد داخل أودو (حقل مخصص)' : 'Sync Zid Order Status to Odoo (Custom Field)'}</span>
+                                      </h3>
+                                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                                        {lang === 'ar'
+                                          ? 'إنشاء خانة من نوع Selection في أودو على أمر المبيعات (sale.order) تحتوي على حالات طلبات زد ويتم تحديثها تلقائياً عند تغير الحالة في زد.'
+                                          : 'Create a Selection field on sale.order in Odoo containing Zid order statuses, automatically updated when the order status changes in Zid.'}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                        dir="ltr"
+                                        aria-checked={orderUpdateCustomStatus}
+                                        onClick={() => setOrderUpdateCustomStatus(!orderUpdateCustomStatus)}
+                                        className={cn(
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderUpdateCustomStatus ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderUpdateCustomStatus ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                        )} />
+                                      </button>
+                                      <span className="text-xs font-semibold text-foreground">
+                                        {lang === 'ar' ? 'تفعيل الخيار' : 'Enable Option'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {orderUpdateCustomStatus && (
+                                    <div className="mt-4 p-4 rounded-xl border border-border bg-muted/10 space-y-4">
+                                      {statusFieldExists ? (
+                                        <div className="space-y-3">
+                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
+                                            <div className="flex items-center gap-2">
+                                              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                                              <span className="text-xs font-semibold">
+                                                {lang === 'ar'
+                                                  ? `الخانة متوفرة في أودو: ${orderStatusCustomField || 'x_zid_order_status'} (نوع Selection)`
+                                                  : `Field exists in Odoo: ${orderStatusCustomField || 'x_zid_order_status'} (Selection)`}
+                                              </span>
+                                            </div>
+                                            <Button
+                                              type="button"
+                                              variant="outline"
+                                              size="sm"
+                                              onClick={handleCreateStatusField}
+                                              disabled={isCreatingStatusField}
+                                              className="h-7 text-[11px] gap-1 border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 self-start sm:self-auto"
+                                            >
+                                              <RefreshCw className={cn("h-3 w-3", isCreatingStatusField && "animate-spin")} />
+                                              {lang === 'ar' ? 'تحديث خيارات الحالات من زد' : 'Update Options from Zid'}
+                                            </Button>
+                                          </div>
+
+                                          <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between">
+                                              <label className="block text-xs font-semibold text-foreground">
+                                                {lang === 'ar' ? 'حقل أودو المستهدف على أمر المبيعات (sale.order)' : 'Target Odoo Field on sale.order'}
+                                              </label>
+                                              <button
+                                                type="button"
+                                                onClick={() => fetchOdooOrderFields(true)}
+                                                disabled={isLoadingOrderFields}
+                                                className="text-muted-foreground hover:text-foreground text-[11px] flex items-center gap-1 transition-colors"
+                                              >
+                                                <RefreshCw className={cn("h-3 w-3", isLoadingOrderFields && "animate-spin")} />
+                                                <span>{lang === 'ar' ? 'تحديث قائمة الحقول' : 'Refresh Fields'}</span>
+                                              </button>
+                                            </div>
+                                            <SearchableSelect
+                                              options={odooOrderFields}
+                                              value={orderStatusCustomField || 'x_zid_order_status'}
+                                              onChange={setOrderStatusCustomField}
+                                              placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo Field —'}
+                                              disabled={isLoadingOrderFields}
+                                            />
+                                          </div>
+
+                                          <div className="space-y-1.5 pt-2">
+                                            <label className="block text-xs font-semibold text-muted-foreground">
+                                              {lang === 'ar' ? 'الخيارات وحالات زد المربوطة داخل الخانة:' : 'Linked Zid Status Options in Selection:'}
+                                            </label>
+                                            <div className="flex flex-wrap gap-1.5">
+                                              {statusFieldOptions.map((opt) => (
+                                                <span
+                                                  key={opt.key}
+                                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-background border border-border text-foreground shadow-sm"
+                                                >
+                                                  <span className="font-semibold text-primary mx-1">{opt.key}:</span>
+                                                  {opt.label}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-dashed border-primary/30 bg-primary/5">
+                                          <div className="space-y-1">
+                                            <div className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                                              <Wand2 className="h-4 w-4 text-primary" />
+                                              <span>{lang === 'ar' ? 'إنشاء خانة حالة طلب زد في أودو' : 'Create Zid Order Status Field in Odoo'}</span>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                              {lang === 'ar'
+                                                ? 'سيتم إنشاء حقل جديد تلقائياً باسم (x_zid_order_status) من نوع Selection داخل أمر المبيعات (sale.order) في أودو وإدراج كافة حالات طلبات زد كخيارات بداخله، وتحديثه تلقائياً فورياً مع كل تحديث لحالة الطلب.'
+                                                : 'A new selection field (x_zid_order_status) will be created on sale.order in Odoo with all Zid order statuses as options, and updated automatically on every status update.'}
+                                            </p>
+                                          </div>
+                                          <Button
+                                            type="button"
+                                            onClick={handleCreateStatusField}
+                                            disabled={isCreatingStatusField || !hasOdooConnection}
+                                            className="shrink-0 bg-primary text-primary-foreground gap-1.5 font-semibold rounded-lg h-9 text-xs px-4"
+                                          >
+                                            {isCreatingStatusField ? (
+                                              <>
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                <span>{lang === 'ar' ? 'جاري الإنشاء في أودو...' : 'Creating in Odoo...'}</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Plus className="h-3.5 w-3.5" />
+                                                <span>{lang === 'ar' ? 'إنشاء الخانة في أودو الآن' : 'Create Field in Odoo Now'}</span>
+                                              </>
+                                            )}
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+
                                 {/* ═══ 5. Order Status Mapping ═══ */}
                                 <div className="border-t border-border/80 pt-5">
                                   <h3 className="text-sm font-bold text-muted-foreground">
@@ -3789,7 +4762,7 @@ export default function FieldMappingClient({
                                   <Button
                                     type="button"
                                     variant="outline"
-                                    onClick={() => router.push('/dashboard/mapping-center/orders')}
+                                    onClick={() => router.push('/app/mapping-center/orders')}
                                     className="gap-1.5 rounded-lg h-9 text-xs px-4"
                                   >
                                     <ShoppingCart className="h-3.5 w-3.5" />
@@ -4240,6 +5213,9 @@ export default function FieldMappingClient({
         isOpen={isProductMappingOpen}
         onClose={() => setIsProductMappingOpen(false)}
         platform={standardStoreTab}
+        defaultStoreField={productMatchZidField || 'sku'}
+        defaultOdooField={productMatchOdooField || 'default_code'}
+        odooFieldOptions={productOdooFields}
       />
       <SyncLogModal 
         isOpen={isProductLogOpen}

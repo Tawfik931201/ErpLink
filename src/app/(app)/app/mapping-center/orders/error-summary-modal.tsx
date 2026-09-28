@@ -3,7 +3,7 @@
 import { X, Loader2, Bug, BarChart3 } from 'lucide-react'
 import React, { useState, useEffect, useCallback } from 'react'
 
-import { ExpandableError } from '@/app/(app)/dashboard/mapping-center/orders/expandable-error'
+import { ExpandableError } from '@/app/(app)/app/mapping-center/orders/expandable-error'
 import { getErrorSummary } from '@/app/actions/order-timeline'
 import type { ErrorGroup } from '@/app/actions/order-timeline'
 import { useToast } from '@/hooks/use-toast'

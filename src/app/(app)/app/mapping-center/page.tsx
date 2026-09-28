@@ -9,14 +9,23 @@ import { Button } from '@/components/ui/button'
 import type { Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
-import FieldMappingClient from '../field-mapping-client'
+import FieldMappingClient from './field-mapping-client'
 
 export const metadata: Metadata = {
-  title: 'Category Mapping — Mapping Center — ErpLink',
-  description: 'إعدادات ربط التصنيفات بين المتجر وأودو',
+  title: 'Mapping Center — ErpLink',
+  description: 'تخصيص ربط الحقول وإعدادات المزامنة بين المتجر ونظام ERP',
 }
 
-export default async function CategoriesPage() {
+export default async function MappingCenterPage({
+  searchParams,
+}: {
+  searchParams?: { [key: string]: string | string[] | undefined }
+}) {
+  const subtabParam = typeof searchParams?.subtab === 'string' ? searchParams.subtab : undefined
+  const initialSubTab = subtabParam === 'orders' || subtabParam === 'products' || subtabParam === 'customers'
+    ? subtabParam
+    : undefined
+
   const [connRes, zidTokenRes, sallaTokenRes, shopifyTokenRes] = await Promise.all([
     getActiveWorkspaceErpConnection(),
     getActiveWorkspaceZidToken(),
@@ -67,6 +76,7 @@ export default async function CategoriesPage() {
 
   return (
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
+      
       {!hasErpConnection && (
         <div className="flex flex-col sm:flex-row items-start gap-3 rounded-lg border bg-muted p-3.5">
           <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -80,7 +90,7 @@ export default async function CategoriesPage() {
                 : `Please configure your ${getErpNameEn(erpType)} connection first to retrieve live models and fields. Showing offline demo data for preview now.`}
             </p>
             <Button asChild variant="outline" size="sm" className="mt-1 text-[10px] h-7 font-semibold gap-1 rounded-lg">
-              <Link href="/dashboard/connect-odoo">
+              <Link href="/app/connect-odoo">
                 {lang === 'ar' ? `انتقل لصفحة ربط الـ ERP` : `Go to Connect ERP`}
                 <ArrowRight className={cn("h-3 w-3", lang === 'ar' ? "rotate-180" : "")} />
               </Link>
@@ -101,8 +111,9 @@ export default async function CategoriesPage() {
         zidStoreName={zidTokenRes.success && zidTokenRes.token ? (zidTokenRes.token.name || null) : null}
         sallaStoreName={sallaTokenRes.success && sallaTokenRes.token ? (sallaTokenRes.token.store_name || sallaTokenRes.token.name || null) : null}
         shopifyStoreName={shopifyTokenRes.success && shopifyTokenRes.token ? (shopifyTokenRes.token.name || null) : null}
-        initialSubTab="categories"
+        initialSubTab={initialSubTab}
       />
     </div>
   )
 }
+

@@ -248,7 +248,7 @@ export default function OrderDashboardClient() {
     <div className="space-y-6 p-6" dir={dir}>
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => router.push('/dashboard/mapping-center')} className="h-8 w-8">
+        <Button variant="ghost" size="icon" onClick={() => router.push('/app/mapping-center')} className="h-8 w-8">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -362,7 +362,7 @@ export default function OrderDashboardClient() {
         <Button
           variant="link"
           size="sm"
-          onClick={() => router.push('/dashboard/mapping-center?tab=standard&subtab=orders')}
+          onClick={() => router.push('/app/mapping-center?tab=standard&subtab=orders')}
           className="gap-1 h-7 text-[10px] text-muted-foreground hover:text-foreground"
         >
           <Settings className="h-3 w-3" />

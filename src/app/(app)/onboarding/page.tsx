@@ -4,5 +4,5 @@ import { redirect } from 'next/navigation'
 // Kept as a redirect (instead of deleting) so old links/bookmarks keep working
 // with no middleware change.
 export default function OnboardingRedirect() {
-  redirect('/dashboard/setup')
+  redirect('/app/setup')
 }

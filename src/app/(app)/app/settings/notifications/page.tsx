@@ -56,6 +56,7 @@ interface ChatSub {
   enabled: boolean
   workspace_filter: unknown
   mapping_filter: unknown
+  events_filter?: string[]
   created_at: string
   linked_at: string
   bot: { bot_username: string | null; label: string | null } | null
@@ -70,6 +71,49 @@ const MODE_OPTIONS = [
   { id: 'success' as const, ar: 'الناجحة فقط', en: 'Successful only' },
   { id: 'failure' as const, ar: 'الفاشلة فقط', en: 'Failed only' },
   { id: 'both' as const, ar: 'كلا الحالتين', en: 'Both outcomes' },
+]
+
+const EVENT_CATEGORY_OPTIONS = [
+  {
+    id: 'orders',
+    icon: '📦',
+    titleAr: 'الطلبات',
+    titleEn: 'Orders',
+    descAr: 'إشعار بوصول الطلبات وحالة تسجيلها في أودوو',
+    descEn: 'Notification on new orders and Odoo status',
+  },
+  {
+    id: 'products',
+    icon: '🏷️',
+    titleAr: 'المنتجات',
+    titleEn: 'Products',
+    descAr: 'إشعار بإنشاء وتحديث المنتجات في أودوو',
+    descEn: 'Notification on product create/update in Odoo',
+  },
+  {
+    id: 'categories',
+    icon: '🗂️',
+    titleAr: 'التصنيفات',
+    titleEn: 'Categories',
+    descAr: 'إشعار بمزامنة التصنيفات مع أودوو',
+    descEn: 'Notification on category sync with Odoo',
+  },
+  {
+    id: 'customers',
+    icon: '👥',
+    titleAr: 'العملاء',
+    titleEn: 'Customers',
+    descAr: 'إشعار بتسجيل وتحديث العملاء في أودوو',
+    descEn: 'Notification on customer sync in Odoo',
+  },
+  {
+    id: 'stock',
+    icon: '🔄',
+    titleAr: 'تحديث المخزون (أودوو ⬅️ زد)',
+    titleEn: 'Stock Updates (Odoo ⬅️ Store)',
+    descAr: 'إشعار بتحديث الكميات من أودوو إلى المتجر',
+    descEn: 'Notification on stock updates from Odoo to store',
+  },
 ]
 
 // ─── Dropdown Components ─────────────────────────────────────────────────────
@@ -227,6 +271,7 @@ export default function NotificationsSettingsPage() {
     notify_mode?: 'success' | 'failure' | 'both'
     enabled?: boolean
     mapping_filter?: string[]
+    events_filter?: string[]
   }
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const setDraftField = (id: string, patch: Draft) =>
@@ -645,6 +690,65 @@ export default function NotificationsSettingsPage() {
                           {lang === 'ar' ? 'الإشعارات مفعّلة' : 'Notifications enabled'}
                         </span>
                       </label>
+
+                      {/* Event Categories Toggles */}
+                      <div className="space-y-2 pt-2 border-t border-border/40">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-bold text-foreground">
+                            {lang === 'ar' ? 'خيارات إرسال الإشعارات' : 'Notification Triggers'}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">
+                            {lang === 'ar' ? 'حدد ما ترغب في إرساله إلى هذه المحادثة' : 'Choose what events to send to this chat'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {EVENT_CATEGORY_OPTIONS.map(opt => {
+                            const currentEvents: string[] = getDraftValue(
+                              sub.id,
+                              'events_filter',
+                              sub.events_filter || ['orders', 'products', 'categories', 'customers', 'stock']
+                            )
+                            const isChecked = currentEvents.includes(opt.id)
+
+                            return (
+                              <label
+                                key={opt.id}
+                                className={cn(
+                                  'flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition-all',
+                                  isChecked
+                                    ? 'border-foreground/30 bg-secondary/40 shadow-xs'
+                                    : 'border-border/50 bg-background/50 opacity-60'
+                                )}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span className="text-base shrink-0">{opt.icon}</span>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-bold text-foreground truncate">
+                                      {lang === 'ar' ? opt.titleAr : opt.titleEn}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground truncate">
+                                      {lang === 'ar' ? opt.descAr : opt.descEn}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="ms-2 shrink-0 flex items-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      const next = e.target.checked
+                                        ? [...currentEvents, opt.id]
+                                        : currentEvents.filter(x => x !== opt.id)
+                                      setDraftField(sub.id, { events_filter: next })
+                                    }}
+                                    className="h-4 w-4 rounded border-border text-foreground accent-foreground focus:ring-foreground"
+                                  />
+                                </div>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
 
                       {/* Mapping filter — multi-select dropdown */}
                       {mappings.length > 0 && (

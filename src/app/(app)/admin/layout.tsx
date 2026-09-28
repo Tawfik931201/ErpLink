@@ -1,7 +1,10 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 
+import Link from 'next/link'
+
 import AdminNavLinks from '@/components/admin-nav-links'
+import { Logo } from '@/components/ui/logo'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 import { translations, type Language } from '@/lib/translations'
 
@@ -20,13 +23,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       {/* Header nav bar — same as partner dashboard header */}
       <header className="sticky top-0 z-40 border-b border-border bg-card">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
-          <div className="hidden sm:flex items-center gap-3 shrink-0">
-            <a
-              href="/dashboard"
-              className="text-xs text-muted-foreground hover:text-foreground font-medium transition-colors"
+          <div className="flex items-center gap-3 shrink-0">
+            <Link
+              href="/app/dashboard"
+              className="flex items-center"
+              aria-label="ErpLink Dashboard"
             >
-              ← {t('nav.dashboard')}
-            </a>
+              <Logo variant="horizontal" size="sm" />
+            </Link>
             <span className="text-muted-foreground/30">/</span>
             <span className="text-sm font-bold text-foreground">
               {lang === 'ar' ? 'لوحة الإدارة' : 'Admin Panel'}

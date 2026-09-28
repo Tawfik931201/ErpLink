@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
 export default function WorkspaceRedirectPage() {
-  redirect('/dashboard/settings/workspace')
+  redirect('/app/settings/workspace')
 }

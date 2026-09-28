@@ -12,7 +12,23 @@ import {
 const LOCALE_COOKIE = 'lang'
 
 // Protect dashboard routes, keeping API endpoints and callbacks public
-const isProtectedRoute = createRouteMatcher(['/dashboard((?!/connect-store).*)'])
+const isProtectedRoute = createRouteMatcher(['/app(.*)'])
+
+// The dashboard tree moved under /app/*. Links, OAuth callbacks and bookmarks
+// created before the move still target /dashboard/*, so redirect them instead
+// of 404-ing. Sub-paths were reshuffled during the move (not a pure prefix
+// rename), hence the explicit map. Longest prefix wins, so order matters.
+const LEGACY_ROUTE_MAP: ReadonlyArray<readonly [string, string]> = [
+  ['/dashboard/connect-store', '/app/connect-store'],
+  ['/dashboard/connect-odoo', '/app/connect-odoo'],
+  ['/dashboard/initial-transfer', '/app/initial-transfer'],
+  ['/dashboard/mapping-center', '/app/mapping-center'],
+  ['/dashboard/settings', '/app/settings'],
+  ['/dashboard/integrations', '/app/dashboard/integrations'],
+  ['/dashboard/workspace', '/app/settings/workspace'],
+  ['/dashboard/tickets', '/app/tickets'],
+  ['/dashboard', '/app/dashboard'],
+]
 
 // Admin routes get a separate, lighter protection: they're public at the
 // middleware level, but the layouts themselves guard with isAdmin().
@@ -35,20 +51,48 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next()
   }
 
-  // Server Actions (and the internal forwarding requests Next.js issues for
-  // them) must never be locale-redirected: after a rewrite, the action
-  // forward re-enters this middleware against the un-prefixed route
-  // (e.g. POST /dashboard). Redirecting that to /ar-sa/dashboard bounces the
-  // forward and produces "failed to forward action response" + a 404 for the
-  // client-side action POST. Locale-prefixed action requests are still
-  // rewritten below.
-  const isServerAction =
-    req.method === 'POST' &&
-    (req.headers.has('next-action') || req.headers.has('x-action-forwarded'))
-
-  // --- LOCALE HANDLING ---
   let needsRewrite = false
   let langFromUrl: string | null = null
+
+  // Server Actions, action forward fetches, and mutation requests (POST/PUT/DELETE)
+  // must NEVER be redirected (HTTP 307/308). Redirecting a POST drops/corrupts the
+  // body, breaks internal Next.js action forwarding, causes 5-minute UND_ERR_HEADERS_TIMEOUT
+  // socket deadlocks, and exhausts the Node.js memory heap.
+  const isPostOrMutation = req.method !== 'GET' && req.method !== 'HEAD'
+  const isServerAction =
+    req.method === 'POST' &&
+    (req.headers.has('next-action') || req.headers.has('x-action-forwarded') || req.headers.has('rsc'))
+
+  // --- LEGACY /dashboard/* -> /app/* ---
+  // Runs before locale handling so both /dashboard and /ar-sa/dashboard land on
+  // a real route.
+  if (!isApiRoute(req)) {
+    const segments = pathname.split('/').filter(Boolean)
+    const first = segments[0]?.toLowerCase() ?? ''
+    const hasLocale = SUPPORTED_URL_LOCALES.includes(first)
+
+    const barePath = hasLocale ? `/${segments.slice(1).join('/')}` : pathname
+    const match = LEGACY_ROUTE_MAP.find(
+      ([from]) => barePath === from || barePath.startsWith(`${from}/`)
+    )
+
+    if (match) {
+      const [from, to] = match
+      const target = `${to}${barePath.slice(from.length)}`
+      if (isPostOrMutation) {
+        // Rewrite POST/mutations internally instead of redirecting
+        req.nextUrl.pathname = target
+        needsRewrite = true
+      } else {
+        const localePrefix = hasLocale
+          ? `/${first}`
+          : `/${getUrlLocaleFromLanguage(req.cookies.get(LOCALE_COOKIE)?.value || DEFAULT_LANG)}`
+        return NextResponse.redirect(new URL(`${localePrefix}${target}${search}`, req.url))
+      }
+    }
+  }
+
+  // --- LOCALE HANDLING ---
 
   const pathParts = pathname.split('/').filter(Boolean)
   const firstSegment = pathParts[0]?.toLowerCase()
@@ -59,8 +103,8 @@ export default clerkMiddleware(async (auth, req) => {
     const newPath = stripLocaleFromPathname(pathname)
     req.nextUrl.pathname = newPath
     needsRewrite = true
-  } else if (!isApiRoute(req) && !isServerAction) {
-    // No locale prefix (and not an API route) → redirect to locale-prefixed URL
+  } else if (!isApiRoute(req) && !isPostOrMutation && !isServerAction) {
+    // No locale prefix (and not an API route or POST) → redirect to locale-prefixed URL for browser GET/HEAD
     const lang = req.cookies.get(LOCALE_COOKIE)?.value || DEFAULT_LANG
     const urlLocale = getUrlLocaleFromLanguage(lang)
     const suffix = pathname === '/' ? '' : pathname

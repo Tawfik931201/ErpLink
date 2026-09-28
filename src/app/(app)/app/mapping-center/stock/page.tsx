@@ -37,7 +37,7 @@ export default async function StockSyncPage() {
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
       <div className="flex items-center gap-3">
         <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <Link href="/dashboard/mapping-center">
+          <Link href="/app/mapping-center">
             <ArrowLeft className={cn("h-4 w-4", lang === 'ar' && "rotate-180")} />
           </Link>
         </Button>

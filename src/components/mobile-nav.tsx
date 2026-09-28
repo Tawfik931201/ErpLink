@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 
+import { Logo } from '@/components/ui/logo'
 import { cn } from '@/lib/utils'
 
 export interface MobileNavSectionItem {
@@ -30,7 +31,7 @@ export default function MobileNav({
 
   return (
     <div className="md:hidden border-b border-border bg-sidebar">
-      <div className="flex items-center gap-2 px-4 py-3">
+      <div className="flex items-center gap-3 px-4 py-3">
         <button
           onClick={() => setOpen((v) => !v)}
           aria-label={open ? 'Close menu' : 'Open menu'}
@@ -38,7 +39,9 @@ export default function MobileNav({
         >
           {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
         </button>
-        <span className="text-sm font-semibold tracking-tight">ERP Link</span>
+        <Link href="/app/dashboard" className="flex items-center" aria-label="ErpLink Dashboard">
+          <Logo variant="horizontal" size="sm" priority />
+        </Link>
       </div>
 
       {open && (

@@ -110,7 +110,7 @@ export default async function InitialTransferPage() {
                 : 'Please configure your Odoo connection first to retrieve live models and fields. Showing offline demo data for preview now.'}
             </p>
             <Button asChild variant="outline" size="sm" className="mt-1 text-[10px] h-7 font-semibold gap-1 rounded-lg">
-              <Link href="/dashboard/connect-odoo">
+              <Link href="/app/connect-odoo">
                 {lang === 'ar' ? 'انتقل لصفحة ربط أودو' : 'Go to Connect Odoo'}
                 <ArrowRight className={cn("h-3 w-3", lang === 'ar' ? "rotate-180" : "")} />
               </Link>
