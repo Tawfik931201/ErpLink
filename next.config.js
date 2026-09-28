@@ -95,6 +95,11 @@ const nextConfig = {
   },
 
   experimental: {
+    // Required so `src/instrumentation.ts` runs once at server boot — this is
+    // what starts the background sync-queue runner (drain + Zid reconcile).
+    // Still gated at runtime by SYNC_QUEUE_SELF_RUNNER, so platforms without
+    // long-lived processes never start a permanent interval.
+    instrumentationHook: true,
     serverComponentsExternalPackages: ['@prisma/client', 'prisma', 'xmlrpc', 'ioredis', 'bull'],
   },
 }

@@ -180,18 +180,41 @@ If this migration is not applied, every webhook route returns 503
   via `extractEntityId`, keyed on `odooRecordId` / `quant_id` / `product_id` /
   `order_id` — so repeated updates collapse to one Odoo write.
 
-### Cron (Hostinger shared hosting — external scheduler only)
-| Endpoint | Schedule | Does |
-|---|---|---|
-| `GET /api/cron/sync-queue?key=$CRON_SECRET` | every minute | `drainWebhookInbox` → `runSyncQueueOnce` → metrics + orphan count |
-| `GET /api/cron/reconcile?key=$CRON_SECRET` | every 10 minutes | re-pulls changed Zid orders, re-enqueues (heals dropped webhooks) |
+### Scheduler — in-process runner is the primary path (NOT cron)
 
-- Set up as cPanel **Cron Jobs**. Both require `CRON_SECRET`; in production a
-  missing `CRON_SECRET` makes them return 500 rather than run unauthenticated.
-- `SYNC_QUEUE_SELF_RUNNER` must stay **unset** on shared hosting (no
-  `setInterval`). A boot-time warning fires if the self-runner is off in
-  production, because the external cron then becomes the only drain path.
-- `vercel.json` crons are irrelevant on Hostinger.
+> Changed 2026-09-28. The Hostinger host has a `crontab` binary that reports
+> success but writes nothing to `/var/spool/cron` (dir stays empty, owner is the
+> user, `EXIT=0`). hPanel exposes no Cron Jobs page either. **There is no
+> working external scheduler on this host** — do not plan around one.
+
+| Path | Period | Does |
+|---|---|---|
+| `startSyncQueueRunner()` in `src/lib/sync-queue-runner.ts` | every **30s** (`SYNC_QUEUE_POLL_INTERVAL_MS`) | `processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)` |
+| same runner, reconcile ticker | every **10 min** (`SYNC_RECONCILE_INTERVAL_MS`) | `reconcileZidOrders()` — heals dropped webhooks |
+| `GET /api/cron/sync-queue` | on demand only | `drainWebhookInbox` → drain loop (≤40s) → metrics + orphan count |
+| `GET /api/cron/reconcile` | on demand only | single reconciliation cycle |
+
+- Started **once** at boot from `src/instrumentation.ts`, which requires
+  `experimental.instrumentationHook: true` in `next.config.js` (Next 14.x).
+  `instrumentation.ts` skips Vercel and `phase-production-build`.
+- **`SYNC_QUEUE_SELF_RUNNER=true` is required in production.** Without it the
+  runner returns early and a boot-time warning fires, because no external
+  scheduler exists to take over.
+- Safety: per-cycle overlap guard (`__syncQueueRunnerProcessing` /
+  `__syncQueueReconcileProcessing`), single-instance guard
+  (`__syncQueueRunnerStarted`), `unref()` on both timers, and a fix-up drain 5s
+  after boot so anything queued while the process was down clears immediately.
+  Load grows with actual queue depth, never with elapsed time.
+- Only gap: the runner stops while the process is down, so there is a short
+  window after a restart/deploy before the first tick. The 5s fix-up drain
+  closes most of it.
+- The `/api/cron/*` routes stay available for manual runs and for any future
+  host that does have a working cron. Both require `CRON_SECRET`; in production
+  a missing value makes them return 500 rather than run unauthenticated.
+- **Auth differs per route — use the Bearer header, it is the only one both
+  accept:** `Authorization: Bearer $CRON_SECRET`. `?key=` works on `reconcile`
+  only, `x-cron-secret` on `sync-queue` only. Do not assume a third form works.
+- `vercel.json` crons are irrelevant here.
 
 ### Load knobs (tune down for shared hosting)
 - `SYNC_QUEUE_CONCURRENCY` (default 10), `SYNC_QUEUE_BATCH_SIZE` (default 50),
