@@ -28,7 +28,9 @@ export function isAdmin(userId: string | null | undefined): boolean {
  * 2. In your async server actions, routes, or Server Components, replace `const { userId } = await auth()`
  *    with `const userId = await getActiveUserId()`.
  */
-export const getActiveUserId = cache(async (): Promise<string | null> => {
+const safeCache = typeof cache === 'function' ? cache : (<T extends (...args: any[]) => any>(fn: T): T => fn)
+
+export const getActiveUserId = safeCache(async (): Promise<string | null> => {
   const { userId } = await auth()
 
   if (!userId) {
@@ -52,7 +54,7 @@ export const getActiveUserId = cache(async (): Promise<string | null> => {
  * Reads the `users.active_workspace_id` column from Supabase.
  * Returns `null` if the user is not signed in or has no active workspace.
  */
-export const getActiveWorkspaceId = cache(async (): Promise<string | null> => {
+export const getActiveWorkspaceId = safeCache(async (): Promise<string | null> => {
   const userId = await getActiveUserId()
   if (!userId) return null
 

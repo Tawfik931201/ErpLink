@@ -3,7 +3,7 @@
 import { Plus, Pencil, Trash2, Loader2, X, Check, Search, Download, AlertTriangle, RefreshCw } from 'lucide-react'
 import React, { useState, useEffect, useCallback } from 'react'
 
-import SearchableSelect from '@/app/(app)/dashboard/mapping-center/searchable-select'
+import SearchableSelect from '@/app/(app)/app/mapping-center/searchable-select'
 import { getCategoryMappings, saveCategoryMapping, deleteCategoryMapping, fetchStoreCategories, batchImportCategoryMappings } from '@/app/actions/category-mappings'
 import { searchOdooCategories } from '@/app/actions/odoo'
 import { useLanguage } from '@/components/language-provider'

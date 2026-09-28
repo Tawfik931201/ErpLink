@@ -95,6 +95,12 @@ export async function POST(req: NextRequest) {
     if (!svixId || !svixTimestamp || !svixSignature) {
       return NextResponse.json({ error: 'Missing signature headers' }, { status: 401 })
     }
+    // Replay protection: reject timestamps older than 5 minutes or in the future
+    const timestampMs = parseInt(svixTimestamp, 10) * 1000
+    const now = Date.now()
+    if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > 5 * 60 * 1000) {
+      return NextResponse.json({ error: 'Timestamp outside acceptable window' }, { status: 401 })
+    }
     const valid = verifyClerkSignature(secret, svixId, svixTimestamp, rawBody, svixSignature)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })

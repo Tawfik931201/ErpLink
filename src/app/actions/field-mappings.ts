@@ -11,14 +11,9 @@ import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
 async function getOrCreateDbUser() {
-  console.log('[getFieldMappings/saveFieldMapping] Calling Clerk auth()...')
   const userId = await getActiveUserId()
-  console.log('[getFieldMappings/saveFieldMapping] Clerk userId:', userId)
   if (!userId) throw new Error('Unauthorized')
-  
-  console.log('[getFieldMappings/saveFieldMapping] Calling ensureDbUser...')
   const dbUser = await ensureDbUser(userId)
-  console.log('[getFieldMappings/saveFieldMapping] dbUser resolved with active_workspace_id:', dbUser?.active_workspace_id)
   return dbUser
 }
 
@@ -30,7 +25,6 @@ export async function getFieldMappings() {
       return { success: true, mappings: [] }
     }
 
-    console.log('[getFieldMappings] Fetching all mappings from Supabase...')
     const { data: mappings, error } = await supabase
       .from('field_mappings')
       .select('*')
@@ -38,7 +32,6 @@ export async function getFieldMappings() {
       .order('created_at', { ascending: false })
 
     if (error) throw new Error('Failed to query field mappings: ' + error.message)
-    console.log('[getFieldMappings] Successfully fetched mappings count:', mappings?.length || 0)
 
     return { success: true, mappings: mappings || [] }
   } catch (error: any) {
@@ -88,20 +81,6 @@ export async function saveFieldMapping(data: {
   variantOdooMatchField?: string
   variantZidMatchField?: string
 }) {
-  console.log('[saveFieldMapping] Started action with parameters:', {
-    id: data.id,
-    name: data.name,
-    action: data.action,
-    odooModel: data.odooModel,
-    odooOperation: data.odooOperation || 'create',
-    odooMatchField: data.odooMatchField || '',
-    zidMatchField: data.zidMatchField || '',
-    platform: data.platform || 'auto',
-    syncDirection: data.syncDirection || 'store_to_erp',
-    mappingsCount: data.mappings ? Object.keys(data.mappings).length : 0,
-    odooFallbackPolicy: data.odooFallbackPolicy || 'none'
-  })
-
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
@@ -113,13 +92,11 @@ export async function saveFieldMapping(data: {
     }
 
     // Fetch connection info
-    console.log('[saveFieldMapping] Querying erp_connections...')
     const { data: odooConn } = await supabase
       .from('erp_connections')
       .select('*')
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
-    console.log('[saveFieldMapping] odooConn resolved:', odooConn?.id || 'none')
 
     const isSallaEvent = (action: string) => {
       // Detect Salla events by their prefix patterns (all events specific to Salla)
@@ -145,39 +122,33 @@ export async function saveFieldMapping(data: {
     let storeId: string | null = null
 
     if (isShopify) {
-      console.log('[saveFieldMapping] Querying shopify_tokens...')
       const { data: shopifyTok } = await supabase
         .from('shopify_tokens')
         .select('shop_domain')
         .eq('workspace_id', user.active_workspace_id)
         .maybeSingle()
-      console.log('[saveFieldMapping] shopifyTok resolved:', shopifyTok ? { shop_domain: shopifyTok.shop_domain } : 'none')
 
       if (!shopifyTok) {
         throw new Error('متجرك في شوبيفاي غير متصل - يرجى ربط شوبيفاي أولاً (Shopify store not connected)')
       }
       merchantId = shopifyTok.shop_domain
     } else if (isSalla) {
-      console.log('[saveFieldMapping] Querying salla_tokens...')
       const { data: sallaTok } = await supabase
         .from('salla_tokens')
         .select('merchant_id')
         .eq('workspace_id', user.active_workspace_id)
         .maybeSingle()
-      console.log('[saveFieldMapping] sallaTok resolved:', sallaTok ? { merchant_id: sallaTok.merchant_id } : 'none')
 
       if (!sallaTok) {
         throw new Error('متجرك في سلة غير متصل - يرجى ربط سلة أولاً (Salla store not connected)')
       }
       merchantId = sallaTok.merchant_id
     } else {
-      console.log('[saveFieldMapping] Querying merchant_tokens...')
       const { data: merchantTok } = await supabase
         .from('merchant_tokens')
         .select('merchant_id, store_id')
         .eq('workspace_id', user.active_workspace_id)
         .maybeSingle()
-      console.log('[saveFieldMapping] merchantTok resolved:', merchantTok ? { merchant_id: merchantTok.merchant_id, store_id: merchantTok.store_id } : 'none')
 
       if (!merchantTok) {
         throw new Error('متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
@@ -206,7 +177,6 @@ export async function saveFieldMapping(data: {
 
         if (oldMapping?.odoo_webhook_id) {
           try {
-            console.log('[saveFieldMapping] Unregistering old Odoo Webhook...')
             const decryptedPassword = decrypt(odooConn.password)
             await unregisterOdooWebhook(
               {
@@ -225,7 +195,6 @@ export async function saveFieldMapping(data: {
       }
 
       try {
-        console.log('[saveFieldMapping] Registering new Webhook in Odoo...')
         const decryptedPassword = decrypt(odooConn.password)
         
         // Build unique field names to track (mapped lines + match field)
@@ -278,7 +247,6 @@ export async function saveFieldMapping(data: {
     }
 
     if (data.id) {
-      console.log('[saveFieldMapping] Updating existing mapping ID:', data.id)
       const { error } = await supabase
         .from('field_mappings')
         .update(mappingData)
@@ -286,9 +254,7 @@ export async function saveFieldMapping(data: {
         .eq('workspace_id', user.active_workspace_id)
 
       if (error) throw new Error('Failed to update field mapping: ' + error.message)
-      console.log('[saveFieldMapping] Update completed successfully.')
     } else {
-      console.log('[saveFieldMapping] Inserting new field mapping...')
       const { error } = await supabase
         .from('field_mappings')
         .insert([{
@@ -297,12 +263,9 @@ export async function saveFieldMapping(data: {
         }])
 
       if (error) throw new Error('Failed to create field mapping: ' + error.message)
-      console.log('[saveFieldMapping] Insert completed successfully.')
     }
 
-    console.log('[saveFieldMapping] Revalidating path /dashboard/mapping-center...')
     revalidatePath('/dashboard/mapping-center')
-    console.log('[saveFieldMapping] Revalidation complete.')
 
     return { success: true }
   } catch (error: any) {
@@ -312,7 +275,6 @@ export async function saveFieldMapping(data: {
 }
 
 export async function deleteFieldMapping(id: string) {
-  console.log('[deleteFieldMapping] Deleting mapping ID:', id)
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
@@ -324,6 +286,7 @@ export async function deleteFieldMapping(id: string) {
       .from('field_mappings')
       .select('odoo_webhook_id, odoo_server_action_id, erp_connection_id')
       .eq('id', id)
+      .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
 
     if (mapping?.odoo_webhook_id && mapping.erp_connection_id) {
@@ -335,7 +298,6 @@ export async function deleteFieldMapping(id: string) {
 
       if (odooConn) {
         try {
-          console.log('[deleteFieldMapping] Unregistering webhook from Odoo...')
           const decryptedPassword = decrypt(odooConn.password)
           await unregisterOdooWebhook(
             {
@@ -360,7 +322,6 @@ export async function deleteFieldMapping(id: string) {
       .eq('workspace_id', user.active_workspace_id)
 
     if (error) throw new Error('Failed to delete field mapping: ' + error.message)
-    console.log('[deleteFieldMapping] Delete completed successfully.')
 
     revalidatePath('/dashboard/mapping-center')
     return { success: true }

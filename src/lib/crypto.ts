@@ -9,20 +9,20 @@ if (!ENCRYPTION_KEY) {
   }
   console.warn('[Crypto] ENCRYPTION_KEY is not set — using an insecure default key. This is acceptable only for local development.')
 }
-const ACTIVE_KEY = ENCRYPTION_KEY || 'default-super-secret-key-32-chars-long!!'
+function getActiveKey(): string {
+  return process.env.ENCRYPTION_KEY || 'YCnwTG3j3mOspnQ0PiwgS88KsFlXMq2nF4Wl/6fNFec='
+}
 
 export function encrypt(text: string): string {
   if (!text) return ''
   try {
-    // Ensure key is exactly 32 bytes
-    const key = crypto.createHash('sha256').update(ACTIVE_KEY).digest()
+    const key = crypto.createHash('sha256').update(getActiveKey()).digest()
     const iv = crypto.randomBytes(IV_LENGTH)
     const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
     let encrypted = cipher.update(text)
     encrypted = Buffer.concat([encrypted, cipher.final()])
     return iv.toString('hex') + ':' + encrypted.toString('hex')
   } catch (error) {
-    // SECURITY: never silently store the plaintext credential on failure
     console.error('Encryption failed:', error)
     throw new Error('Failed to encrypt sensitive value')
   }
@@ -30,20 +30,28 @@ export function encrypt(text: string): string {
 
 export function decrypt(text: string): string {
   if (!text) return ''
-  try {
-    const textParts = text.split(':')
-    const ivHex = textParts.shift()
-    if (!ivHex) return text
-    const iv = Buffer.from(ivHex, 'hex')
-    const encryptedText = Buffer.from(textParts.join(':'), 'hex')
-    const key = crypto.createHash('sha256').update(ACTIVE_KEY).digest()
-    const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
-    let decrypted = decipher.update(encryptedText)
-    decrypted = Buffer.concat([decrypted, decipher.final()])
-    return decrypted.toString()
-  } catch (error) {
-    console.error('Decryption failed, returning raw text:', error)
-    // Fallback to raw text if it was stored unencrypted initially
-    return text
+  const candidates = [
+    process.env.ENCRYPTION_KEY,
+    'YCnwTG3j3mOspnQ0PiwgS88KsFlXMq2nF4Wl/6fNFec=',
+    'default-super-secret-key-32-chars-long!!',
+  ].filter(Boolean) as string[]
+
+  for (const k of candidates) {
+    try {
+      const textParts = text.split(':')
+      const ivHex = textParts.shift()
+      if (!ivHex) return text
+      const iv = Buffer.from(ivHex, 'hex')
+      const encryptedText = Buffer.from(textParts.join(':'), 'hex')
+      const key = crypto.createHash('sha256').update(k).digest()
+      const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
+      let decrypted = decipher.update(encryptedText)
+      decrypted = Buffer.concat([decrypted, decipher.final()])
+      const result = decrypted.toString('utf8')
+      if (result) return result
+    } catch {
+      // try next key
+    }
   }
+  return text
 }

@@ -4,19 +4,91 @@ import { decrypt } from '@/lib/crypto'
 import { supabase } from '@/lib/supabase'
 
 export type SyncStatus = 'success' | 'failed' | 'skipped' | 'processing'
+export type SyncCategory = 'orders' | 'products' | 'categories' | 'customers' | 'stock'
+
+export const DEFAULT_SYNC_CATEGORIES: SyncCategory[] = [
+  'orders',
+  'products',
+  'categories',
+  'customers',
+  'stock',
+]
 
 export interface SyncRecordSummary {
   status: SyncStatus
   event: string
-  mappingName: string
-  mappingId: string
-  model: string
+  mappingName?: string
+  mappingId?: string
+  model?: string
   odooRecordId?: number | string | null
   errorMessage?: string | null
   storeName?: string | null
   storeId?: string | null
   receivedAt?: string
   workspaceId?: string | null
+  details?: {
+    orderNumber?: string | number | null
+    orderCode?: string | null
+    customerName?: string | null
+    customerPhone?: string | null
+    totalAmount?: string | number | null
+    currency?: string | null
+    paymentMethod?: string | null
+    shippingMethod?: string | null
+    itemsCount?: number | null
+    productName?: string | null
+    productSku?: string | null
+    categoryName?: string | null
+    stockQuantity?: number | string | null
+    locationName?: string | null
+    stockOperation?: string | null
+  }
+}
+
+// ─── Event category detector ──────────────────────────────────────────────────
+
+export function getEventCategory(event: string): SyncCategory {
+  const ev = (event || '').toLowerCase()
+  if (ev.includes('order') || ev.includes('sale') || ev.includes('cart')) return 'orders'
+  if (ev.includes('category')) return 'categories'
+  if (ev.includes('customer') || ev.includes('contact') || ev.includes('partner')) return 'customers'
+  if (ev.includes('stock') || ev.includes('inventory') || ev.includes('quant')) return 'stock'
+  if (ev.includes('product') || ev.includes('item')) return 'products'
+  return 'orders'
+}
+
+export function parseEventsFilter(val: unknown): SyncCategory[] {
+  if (!val) return DEFAULT_SYNC_CATEGORIES
+  if (Array.isArray(val)) {
+    const valid = val.filter((x: unknown): x is SyncCategory =>
+      typeof x === 'string' && DEFAULT_SYNC_CATEGORIES.includes(x as SyncCategory)
+    )
+    if (valid.length > 0) return valid
+    return DEFAULT_SYNC_CATEGORIES
+  }
+  if (typeof val === 'object' && val !== null && 'events' in val) {
+    const events = (val as { events: unknown }).events
+    if (Array.isArray(events)) {
+      return events.filter((x: unknown): x is SyncCategory =>
+        typeof x === 'string' && DEFAULT_SYNC_CATEGORIES.includes(x as SyncCategory)
+      )
+    }
+  }
+  return DEFAULT_SYNC_CATEGORIES
+}
+
+export function parseMappingsFilter(val: unknown): string[] {
+  if (!val) return []
+  if (Array.isArray(val)) {
+    return val.filter((x: unknown) => typeof x === 'string' && !DEFAULT_SYNC_CATEGORIES.includes(x as any)).map(String)
+  }
+  if (typeof val === 'object' && val !== null && 'mappings' in val) {
+    const mappings = (val as { mappings: unknown }).mappings
+    if (Array.isArray(mappings)) {
+      return mappings.map(String)
+    }
+  }
+  return []
 }
 
 // ─── Event labels (bilingual) ────────────────────────────────────────────────
@@ -44,9 +116,11 @@ const EVENT_LABELS: Record<string, { ar: string; en: string }> = {
   'category.created':   { ar: 'إنشاء تصنيف',       en: 'Category created' },
   'category.updated':   { ar: 'تحديث تصنيف',       en: 'Category updated' },
   'category.deleted':   { ar: 'حذف تصنيف',         en: 'Category deleted' },
+  'stock.update':       { ar: 'تحديث المخزون',     en: 'Stock updated' },
+  'stock.updated':      { ar: 'تحديث المخزون',     en: 'Stock updated' },
 }
 
-function labelFor(event: string, lang: 'ar' | 'en'): string {
+function _labelFor(event: string, lang: 'ar' | 'en'): string {
   return EVENT_LABELS[event]?.[lang] ?? event
 }
 
@@ -76,48 +150,120 @@ export function buildSyncMessage(
   record: SyncRecordSummary,
   lang: 'ar' | 'en'
 ): string {
-  const eventLabel = labelFor(record.event, lang)
+  const isAr = lang === 'ar'
+  const category = getEventCategory(record.event)
+  const d = record.details || {}
   const date = formatDate(record.receivedAt, lang)
 
   const lines: string[] = []
 
+  // Status Title Header
   if (record.status === 'success') {
-    lines.push(lang === 'ar' ? '✅ تمت المزامنة بنجاح' : '✅ Sync completed')
+    if (category === 'orders') {
+      lines.push(isAr ? '📦 ✅ تم تسجيل طلب جديد في أودوو بنجاح' : '📦 ✅ New Order Synced to Odoo Successfully')
+    } else if (category === 'products') {
+      lines.push(isAr ? '🏷️ ✅ تم مزامنة المنتج مع أودوو بنجاح' : '🏷️ ✅ Product Synced to Odoo Successfully')
+    } else if (category === 'categories') {
+      lines.push(isAr ? '🗂️ ✅ تم مزامنة التصنيف مع أودوو بنجاح' : '🗂️ ✅ Category Synced to Odoo Successfully')
+    } else if (category === 'customers') {
+      lines.push(isAr ? '👥 ✅ تم مزامنة العميل مع أودوو بنجاح' : '👥 ✅ Customer Synced to Odoo Successfully')
+    } else if (category === 'stock') {
+      lines.push(isAr ? '🔄 ✅ تم تحديث المخزون في المتجر بنجاح' : '🔄 ✅ Stock Updated in Store Successfully')
+    } else {
+      lines.push(isAr ? '✅ تمت المزامنة بنجاح' : '✅ Sync Completed Successfully')
+    }
   } else if (record.status === 'failed') {
-    lines.push(lang === 'ar' ? '❌ فشلت المزامنة' : '❌ Sync failed')
+    if (category === 'orders') {
+      lines.push(isAr ? '📦 ❌ فشل تسجيل الطلب في أودوو' : '📦 ❌ Failed to Sync Order to Odoo')
+    } else if (category === 'products') {
+      lines.push(isAr ? '🏷️ ❌ فشلت مزامنة المنتج مع أودوو' : '🏷️ ❌ Failed to Sync Product to Odoo')
+    } else if (category === 'categories') {
+      lines.push(isAr ? '🗂️ ❌ فشلت مزامنة التصنيف مع أودوو' : '🗂️ ❌ Failed to Sync Category to Odoo')
+    } else if (category === 'customers') {
+      lines.push(isAr ? '👥 ❌ فشلت مزامنة العميل مع أودوو' : '👥 ❌ Failed to Sync Customer to Odoo')
+    } else if (category === 'stock') {
+      lines.push(isAr ? '🔄 ❌ فشل تحديث المخزون في المتجر' : '🔄 ❌ Failed to Update Stock in Store')
+    } else {
+      lines.push(isAr ? '❌ فشلت المزامنة' : '❌ Sync Failed')
+    }
   } else if (record.status === 'skipped') {
-    lines.push(lang === 'ar' ? '⏭️ تم تخطي المزامنة' : '⏭️ Sync skipped')
+    lines.push(isAr ? '⏭️ تم تخطي المزامنة' : '⏭️ Sync Skipped')
   } else {
-    lines.push(lang === 'ar' ? '⏳ جارٍ المعالجة' : '⏳ In progress')
+    lines.push(isAr ? '⏳ جارٍ المعالجة' : '⏳ In Progress')
   }
 
-  lines.push('')
-  const mapL = lang === 'ar' ? 'القاعدة' : 'Mapping'
-  const modelL = lang === 'ar' ? 'النموذج' : 'Model'
-  const eventL = lang === 'ar' ? 'الحدث' : 'Event'
-  const idLabel = lang === 'ar' ? 'المعرّف في ERP' : 'ERP id'
-  const storeLabel = lang === 'ar' ? 'المتجر' : 'Store'
-  const reasonLabel = lang === 'ar' ? 'السبب' : 'Reason'
-  const dateLabel = lang === 'ar' ? 'التاريخ' : 'Time'
+  lines.push('─────────────────')
 
-  lines.push(`${eventL}: ${eventLabel}`)
-  lines.push(`${mapL}: ${clip(record.mappingName ?? '-', 80)}`)
-  lines.push(`${modelL}: ${record.model ?? '-'}`)
+  // Detailed fields based on category
+  if (category === 'orders') {
+    if (d.orderNumber) {
+      lines.push(isAr ? `🔢 رقم الطلب: #${d.orderNumber}` : `🔢 Order #: #${d.orderNumber}`)
+    }
+    if (d.customerName) {
+      lines.push(isAr ? `👤 العميل: ${d.customerName}` : `👤 Customer: ${d.customerName}`)
+    }
+    if (d.customerPhone) {
+      lines.push(isAr ? `📞 الهاتف: ${d.customerPhone}` : `📞 Phone: ${d.customerPhone}`)
+    }
+    if (d.totalAmount) {
+      lines.push(isAr ? `💰 الإجمالي: ${d.totalAmount} ${d.currency || 'SAR'}` : `💰 Total: ${d.totalAmount} ${d.currency || 'SAR'}`)
+    }
+    if (d.paymentMethod) {
+      lines.push(isAr ? `💳 طريقة الدفع: ${d.paymentMethod}` : `💳 Payment: ${d.paymentMethod}`)
+    }
+    if (d.shippingMethod) {
+      lines.push(isAr ? `🚚 الشحن: ${d.shippingMethod}` : `🚚 Shipping: ${d.shippingMethod}`)
+    }
+    if (d.itemsCount) {
+      lines.push(isAr ? `📦 عدد المنتجات: ${d.itemsCount}` : `📦 Items: ${d.itemsCount}`)
+    }
+  } else if (category === 'products') {
+    if (d.productName) {
+      lines.push(isAr ? `🏷️ المنتج: ${d.productName}` : `🏷️ Product: ${d.productName}`)
+    }
+    if (d.productSku) {
+      lines.push(isAr ? `🔖 رمز (SKU): ${d.productSku}` : `🔖 SKU: ${d.productSku}`)
+    }
+  } else if (category === 'categories') {
+    if (d.categoryName) {
+      lines.push(isAr ? `🗂️ التصنيف: ${d.categoryName}` : `🗂️ Category: ${d.categoryName}`)
+    }
+  } else if (category === 'customers') {
+    if (d.customerName) {
+      lines.push(isAr ? `👤 العميل: ${d.customerName}` : `👤 Customer: ${d.customerName}`)
+    }
+    if (d.customerPhone) {
+      lines.push(isAr ? `📞 الهاتف: ${d.customerPhone}` : `📞 Phone: ${d.customerPhone}`)
+    }
+  } else if (category === 'stock') {
+    if (d.productSku || d.productName) {
+      lines.push(isAr ? `🏷️ المنتج: ${d.productName || d.productSku}` : `🏷️ Product: ${d.productName || d.productSku}`)
+    }
+    if (d.stockQuantity !== undefined && d.stockQuantity !== null) {
+      lines.push(isAr ? `📦 الكمية المحدثة: ${d.stockQuantity}` : `📦 Quantity: ${d.stockQuantity}`)
+    }
+  }
 
+  // Odoo registration status
   if (record.odooRecordId !== undefined && record.odooRecordId !== null) {
-    lines.push(`${idLabel}: #${record.odooRecordId}`)
+    const modelText = record.model ? ` (${record.model})` : ''
+    lines.push(isAr ? `⚙️ تم التسجيل في أودوو: #${record.odooRecordId}${modelText}` : `⚙️ Odoo Record: #${record.odooRecordId}${modelText}`)
+  } else if (record.status === 'success' && category === 'stock') {
+    lines.push(isAr ? `⚙️ تم التحديث في المتجر من أودوو` : `⚙️ Synced to Store from Odoo`)
+  } else if (record.status === 'failed') {
+    lines.push(isAr ? `⚙️ لم يتم التسجيل في أودوو` : `⚙️ Not registered in Odoo`)
   }
 
   if (record.storeName) {
-    lines.push(`${storeLabel}: ${clip(record.storeName, 60)}`)
+    lines.push(isAr ? `🏪 المتجر: ${clip(record.storeName, 50)}` : `🏪 Store: ${clip(record.storeName, 50)}`)
   }
 
   if (record.status === 'failed' && record.errorMessage) {
-    lines.push(`${reasonLabel}: ${clip(record.errorMessage, 220)}`)
+    lines.push(isAr ? `⚠️ السبب: ${clip(record.errorMessage, 200)}` : `⚠️ Reason: ${clip(record.errorMessage, 200)}`)
   }
 
   if (date) {
-    lines.push(`${dateLabel}: ${date}`)
+    lines.push(isAr ? `🕒 الوقت: ${date}` : `🕒 Time: ${date}`)
   }
 
   return lines.join('\n')
@@ -307,12 +453,19 @@ export async function notifySyncResult(args: {
       if (record.status === 'failed' && chat.notify_mode === 'success') continue
       if (record.status === 'skipped') continue
 
+      // Event category filter (orders, products, categories, customers, stock)
+      const category = getEventCategory(record.event)
+      const allowedCategories = parseEventsFilter(chat.mapping_filter)
+      if (!allowedCategories.includes(category)) {
+        continue
+      }
+
       // Workspace filter
       const wsFilter = parseJsonFilter(chat.workspace_filter)
       if (wsFilter.length > 0 && record.workspaceId && !wsFilter.includes(record.workspaceId)) continue
 
       // Mapping filter
-      const mapFilter = parseJsonFilter(chat.mapping_filter)
+      const mapFilter = parseMappingsFilter(chat.mapping_filter)
       if (mapFilter.length > 0 && record.mappingId && !mapFilter.includes(record.mappingId)) continue
 
       // Decrypt token
@@ -321,12 +474,15 @@ export async function notifySyncResult(args: {
       if (!tokenPlain) continue
 
       const text = buildSyncMessage(record, chat.language as 'ar' | 'en')
-      void callTelegramApi(tokenPlain, 'sendMessage', {
+      const sendRes = await callTelegramApi(tokenPlain, 'sendMessage', {
         chat_id: chat.chat_id,
         text,
-      }).catch((err) => {
-        console.warn(`[TelegramNotifier] Send failed chat=${chat.chat_id}:`, err?.message ?? err)
       })
+      if (!sendRes.ok) {
+        console.error(`[TelegramNotifier] Send failed chat=${chat.chat_id}: status=${sendRes.statusCode} desc=${sendRes.description}`)
+      } else {
+        console.log(`[TelegramNotifier] Notification delivered to chat=${chat.chat_id} (category=${category}, status=${record.status})`)
+      }
     }
   } catch (err: any) {
     console.warn('[TelegramNotifier] notifySyncResult error (swallowed):', err?.message ?? err)

@@ -139,3 +139,73 @@ npm run dev
 - `specs/001-simplify-and-integrate/history.md` — change log (started from 5 exploration reports)
 - Optional: `.github/prompts/speckit.*.prompt.md` — copy-paste helpers
 - Rule: spec-kit changes are docs-only (`md`/`yml`) — never break `type-check`
+
+---
+
+## Sync Reliability (added 2026-09-26) — webhooks, no-loss, Hostinger
+
+Source of truth for the reliable-ingest design: this section. SQL migrations are
+the source of truth for the schema; `AGENTS.md` never overrides SQL.
+
+### Required migration (apply BEFORE deploying the code)
+`supabase/migrations/20260922_sync_reliability.sql`
+- `sync_queue.next_retry_at` becomes NULLABLE (frozen = exhausted)
+- `sync_queue.dedup_key` + partial unique index (atomic idempotency)
+- `webhook_inbox` — durable receipt written *before* the queue; 2xx only after it lands
+- `sync_queue_dead` — dead-letter archive (exhausted rows are archived, never hard-deleted)
+- `sync_reconcile_state` — reconciliation watermark per scope
+- `idx_sync_logs_match` — tenant-safe match lookup index
+
+If this migration is not applied, every webhook route returns 503
+(`webhook_inbox_missing`) by design. Do not deploy code without it.
+
+### Ingress contract (all webhook routes)
+1. Verify signature.
+2. Honour settings: `isWebhookEventEnabled(workspaceId, platform, event)`
+   reads `standard_mapping_settings` (Mapping Center = source of truth).
+3. `recordWebhookReceipt` — durable write.
+4. `enqueueWebhookEvent` — atomic `dedup_key` + coalescing.
+5. Respond 2xx **only after** step 3; on failure return 503 so the platform retries.
+   Never 4xx for a store-not-linked event (that is a permanent loss) — the Zid
+   route stores an orphan receipt and returns 202.
+
+### dedup_key rules (critical, easy to get wrong)
+`dedup_key` identifies the **event/delivery**, never the **record/entity**.
+- Shopify: `X-Shopify-Webhook-Id`; Salla: `webhook id`; Zid: delivery id if sent.
+- Odoo sends no delivery id → use `write_date` if present, else
+  `fingerprintPayload()` (sha1 of canonicalised JSON).
+- A record-scoped key (`odoo:<model>:<id>`) makes every later update look like a
+  duplicate and silently drops real changes. Do not reintroduce it.
+- Coalescing (same entity while a row is pending) is handled by `sync_queue`
+  via `extractEntityId`, keyed on `odooRecordId` / `quant_id` / `product_id` /
+  `order_id` — so repeated updates collapse to one Odoo write.
+
+### Cron (Hostinger shared hosting — external scheduler only)
+| Endpoint | Schedule | Does |
+|---|---|---|
+| `GET /api/cron/sync-queue?key=$CRON_SECRET` | every minute | `drainWebhookInbox` → `runSyncQueueOnce` → metrics + orphan count |
+| `GET /api/cron/reconcile?key=$CRON_SECRET` | every 10 minutes | re-pulls changed Zid orders, re-enqueues (heals dropped webhooks) |
+
+- Set up as cPanel **Cron Jobs**. Both require `CRON_SECRET`; in production a
+  missing `CRON_SECRET` makes them return 500 rather than run unauthenticated.
+- `SYNC_QUEUE_SELF_RUNNER` must stay **unset** on shared hosting (no
+  `setInterval`). A boot-time warning fires if the self-runner is off in
+  production, because the external cron then becomes the only drain path.
+- `vercel.json` crons are irrelevant on Hostinger.
+
+### Load knobs (tune down for shared hosting)
+- `SYNC_QUEUE_CONCURRENCY` (default 10), `SYNC_QUEUE_BATCH_SIZE` (default 50),
+  `SYNC_QUEUE_MAX_RETRIES` (default 5), `COALESCE_WINDOW_MS` (5s).
+- Reconciliation self-limits: `MAX_API_CALLS_PER_RUN = 4` and
+  `MAX_ENQUEUED_PER_RUN = 100` per cycle, sequential (Zid allows 60 req/min).
+- `processSyncQueue` is disabled in `phase-production-build`.
+
+### Service role
+`src/lib/supabase.ts` throws in production when `SUPABASE_SERVICE_ROLE_KEY` is
+missing. The old `|| ANON_KEY` fallback made every write fail silently under
+RLS while appearing healthy. Dev-only fallback logs a warning.
+
+### Cross-tenant safety
+`findExistingOdooRecord` in `src/lib/sync-engine.ts` scopes the `sync_logs`
+lookup by `workspace_id` **and** `platform` — `zid_entity_id` alone is not
+unique across merchants. Keep the filter when touching that function.

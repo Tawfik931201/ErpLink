@@ -57,7 +57,7 @@ const actionBtn =
 
 export default function ClientStatementClient({
   lang,
-  userId,
+  userId: _userId,
   clientEmail,
   workspaces,
   subscriptions,

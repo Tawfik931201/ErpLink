@@ -139,7 +139,7 @@ export async function createTicket(formData: FormData) {
       }
     }
 
-    // 3. Create the ticket record and associate it with partner, team_id 1, and the impersonation link
+    const appBaseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || 'http://localhost:3000'
     const ticketId = await executeKw<number>(
       'helpdesk.ticket',
       'create',
@@ -148,7 +148,7 @@ export async function createTicket(formData: FormData) {
         description: description?.trim() || '',
         partner_id: partnerId,
         team_id: 1,
-        x_user_impersonation: `http://localhost:3000/api/admin/impersonate?userId=${dbUser.id}`,
+        x_user_impersonation: `${appBaseUrl}/api/admin/impersonate?userId=${dbUser.id}`,
       }]
     )
 
@@ -501,8 +501,8 @@ export async function checkPendingTickets() {
 
   try {
     return await getCachedPendingTickets(email)
-  } catch (error) {
-    console.error('Error checking pending tickets:', error)
+  } catch (error: any) {
+    // Do not flood dev server logs on every route navigation if helpdesk ticketing is not configured
     return { success: false, hasPending: false }
   }
 }

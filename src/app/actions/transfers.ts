@@ -501,11 +501,22 @@ async function runTransferInBackground(
             return
           }
 
-          // Duplication check in Odoo
-          const existingId = await findExistingOdooRecord(odooClient, odooModel, entity, odooValues, {
-            odoo_match_field: odooConn.odoo_match_field || undefined,
-            zid_match_field: odooConn.zid_match_field || undefined,
-          })
+          // Duplication check in Odoo. workspaceId + platform are required so the
+          // sync_logs fast-path lookup can never match another merchant's record.
+          const existingId = await findExistingOdooRecord(
+            odooClient,
+            odooModel,
+            entity,
+            odooValues,
+            {
+              odoo_match_field: odooConn.odoo_match_field || undefined,
+              zid_match_field: odooConn.zid_match_field || undefined,
+            },
+            undefined,
+            undefined,
+            workspaceId,
+            data.platform
+          )
 
           if (existingId !== null) {
             // Record already exists, update it to keep Odoo in sync!
