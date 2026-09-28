@@ -33,12 +33,53 @@ interface ProcessResult {
   transferred?: number
 }
 
+/**
+ * نتيجة الدفع لمنتج واحد.
+ *   pushed  — الرصيد وصل زد.
+ *   skipped — لا يوجد ما يُفعل (المنتج غير مربوط بمنتج زد، أو مخزونه غير
+ *             محدود في زد). هذه حالة دائمة لا تحلها إعادة المحاولة، فحسابها
+ *            فشلاً كان يحرق خمس محاولات ثم يذهب الصف إلى صندوق الموتى.
+ *   failed  — خطأ عابر (شبكة/مصادقة/حدRate) ⇒ يستحق إعادة المحاولة.
+ */
+type PushOutcome = 'pushed' | 'skipped' | 'failed'
+
 function toInt(v: unknown): number | null {
   if (v === undefined || v === null || v === '') return null
   // Odoo m2o values arrive as [id, display_name]
   if (Array.isArray(v)) return toInt(v[0])
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null
+}
+
+/**
+ * رسالة خطأ مفيدة. axios يبتلع جسم الاستجابة في `message` ويكتفي بـ
+ * "Request failed with status code 400" — وهو لا يقول شيئاً عن سبب رفض زد.
+ * هنا نُخرج تفاصيل Zid (رسائل التحقق) لأن تشخيص 400 بدونها مستحيل.
+ */
+function describeError(err: unknown): string {
+  const e = err as {
+    message?: string
+    response?: { status?: number; data?: unknown }
+  }
+  const parts: string[] = []
+  if (e?.response?.status) parts.push(`HTTP ${e.response.status}`)
+
+  const data = e?.response?.data
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>
+    const detail =
+      d.detail ?? d.error_description ?? d.error ?? d.message ?? d.errors ?? d.non_field_errors
+    if (detail !== undefined && detail !== null) {
+      parts.push(typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 300))
+    } else {
+      parts.push(JSON.stringify(d).slice(0, 300))
+    }
+  } else if (typeof data === 'string' && data.trim()) {
+    parts.push(data.slice(0, 300))
+  }
+
+  if (parts.length === 0) parts.push(String(e?.message ?? err))
+  return parts.join(' — ').slice(0, 400)
 }
 
 export async function processOdooStockEvent(payload: Record<string, unknown>): Promise<ProcessResult> {
@@ -148,6 +189,7 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
 
   // 5. Read balances and push
   let transferred = 0
+  let skipped = 0
   let failed = 0
   const errors: string[] = []
 
@@ -155,7 +197,7 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     const zidLocId = pairByOdooLoc.get(Number(loc))!
     try {
       const qty = await readOdooQtyAtLocation(client, Number(pid), Number(loc), settings.sync_mode)
-      const pushed = await pushStockToZid({
+      const outcome = await pushStockToZid({
         client,
         creds: zidCreds,
         zidLocationId: zidLocId,
@@ -163,11 +205,12 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
         odooConnection: erpConn,
         quantity: qty,
       })
-      if (pushed) transferred++
+      if (outcome === 'pushed') transferred++
+      else if (outcome === 'skipped') skipped++
       else failed++
     } catch (err: any) {
       failed++
-      errors.push(`product#${pid}: ${(err?.message || err)?.toString().slice(0, 140)}`)
+      errors.push(`product#${pid}: ${describeError(err)}`)
     }
   }
 
@@ -184,8 +227,55 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     },
   })
 
-  if (failed > 0 && transferred === 0) {
-    throw new Error(`[StockSync] All stock updates failed: ${errors.join(' ; ')}`)
+  // Telegram notification for stock sync
+  try {
+    let sku = String(payload.default_code || payload.sku || '')
+    let name = String(payload.product_name || payload.name || '')
+    if ((!sku || !name) && odooProductId) {
+      try {
+        const prods = await client.execute<Array<{ default_code?: string; name?: string }>>(
+          'product.product',
+          'read',
+          [[odooProductId]],
+          { fields: ['default_code', 'name'] }
+        )
+        if (prods?.[0]) {
+          sku = sku || prods[0].default_code || ''
+          name = name || prods[0].name || ''
+        }
+      } catch { /* best effort */ }
+    }
+
+    const { notifySyncResult } = await import('@/lib/telegram-notifier')
+    await notifySyncResult({
+      workspaceId,
+      record: {
+        status: failed > 0 ? (transferred > 0 ? 'success' : 'failed') : transferred > 0 ? 'success' : 'skipped',
+        event: 'stock.updated',
+        mappingName: 'تحديث المخزون (أودوو ⬅️ زد)',
+        mappingId: 'stock_sync_odoo_zid',
+        model: 'stock.quant',
+        odooRecordId: odooProductId,
+        storeName: zidTok.name || 'Zid Store',
+        storeId: zidTok.store_id || undefined,
+        errorMessage: errors.length > 0 ? errors.join(', ') : null,
+        details: {
+          productSku: sku || undefined,
+          productName: name || undefined,
+          stockQuantity: transferred,
+        }
+      }
+    }).catch(() => {})
+  } catch {
+    // best-effort
+  }
+
+  // Skips لا تُعدّ فشلاً: لا تعالجها إعادة المحاولة. نعيد ok طالما نجحت
+  // محاولة واحدة على الأقل، وإلا نُبلّغ العميل بالسبب الحقيقي.
+  if (failed > 0 && transferred === 0 && skipped === 0) {
+    throw new Error(
+      `[StockSync] All stock updates failed: ${errors.length ? errors.join(' ; ') : 'no reason recorded'}`
+    )
   }
   return { ok: true, transferred }
 }
@@ -406,8 +496,7 @@ async function resolveZidProductId(
 /**
  * Update a Zid product stock at the paired Zid location with `quantity`.
  * Uses POST /v1/locations/{location_id}/stock-update/ (absolute value,
- * creates/updates the stock record for that location). Returns true when
- * pushed, false when skipped (no linked product / product is infinite).
+ * creates/updates the stock record for that location).
  */
 async function pushStockToZid(params: {
   client: OdooClient
@@ -416,7 +505,7 @@ async function pushStockToZid(params: {
   odooProductId: number
   odooConnection: any
   quantity: number
-}): Promise<boolean> {
+}): Promise<PushOutcome> {
   const { client, creds, zidLocationId, odooProductId, odooConnection, quantity } = params
 
   const std = await loadZidProductMatchField(odooConnection.workspace_id)
@@ -436,11 +525,11 @@ async function pushStockToZid(params: {
     const shown =
       odooValues[matchOdooField] ?? odooValues.x_zid_id ?? odooValues.zid_id ?? odooValues.default_code ?? odooValues.barcode ?? '-'
     console.info(`[StockSync] Zid product not found for Odoo #${odooProductId} (${matchZidField}=${String(shown)}) — skipped.`)
-    return false
+    return 'skipped'
   }
   if (zidProduct.is_infinite) {
     console.info(`[StockSync] Zid product #${zidProduct.id} is infinite — skipped.`)
-    return false
+    return 'skipped'
   }
 
   const zidProductId = String(zidProduct.id)
@@ -452,7 +541,7 @@ async function pushStockToZid(params: {
     },
   ])
   console.info(`[StockSync] ✅ Updated Zid product #${zidProductId} @ location ${zidLocationId} → ${quantity}`)
-  return true
+  return 'pushed'
 }
 
 async function loadZidProductMatchField(workspaceId: string): Promise<{ match_odoo_field: string; match_zid_field: string }> {

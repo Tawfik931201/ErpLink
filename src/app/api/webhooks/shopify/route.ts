@@ -13,8 +13,9 @@ import {
 } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent } from '@/lib/sync-queue'
-import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
+import { ttlCache } from '@/lib/ttl-cache'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
+import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 const GDPR_TOPICS: readonly string[] = SHOPIFY_GDPR_TOPICS
 const KNOWN_TOPICS: ReadonlySet<string> = new Set([
@@ -39,6 +40,9 @@ export async function POST(req: NextRequest) {
     if (!signature || !verifyShopifySignature(rawBody, signature, webhookSecret)) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.error('[Shopify Webhook] Security Alert: SHOPIFY_WEBHOOK_SECRET is not configured in production.')
+    return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
   }
 
   // early-returns خفيفة: نطاق + موضوع
@@ -114,14 +118,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, processed: false, reason: 'unknown_topic' })
   }
 
-  // Idempotency: نفس X-Shopify-Webhook-Id لا يُعالَج مرتين (إعادة تسليم شوبيفاي)
-  if (webhookId) {
+  // Idempotency ذرّي: `dedup_key` = shopify:<shop>:<topic>:<X-Shopify-Webhook-Id>
+  // موصى به رسمياً في توثيق Shopify ومعه فهرس فريد جزئي، فتنهار التسليمات
+  // المكرّرة إلى صف واحد حتى مع تزامن عمليّن.
+  const shopifyDedupKey = webhookId ? `shopify:${shopDomain}:${topic}:${webhookId}` : null
+  if (shopifyDedupKey) {
     const { data: dup } = await supabase
       .from('sync_queue')
       .select('id')
-      .eq('store_id', shopDomain)
-      .eq('event', topic)
-      .contains('payload', { shopify_webhook_id: webhookId })
+      .eq('dedup_key', shopifyDedupKey)
       .limit(1)
       .maybeSingle()
     if (dup) {
@@ -139,19 +144,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // ── فحص خفيف للتوكن (عمودان فقط — بلا select(*)) ─────────────────────
-  const { data: shopifyToken } = await supabase
-    .from('shopify_tokens')
-    .select('workspace_id, sync_settings')
-    .eq('shop_domain', shopDomain)
-    .maybeSingle()
+  // ── فحص خفيف للتوكن (مخزن مؤقتاً في الذاكرة 60 ثانية لحماية قاعدة البيانات) ──
+  const shopifyToken = await ttlCache.get(
+    `shopify:token:${shopDomain}`,
+    60_000,
+    async () => {
+      const { data } = await supabase
+        .from('shopify_tokens')
+        .select('workspace_id')
+        .eq('shop_domain', shopDomain)
+        .maybeSingle()
+      return data as { workspace_id: string | null } | null
+    }
+  )
 
   if (!shopifyToken?.workspace_id) {
     return NextResponse.json({ error: 'Shopify store not connected' }, { status: 404 })
   }
 
-  const syncSettings = (shopifyToken.sync_settings as Record<string, any>) || {}
-  if (syncSettings[topic]?.shopify2odoo !== true) {
+  // ── فحص إعدادات صفحة Mapping Center (Standard Mapping) ──
+  const { allowed, reason } = await isWebhookEventEnabled(shopifyToken.workspace_id, 'shopify', topic)
+  if (!allowed) {
     const broadcastPayload: WebhookEventPayload = {
       event: topic as never,
       store_id: shopDomain,
@@ -160,7 +173,7 @@ export async function POST(req: NextRequest) {
       receivedAt: new Date().toISOString(),
     }
     webhookEmitter.emit('zid-event', broadcastPayload)
-    return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings' })
+    return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings', detail: reason })
   }
 
   const entityId = extractShopifyEntityId(payload)
@@ -222,21 +235,30 @@ export async function POST(req: NextRequest) {
   webhookEmitter.emit('zid-event', broadcastPayload)
 
   try {
-    await enqueueWebhookEvent({
+    const queued = await enqueueWebhookEvent({
       workspaceId: shopifyToken.workspace_id as string,
       storeId: shopDomain,
       event: topic,
       platform: 'shopify',
       payload: enrichedPayload,
+      dedupKey: shopifyDedupKey,
     })
+    if (queued.error) {
+      console.error('[Shopify Webhook] durable enqueue failed:', queued.error)
+      return NextResponse.json(
+        { received: false, processed: false, error: 'durable_storage_failed' },
+        { status: 503 }
+      )
+    }
   } catch {
-    return NextResponse.json({ received: true, processed: false, error: 'enqueue_failed' })
+    // استثناء قبل الحفظ الدائم → 503 ليعيد Shopify الإرسال (8 مرات / 4 ساعات).
+    return NextResponse.json(
+      { received: false, processed: false, error: 'enqueue_failed' },
+      { status: 503 }
+    )
   }
 
-  // Trigger non-blocking background queue drain
-  runSyncQueueOnce().catch(() => {})
-
-  // رد 200 فوري — الإثراء والمعالجة الثقيلة في الطابور المركزي (حد التوازي هناك)
+  // رد 200 فوري — الإثراء والمعالجة الثقيلة في الطابور المركزي بعد الحفظ الدائم.
   return NextResponse.json({ received: true, queued: true })
 }
 

@@ -25,6 +25,7 @@ import { recordAudit } from '@/lib/audit-logs'
 import { SALLA_DEFAULT_WEBHOOK_EVENTS } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
+import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 // Events older than this are ignored (Salla redeliveries arriving late must
 // not overwrite newer state applied after them).
@@ -115,6 +116,12 @@ export async function POST(req: NextRequest) {
         { status: 401 }
       )
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.error('[Salla Webhook] Security Alert: SALLA_WEBHOOK_SECRET is not configured in production.')
+    return NextResponse.json(
+      { error: 'Webhook secret not configured on server', message_ar: 'لم يتم تكوين المفتاح السري للويب هوك في بيئة الإنتاج.' },
+      { status: 500 }
+    )
   }
 
   let payload: any
@@ -174,7 +181,7 @@ export async function POST(req: NextRequest) {
   // ── 6. Store-connected early-return (minimal column select) ───────────────
   const { data: sallaToken, error: tokenErr } = await supabase
     .from('salla_tokens')
-    .select('workspace_id, sync_settings')
+    .select('workspace_id')
     .eq('merchant_id', merchantId)
     .maybeSingle()
 
@@ -185,10 +192,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // ── 7. Disabled-event early-return ────────────────────────────────────────
-  const syncSettings = (sallaToken.sync_settings as Record<string, any>) || {}
-  const eventSettings = syncSettings[event]
-  const isEnabled = eventSettings?.salla2odoo === true
+  // ── 7. Disabled-event early-return (Standard Mapping settings gate) ────────
+  const { allowed, reason } = await isWebhookEventEnabled(sallaToken.workspace_id, 'salla', event)
 
   // Cheap SSE broadcast (in-memory only) for both paths.
   const broadcastPayload: WebhookEventPayload = {
@@ -200,15 +205,38 @@ export async function POST(req: NextRequest) {
   }
   webhookEmitter.emit('zid-event', broadcastPayload)
 
-  if (!isEnabled) {
-    return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings' })
+  if (!allowed) {
+    return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings', detail: reason })
   }
 
-  // ── 8. Idempotency: same delivery must never create a duplicate job ───────
-  // dedup_key has a partial UNIQUE index (migration 20260910), so concurrent
-  // double-deliveries collapse even if both pass the check below — the loser
-  // gets a 23505 conflict which we translate to `duplicate`.
+  // ── 8. الاستلام الدائم أولاً (webhook_inbox) ──────────────────────────────
+  // يُكتب الحدث قبل أي معالجة. إن فشل نرد 503 فتعيد سالا الإرسال (3 مرات)
+  // والأهم: يبقى في صندوق الاستلام ليُعاد دفعه من cron.
   const dedupKey = webhookId ? buildDedupKey(merchantId, event, webhookId) : null
+  const { recordWebhookReceipt, completeWebhookReceipt } = await import('@/lib/webhook-inbox')
+  const receipt = await recordWebhookReceipt({
+    platform: 'salla',
+    storeId: merchantId,
+    workspaceId: sallaToken.workspace_id,
+    event,
+    dedupKey,
+    payload: (webhookId ? { ...(data as Record<string, any>), salla_webhook_id: webhookId } : data) as Record<string, unknown>,
+  })
+  if (!receipt.ok) {
+    console.error('[Salla Webhook] inbox write failed:', receipt.error)
+    return NextResponse.json(
+      { received: false, processed: false, error: 'durable_storage_failed' },
+      { status: 503 }
+    )
+  }
+  if (receipt.duplicate) {
+    return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
+  }
+
+  // ── 9. Idempotency: same delivery must never create a duplicate job ───────
+  // dedup_key has a partial UNIQUE index, so concurrent double-deliveries
+  // collapse even if both pass the check below — the loser gets a 23505
+  // conflict which we translate to `duplicate`.
   if (dedupKey) {
     const { data: dup, error: dupErr } = await supabase
       .from('sync_queue')
@@ -217,6 +245,7 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .maybeSingle()
     if (dup) {
+      if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
       return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
     }
     // Pre-migration fallback (no dedup_key column yet): legacy payload check.
@@ -230,12 +259,13 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .maybeSingle()
       if (legacyDup) {
+        if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
         return NextResponse.json({ received: true, processed: false, reason: 'duplicate' })
       }
     }
   }
 
-  // ── 9. Coalescing: collapse bursts for the same entity into one job ───────
+  // ── 10. Coalescing: collapse bursts for the same entity into one job ───────
   // If a pending job already exists for this store+event+entity, merge the
   // newest payload into it instead of enqueueing N jobs. The row keeps its
   // FIRST dedup_key: a redelivery of a merged (superseded) id then either
@@ -273,12 +303,13 @@ export async function POST(req: NextRequest) {
         .from('sync_queue')
         .update({ payload: merged, updated_at: new Date().toISOString() })
         .eq('id', pending.id)
-      await recordSallaWebhookMetric(merchantId, event)
+  await recordSallaWebhookMetric(merchantId, event)
+  if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
       return NextResponse.json({ received: true, queued: true, coalesced: true })
     }
   }
 
-  // ── 10. Enqueue raw payload only (NO Salla API enrichment here) ───────────
+  // ── 11. Enqueue raw payload only (NO Salla API enrichment here) ───────────
   const baseRow: Record<string, any> = {
     workspace_id: sallaToken.workspace_id,
     store_id: merchantId,
@@ -303,21 +334,27 @@ export async function POST(req: NextRequest) {
       delete retryRow.dedup_key
       const { error: retryErr } = await supabase.from('sync_queue').insert(retryRow)
       if (retryErr) {
-        return NextResponse.json({ received: true, processed: false, error: 'enqueue_failed' })
+        console.error('[Salla Webhook] durable enqueue failed:', retryErr.message)
+        return NextResponse.json(
+          { received: false, processed: false, error: 'durable_storage_failed' },
+          { status: 503 }
+        )
       }
     } else {
-      return NextResponse.json({ received: true, processed: false, error: 'enqueue_failed' })
+      console.error('[Salla Webhook] durable enqueue failed:', insertErr.message)
+      return NextResponse.json(
+        { received: false, processed: false, error: 'durable_storage_failed' },
+        { status: 503 }
+      )
     }
   }
 
   await recordSallaWebhookMetric(merchantId, event)
+  if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
 
-  // Trigger non-blocking background queue drain
-  import('@/lib/sync-queue-runner').then(({ runSyncQueueOnce }) => {
-    runSyncQueueOnce().catch(() => {})
-  }).catch(() => {})
-
-  // Fast 200 — the queue runner + sync engine do the heavy lifting.
+  // لا تشغيل الطابور داخل الطلب إطلاقاً: على استضافة مشتركة (Hostinger) هذا
+  // يعني تنفيذ مزامنة كاملة داخل طلب الويب هوك، وهو أكبر مصدر للضغط على
+  // السيرفر. المعالجة كلها عبر /api/cron/sync-queue كل دقيقة.
   return NextResponse.json({ received: true, queued: true })
 }
 

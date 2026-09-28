@@ -17,7 +17,9 @@ import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { supabase } from '@/lib/supabase'
+import { ttlCache } from '@/lib/ttl-cache'
 import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
+import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 function verifyZidSignature(body: string, signature: string, secret: string): boolean {
   try {
@@ -46,14 +48,29 @@ function isUninstallEvent(event: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // In development, ensure the background queue runner is running
+  if (process.env.NODE_ENV !== 'production') {
+    import('@/lib/sync-queue-runner').then(({ startSyncQueueRunner }) => {
+      startSyncQueueRunner()
+    }).catch(() => {})
+  }
+
   const rawBody = await req.text()
   const headersList = headers()
   const signature = headersList.get('x-zid-signature') ?? ''
-  const webhookSecret = process.env.ZID_WEBHOOK_SECRET ?? ''
+  const webhookSecret = (process.env.ZID_WEBHOOK_SECRET ?? '').trim()
+  const hasRealSecret = Boolean(
+    webhookSecret &&
+    webhookSecret !== 'your_webhook_secret_here' &&
+    !webhookSecret.startsWith('your_')
+  )
 
-  // ── Verify signature (when a secret is configured, all envs) ───────────────
-  if (webhookSecret) {
+  // ── Verify signature (when a real secret is configured) ─────
+  if (hasRealSecret) {
     if (!verifyZidSignature(rawBody, signature, webhookSecret)) {
+      console.warn('[Zid Webhook] Signature verification failed', {
+        hasSignature: Boolean(signature),
+      })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
   }
@@ -305,8 +322,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true, processed: false, reason: 'unknown_event' })
   }
 
-  // ── Route events to handlers (enqueue فقط — 200 فوري) ─────────────────────
+  // ── Route events to handlers (enqueue فقط — رد فوري بعد الحفظ الدائم) ───────
   // البث لـSSE يتم فقط للأحداث المفعّلة (داخل كل handler بعد فحص الإعدادات).
+  let handlerResult: HandlerResult = 'enqueued'
   try {
     switch (event) {
       case 'order.create':
@@ -320,14 +338,14 @@ export async function POST(req: NextRequest) {
       case 'order.cancelled':
       case 'order.payment_status.update':
       case 'order_payment_status_update':
-        await handleOrderEvent(event, store_id, data)
+        handlerResult = await handleOrderEvent(event, store_id, data)
         break
 
       case 'abandoned_cart.created':
       case 'abandoned_cart_created':
       case 'abandoned_cart.completed':
       case 'abandoned_cart_completed':
-        await handleAbandonedCartEvent(event, store_id, data)
+        handlerResult = await handleAbandonedCartEvent(event, store_id, data)
         break
 
       case 'product.create':
@@ -349,7 +367,7 @@ export async function POST(req: NextRequest) {
       case 'product.stock.create':
       case 'product.stock.update':
       case 'product.stock.delete':
-        await handleProductEvent(event, store_id, data)
+        handlerResult = await handleProductEvent(event, store_id, data)
         break
 
       case 'customer.create':
@@ -363,7 +381,7 @@ export async function POST(req: NextRequest) {
       case 'customer.merchant.update':
       case 'customer.merchant.updated':
       case 'customer.login':
-        await handleCustomerEvent(event, store_id, data)
+        handlerResult = await handleCustomerEvent(event, store_id, data)
         break
 
       case 'category.create':
@@ -378,7 +396,7 @@ export async function POST(req: NextRequest) {
       case 'category.deleted':
       case 'category_delete':
       case 'category_deleted':
-        await handleCategoryEvent(event, store_id, data)
+        handlerResult = await handleCategoryEvent(event, store_id, data)
         break
 
       case 'location.create':
@@ -390,24 +408,74 @@ export async function POST(req: NextRequest) {
       case 'location.stock.update':
         // Legacy location/stock event names (removed from ZID_EVENT_MAP — Zid
         // never sends them). Route to product handler for backward compat.
-        await handleProductEvent(event, store_id, data)
+        handlerResult = await handleProductEvent(event, store_id, data)
         break
 
       default:
         return NextResponse.json({ received: true, processed: false, reason: 'unhandled_event' })
     }
   } catch (err) {
-    console.error('[Zid Webhook] handler error', { event, store_id })
-    // Return 200 anyway so Zid doesn't retry indefinitely
-    return NextResponse.json({ received: true, processed: false })
+    console.error('[Zid Webhook] handler error', { event, store_id, err })
+    // 503 وليس 200: الاستثناء يعني أن التخزين الدائم لم يكتمل. replying 200
+    // هنا كان يعني فقدان الطلب نهائياً لأن زد لا تعيد الإرسال بعد 200.
+    return NextResponse.json(
+      { received: false, processed: false, error: 'handler_failed' },
+      { status: 503 }
+    )
   }
 
-  // Trigger non-blocking background queue drain
-  import('@/lib/sync-queue-runner').then(({ runSyncQueueOnce }) => {
-    runSyncQueueOnce().catch(() => {})
-  }).catch(() => {})
+  // تخزين دائم غير مكتمل → 503 لتعيد زد الإرسال. الحدث محفوظ في
+  // webhook_inbox في كل الأحوال، لكن الرد غير 2xx هو خط الدفاع الثاني.
+  if (handlerResult === 'error') {
+    return NextResponse.json(
+      { received: false, processed: false, error: 'durable_storage_failed' },
+      { status: 503 }
+    )
+  }
+  if (handlerResult === 'no_workspace') {
+    // لا يوجد ربط متجر لهذا الـstore — لا نخمّن المستأجر (تفادي خلط العملاء).
+    //
+    // كان يُعاد 422 هنا، أي رفض نهائي: زد لا تعيد الإرسال بعد 4xx، فكان
+    // الحدث يضيع. الآن نحفظه في صندوق الاستلام كـ«orphan» ونعيد 202:
+    // المتجر يتوقف عن الإرسال بلا فائدة، والحدث يبقى محفوظاً قابلاً
+    // للاسترداد فور ربط المتجر (والتسوية الدورية تغطّي بياناته).
+    console.error('[Zid Webhook] no workspace bound to store — event stored as orphan', {
+      event,
+      store_id,
+    })
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { extractDeliveryId, fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'zid',
+      storeId: String(store_id),
+      event,
+      dedupKey: `zid:orphan:${store_id}:${event}:${
+        extractDeliveryId(data) || fingerprintPayload(data as Record<string, unknown>)
+      }`,
+      payload: data as Record<string, unknown>,
+    })
+    if (!stored.ok) {
+      // فشل الحفظ الدائم → نطلب إعادة الإرسال بدل الرد 202.
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
+    return NextResponse.json(
+      { received: true, processed: false, queued: false, reason: 'store_not_linked' },
+      { status: 202 }
+    )
+  }
 
-  return NextResponse.json({ received: true, queued: true })
+  // لا تشغيل للطابور داخل مسار الطلب إطلاقاً في الإنتاج (المعالجة عبر cron خارجي).
+  // في التطوير المحلي فقط: شغّل دورة واحدة في الخلفية فوراً لاختبار التزامن بلا انتظار.
+  if (handlerResult === 'enqueued' && process.env.NODE_ENV !== 'production') {
+    import('@/lib/sync-queue-runner').then(({ runSyncQueueOnce }) => {
+      runSyncQueueOnce().catch((err) => console.warn('[Zid Webhook] immediate dev queue drain error:', err))
+    }).catch(() => {})
+  }
+
+  return NextResponse.json({ received: true, queued: handlerResult === 'enqueued' })
 }
 
 export async function GET() {
@@ -433,162 +501,166 @@ function emitToSse(event: string, store_id: number, data: Record<string, unknown
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
 /**
- * Normalize any received event name (dot or underscore, legacy or official)
- * to the canonical sync-settings key used in ZID_EVENT_MAP.
+ * نتيجة معالج الحدث.
+ * `error` تعني «لم يُحفظ بشكل دائم» → يرد المسار بـ 503 فتعيد زد الإرسال.
+ * `skipped` تعني قراراً مقصوداً (معطّل من الإعدادات) → رد 200 طبيعي.
  */
-function toSettingsKey(event: string): string {
-  const n = event.replace(/\./g, '_')
-  // Legacy aliases from the old 29-key map → canonical keys
-  const aliases: Record<string, string> = {
-    order_updated: 'order_status_update',
-    order_created: 'order_create',
-    order_cancelled: 'order_status_update',
-    order_delivered: 'order_status_update',
-    order_tagged: 'order_status_update',
-    product_created: 'product_create',
-    product_updated: 'product_update',
-    product_deleted: 'product_delete',
-    product_published: 'product_publish',
-    product_publish: 'product_publish',
-    product_stock_create: 'product_update',
-    product_stock_update: 'product_update',
-    product_stock_delete: 'product_update',
-    customer_created: 'customer_create',
-    customer_updated: 'customer_update',
-    category_created: 'category_create',
-    category_updated: 'category_update',
-    category_deleted: 'category_delete',
-    location_create: 'product_update',
-    location_update: 'product_update',
-    location_delete: 'product_update',
-    location_stock_update: 'product_update',
-  }
-  return aliases[n] ?? n
-}
+type HandlerResult = 'enqueued' | 'skipped' | 'no_workspace' | 'error'
 
-async function findMerchantToken(storeId: number) {
+async function findMerchantWorkspaceId(storeId: number): Promise<string | null> {
   const storeStr = String(storeId)
-  const { data } = await supabase
-    .from('merchant_tokens')
-    .select('workspace_id, sync_settings')
-    .or(`store_id.eq.${storeStr},merchant_id.eq.${storeStr}`)
-    .maybeSingle()
-  return data as { workspace_id: string | null; sync_settings: Record<string, { zid2odoo?: boolean }> | null } | null
-}
-
-function isEventEnabled(
-  syncSettings: Record<string, { zid2odoo?: boolean }> | null | undefined,
-  event: string
-): boolean {
-  if (!syncSettings) return false
-  return syncSettings[toSettingsKey(event)]?.zid2odoo === true
+  return ttlCache.get(
+    `zid:workspace:${storeStr}`,
+    60_000,
+    async () => {
+      const { data } = await supabase
+        .from('merchant_tokens')
+        .select('workspace_id')
+        .or(`store_id.eq.${storeStr},merchant_id.eq.${storeStr}`)
+        .maybeSingle()
+      return data?.workspace_id ?? null
+    }
+  )
 }
 
 async function handleOrderEvent(
   event: string,
   storeId: number,
   data: Record<string, unknown>
-) {
-  const merchantToken = await findMerchantToken(storeId)
+): Promise<HandlerResult> {
+  const workspaceId = await findMerchantWorkspaceId(storeId)
 
-  if (!merchantToken?.workspace_id) {
+  if (!workspaceId) {
     console.warn('[Zid Webhook] Merchant token not found for order event', { storeId })
-    return
+    return 'no_workspace'
   }
 
-  if (!isEventEnabled(merchantToken.sync_settings, event)) return
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  if (!allowed) {
+    console.info('[Zid Webhook] Order event disabled by settings', { storeId, event, reason })
+    return 'skipped'
+  }
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-  await enqueueWebhookEvent({
-    workspaceId: merchantToken.workspace_id,
+  const queued = await enqueueWebhookEvent({
+    workspaceId,
     storeId: String(storeId),
     event,
     platform: 'zid',
     payload: data,
   })
+  if (queued.error) {
+    console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
+    return 'error'
+  }
   emitToSse(event, storeId, data)
+  return 'enqueued'
 }
 
 async function handleProductEvent(
   event: string,
   storeId: number,
   data: Record<string, unknown>
-) {
-  // Check sync settings from merchant_tokens (like Salla and Shopify do)
-  const merchantToken = await findMerchantToken(storeId)
+): Promise<HandlerResult> {
+  const workspaceId = await findMerchantWorkspaceId(storeId)
 
-  if (!merchantToken?.workspace_id) {
+  if (!workspaceId) {
     console.warn('[Zid Webhook] Merchant token not found for product event', { storeId })
-    return
+    return 'no_workspace'
   }
 
-  // Zid sends dot-notation event names (e.g. "product.create") but
-  // sync_settings are stored with underscore keys ("product_create").
-  if (!isEventEnabled(merchantToken.sync_settings, event)) return
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  if (!allowed) {
+    console.info('[Zid Webhook] Product event disabled by settings', { storeId, event, reason })
+    return 'skipped'
+  }
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-  await enqueueWebhookEvent({
-    workspaceId: merchantToken.workspace_id,
+  const queued = await enqueueWebhookEvent({
+    workspaceId,
     storeId: String(storeId),
     event,
     platform: 'zid',
     payload: data,
   })
+  if (queued.error) {
+    console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
+    return 'error'
+  }
   emitToSse(event, storeId, data)
+  return 'enqueued'
 }
 
 async function handleCustomerEvent(
   event: string,
   storeId: number,
   data: Record<string, unknown>
-) {
-  const merchantToken = await findMerchantToken(storeId)
+): Promise<HandlerResult> {
+  const workspaceId = await findMerchantWorkspaceId(storeId)
 
-  if (!merchantToken?.workspace_id) {
+  if (!workspaceId) {
     console.warn('[Zid Webhook] Merchant token not found for customer event', { storeId })
-    return
+    return 'no_workspace'
   }
 
-  if (!isEventEnabled(merchantToken.sync_settings, event)) return
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  if (!allowed) {
+    console.info('[Zid Webhook] Customer event disabled by settings', { storeId, event, reason })
+    return 'skipped'
+  }
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-  await enqueueWebhookEvent({
-    workspaceId: merchantToken.workspace_id,
+  const queued = await enqueueWebhookEvent({
+    workspaceId,
     storeId: String(storeId),
     event,
     platform: 'zid',
     payload: data,
   })
+  if (queued.error) {
+    console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
+    return 'error'
+  }
   emitToSse(event, storeId, data)
+  return 'enqueued'
 }
 
 async function handleCategoryEvent(
   event: string,
   storeId: number,
   data: Record<string, unknown>
-) {
-  // Find workspace_id from merchant token
-  const merchantToken = await findMerchantToken(storeId)
+): Promise<HandlerResult> {
+  const workspaceId = await findMerchantWorkspaceId(storeId)
 
-  if (!merchantToken?.workspace_id) {
+  if (!workspaceId) {
     console.warn('[Zid Webhook] Merchant token not found for category event', { storeId })
-    return
+    return 'no_workspace'
   }
 
-  if (!isEventEnabled(merchantToken.sync_settings, event)) return
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  if (!allowed) {
+    console.info('[Zid Webhook] Category event disabled by settings', { storeId, event, reason })
+    return 'skipped'
+  }
 
   try {
     const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-    await enqueueWebhookEvent({
-      workspaceId: merchantToken.workspace_id,
+    const queued = await enqueueWebhookEvent({
+      workspaceId,
       storeId: String(storeId),
       event,
       platform: 'zid',
       payload: data,
     })
+    if (queued.error) {
+      console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
+      return 'error'
+    }
     emitToSse(event, storeId, data)
-  } catch {
-    console.error('[Zid Webhook] Failed to enqueue category event')
+    return 'enqueued'
+  } catch (err) {
+    console.error('[Zid Webhook] Failed to enqueue category event', err)
+    return 'error'
   }
 }
 
@@ -601,23 +673,32 @@ async function handleAbandonedCartEvent(
   event: string,
   storeId: number,
   data: Record<string, unknown>
-) {
-  const merchantToken = await findMerchantToken(storeId)
+): Promise<HandlerResult> {
+  const workspaceId = await findMerchantWorkspaceId(storeId)
 
-  if (!merchantToken?.workspace_id) {
+  if (!workspaceId) {
     console.warn('[Zid Webhook] Merchant token not found for abandoned-cart event', { storeId })
-    return
+    return 'no_workspace'
   }
 
-  if (!isEventEnabled(merchantToken.sync_settings, event)) return
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  if (!allowed) {
+    console.info('[Zid Webhook] Abandoned cart event disabled by settings', { storeId, event, reason })
+    return 'skipped'
+  }
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
-  await enqueueWebhookEvent({
-    workspaceId: merchantToken.workspace_id,
+  const queued = await enqueueWebhookEvent({
+    workspaceId,
     storeId: String(storeId),
     event,
     platform: 'zid',
     payload: data,
   })
+  if (queued.error) {
+    console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
+    return 'error'
+  }
   emitToSse(event, storeId, data)
+  return 'enqueued'
 }

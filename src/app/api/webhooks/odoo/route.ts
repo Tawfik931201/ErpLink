@@ -1,19 +1,47 @@
-import { createClient } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
+import { supabase } from '@/lib/supabase'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+const supabaseAdmin = supabase
+
+/**
+ * نتيجة تنفيذ مزامنة واحدة.
+ *
+ * `ok: false` تعني «لم ينجح» → يجب إعادة الجدولة (حتى 5 محاولات ثم صندوق
+ * الموتى). `ok: true` مع `skipped: true` تعني «قرار مقصود» (إعداد معطّل،
+ * اتجاه غير مفعّل، سجل محذوف) → يُحذف الصف ولا يُعاد.
+ *
+ * سابقاً كانت الدالة ترجع `undefined` في كل الحالات، وكان الطابور يعتبر
+ * ذلك «نجاحاً» ويحذف الصف — أي فقدان صامت لطلبات عند تعطّل Odoo.
+ */
+type SyncOutcome = { ok: true; skipped?: boolean; message?: string } | { ok: false; message: string }
+
+const SKIP = (message: string): SyncOutcome => ({ ok: true, skipped: true, message })
+const FAIL = (message: string): SyncOutcome => ({ ok: false, message })
+const DONE = (message = 'done'): SyncOutcome => ({ ok: true, message })
 
 export async function POST(req: NextRequest) {
+  const odooSecret = process.env.ODOO_WEBHOOK_SECRET
+  if (odooSecret) {
+    const authHeader = req.headers.get('authorization') || ''
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
+    const headerSecret = req.headers.get('x-odoo-secret') || ''
+    const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
+    const provided = bearerToken || headerSecret || querySecret
+    if (!provided || provided !== odooSecret) {
+      return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.error('[Odoo Webhook] Security Alert: ODOO_WEBHOOK_SECRET is not configured in production.')
+    return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
+  }
+
   let rawText = ''
   let payload: any = {}
   try {
@@ -37,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 1. Fetch FieldMapping to resolve odoo_model if not passed in request
-  const { data: mapping, error: mappingErr } = await supabaseAdmin
+  const { data: mapping, error: mappingErr } = await supabase
     .from('field_mappings')
     .select('*')
     .eq('id', field_mapping_id)
@@ -57,14 +85,58 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing model or record ID' }, { status: 400 })
   }
 
-  // Pass the actual payload fields directly to background sync to avoid a second Odoo API call
-  // when Odoo already sent the field values in the webhook body
-  runBackgroundSync(field_mapping_id, model, Number(odooRecordId), actualPayload).catch(err => {
-    console.error('[Odoo Webhook Background] Final uncaught background sync error:', err)
+  const workspaceId = mapping.workspace_id
+  if (!workspaceId) {
+    return NextResponse.json({ error: 'Field mapping has no workspace' }, { status: 400 })
+  }
+
+  // Enqueue to central sync_queue for Zero Data Loss, retries, and rate-limit control
+  //
+  // ⚠️ dedup_key هنا لازم أن يعرّف *الحدث* لا *السجل*. Odoo لا يرسل معرّف
+  // تسليم (الـAutomated Action يرسل السجل فقط)، فنستخدم:
+  //   1) write_date إن موجود (Odoo يضبطه عند كل كتابة ⇒ يتغيّر مع كل تعديل)
+  //   2) وإلا بصمة المحتوى.
+  // النتيجة: إعادة إرسال نفس الحدث ⇒ duplicate (لا عمل مكرر)، بينما أي
+  // تعديل حقيقي لاحق على نفس السجل ⇒ مفتاح مختلف ⇒ يُعالَج ولا يُسقَط.
+  const enqueuePayload: Record<string, unknown> = {
+    field_mapping_id,
+    model,
+    odooRecordId: Number(odooRecordId),
+    payloadData: actualPayload,
+  }
+  const writeDate = actualPayload.write_date ?? actualPayload.__last_update ?? null
+  if (writeDate) enqueuePayload.updated_at = String(writeDate)
+
+  const { enqueueWebhookEvent, fingerprintPayload } = await import('@/lib/sync-queue')
+  const eventVersion = writeDate
+    ? String(writeDate)
+    : fingerprintPayload({ model, odooRecordId, data: actualPayload })
+  const dedupKey = `odoo:${field_mapping_id}:${model}:${odooRecordId}:${eventVersion}`
+
+  const queued = await enqueueWebhookEvent({
+    workspaceId,
+    storeId: mapping.store_id ? String(mapping.store_id) : workspaceId,
+    event: 'odoo.model.sync',
+    platform: 'odoo',
+    payload: enqueuePayload,
+    dedupKey,
   })
 
-  // Return a 202 Accepted response immediately so Odoo connection closes cleanly
-  return NextResponse.json({ success: true, message: 'Webhook received and processing started.' }, { status: 202 })
+  // فشل التخزين الدائم → 503 حتى يعيد Odoo الإرسال. الحدث محفوظ في
+  // webhook_inbox على أي حال، لكن الرد غير 2xx هو خط الدفاع الثاني.
+  if (queued.error) {
+    console.error('[Odoo Webhook] durable enqueue failed:', queued.error)
+    return NextResponse.json(
+      { error: 'Failed to persist webhook', detail: queued.error },
+      { status: 503 }
+    )
+  }
+
+  // 202 Accepted: بعدCommit للتخزين الدائم، فالمعالجة في الخلفية آمنة.
+  return NextResponse.json(
+    { success: true, queued: true, duplicate: queued.duplicate ?? false, message: 'Webhook received and queued for sync.' },
+    { status: 202 }
+  )
 }
 
 /**
@@ -72,7 +144,7 @@ export async function POST(req: NextRequest) {
  * Accepts the payload received from Odoo directly so we can skip a redundant Odoo read()
  * when the webhook body already contains the updated field values.
  */
-async function runBackgroundSync(field_mapping_id: string, model: string, odooRecordId: number, payloadData?: Record<string, any>) {
+export async function runBackgroundSync(field_mapping_id: string, model: string, odooRecordId: number, payloadData?: Record<string, any>): Promise<SyncOutcome> {
   console.info(`[Odoo Webhook Bg] Starting sync for mapping=${field_mapping_id}, model=${model}, recordId=${odooRecordId}`)
 
   // 1. Fetch FieldMapping
@@ -84,7 +156,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
 
   if (mappingErr || !mapping) {
     console.warn('[Odoo Webhook Bg] Field mapping not found:', field_mapping_id)
-    return
+    return FAIL(`field mapping ${field_mapping_id} not found`)
   }
 
   // Check sync direction
@@ -92,7 +164,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
   const hasErpToStore = syncDirection.split(',').map((s: string) => s.trim()).includes('erp_to_store')
   if (!hasErpToStore) {
     console.warn(`[Odoo Webhook Bg] Mapping "${mapping.name}" does not support ERP to Store sync direction. Skipping.`)
-    return
+    return SKIP('mapping does not include erp_to_store direction')
   }
 
   // 2. Fetch Odoo Connection
@@ -104,27 +176,29 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
 
   if (connErr || !odooConn) {
     console.warn('[Odoo Webhook Bg] Odoo connection not found')
-    return
+    return FAIL('Odoo connection not found for this mapping')
   }
 
   if (odooConn.erp_type && odooConn.erp_type !== 'odoo') {
     console.warn(`[Odoo Webhook Bg] Webhook sync for non-Odoo ERP (${odooConn.erp_type}) is not supported yet.`)
-    return
+    return SKIP(`non-odoo erp type: ${odooConn.erp_type}`)
   }
 
   // Determine fields to fetch
   const modelMappings = mapping.mappings?.[model] || []
   if (modelMappings.length === 0) {
     console.info(`[Odoo Webhook Bg] No mappings defined for model "${model}". Skipping.`)
-    return
+    return SKIP(`no field mappings for model ${model}`)
   }
 
   let matchField = mapping.odoo_match_field
   let odooRecord: Record<string, any>
 
   // 3. Use the payload data if already received, otherwise fetch from Odoo via XML-RPC
-  const payloadHasFields = payloadData && Object.keys(payloadData).length > 1
-  if (payloadHasFields) {
+  // Check if payloadData contains actual Odoo field values (not just meta keys)
+  const metaKeys = new Set(['field_mapping_id', 'model', 'odooRecordId', '_model', '_name', '_id', 'id', 'odoo_model', 'erp_connection_id'])
+  const hasActualFields = payloadData && Object.keys(payloadData).some(k => !metaKeys.has(k))
+  if (hasActualFields) {
     odooRecord = payloadData
   } else {
     // Fallback: Connect to Odoo and fetch the record fields
@@ -143,7 +217,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
     const odooRecords = await odooClient.read<any>(model, [odooRecordId], erpFields)
     if (!odooRecords || odooRecords.length === 0) {
       console.warn(`[Odoo Webhook Bg] Record ID=${odooRecordId} not found in Odoo`)
-      return
+      return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
     }
     odooRecord = odooRecords[0]
   }
@@ -235,7 +309,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
 
   if (!matchValue) {
     console.warn(`[Odoo Webhook Bg] Match field "${matchField}" is empty on Odoo record. Cannot sync.`)
-    return
+    return SKIP(`match field ${matchField} is empty — cannot identify the store record`)
   }
 
   // Detect removal intent (product archived/deleted in Odoo)
@@ -258,7 +332,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Odoo product removal → Shopify delete is not implemented yet',
         payload: { operation: 'delete', platform: 'shopify', skipped: true }
       })
-      return
+      return SKIP('Shopify product delete is not implemented yet')
     }
     // early-return خفيف: نطاق غير صالح = لا مكالمات Shopify عبثاً (429/فشل)
     if (!shopDomain || !isValidShopDomain(String(shopDomain))) {
@@ -273,7 +347,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Invalid Shopify shop domain',
         payload: { operation: 'skip', reason: 'invalid_shop_domain' }
       })
-      return
+      return FAIL(`invalid Shopify shop domain: ${shopDomain}`)
     }
     const shopifyProduct = await findShopifyProductByMatchField(
       shopDomain,
@@ -335,8 +409,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           error_message: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg),
           payload: { operation: 'create', createData, error: errMsg }
         })
+        return FAIL(`Shopify create failed: ${typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)}`)
       }
-      return
+      return DONE('Shopify product created')
     }
 
     // Update existing Shopify product (match specific variant by SKU/barcode instead of always [0])
@@ -411,7 +486,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg),
         payload: { operation: 'update', updateData, error: errMsg }
       })
+      return FAIL(`Shopify update failed: ${typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)}`)
     }
+    return DONE('Shopify product updated')
 
   } else if (platform === 'salla') {
     // ── Salla ─────────────────────────────────────────────────────────────────
@@ -430,7 +507,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Odoo product removal → Salla delete is not implemented yet',
         payload: { operation: 'delete', platform: 'salla', skipped: true }
       })
-      return
+      return SKIP('Salla product delete is not implemented yet')
     }
 
     const sallaProduct = await findSallaProductByMatchField(
@@ -484,8 +561,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           error_message: errMsg,
           payload: { operation: 'create', createData, error: err.response?.data || err.message }
         })
+        return FAIL(`Salla create failed: ${errMsg}`)
       }
-      return
+      return DONE('Salla product created')
     }
 
     // Update existing Salla product
@@ -526,7 +604,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: errMsg,
         payload: { operation: 'update', updateData, error: err.response?.data || err.message }
       })
+      return FAIL(`Salla update failed: ${errMsg}`)
     }
+    return DONE('Salla product updated')
 
   } else {
     // ── Zid ───────────────────────────────────────────────────────────────────
@@ -556,7 +636,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Product sync is disabled via standard mapping settings',
         payload: { operation: 'disable', skipped: true }
       })
-      return
+      return SKIP('product sync disabled via standard mapping settings')
     }
 
     let zidProductId: string | null = null
@@ -620,7 +700,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           error_message: 'Odoo product removal skipped (on_delete = nothing in standard mapping settings)',
           payload: { operation: 'delete', skipped: true, mode: onDeleteMode }
         })
-        return
+        return SKIP(`on_delete = nothing in standard mapping settings`)
       }
 
       if (!zidProductId) {
@@ -634,7 +714,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           status: 'success',
           payload: { operation: 'delete', zid_product_id: null, result: 'not_found_or_already_deleted', mode: onDeleteMode }
         })
-        return
+        return DONE('product already absent in Zid')
       }
 
       if (onDeleteMode === 'archive') {
@@ -666,8 +746,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
             error_message: errMsg,
             payload: { operation: 'archive', zid_product_id: zidProductId, error: err.response?.data || err.message }
           })
+          return FAIL(`Zid archive (unpublish) failed: ${errMsg}`)
         }
-        return
+        return DONE('Zid product unpublished')
       }
 
       // delete / delete_or_archive → حذف فعلي من زد
@@ -698,8 +779,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           error_message: errMsg,
           payload: { operation: 'delete', zid_product_id: zidProductId, error: err.response?.data || err.message }
         })
+        return FAIL(`Zid delete failed: ${errMsg}`)
       }
-      return
+      return DONE('Zid product deleted')
     }
 
     // احترام enabled_actions من إعدادات الاستندر ماب (create / update)
@@ -715,7 +797,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Product create is not enabled in standard mapping settings',
         payload: { operation: 'create', skipped: true }
       })
-      return
+      return SKIP('product create not enabled in standard mapping settings')
     }
     if (zidProductId && !enabledActions.includes('update')) {
       await logOdooToZidSync({
@@ -729,7 +811,7 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: 'Product update is not enabled in standard mapping settings',
         payload: { operation: 'update', skipped: true }
       })
-      return
+      return SKIP('product update not enabled in standard mapping settings')
     }
 
     if (!zidProductId) {
@@ -800,8 +882,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
           error_message: errMsg,
           payload: { operation: 'create', createData, error: err.response?.data || err.message }
         })
+        return FAIL(`Zid create failed: ${errMsg}`)
       }
-      return
+      return DONE('Zid product created')
     }
 
     // Update existing product in Zid
@@ -846,7 +929,9 @@ async function runBackgroundSync(field_mapping_id: string, model: string, odooRe
         error_message: errMsg,
         payload: { operation: 'update', updateData, error: err.response?.data || err.message }
       })
+      return FAIL(`Zid update failed: ${errMsg}`)
     }
+    return DONE('Zid product updated')
   }
 }
 
@@ -957,7 +1042,9 @@ function hasRemovalSignal(
 ): boolean {
   if (model !== 'product.template' && model !== 'product.product') return false
 
-  const src = payloadData && Object.keys(payloadData).length > 1 ? payloadData : record
+  const metaKeys = new Set(['field_mapping_id', 'model', 'odooRecordId', '_model', '_name', '_id', 'id', 'odoo_model', 'erp_connection_id'])
+  const hasActualFields = payloadData && Object.keys(payloadData).some(k => !metaKeys.has(k))
+  const src = hasActualFields ? payloadData : record
 
   if (src.active !== undefined && (src.active === false || src.active === 'false' || src.active === 0 || src.active === '0')) {
     return true

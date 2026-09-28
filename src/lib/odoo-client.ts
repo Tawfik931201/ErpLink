@@ -30,11 +30,24 @@ function createXmlRpcClient(url: string, path: string) {
   return isHttps ? xmlrpc.createSecureClient(options) : xmlrpc.createClient(options)
 }
 
+const RPC_TIMEOUT_MS = 10_000
+
 function callAsync<T>(client: ReturnType<typeof xmlrpc.createClient>, method: string, params: unknown[]): Promise<T> {
   return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (callback: (value: any) => void, value: any) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      callback(value)
+    }
+    const timer = setTimeout(() => {
+      finish(reject, new Error(`ERP request timed out after ${RPC_TIMEOUT_MS / 1000} seconds`))
+    }, RPC_TIMEOUT_MS)
+
     client.methodCall(method, params, (err: unknown, value: T) => {
-      if (err) reject(err)
-      else resolve(value)
+      if (err) finish(reject, err)
+      else finish(resolve, value)
     })
   })
 }
@@ -46,6 +59,14 @@ export class OdooClient {
 
   constructor(config: OdooConfig) {
     this.config = config
+  }
+
+  get url(): string {
+    return this.config.url
+  }
+
+  get db(): string {
+    return this.config.db
   }
 
   /** Get Odoo major version (e.g. 17, 18, 19) */

@@ -1,26 +1,33 @@
-import { createClient } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { decrypt } from '@/lib/crypto'
-import { OdooClient } from '@/lib/odoo-client'
-import { enqueueWebhookEvent } from '@/lib/sync-queue'
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
+import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
 
 /**
- * Odoo → Zid real-time stock receiver.
+ * Odoo → Stores real-time stock receiver.
  *
  * An Odoo Automated Action on `stock.quant` posts here whenever a quantity
  * changes (purchase receipt, sale delivery, inventory adjustment, production).
  * We resolve the affected product + location (or read the quant when the
  * payload only carries its id), then enqueue an idempotent job. The sync-queue
  * coalesces repeated events for the same product before the stock-sync engine
- * pushes the balance to Zid at the paired location.
+ * pushes the balance to linked stores at the paired location.
  */
 export async function POST(req: NextRequest) {
+  const odooSecret = process.env.ODOO_WEBHOOK_SECRET
+  if (odooSecret) {
+    const authHeader = req.headers.get('authorization') || ''
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
+    const headerSecret = req.headers.get('x-odoo-secret') || ''
+    const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
+    const provided = bearerToken || headerSecret || querySecret
+    if (!provided || provided !== odooSecret) {
+      return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.error('[Odoo Stock Webhook] Security Alert: ODOO_WEBHOOK_SECRET is not configured in production.')
+    return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
+  }
   let payload: any = {}
   try {
     const raw = await req.text()
@@ -45,38 +52,8 @@ export async function POST(req: NextRequest) {
   const productId = toId(actual.product_id ?? payload.product_id)
   const locationId = toId(actual.location_id ?? payload.location_id)
 
-  let resolvedProduct = productId
-  let resolvedLocation = locationId
-
-  // Fall back to reading the quant when the payload does not carry the links
-  if ((!resolvedProduct || !resolvedLocation) && quantId) {
-    try {
-      const { data: erpConn } = await supabaseAdmin
-        .from('erp_connections')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .maybeSingle()
-      if (erpConn) {
-        const client = new OdooClient({
-          url: erpConn.url,
-          db: erpConn.db_name || '',
-          username: erpConn.username,
-          apiKey: decrypt(erpConn.password),
-        })
-        const rows = await client.read<any>('stock.quant', [quantId], ['id', 'product_id', 'location_id', 'write_date'])
-        const q = rows?.[0]
-        if (q) {
-          resolvedProduct = toId(q.product_id)
-          resolvedLocation = toId(q.location_id)
-        }
-      }
-    } catch (err) {
-      console.warn('[Odoo Stock Webhook] Failed to read quant:', err)
-    }
-  }
-
-  if (!resolvedProduct) {
-    return NextResponse.json({ error: 'Missing product_id' }, { status: 400 })
+  if (!productId && !quantId) {
+    return NextResponse.json({ error: 'Missing product_id or quant_id' }, { status: 400 })
   }
 
   const writeDate =
@@ -84,33 +61,79 @@ export async function POST(req: NextRequest) {
 
   const enqueuePayload: Record<string, unknown> = {
     workspace_id: workspaceId,
-    product_id: resolvedProduct,
-    location_id: resolvedLocation,
+    product_id: productId,
+    location_id: locationId,
     quant_id: quantId,
   }
   if (writeDate) enqueuePayload.updated_at = String(writeDate)
 
+  // الرصيد الوارد من Automated Action (إن وُجد) يدخل في البصمة: بدونه كان
+  // تغيّران حقيقيان بنفس الـquant وبنفس write_date الغائب يُحسبان نسخة واحدة
+  // فيُسقط الثاني. نلتقط الأسماء الشائعة فقط — الصومعة ليست شرطاً.
+  const quantityFields: Record<string, unknown> = {}
+  for (const key of ['quantity', 'available_quantity', 'reserved_quantity', 'inventory_quantity', 'incoming', 'outgoing']) {
+    const v = (payload as Record<string, unknown>)[key] ?? (actual as Record<string, unknown>)[key]
+    if (v !== undefined && v !== null && v !== '') quantityFields[key] = v
+  }
+  if (Object.keys(quantityFields).length > 0) {
+    Object.assign(enqueuePayload, quantityFields)
+  }
+
+  // dedup_key لازم أن يعرّف *الحركة* لا *الكمية*، وإلا صار كل تعديل لاحق
+  // على نفس الـquant duplicate مُسقَط. لذلك نضيف وقت آخر كتابة:
+  //   - نفس الحركة مُعادة ⇒ نفس write_date ⇒ duplicate (لا عمل مكرر)
+  //   - حركة جديدة ⇒ write_date مختلف ⇒ تُعالَج (ولا تُدمج مع غيرها)
+  // أما الدمج (coalescing) فيتولّاه sync_queue على مستوى الـquant، فيصل
+  // آخر رصيد إلى Odoo مرة واحدة بدل كل حركة على حدة.
+  const eventVersion = writeDate
+    ? String(writeDate)
+    : fingerprintPayload(enqueuePayload)
+  const dedupKey = `odoo:stock:${workspaceId}:${productId ?? 'na'}:${locationId ?? 'na'}:${quantId ?? 'na'}:${eventVersion}`
+
   // storeId is set to workspace_id so events coalesce per workspace+product.
+  let queued: Awaited<ReturnType<typeof enqueueWebhookEvent>> | null = null
   try {
-    await enqueueWebhookEvent({
+    queued = await enqueueWebhookEvent({
       workspaceId,
       storeId: workspaceId,
       event: 'odoo.stock.quant.update',
       platform: 'odoo',
       payload: enqueuePayload,
+      dedupKey,
     })
   } catch (err) {
-    console.error('[Odoo Stock Webhook] Enqueue failed:', err)
+    console.error('[Odoo Stock Webhook] Enqueue threw:', err)
+    return NextResponse.json(
+      { error: 'Failed to persist webhook', detail: 'enqueue_threw' },
+      { status: 503 }
+    )
   }
 
-  // Process immediately (fire-and-forget) so events don't wait for an external
-  // cron. In production an external scheduler calls GET /api/cron/sync-queue.
-  import('@/lib/sync-queue-runner').then(({ runSyncQueueOnce }) => {
-    runSyncQueueOnce().catch(() => {})
+  // فشل التخزين الدائم → 503 فيعيد Odoo الإرسال بدل فقدان حركة المخزون.
+  if (queued?.error) {
+    console.error('[Odoo Stock Webhook] durable enqueue failed:', queued.error)
+    return NextResponse.json(
+      { error: 'Failed to persist webhook', detail: queued.error },
+      { status: 503 }
+    )
+  }
+
+  // الحدث صار محفوظاً durably أعلاه — من هنا فصاعداً لا يجوز أن يفشل الطلب،
+  // وإلا أعاد Odoo الإرسال وتكرر العمل.
+
+  // تفريغ فوري للصف المُدرج، بلا انتظار Cron.
+  //
+  // على الاستضافة المشتركة تعتمد الأحداث كلياً على مجدول خارجي؛ فإن لم
+  // يُنشأ ذلك الـcron، يبقى كل صف في الطابور إلى الأبد ولا يرى التاجر سوى
+  // "لا شيء يحدث في زد". لذلك نجرّب دفعة واحدة فوراً. الكتابة الدائمة تمت
+  // مسبقاً، فحتى لو قُتلت العملية بعد الرد (وهذا يحدث على PHP-FPM) يبقى
+  // الصف محفوظاً ويلتقطه الـcron. تنفيذ عابر: الرد لا ينتظر أودو/زد.
+  void runSyncQueueOnce(1).catch(err => {
+    console.error('[Odoo Stock Webhook] inline drain failed:', err)
   })
 
   return NextResponse.json(
-    { success: true, message: 'Stock webhook received and processing started.' },
+    { success: true, queued: true, message: 'Stock webhook received and queued for sync.' },
     { status: 202 }
   )
 }

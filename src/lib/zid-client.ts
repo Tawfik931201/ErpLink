@@ -762,5 +762,22 @@ export const ZidAPI = {
         return []
       }
     },
+
+    /**
+     * GET order custom statuses — returns main statuses with optional sub-statuses.
+     * Returns [] on failure (non-fatal).
+     */
+    orderStatuses: async (creds: ZidCredentials): Promise<any[]> => {
+      try {
+        const res = await zidClient.get('/v1/managers/store/orders/custom-statuses', {
+          headers: buildZidHeaders(creds),
+        })
+        const data = res.data?.payload ?? res.data?.data ?? res.data?.results ?? res.data ?? []
+        return Array.isArray(data) ? data : []
+      } catch (err: any) {
+        console.warn('[ZidAPI] order-statuses fetch failed (non-fatal):', err?.response?.data || err?.message)
+        return []
+      }
+    },
   },
 }
