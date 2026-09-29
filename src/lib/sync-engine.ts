@@ -1,10 +1,10 @@
 /**
- * Sync Engine â€” Zid â†’ Odoo
+ * Sync Engine — Zid → Odoo
  *
  * When a Zid webhook arrives, this engine:
  *   1. Looks up all active field_mappings for (storeId + event)
- *   2. Resolves nested Zid data paths (e.g. "name.ar" â†’ data.name.ar)
- *   3. Handles Many2one/Many2many fields by resolving names â†’ IDs in Odoo
+ *   2. Resolves nested Zid data paths (e.g. "name.ar" → data.name.ar)
+ *   3. Handles Many2one/Many2many fields by resolving names → IDs in Odoo
  *   4. Calls OdooClient to create/update the record
  *   5. Logs every attempt to the sync_logs table in Supabase
  */
@@ -182,7 +182,7 @@ async function resolveBinaryField(rawValue: unknown): Promise<string | null> {
         ? mainImg
         : (mainImg.url ?? mainImg.image_url ?? mainImg.src ?? mainImg.image?.url ?? mainImg.path ?? mainImg.full_path ?? null)
       if (!url && typeof mainImg === 'object') {
-        console.warn(`[SyncEngine] resolveBinaryField: mainImg keys=${Object.keys(mainImg).join(', ')} â€” no known URL key found`)
+        console.warn(`[SyncEngine] resolveBinaryField: mainImg keys=${Object.keys(mainImg).join(', ')} — no known URL key found`)
       }
       console.info(`[SyncEngine] resolveBinaryField: extracted url="${url}" from mainImg type=${typeof mainImg}`)
       if (url && typeof url === 'string') {
@@ -328,7 +328,7 @@ async function notifySyncForRecord(
   await notifySyncResult({ workspaceId: wsId, record: summary }).catch(() => {})
 }
 
-// â”€â”€â”€ Helper: fetch Odoo field metadata (ttype + relation) for a model â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: fetch Odoo field metadata (ttype + relation) for a model ─────────
 
 export async function fetchFieldMeta(
   client: OdooClient,
@@ -345,7 +345,7 @@ export async function fetchFieldMeta(
     const map = new Map<string, OdooFieldMeta>()
     for (const r of rows) map.set(r.name, r)
     console.info(`[SyncEngine] Fetched field meta for [${fieldNames.join(', ')}]:`,
-      rows.map(r => `${r.name}(${r.ttype}${r.relation ? 'â†’' + r.relation : ''})`).join(', '))
+      rows.map(r => `${r.name}(${r.ttype}${r.relation ? '→' + r.relation : ''})`).join(', '))
     return map
   } catch (err) {
     console.warn('[SyncEngine] Could not fetch field meta, will skip relational resolution:', err)
@@ -353,7 +353,7 @@ export async function fetchFieldMeta(
   }
 }
 
-// â”€â”€â”€ Helper: Determine platform from webhook event â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: Determine platform from webhook event ──────────────────────────
 
 export function getPlatformFromEvent(event: string): 'zid' | 'salla' | 'shopify' {
   // Shopify events use "shopify:" prefix, contain "shopify", or use "/" syntax (orders/create, products/create)
@@ -389,7 +389,7 @@ export function getPlatformFromEvent(event: string): 'zid' | 'salla' | 'shopify'
   return 'zid'
 }
 
-// â”€â”€â”€ Helper: resolve a single relational value (ID Match â†’ Name Match â†’ Creation) â”€â”€â”€
+// ─── Helper: resolve a single relational value (ID Match → Name Match → Creation) ───
 
 export async function resolveSingleRelationId(
   client: any,
@@ -467,7 +467,7 @@ export async function resolveSingleRelationId(
     // Fetch target relation fields meta to verify field existence (avoiding Odoo RPC errors on non-existing columns)
     const relationFields = await fetchFieldMeta(client, relation, ['name', 'x_zid_id', 'zid_id', 'x_salla_id', 'salla_id', 'x_shopify_id', 'shopify_id'])
 
-    // â”€â”€â”€ Case 1: Search by Platform ID (Fixed Mapping check) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 1: Search by Platform ID (Fixed Mapping check) ─────────────────
     if (platformId) {
       // Stage 1: current-then-legacy resolution now has a single definition.
       const searchField = pickExistingIdField(relationFields, platform)
@@ -475,12 +475,12 @@ export async function resolveSingleRelationId(
       if (searchField) {
         const ids = await client.search(relation, [[searchField, '=', platformId]])
         if (ids && ids.length > 0) {
-          console.info(`[SyncEngine] Case 1 (ID Match): Resolved ${relation} with ${searchField}="${platformId}" â†’ ID #${ids[0]}`)
+          console.info(`[SyncEngine] Case 1 (ID Match): Resolved ${relation} with ${searchField}="${platformId}" → ID #${ids[0]}`)
           return ids[0]
         }
       }
 
-      // â”€â”€â”€ Case 1.5: Try Match Field from standard_mapping_settings â”€â”€â”€â”€â”€â”€â”€â”€
+      // ─── Case 1.5: Try Match Field from standard_mapping_settings ────────
       if (workspaceId && relation) {
         const entityMap: Record<string, string> = {
           'product.category': 'categories',
@@ -507,7 +507,7 @@ export async function resolveSingleRelationId(
               if (odooMatchField && (odooMatchField === 'id' || relationFields.has(odooMatchField))) {
                 const mfIds = await client.search(relation, [[odooMatchField, '=', platformId]])
                 if (mfIds && mfIds.length > 0) {
-                  console.info(`[SyncEngine] Case 1.5 (Match Field): Resolved ${relation} via ${odooMatchField}="${platformId}" â†’ ID #${mfIds[0]}`)
+                  console.info(`[SyncEngine] Case 1.5 (Match Field): Resolved ${relation} via ${odooMatchField}="${platformId}" → ID #${mfIds[0]}`)
                   return mfIds[0]
                 }
               }
@@ -587,16 +587,16 @@ export async function resolveSingleRelationId(
       (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nameVal) ||
        /^\d+$/.test(nameVal))
 
-    // â”€â”€â”€ Case 2: Search by Name inside Odoo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 2: Search by Name inside Odoo ──────────────────────────────────────
     if (nameVal && !looksLikePlatformId && nameVal !== '[object Object]' && nameVal !== 'undefined') {
       const ids = await client.search(relation, [['name', '=', nameVal]])
       if (ids && ids.length > 0) {
-        console.info(`[SyncEngine] Case 2 (Name Match): Resolved ${relation} with name="${nameVal}" â†’ ID #${ids[0]}`)
+        console.info(`[SyncEngine] Case 2 (Name Match): Resolved ${relation} with name="${nameVal}" → ID #${ids[0]}`)
         return ids[0]
       }
     }
 
-    // â”€â”€â”€ Case 3: Create it if not found â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 3: Create it if not found ──────────────────────────────────────────
     if (nameVal && !looksLikePlatformId && nameVal !== '[object Object]' && nameVal !== 'undefined') {
       console.info(`[SyncEngine] Case 3 (Creation): Record not found in "${relation}". Creating a new one with name="${nameVal}"`)
       
@@ -874,7 +874,7 @@ export async function updateOdooStock(client: OdooClient, productId: number, qty
   }
 }
 
-// â”€â”€â”€ Helper: build sale.order.line items for sale.order mappings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: build sale.order.line items for sale.order mappings ────────────
 
 // ──── Helper: resolve shipping/delivery fee from a Zid order payload ─────
 
@@ -1904,7 +1904,7 @@ const HARDCODED_FIELD_META: Record<string, { ttype: string; relation?: string }>
 // (fixed_mappings and fixed_mapping_preset_definitions tables), seeded via migration.
 // No hardcoded fallback needed.
 
-// â”€â”€â”€ Helper: derive fixed-mapping preset_key from event + platform â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: derive fixed-mapping preset_key from event + platform ────────────
 // Known preset_key format: {platform}_{model}_{action}
 // e.g. "zid_product_create", "salla_order_update", "shopify_product_create"
 //                          "zid_category", "shopify_category_create"
@@ -1980,7 +1980,7 @@ function derivePresetKey(event: string, platform: string): string | null {
   return `${platform}_${model}_${action}`
 }
 
-// â”€â”€â”€ Helper: apply fixed mapping settings to Odoo values â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: apply fixed mapping settings to Odoo values ───────────────────────
 // Injects settings-driven defaults/logic (sale_ok, type, price markup, name
 // language, etc.) into odooValues.
 export async function applyFixedSettingsToValues(
@@ -1996,7 +1996,7 @@ export async function applyFixedSettingsToValues(
 
   const values = { ...odooValues }
 
-  // â”€â”€ product.category only gets inventory_valuation + accounting settings â”€â”€
+  // ── product.category only gets inventory_valuation + accounting settings ──
   // Skip all product-template fields (type, sale_ok, is_storable, etc.)
   if (odooModel === 'product.category') {
     const invValCfg = settings.inventory_valuation
@@ -2057,7 +2057,7 @@ export async function applyFixedSettingsToValues(
     return values
   }
 
-  // â”€â”€ Product type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Product type ────────────────────────────────────────────────────────────
   // Odoo 18+ changed type selection: 'product' removed, 'consu' means "Goods".
   // Use is_storable + tracking fields instead.  Skip if values.type is already
   // provided by a row-level field mapping.
@@ -2103,7 +2103,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Status fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Status fields ───────────────────────────────────────────────────────────
   const status = settings.status
   if (status) {
     // Only set if not already provided by user mapping
@@ -2125,7 +2125,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Price transformations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Price transformations ──────────────────────────────────────────────────
   const priceCfg = settings.price
   if (priceCfg) {
     // Apply markup/discount to list_price
@@ -2150,7 +2150,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Price rounding â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Price rounding ──────────────────────────────────────────────────────────
   if (priceCfg) {
     if (values.list_price !== undefined && priceCfg.rounding && priceCfg.decimal_places !== undefined) {
       const factor = Math.pow(10, priceCfg.decimal_places)
@@ -2172,7 +2172,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Name language selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Name language selection ─────────────────────────────────────────────────
   const nameCfg = settings.name
   const rawName = zidData.name as Record<string, unknown> | string | undefined
   if (nameCfg && nameCfg.language && rawName && typeof rawName === 'object') {
@@ -2198,7 +2198,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Description language selection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Description language selection ─────────────────────────────────────────
   const descCfg = settings.description
   const rawDesc = zidData.description as Record<string, unknown> | string | undefined
   if (descCfg && descCfg.language && rawDesc && typeof rawDesc === 'object') {
@@ -2219,7 +2219,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Description fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Description fallback ─────────────────────────────────────────────────────
   if (descCfg) {
       if (descCfg.fallback === 'custom' && descCfg.custom_text && values.description_sale === undefined) {
       values.description_sale = descCfg.custom_text
@@ -2252,7 +2252,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Warehouse / Stock Location â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Warehouse / Stock Location ─────────────────────────────────────────────
   // Resolve warehouse from static DB mapping using Zid location data
   if (workspaceId) {
     const { locationId: zidLocId, locationName: zidLocName } = extractOrderLocationInfo(zidData, platform)
@@ -2267,7 +2267,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Tax sync_mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Tax sync_mode ───────────────────────────────────────────────────────────
   const taxCfg = settings.tax
   if (taxCfg) {
     if (taxCfg.sync_mode === 'static_ids' && Array.isArray(taxCfg.default_tax_ids) && taxCfg.default_tax_ids.length > 0) {
@@ -2291,7 +2291,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Category sync_mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Category sync_mode ──────────────────────────────────────────────────────
   const catCfg = settings.category
   if (catCfg) {
     if (catCfg.sync_mode === 'skip' && values.categ_id !== undefined) {
@@ -2306,7 +2306,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Image sync_mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Image sync_mode ─────────────────────────────────────────────────────────
   const imgCfg = settings.image
   if (imgCfg) {
     if (imgCfg.sync_mode === 'skip') {
@@ -2323,7 +2323,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ UOM auto_create â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── UOM auto_create ─────────────────────────────────────────────────────────
   const uomCfg = settings.uom
   if (uomCfg) {
     if (!uomCfg.auto_create && values.uom_id === undefined) {
@@ -2333,7 +2333,7 @@ export async function applyFixedSettingsToValues(
 
 
 
-  // â”€â”€ Website settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Website settings ────────────────────────────────────────────────────────
   const webCfg = settings.website
   if (webCfg) {
     if (values.active !== undefined && (webCfg.published === 'always_published' || webCfg.published === 'from_platform')) {
@@ -2344,7 +2344,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Accounting settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Accounting settings ─────────────────────────────────────────────────────
   const acctCfg = settings.accounting
   if (acctCfg) {
     if (odooModel === 'product.category') {
@@ -2377,7 +2377,7 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // â”€â”€ Inventory Valuation settings (product.category) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Inventory Valuation settings (product.category) ─────────────────────────
   const invValCfg = settings.inventory_valuation
   if (invValCfg && odooModel === 'product.category') {
     if (invValCfg.property_cost_method) {
@@ -2391,7 +2391,7 @@ export async function applyFixedSettingsToValues(
   return values
 }
 
-// â”€â”€â”€ Helper: safe Odoo create with field-level error fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: safe Odoo create with field-level error fallback ──────────────────
 async function safeCreateOdooRecord(
   client: OdooClient,
   model: string,
@@ -2449,7 +2449,7 @@ async function safeCreateOdooRecord(
   }
 }
 
-// â”€â”€â”€ Helper: safe Odoo write with field-level error fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: safe Odoo write with field-level error fallback ──────────────────
 async function safeWriteOdooRecord(
   client: OdooClient,
   model: string,
@@ -2508,7 +2508,7 @@ async function safeWriteOdooRecord(
   }
 }
 
-// â”€â”€â”€ Helper: evaluate a single condition against zidData â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: evaluate a single condition against zidData ───────────────────────
 function evaluateCondition(
   field: string | undefined,
   op: string | undefined,
@@ -2529,7 +2529,7 @@ function evaluateCondition(
   }
 }
 
-// â”€â”€â”€ Helper: resolve platform order status â†’ Odoo state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: resolve platform order status → Odoo state ──────────────────────
 // Uses DB order_status_mappings table; falls back to defaults from settings.
 async function resolveOrderState(
   workspaceId: string,
@@ -2733,7 +2733,7 @@ async function maybeApplyOrderStatusAction(
   }
 }
 
-// â”€â”€â”€ Helper: extract fulfilled items from platform payload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: extract fulfilled items from platform payload ───────────────────
 function extractFulfilledItems(zidData: Record<string, unknown>): Array<{ sku: string; qty: number }> {
   // Try multiple common payload structures for fulfillment items
   const candidates = ['fulfilled_items', 'items', 'line_items', 'order_items', 'fulfillments']
@@ -2764,7 +2764,7 @@ function extractFulfilledItems(zidData: Record<string, unknown>): Array<{ sku: s
   return []
 }
 
-// â”€â”€â”€ Helper: process partial delivery in Odoo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: process partial delivery in Odoo ────────────────────────────────
 async function processPartialDelivery(
   client: OdooClient,
   odooModel: string,
@@ -2882,7 +2882,7 @@ async function processFullDelivery(client: OdooClient, odooModel: string, orderI
   }
 }
 
-// â”€â”€â”€ Helper: resolve platform payment method â†’ Odoo journal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: resolve platform payment method → Odoo journal ─────────────────
 async function resolvePaymentMethod(
   workspaceId: string,
   zidMethod: string,
@@ -2902,7 +2902,7 @@ async function resolvePaymentMethod(
   }
 }
 
-// â”€â”€â”€ Helper: resolve platform shipping method â†’ Odoo carrier â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: resolve platform shipping method → Odoo carrier ────────────────
 async function resolveShippingCarrier(
   workspaceId: string,
   zidMethodName: string,
@@ -3038,7 +3038,7 @@ async function resolveWarehouse(
   return null
 }
 
-// â”€â”€â”€ Helper: apply conditional rules and currency conversion from DB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: apply conditional rules and currency conversion from DB ──────────
 export async function applyRulesToValues(
   odooValues: Record<string, unknown>,
   workspaceId: string,
@@ -3099,7 +3099,7 @@ export async function applyRulesToValues(
   return values
 }
 
-// â”€â”€â”€ Helper: build the Odoo values dict from Zid data + field meta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Helper: build the Odoo values dict from Zid data + field meta ────────────
 
 export async function buildOdooValues(
   client: OdooClient,
@@ -3143,7 +3143,7 @@ export async function buildOdooValues(
     const ttype = meta?.ttype ?? ''
     const relation = meta?.relation ?? ''
 
-    // â”€â”€ Many2one: needs an integer record ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Many2one: needs an integer record ID ──────────────────────────────────
     if (ttype === 'many2one' && relation) {
       if (hasStaticValue) {
         const id = Number(Array.isArray(rawValue) ? rawValue[0] : rawValue)
@@ -3172,7 +3172,7 @@ export async function buildOdooValues(
       continue
     }
 
-    // â”€â”€ Many2many / One2many: needs [(6, 0, [ids])] syntax â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Many2many / One2many: needs [(6, 0, [ids])] syntax ────────────────────
     if ((ttype === 'many2many' || ttype === 'one2many') && relation) {
       const items = Array.isArray(rawValue) ? rawValue : [rawValue]
       const ids: number[] = []
@@ -3191,23 +3191,23 @@ export async function buildOdooValues(
       if (ids.length > 0) {
         values[item.erpField] = [[6, 0, ids]]
       } else {
-        console.warn(`[SyncEngine] Skipping "${item.erpField}" â€” no IDs resolved`)
+        console.warn(`[SyncEngine] Skipping "${item.erpField}" — no IDs resolved`)
       }
       continue
     }
 
-    // â”€â”€ Binary fields: Odoo expects base64 encoded data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Binary fields: Odoo expects base64 encoded data ────────────────────────
     if (ttype === 'binary') {
       const base64Data = await resolveBinaryField(rawValue)
       if (base64Data) {
         values[item.erpField] = base64Data
       } else {
-        console.warn(`[SyncEngine] Skipping binary field "${item.erpField}" â€” could not resolve. rawValue type=${typeof rawValue} isArray=${Array.isArray(rawValue)} value=${JSON.stringify(rawValue).slice(0, 300)}`)
+        console.warn(`[SyncEngine] Skipping binary field "${item.erpField}" — could not resolve. rawValue type=${typeof rawValue} isArray=${Array.isArray(rawValue)} value=${JSON.stringify(rawValue).slice(0, 300)}`)
       }
       continue
     }
 
-    // â”€â”€ Numeric fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Numeric fields ─────────────────────────────────────────────────────────
     let value: unknown = rawValue
     if (ttype === 'boolean' && typeof value === 'string') {
       value = value === 'true'
@@ -3215,7 +3215,7 @@ export async function buildOdooValues(
       value = value === 'true' || value === '1' || value === 'yes'
     }
 
-    // Zid may send weight / cost as { value: 0, unit: "kg" } â€” extract the number
+    // Zid may send weight / cost as { value: 0, unit: "kg" } — extract the number
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       const obj = value as Record<string, unknown>
       if ('value' in obj || 'weight' in obj) {
@@ -3238,12 +3238,12 @@ export async function buildOdooValues(
       if (!isNaN(parsed)) value = parsed
     }
 
-    // â”€â”€ Arrays â†’ comma-separated string for plain text fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Arrays → comma-separated string for plain text fields ─────────────────
     if (Array.isArray(value)) {
       value = value.map(toNameString).join(', ')
     }
 
-    // â”€â”€ Flatten language objects for char/text fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Flatten language objects for char/text fields ───────────────────────────
     // Zid/Salla may send name/description as {ar: '...', en: '...'}.
     // Odoo plain fields expect a string, not a language dict.
     // We flatten here so the fallback values in safeCreateOdooRecord are also clean.
@@ -3260,7 +3260,7 @@ export async function buildOdooValues(
   return values
 }
 
-// â”€â”€â”€ Event normalization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Event normalization ──────────────────────────────────────────────────────
 // Zid sometimes sends 'product.created' while field_mappings stores 'product.create'.
 
 const EVENT_ALIASES: Record<string, string> = {
@@ -3419,7 +3419,7 @@ async function isEntityOperationAllowed(
   return { allowed: true }
 }
 
-// â”€â”€â”€ Main entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Main entry point ─────────────────────────────────────────────────────────
 
 /**
  * Called from the webhook handler for every incoming Zid event.
@@ -3679,7 +3679,7 @@ export async function processWebhookEvent(
     return direction.split(',').map((s: string) => s.trim()).includes('store_to_erp')
   })
 
-  // â”€â”€ 1a. Fixed Mapping as FALLBACK (only when no field_mappings exist) â”€â”€â”€â”€
+  // ── 1a. Fixed Mapping as FALLBACK (only when no field_mappings exist) ────
   // This prevents duplicate writes: if the user has custom field mappings,
   // those take priority over the preset. The preset only runs as a default
   // when the user hasn't created any field_mapping for this event.
@@ -3774,7 +3774,7 @@ export async function processWebhookEvent(
   return result
 }
 
-// â”€â”€â”€ Fixed Mapping fallback: runs independently when no field_mapping matches â”€â”€
+// ─── Fixed Mapping fallback: runs independently when no field_mapping matches ──
 // Also runs BEFORE field_mappings so Fixed Mapping values are sent to Odoo first.
 async function processFixedMappingFallback(
   presetKey: string,
@@ -5597,7 +5597,7 @@ async function executeOdooOperation(params: {
     platformHint,
   } = params
 
-  // â”€â”€â”€ Merge settings for the Odoo model (product.template, res.partner, sale.order, product.category) â”€â”€
+  // ─── Merge settings for the Odoo model (product.template, res.partner, sale.order, product.category) ──
   let mergedSettings: Record<string, any> = {}
   let effectiveOdooValues = odooValues
   const inlineSettings: Record<string, any> = (mapping.mappings as any)?.['__settings'] ?? {}
@@ -5945,7 +5945,7 @@ async function executeOdooOperation(params: {
     effectiveOdooValues = injectCustomerCompanyFields(effectiveOdooValues, zidData)
   }
 
-  // â”€â”€ Order-specific settings (sale.order) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Order-specific settings (sale.order) ──────────────────────────────────
   if (odooModel === 'sale.order' && (odooOperation === 'create' || odooOperation === 'update')) {
     const platform = (platformHint || getPlatformFromEvent(event)) as 'zid' | 'salla' | 'shopify'
     const majorVersion = await client.getMajorVersion().catch(() => 17)
@@ -6344,7 +6344,7 @@ async function executeOdooOperation(params: {
     }
 
     if (orderSettings) {
-      // Resolve payment method â†’ Odoo journal from DB mapping
+      // Resolve payment method → Odoo journal from DB mapping
       const zidPaymentMethod = (zidData as any)?.payment_method?.title
         || (zidData as any)?.payment_gateway?.title
         || (zidData as any)?.payment_method
@@ -6356,7 +6356,7 @@ async function executeOdooOperation(params: {
           if (pm.payment_method_id) effectiveOdooValues.x_payment_method_id = pm.payment_method_id
         }
       }
-      // Resolve shipping method â†’ Odoo carrier from DB mapping
+      // Resolve shipping method → Odoo carrier from DB mapping
       const zidShippingMethod = (zidData as any)?.shipping_method?.title
         || (zidData as any)?.shipping?.title
         || (zidData as any)?.shipping_method
@@ -6555,7 +6555,7 @@ async function executeOdooOperation(params: {
     delete (odooValues as any).location_id
   }
 
-  // â”€â”€ Cancel operation (sale.order only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Cancel operation (sale.order only) ────────────────────────────────────────
   if (odooOperation === 'cancel') {
     const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     if (existingId === null) {
@@ -6577,7 +6577,7 @@ async function executeOdooOperation(params: {
     }
   }
 
-  // â”€â”€ Deliver operation (sale.order only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Deliver operation (sale.order only) ────────────────────────────────────
   if (odooOperation === 'deliver') {
     const existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     if (existingId === null) {
@@ -6812,7 +6812,7 @@ async function executeOdooOperation(params: {
       const ok = await client.write(odooModel, [existingId], effectiveOdooValues)
       if (!ok) throw new Error(`Odoo write returned false`)
       fallbacksExecuted.push('run_map')
-      console.info(`[SyncEngine] âœ… Fallback mapping executed successfully for Odoo ${odooModel} #${existingId}`)
+      console.info(`[SyncEngine] ✅ Fallback mapping executed successfully for Odoo ${odooModel} #${existingId}`)
     } catch (err: any) {
       console.error(`[SyncEngine] Fallback mapping failed for Odoo ${odooModel} #${existingId}:`, err?.message || err)
     }
@@ -6899,7 +6899,7 @@ export async function findExistingOdooRecord(
   const zidId = toNameString(zidData.id || zidData.customer_id || zidData.product_id || zidData.category_id || zidData.category_uuid || odooValues.x_zid_id || odooValues.zid_id || odooValues.x_zid_id_categ)
   const numericId = Number(odooValues.id || zidData.odoo_id || zidData.odoo_record_id)
 
-  // Build candidates â€” highest priority first
+  // Build candidates — highest priority first
   const candidates: unknown[][] = []
 
   // 0) Priority check: If this entity was already synced, check sync_logs first.

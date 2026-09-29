@@ -217,7 +217,7 @@ async function resolveSingleErpNextRelationName(
     // Fetch target relation fields meta to verify field existence
     const relationFields = await fetchErpNextFieldMeta(client, relation)
 
-    // â”€â”€â”€ Case 1: Search by Platform ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 1: Search by Platform ID ───────────────────────────────────────
     if (platformId) {
       let searchField: string | null = null
       // ERPNext is Zid/Salla only — no shopify branch exists in this file.
@@ -233,17 +233,17 @@ async function resolveSingleErpNextRelationName(
       if (searchField) {
         const names = await client.search(relation, [[searchField, '=', platformId]])
         if (names && names.length > 0) {
-          console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by platform ID "${platformId}" â†’ "${names[0]}"`)
+          console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by platform ID "${platformId}" → "${names[0]}"`)
           return names[0]
         }
       }
     }
 
-    // â”€â”€â”€ Case 2: Search by Name inside ERPNext â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 2: Search by Name inside ERPNext ────────────────────────────────
     if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined') {
       const names = await client.search(relation, [['name', '=', nameVal]])
       if (names && names.length > 0) {
-        console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by name="${nameVal}" â†’ "${names[0]}"`)
+        console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by name="${nameVal}" → "${names[0]}"`)
         return names[0]
       }
 
@@ -253,7 +253,7 @@ async function resolveSingleErpNextRelationName(
       }
     }
 
-    // â”€â”€â”€ Case 3: Create it if not found â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─── Case 3: Create it if not found ──────────────────────────────────────
     const systemDocTypes = ['currency', 'uom', 'company', 'warehouse', 'payment_term', 'price_list']
     if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined' && !systemDocTypes.includes(relation.toLowerCase())) {
       console.info(`[SyncEngine] Creating new ERPNext "${relation}" with name="${nameVal}"`)
@@ -300,7 +300,7 @@ async function resolveSingleErpNextRelationName(
       try {
         const newName = await client.create(relation, createData)
         if (newName) {
-          console.info(`[SyncEngine] Successfully created ERPNext relation "${relation}" â†’ "${newName}"`)
+          console.info(`[SyncEngine] Successfully created ERPNext relation "${relation}" → "${newName}"`)
           return newName
         }
       } catch (createErr: any) {
@@ -354,7 +354,7 @@ export async function buildErpNextValues(
         values[item.erpField] = resolvedName
       } else {
         const nameStr = toNameString(singleValue)
-        console.warn(`[SyncEngine] Skipping ERPNext "${item.erpField}" â€” could not resolve "${nameStr}" in ${relation}`)
+        console.warn(`[SyncEngine] Skipping ERPNext "${item.erpField}" — could not resolve "${nameStr}" in ${relation}`)
       }
       continue
     }
@@ -573,7 +573,7 @@ export async function executeErpNextOperation(params: {
     }
 
     const newName = await client.create(docType, values)
-    console.info(`[SyncEngine] âœ… Created ${docType} "${newName}" in ERPNext (zid_id="${zidEntityId}")`)
+    console.info(`[SyncEngine] ✅ Created ${docType} "${newName}" in ERPNext (zid_id="${zidEntityId}")`)
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: newName, status: 'success', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Created record: ${newName}` }
   }
@@ -589,14 +589,14 @@ export async function executeErpNextOperation(params: {
   if (operation === 'update') {
     const ok = await client.update(docType, existingId, values)
     if (!ok) throw new Error(`ERPNext update returned false for ${docType} "${existingId}"`)
-    console.info(`[SyncEngine] âœ… Updated ${docType} "${existingId}" in ERPNext (zid_id="${zidEntityId}")`)
+    console.info(`[SyncEngine] ✅ Updated ${docType} "${existingId}" in ERPNext (zid_id="${zidEntityId}")`)
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Updated record: ${existingId}` }
   }
 
   const ok = await client.delete(docType, existingId)
   if (!ok) throw new Error(`ERPNext delete returned false for ${docType} "${existingId}"`)
-  console.info(`[SyncEngine] âœ… Deleted ${docType} "${existingId}" from ERPNext (zid_id="${zidEntityId}")`)
+  console.info(`[SyncEngine] ✅ Deleted ${docType} "${existingId}" from ERPNext (zid_id="${zidEntityId}")`)
   await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
   return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Deleted record: ${existingId}` }
 }
