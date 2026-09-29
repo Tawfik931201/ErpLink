@@ -143,25 +143,6 @@ export async function saveTokens(
   return tokens
 }
 
-export async function exchangeAuthorizationCode(
-  code: string,
-  key = DEFAULT_TOKEN_KEY
-): Promise<StoredZidTokens> {
-  const { tokens } = await exchangeAuthorizationCodeWithResponse(code, key)
-
-  return tokens
-}
-
-export async function exchangeAuthorizationCodeWithResponse(
-  code: string,
-  key = DEFAULT_TOKEN_KEY
-): Promise<{ rawResponse: AccessTokenResponse; tokens: StoredZidTokens }> {
-  const payload = await exchangeAuthorizationCodeForResponse(code)
-  const tokens = await saveTokens(payload, key)
-
-  return { rawResponse: payload, tokens }
-}
-
 export async function exchangeAuthorizationCodeForResponse(
   code: string
 ): Promise<AccessTokenResponse> {

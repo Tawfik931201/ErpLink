@@ -631,24 +631,4 @@ export async function recoverZidBrokenWebhooks(merchantId: string) {
   }
 }
 
-/**
- * خيارات الشحن/الدفع من زد لملء خرائط المطابقة تلقائياً (P2 أساس).
- * آمن: يعيد قوائم فارغة عند الفشل — واجهة المطابقة تبقى تعمل بالقيم اليدوية.
- */
-export async function getZidStoreMeta(merchantId: string) {
-  try {
-    const { ZidAPI, creds } = await getZidCredsForOwnedMerchant(merchantId)
-    const [deliveryOptions, paymentMethods] = await Promise.all([
-      ZidAPI.storeMeta.deliveryOptions(creds),
-      ZidAPI.storeMeta.paymentMethods(creds),
-    ])
-    return { success: true, deliveryOptions, paymentMethods }
-  } catch (error: any) {
-    console.error('[Zid] storeMeta failed:', error?.message || error)
-    return { success: false, deliveryOptions: [], paymentMethods: [], error: error?.message || 'Failed' }
-  }
-}
-
-
-
 

@@ -18,7 +18,7 @@ import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWork
 import SubscriptionStatusCard from '@/components/subscription/SubscriptionStatusCard'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { resolveLanguage, translations, type Language } from '@/lib/translations'
+import { resolveLanguage, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import { SyncAreaChart, EventPieChart } from './dashboard-client'

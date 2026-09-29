@@ -61,12 +61,51 @@
 # Type-check the whole project
 npm run type-check
 
-# Lint
+# Lint — clean (0 errors) as of 2026-09-29
 npm run lint
+
+# Production build — also a gate
+npm run build
 
 # Dev server
 npm run dev
 ```
+
+## Safe Cleanup (2026-09-29)
+
+Checkpoint commit `1fd73c6` ("chore: checkpoint before safe cleanup") holds the
+pre-cleanup state. Everything after it is behaviour-preserving.
+
+**Removed dead code** (verified unused by grep across `src` before deleting):
+`getZidStoreMeta`, `ZidAPI.storeMeta.deliveryOptions` / `.paymentMethods`,
+`getOdooCategories`, `searchOdooAccounts`, `searchOdooJournals`,
+`getFieldMappingById`, `getUrlLocaleFromPathname`,
+`exchangeAuthorizationCode`, `exchangeAuthorizationCodeWithResponse`.
+Kept on purpose: `exchangeAuthorizationCodeForResponse` + `saveTokens` (the Zid
+callback uses them), `ZidAPI.storeMeta.orderStatuses`, `stopSyncQueueRunner`,
+`stopTelegramPoller`, `botTokenFingerprint`.
+
+**Also removed**: the dead `workspace` / `bell` / `partner` entries in
+`sidebar-nav.tsx`'s `ICON_MAP`, the `RawOdooField` type in `field-mapping-client.tsx`,
+~12 unused destructured bindings in `odoo.ts`, the `type Language` imports in
+three layouts, and the empty dirs `mapping-center/standard/`,
+`api/webhooks/zid/stream/`, `components/admin/`.
+
+**Lint is now 0 errors** (was 50 — CI was already red before this cleanup, so
+`.gitlab-ci.yml`'s lint stage was failing on `main`). If you introduce an
+`unused`/`import order` error, CI turns red again. Unused deps dropped:
+`@hookform/resolvers`, `@radix-ui/react-{dropdown-menu,scroll-area,switch,tabs}`,
+`immer`, `react-hook-form`, `husky`. Jest/Testing Library were **kept** — no test
+files exist yet, but the split below needs them.
+
+**Routing fix**: nine more `/dashboard` → `/app/dashboard` links corrected in the
+admin pages, `invoice/[id]`, `SetupWizard`, the impersonate route, and the
+sign-in/sign-up Clerk props. `LEGACY_ROUTE_MAP` in `src/middleware.ts` is
+deliberately kept for old external links.
+
+**Platform code split is planned but NOT started** — see
+`docs/platform-code-split-plan.md`. The unified `/app/connect-store` UI stays
+as-is; only the code layer gets split per platform, and only after tests exist.
 
 ## Data Model
 

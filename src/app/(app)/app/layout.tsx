@@ -12,7 +12,7 @@ import SubscriptionBanner from '@/components/subscription/SubscriptionBanner'
 import { Logo } from '@/components/ui/logo'
 import UserMenu from '@/components/user-menu'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
-import { resolveLanguage, translations, type Language } from '@/lib/translations'
+import { resolveLanguage, translations } from '@/lib/translations'
 
 export const metadata: Metadata = {
   title: 'لوحة التحكم',

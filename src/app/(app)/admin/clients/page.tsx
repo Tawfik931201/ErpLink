@@ -11,7 +11,7 @@ export const metadata = { title: 'Clients — Admin' }
 
 export default async function AdminClientsPage() {
   const userId = await getActiveUserId()
-  if (!userId || !isAdmin(userId)) redirect('/dashboard')
+  if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
   const cookieStore = cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)

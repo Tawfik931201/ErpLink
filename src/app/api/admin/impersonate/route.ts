@@ -8,7 +8,7 @@ import { isAdmin } from '@/lib/auth'
 /**
  * API route to start user impersonation.
  * GET shows a confirmation page (mitigates CSRF via <img> tags).
- * POST sets the impersonation cookie and redirects to /dashboard.
+ * POST sets the impersonation cookie and redirects to /app/dashboard.
  */
 export async function GET(request: NextRequest) {
   const { userId: realUserId } = await auth()
@@ -100,5 +100,5 @@ export async function POST(request: NextRequest) {
   })
 
   const baseUrl = new URL(request.url).origin
-  return NextResponse.redirect(`${baseUrl}/dashboard`, 303)
+  return NextResponse.redirect(`${baseUrl}/app/dashboard`, 303)
 }

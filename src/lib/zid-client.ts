@@ -660,40 +660,6 @@ export const ZidAPI = {
   // ── Store metadata (auto-fill mapping dropdowns) ─────────────────────────
   storeMeta: {
     /**
-     * GET delivery options — used to auto-fill shipping-method maps in the UI
-     * instead of hardcoding method codes. Returns [] on failure (non-fatal).
-     */
-    deliveryOptions: async (creds: ZidCredentials): Promise<any[]> => {
-      try {
-        const res = await zidClient.get('/v1/managers/store/delivery-options', {
-          headers: buildZidHeaders(creds),
-        })
-        const data = res.data?.data ?? res.data?.results ?? res.data ?? []
-        return Array.isArray(data) ? data : []
-      } catch (err: any) {
-        console.warn('[ZidAPI] delivery-options fetch failed (non-fatal):', err?.response?.data || err?.message)
-        return []
-      }
-    },
-
-    /**
-     * GET payment methods — used to auto-fill payment-method maps in the UI.
-     * Returns [] on failure (non-fatal).
-     */
-    paymentMethods: async (creds: ZidCredentials): Promise<any[]> => {
-      try {
-        const res = await zidClient.get('/v1/managers/store/payment-methods', {
-          headers: buildZidHeaders(creds),
-        })
-        const data = res.data?.data ?? res.data?.results ?? res.data ?? []
-        return Array.isArray(data) ? data : []
-      } catch (err: any) {
-        console.warn('[ZidAPI] payment-methods fetch failed (non-fatal):', err?.response?.data || err?.message)
-        return []
-      }
-    },
-
-    /**
      * GET order custom statuses — returns main statuses with optional sub-statuses.
      * Returns [] on failure (non-fatal).
      */

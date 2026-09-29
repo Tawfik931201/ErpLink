@@ -20,14 +20,6 @@ export function getUrlLocaleFromLanguage(lang: string): string {
   return LANG_TO_URL_LOCALE[lang] || DEFAULT_URL_LOCALE
 }
 
-export function getUrlLocaleFromPathname(pathname: string): string | null {
-  const parts = pathname.split('/').filter(Boolean)
-  if (parts.length > 0 && SUPPORTED_URL_LOCALES.includes(parts[0].toLowerCase())) {
-    return parts[0].toLowerCase()
-  }
-  return null
-}
-
 export function stripLocaleFromPathname(pathname: string): string {
   const parts = pathname.split('/').filter(Boolean)
   if (parts.length > 0 && SUPPORTED_URL_LOCALES.includes(parts[0].toLowerCase())) {

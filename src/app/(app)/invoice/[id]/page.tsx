@@ -16,7 +16,7 @@ export default async function InvoicePage({ params }: Props) {
   const res = await getSubscriptionForInvoice(params.id)
 
   if (!res.success || !res.subscription) {
-    redirect('/dashboard')
+    redirect('/app/dashboard')
   }
 
   return <InvoiceClient subscription={res.subscription} />

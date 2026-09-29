@@ -61,12 +61,12 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { ZID_EVENTS, SALLA_EVENTS, SHOPIFY_EVENTS, ZID_FIELDS, SALLA_FIELDS, SHOPIFY_FIELDS } from '@/lib/mapping-constants'
+import { toOdooFieldOption, type OdooFieldOption } from '@/lib/odoo-field-options'
 import {
   DEFAULT_ZID_ORDER_STATUSES,
   type ZidStatusOption,
 } from '@/lib/order-custom-status-constants'
 import { formatFieldLabel } from '@/lib/translations'
-import { toOdooFieldOption, type OdooFieldOption } from '@/lib/odoo-field-options'
 import { cn } from '@/lib/utils'
 
 import AddCustomFieldForm from './add-custom-field-form'
@@ -89,8 +89,6 @@ interface FieldMappingClientProps {
   shopifyStoreName?: string | null
   initialSubTab?: 'categories' | 'products' | 'customers' | 'orders'
 }
-
-type RawOdooField = { value: string; label?: string; desc?: string }
 
 /**
  * Loads the field list for one Odoo model into `setFields`, tracking its own

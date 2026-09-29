@@ -5,7 +5,7 @@
  * كانت المواضيع مبعثرة في 4 أماكن تخرج عن المزامنة بسهولة:
  *   1. shopify.app.toml [webhooks.subscriptions] (تثبيت CLI)
  *   2. src/lib/shopify-client.ts SHOPIFY_CORE_TOPICS (تسجيل تلقائي عند OAuth)
- *   3. src/app/(app)/dashboard/connect-store/shopify-sync-settings.tsx (مفاتيح UI)
+ *   3. src/app/(app)/app/connect-store/shopify-sync-settings.tsx (مفاتيح UI)
  *   4. src/lib/mapping-constants.ts SHOPIFY_EVENTS (مركز المطابقة)
  * أي موضوع يُضاف هنا يجب إضافته في الأماكن الأربعة أعلاه.
  * هذا الملف هو المرجع — استورده بدل تكرار القوائم يدوياً حيث أمكن.

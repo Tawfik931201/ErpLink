@@ -206,7 +206,7 @@ export default function SetupWizard({
           </Button>
           {allDone && (
             <Button asChild size="sm" className="rounded-lg h-8 text-[11px] gap-1.5">
-              <Link href="/dashboard/initial-transfer">
+              <Link href="/app/initial-transfer">
                 <Zap className="h-3 w-3" />
                 {t('setup.syncNow')}
               </Link>

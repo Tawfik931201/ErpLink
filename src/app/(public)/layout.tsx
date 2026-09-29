@@ -1,8 +1,7 @@
 import { cookies } from 'next/headers'
 
 import { LanguageProvider } from '@/components/language-provider'
-import { resolveLanguage, type Language } from '@/lib/translations'
-
+import { resolveLanguage } from '@/lib/translations'
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies()

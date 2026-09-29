@@ -26,7 +26,7 @@ export default async function AdminClientStatementPage({
   params: { userId: string }
 }) {
   const userId = await getActiveUserId()
-  if (!userId || !isAdmin(userId)) redirect('/dashboard')
+  if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
   const cookieStore = cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)

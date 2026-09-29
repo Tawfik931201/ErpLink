@@ -415,7 +415,7 @@ export async function disconnectErpConnection(connectionId: string) {
 }
 
 async function fetchModelsRaw(connection: any) {
-  const { url, db_name, username, password, erp_type } = connection
+  const { url, username, password, erp_type } = connection
   const decryptedPassword = decrypt(password)
 
   if (erp_type === 'erpnext') {
@@ -494,7 +494,7 @@ export async function getOdooModels() {
 }
 
 async function fetchModelFieldsRaw(connection: any, modelName: string) {
-  const { url, db_name, username, password, erp_type } = connection
+  const { url, username, password, erp_type } = connection
   const decryptedPassword = decrypt(password)
 
   if (erp_type === 'erpnext') {
@@ -722,7 +722,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
 
     const cacheKey = `odoo:options:${connRes.connection.id}:${modelName}:${fieldName}`
     const result = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const { url, db_name, username, password, erp_type } = connRes.connection
+      const { url, username, password, erp_type } = connRes.connection
       const decryptedPassword = decrypt(password)
 
       if (erp_type === 'erpnext') {
@@ -943,7 +943,6 @@ export async function getOdooWarehouses(force = false): Promise<{
     const cacheKey = `odoo:warehouses:${connRes.connection.id}`
     if (force) ttlCache.delete(cacheKey)
     const warehouses = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const { url, db_name, username, password } = connRes.connection
       const client = createOdooClient(connRes.connection)
 
       const records = await client.execute<Array<{ id: number; name: string; code: string }>>(
@@ -991,7 +990,6 @@ export async function getOdooTaxes(force = false): Promise<{
     if (force) ttlCache.delete(cacheKey)
 
     const taxes = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const { url, db_name, username, password } = connRes.connection
       const client = createOdooClient(connRes.connection)
 
       let records: Array<{ id: number; name: string; amount?: number; type_tax_use?: string }> = []
@@ -1066,7 +1064,6 @@ export async function getOdooLocations(usage?: string, force = false): Promise<{
     const cacheKey = `odoo:locations:${connRes.connection.id}:${usageKey}`
     if (force) ttlCache.delete(cacheKey)
     const locations = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const { url, db_name, username, password } = connRes.connection
       const client = createOdooClient(connRes.connection)
 
       const domain: any[][] = []
@@ -1097,50 +1094,6 @@ export async function getOdooLocations(usage?: string, force = false): Promise<{
 }
 
 /**
- * Fetch product categories (product.category) from Odoo
- */
-export async function getOdooCategories(): Promise<{
-  success: boolean
-  categories?: Array<{ id: number; name: string; parent_id: [number, string] | false; complete_name: string }>
-  error?: string
-}> {
-  try {
-    const connRes = await getActiveWorkspaceErpConnection()
-    if (!connRes.success || !connRes.connection) {
-      return { success: false, error: 'ERP connection not found' }
-    }
-
-    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
-      return { success: true, categories: [] }
-    }
-
-    const categories = await ttlCache.get(`odoo:categories:${connRes.connection.id}`, TTL_OPTIONS_MS, async () => {
-      const { url, db_name, username, password } = connRes.connection
-      const client = createOdooClient(connRes.connection)
-
-      const records = await client.execute<Array<{ id: number; name: string; parent_id: [number, string] | false; complete_name: string }>>(
-        'product.category',
-        'search_read',
-        [[]],
-        { fields: ['id', 'name', 'parent_id', 'complete_name'], order: 'complete_name asc' }
-      )
-
-      return records.map(c => ({
-        id: c.id,
-        name: c.name,
-        parent_id: c.parent_id,
-        complete_name: c.complete_name || c.name,
-      }))
-    })
-
-    return { success: true, categories }
-  } catch (error: any) {
-    console.error('[Odoo Action] getOdooCategories failed:', error)
-    return { success: false, error: error.message || 'Failed to fetch categories' }
-  }
-}
-
-/**
  * Dry-run: Test a relation's smart match configuration without writing any data to Odoo.
  * Returns which phase would succeed and what would happen.
  */
@@ -1160,7 +1113,6 @@ export async function dryRunMatch(args: {
       return { success: false, error: 'ERP connection not found', phase: 'error' }
     }
 
-    const { url, db_name, username, password } = connRes.connection
     const client = createOdooClient(connRes.connection)
 
     await client.authenticate()
@@ -1217,7 +1169,7 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
+    const { erp_type } = connRes.connection
     if (erp_type && erp_type !== 'odoo') {
       return { success: true, options: [] }
     }
@@ -1273,82 +1225,6 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
   }
 }
 
-export async function searchOdooAccounts(searchTerm: string = '', accountType?: string) {
-  try {
-    const connRes = await getActiveWorkspaceErpConnection()
-    if (!connRes.success || !connRes.connection) {
-      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
-    }
-
-    const { url, db_name, username, password, erp_type } = connRes.connection
-    if (erp_type && erp_type !== 'odoo') {
-      return { success: true, options: [] }
-    }
-
-    const client = createOdooClient(connRes.connection)
-
-    const domain: any[] = []
-    if (accountType) {
-      domain.push(['account_type', '=', accountType])
-    }
-
-    const records = await client.execute<Array<[number, string]>>(
-      'account.account',
-      'name_search',
-      [searchTerm, domain, 'ilike', 300]
-    )
-
-    return {
-      success: true,
-      options: records.map(([id, label]) => ({
-        value: String(id),
-        label: label || String(id),
-      })),
-    }
-  } catch (error: any) {
-    console.error(`[Odoo Action] searchOdooAccounts failed:`, error)
-    return { success: false, error: error.message || 'Failed to search accounts', options: [] }
-  }
-}
-
-export async function searchOdooJournals(searchTerm: string = '', journalType?: string) {
-  try {
-    const connRes = await getActiveWorkspaceErpConnection()
-    if (!connRes.success || !connRes.connection) {
-      return { success: false, error: 'ERP connection not found or inactive.', options: [] }
-    }
-
-    const { url, db_name, username, password, erp_type } = connRes.connection
-    if (erp_type && erp_type !== 'odoo') {
-      return { success: true, options: [] }
-    }
-
-    const client = createOdooClient(connRes.connection)
-
-    const domain: any[] = []
-    if (journalType) {
-      domain.push(['type', '=', journalType])
-    }
-
-    const records = await client.execute<Array<[number, string]>>(
-      'account.journal',
-      'name_search',
-      [searchTerm, domain, 'ilike', 300]
-    )
-
-    return {
-      success: true,
-      options: records.map(([id, label]) => ({
-        value: String(id),
-        label: label || String(id),
-      })),
-    }
-  } catch (error: any) {
-    console.error(`[Odoo Action] searchOdooJournals failed:`, error)
-    return { success: false, error: error.message || 'Failed to search journals', options: [] }
-  }
-}
-
 export async function searchOdooCategories(searchTerm: string = '') {
   try {
     const connRes = await getActiveWorkspaceErpConnection()
@@ -1356,7 +1232,7 @@ export async function searchOdooCategories(searchTerm: string = '') {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
+    const { erp_type } = connRes.connection
     if (erp_type && erp_type !== 'odoo') {
       return { success: true, options: [] }
     }
@@ -1389,7 +1265,7 @@ export async function searchOdooProducts(searchTerm: string = '') {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
+    const { erp_type } = connRes.connection
     if (erp_type && erp_type !== 'odoo') {
       return { success: true, options: [] }
     }
@@ -1426,7 +1302,7 @@ export async function getOdooCustomers(force = false): Promise<{
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
+    const { url, username, password, erp_type } = connRes.connection
     if (erp_type === 'erpnext') {
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
@@ -1512,7 +1388,7 @@ export async function getOdooProducts(force = false): Promise<{
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
 
-    const { url, db_name, username, password, erp_type } = connRes.connection
+    const { url, username, password, erp_type } = connRes.connection
     if (erp_type === 'erpnext') {
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
