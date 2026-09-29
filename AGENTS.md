@@ -122,10 +122,54 @@ remainder all need a framework major upgrade:
 
 | Package | Now | Needs | Real risk here |
 |---|---|---|---|
-| `next` | 14.2.35 | 16.3.7 | Medium — mostly DoS; the RCE is Windows-only (host is Linux) |
+| `next` | 14.2.35 | 15.5.24+ (16.3.3+) | **One critical RCE — mitigated, see below**; the rest is DoS/cache |
 | `@clerk/nextjs` | 5.7.6 (latest stable v5) | 6.39.3+ | **None reachable — see below** |
 | `postcss` | 8.4.31 (nested in Next) | — | Low — build-time only |
 | `glob` | — | via eslint-config-next 16 | Low — lint tool only |
+
+### The one Critical that did apply: AVIF RCE (mitigated 2026-09-29)
+
+Of the 30 distinct advisories npm reports, almost none are reachable. One is,
+and it is not hypothetical.
+
+**GHSA-2xp9-vwfh-vxw4 — "Unauthenticated Remote Code Execution in Image
+Optimization API when AVIF files are used"** — Critical, **CVSS 9.5**,
+`PR:N` (no privileges) and `UI:N` (no user interaction). Root cause is a flaw
+in the `libheif` library inside `sharp`, triggered whenever an AVIF file is
+optimised. Affected `>=10.0.0 <15.5.24`; patched `15.5.24` / `16.3.3`.
+
+It was reachable in this app on all three counts:
+
+1. `next.config.js` had `formats: ['image/avif', 'image/webp']` — AVIF on.
+2. `src/middleware.ts` excludes `_next/image` from the Clerk matcher, so the
+   optimiser endpoint is **public** — no session, no account needed.
+3. `src/components/ui/logo.tsx` uses `next/image`, so the endpoint is live.
+
+**Mitigation applied:** `formats: ['image/webp']`. This is the advisory's own
+interim guidance. Cost is negligible — `next/image` is used in exactly one
+place in the whole app, so only the logo changes format.
+
+> ⚠️ **Never re-add `'image/avif'` while next is 14.x.** Re-enable it only when
+> `next >= 15.5.24`. The same applies to any new `next/image` usage: the
+> endpoint is unauthenticated by design, so it is public attack surface.
+
+### Not reachable despite high/CVSS scores — do not chase these
+
+- **RCE on Windows-hosted servers** (CVSS 9.0) — host is Linux.
+- **SSRF in WebSocket upgrades** (8.6) — no WebSockets in the app.
+- **Middleware bypass in Pages Router with i18n** — this is App Router.
+- **SSRF in Server Actions on custom servers** — `start` is plain `next start`.
+- **SSRF in rewrites via attacker-controlled hostname** — `LEGACY_ROUTE_MAP` is
+  a static table and the middleware rewrite targets `req.nextUrl` only.
+- **`postcss` (4 advisories) and `glob`** — build-time and lint-time only; the
+  CSS and the lint invocation are not attacker-controlled.
+- **`@clerk/*` and `js-cookie`** — Clerk proven unreachable below; `js-cookie`
+  is a transitive dep with no attacker-controlled `assign()` input here.
+
+What the Next upgrade *does* still buy: the DoS cluster on the Server Actions
+surface (5 advisories at 7.5, and this app has ~25 `'use server'` modules),
+RSC response cache poisoning, the Image Optimizer DoS, and unbounded image
+disk-cache growth — which is a real operational risk on shared hosting.
 
 ### Clerk CVE-2026-42349 is NOT reachable in this app (2026-09-29)
 

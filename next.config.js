@@ -50,7 +50,21 @@ const nextConfig = {
       'odoo.com',
       'localhost',
     ],
-    formats: ['image/avif', 'image/webp'],
+    // DO NOT re-add 'image/avif' on Next 14.
+    //
+    // next 14.2.35 is inside the vulnerable range of GHSA-2xp9-vwfh-vxw4
+    // (CVSS 9.5, Critical): "Unauthenticated Remote Code Execution in Image
+    // Optimization API when AVIF files are used" — a flaw in the libheif
+    // library inside sharp, triggered whenever an AVIF file is optimised.
+    // Affected: >=10.0.0 <15.5.24. Patched: 15.5.24 / 16.3.3.
+    //
+    // It is reachable here: `/_next/image` is deliberately excluded from the
+    // Clerk matcher in src/middleware.ts, so the endpoint is public, and the
+    // advisory's own interim mitigation is to disable AVIF optimisation.
+    // The cost is negligible — next/image is used in exactly one place
+    // (src/components/ui/logo.tsx), so the logo is served as WebP instead.
+    // Re-enable AVIF only once next is >= 15.5.24.
+    formats: ['image/webp'],
   },
 
   async headers() {
