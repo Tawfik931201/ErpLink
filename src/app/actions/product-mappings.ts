@@ -6,6 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
+import { platformIdField, toPlatformKey } from '@/lib/platform-fields'
 import { getProductName } from '@/lib/product-name'
 import { listSallaProducts } from '@/lib/salla-client'
 import { listShopifyProducts } from '@/lib/shopify-client'
@@ -108,9 +109,7 @@ export async function saveProductMapping(data: {
           const settings = (settingsRow as any)?.settings || {}
           const productCfg = settings.product || {}
           const odooField = productCfg.odoo_match_field || settings.match_odoo_field
-            || (data.platform === 'salla' ? 'x_salla_id'
-              : data.platform === 'shopify' ? 'x_shopify_id'
-              : 'x_zid_id')
+            || platformIdField(toPlatformKey(data.platform))
           const zidField = productCfg.zid_match_field || settings.match_zid_field || 'sku'
 
           let rawVal = ''

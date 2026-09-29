@@ -64,7 +64,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 65 tests, all pure functions (added 2026-09-29)
+# Unit tests — 99 tests, all pure functions (added 2026-09-29)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -85,7 +85,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
 - `tests/mocks/supabase.ts` is mapped over `@/lib/supabase` in
   `moduleNameMapper`; **no test may open a real DB connection**. Assert on
   `supabase.calls`, never on live data.
-- 76 tests over 5 suites:
+- 99 tests over 6 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -96,6 +96,8 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     `presetEntityType`
   - `tests/unit/clerk-authz-guard.test.ts` — scans `src/**` to prove the
     Clerk advisory is unreachable (see Known Vulnerabilities)
+  - `tests/unit/platform-fields.test.ts` — the `x_<platform>_id` table and
+    the `current` → `legacy` resolution order (Stage 1 of the platform split)
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -256,10 +258,32 @@ admin pages, `invoice/[id]`, `SetupWizard`, the impersonate route, and the
 sign-in/sign-up Clerk props. `LEGACY_ROUTE_MAP` in `src/middleware.ts` is
 deliberately kept for old external links.
 
-**Platform code split is planned but NOT started** — see
-`docs/platform-code-split-plan.md`. The unified `/app/connect-store` UI stays
-as-is; only the code layer gets split per platform. **Stage 0 of that plan
-(tests) is now done** — 65 tests cover the pure helpers that will move.
+**Platform code split — Stage 1 is DONE (2026-09-29).** Stages 2–4 are NOT
+started. Source of truth: `docs/platform-code-split-plan.md`.
+
+- `src/lib/platform-fields.ts` now owns the whole `x_<platform>_id` /
+  `<platform>_id` table, plus `platformIdField`, `platformLegacyIdField`,
+  `platformIdFieldNames`, `allPlatformIdFieldNames`, `pickExistingIdField`
+  and `toPlatformKey`. Adding a platform is a one-line change there.
+  `tests/unit/platform-fields.test.ts` (23 tests) pins the priority order.
+- `pickExistingIdField` takes `{ has(key: string): boolean }`, **not** a
+  `Set` — `fetchFieldMeta` returns a `Map<string, OdooFieldMeta>`.
+- **Not all six blocks were equivalent.** The plan assumed they were; three
+  differ on purpose and are deliberately left alone, each with a comment at
+  the site explaining why:
+  - the create path never writes `x_shopify_id` (unifying it would start
+    writing the column),
+  - `erpnext-engine.ts` is Zid/Salla only — zero shopify references,
+  - `erpnext-engine.ts` ~479 is a **cross-platform** `else if` chain, not
+    platform-scoped, so `pickExistingIdField` is not equivalent.
+  Also untouched: `matchStrategy` at ~7005, the field-type defaults at
+  ~1888, `stock-sync-engine.ts` and `category-mappings.ts`.
+- `syncChildVariantAsVariant` uses the table for its two field names but
+  keeps its `try/catch` — its legacy fallback is **exception-driven** (only
+  on a thrown error), not existence-driven. Do not "simplify" that to
+  `pickExistingIdField`.
+- Do **not** add a shopify branch to those skipped sites without a product
+  decision — it is a behaviour change, not a refactor.
 
 ## Data Model
 

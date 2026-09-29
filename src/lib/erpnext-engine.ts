@@ -220,6 +220,8 @@ async function resolveSingleErpNextRelationName(
     // â”€â”€â”€ Case 1: Search by Platform ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (platformId) {
       let searchField: string | null = null
+      // ERPNext is Zid/Salla only — no shopify branch exists in this file.
+      // Not routed through pickExistingIdField: that would add shopify.
       if (platform === 'zid') {
         if (relationFields.has('x_zid_id')) searchField = 'x_zid_id'
         else if (relationFields.has('zid_id')) searchField = 'zid_id'
@@ -473,10 +475,13 @@ async function findExistingErpNextRecord(
     zidData.order_id ??
     ''
   )
-  if (zidId) {
-    try {
-      const relationFields = await fetchErpNextFieldMeta(client, model)
-      if (relationFields.has('x_zid_id')) candidates.push(['x_zid_id', '=', zidId])
+    if (zidId) {
+      try {
+        const relationFields = await fetchErpNextFieldMeta(client, model)
+        // Cross-platform priority chain, NOT platform-gated: it probes the
+        // Zid column then Salla regardless of which platform the event came
+        // from. pickExistingIdField is platform-scoped, so it is not equivalent.
+        if (relationFields.has('x_zid_id')) candidates.push(['x_zid_id', '=', zidId])
       else if (relationFields.has('zid_id')) candidates.push(['zid_id', '=', zidId])
       else if (relationFields.has('x_salla_id')) candidates.push(['x_salla_id', '=', zidId])
       else if (relationFields.has('salla_id')) candidates.push(['salla_id', '=', zidId])

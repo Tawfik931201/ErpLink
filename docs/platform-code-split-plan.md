@@ -1,7 +1,7 @@
-# خطة فصل الكود حسب المنصة — لم تُبدأ بعد
+# خطة فصل الكود حسب المنصة
 
-> الحالة: **مخطط فقط**. لم يُنفّذ أي تقسيم.
-> التاريخ: 2026-09-29
+> الحالة: **المرحلة 0 ✅ / المرحلة 1 ✅** — المراحل 2–4 لم تُبدأ.
+> التاريخ: آخر تحديث 2026-09-29
 > مرجع السياق: `AGENTS.md` → قسم "Safe Cleanup (2026-09-29)"
 
 ## 0) القرار المتفق عليه مع المستخدم
@@ -42,14 +42,18 @@ src/lib/zid/{auth,config,token,types,webhooks}.ts   ← 817 سطر، منفصل
 نفس الفكرة مكررة بشكل حرفي: لكل منصة حقل ببادئة `x_` (حديث) وآخر
 بدون بادئة (قديم)، ويُبحث عن الأحدث أولاً.
 
-| السطر | الدالة | الشكل |
-|---:|---|---|
-| 461–474 | `resolveSingleRelationId` | `if/else if` × 3 منصات |
-| 663–667 | نفس الدالة (مسار الإنشاء) | `if/else if` × 3 منصات |
-| 4573–4578 | `persistPlatformIdOnRecord` | ternary متداخل |
-| 5135–5143 | `syncAsVariants` | ternary × 2 |
-| 6674–6676 | `executeOdooOperation` | ternary يُرجع مصفوفة |
-| 7199–7201 | `findExistingOdooRecord` | ternary |
+| السطر | الدالة | الشكل | نُفّذ؟ |
+|---:|---|---|---|
+| 461–474 | `resolveSingleRelationId` | `if/else if` × 3 منصات | ✅ |
+| 663–667 | نفس الدالة (مسار الإنشاء) | `if/else if` × **منصتان فقط** | ❌ لا فرع shopify |
+| 4573–4578 | `persistPlatformIdOnRecord` | ternary متداخل | ✅ |
+| 5135–5143 | `syncChildVariantAsVariant` | ternary × 2 | ⚠️ أسماء فقط، fallback بالاستثناء |
+| 6674–6676 | `executeOdooOperation` | ternary يُرجع مصفوفة | ✅ |
+| 7199–7201 | `syncProductBom` | ternary | ✅ |
+
+> ⚠️ صف 663–667 كان موصوفاً في نسخة سابقة من هذه الخطة بأنه "× 3 منصات".
+> **تصحيح**: لا يوجد فرع shopify في ذلك الموضع إطلاقاً. التفاصيل في
+> المرحلة 1.
 
 **الخطر:** لو أضفنا منصة جديدة (Shopify Plus مثلاً) ننسخ 6 كتل وننسى واحدة.
 لاحظ أيضاً السطر 7008–7040: منطق مطابقة `x_zid_id` مكتوب يدوياً ويسبق
@@ -78,21 +82,27 @@ src/lib/zid/{auth,config,token,types,webhooks}.ts   ← 817 سطر، منفصل
 
 > **تم التنفيذ.** `jest.config.js` عبر `next/jest`، و`tests/mocks/supabase.ts`
 > يمنع أي اتصال بقاعدة بيانات، و`npm test` أصبح job حاجباً في CI.
-> 65 اختباراً في 4 ملفات تغطي بالضبط الدوال التي تنقلها المراحل التالية:
+> **99 اختباراً في 6 ملفات** تغطي الدوال التي تنقلها المراحل التالية:
 > `tests/unit/zid-order-helpers.test.ts` (المرحلة 2)،
 > `tests/unit/sync-queue-dedup.test.ts`، `tests/unit/subscription-dates.test.ts`،
-> `tests/unit/odoo-operation-routing.test.ts` (المرحلة 1).
+> `tests/unit/odoo-operation-routing.test.ts`،
+> `tests/unit/clerk-authz-guard.test.ts` (حارس أمني)،
+> `tests/unit/platform-fields.test.ts` (المرحلة 1).
 >
 > تغطية خط واحد (statements) ~4% من 63k سطر — متوقع، والمهم هو تثبيت
 > الدوال الحرجة لا النسبة. الخطط التالية أصبحت آمنة للبدء.
 
-### المرحلة 1 — توحيد `PLATFORM_ID_FIELDS` (صغير الأثر، بلا واجهة)
+### المرحلة 1 — توحيد `PLATFORM_ID_FIELDS` (✅ اكتملت 2026-09-29)
 
 أنشئ ملفاً واحداً:
 
 ```
 src/lib/platform-fields.ts
 ```
+
+> **تم التنفيذ.** الجدول صار كما هو في الخطة بالضبط، مع واجهة أوسع قليلاً
+> لأن قراءة المواضع الفعلياً كشفت ثلاثة عقود مختلفة لا اثنين.
+> `tests/unit/platform-fields.test.ts` (23 اختباراً) يثبّت ترتيب الأولوية.
 
 ```ts
 export const PLATFORM_ID_FIELDS = {
@@ -101,18 +111,59 @@ export const PLATFORM_ID_FIELDS = {
   shopify: { current: 'x_shopify_id', legacy: 'shopify_id' },
 } as const
 
-export function platformIdFields(platform: 'zid' | 'salla' | 'shopify') { ... }
-export function pickExistingIdField(
-  fields: Set<string>, platform: 'zid' | 'salla' | 'shopify'
-): string | undefined   // يعيد current إن وُجد، وإلا legacy
+export function platformIdField(p)        // current فقط، بلا fallback
+export function platformLegacyIdField(p)  // legacy فقط
+export function platformIdFieldNames(p)   // [current, legacy]
+export function allPlatformIdFieldNames() // الـ6 أسماء بترتيبها الأصلي
+export function pickExistingIdField(fields, p) // current إن وُجد وإلا legacy
+export function toPlatformKey(s: string | null | undefined) // يضيّق إلى union، والافتراضي zid
 ```
 
-ثم استبدل الست كتل. النتيجة: `sync-engine.ts` يفقد ~35 سطراً، وتصبح
-إضافة منصة جديدة = سطر واحد في الجدول.
+#### ⚠️ تصحيح جوهري لجدول المرحلة 1 أعلاه
 
-⚠️ **شرط سلوك صارم:** `pickExistingIdField` يجب أن يحترم نفس ترتيب
-الأولوية الحالي (`current` قبل `legacy`) في كل موضع. الفروقات بين المواضع
-الستة مقصودة أحياناً (مثل 7008–7040) — **لا توحّدها بلا قراءة كل موضع**.
+الجدول في القسم 2-أ افترض أن الست كتل متطابقة وقابلة للتوحيد بحرية.
+**القراءة الفعلية لكل موضع أثبتت خلاف ذلك**، لأن 3 منها تختلف دلالياً.
+هذا بالضبط ما حذّر منه شرط السلوك الصارم أدناه، وقد تم الالتزام به:
+
+| الموضع | الافتراض القديم | الواقع | القرار |
+|---:|---|---|---|
+| `resolveSingleRelationId` ~468 | 3 منصات × current/legacy | مطابق تماماً | ✅ `pickExistingIdField` |
+| `persistPlatformIdOnRecord` ~4567 | ternary متداخل | مطابق تماماً | ✅ `pickExistingIdField` |
+| `executeOdooOperation` ~6662 | ternary يُرجع مصفوفة | مطابق تماماً | ✅ `platformIdFieldNames` |
+| `syncProductBom` ~7185 | ternary | مطابق تماماً | ✅ `platformIdField` |
+| `syncChildVariantAsVariant` ~5129 | ternary × 2 | **الفallback عند الاستثناء لا عند غياب العمود** | ⚠️ أسماء الحقول فقط، `try/catch` كما هو |
+| مسار الإنشاء ~658 | "× 3 منصات" | **منصتان فقط — لا يوجد فرع shopify** | ❌ لم يُلمس، مع تعليق تحذيري |
+
+❌ **لم يُوحَّد عمداً** (سلوك تاريخي محفوظ):
+
+- **مسار إنشاء السجل** (`sync-engine.ts`): لا يكتب `x_shopify_id` إطلاقاً.
+  توحيده عبر `pickExistingIdField` **سيبدأ كتابة العمود** — تغيير سلوك.
+- **`erpnext-engine.ts` (~223, ~289)**: الملف كله Zid/Salla فقط —
+  **صفر** ذكر لـ shopify (تحقّق بالـ grep على الملف كله). إضافة فرع
+  shopify ستُفعّل مساراً لم يُختبر في ERPNext إطلاقاً.
+- **`erpnext-engine.ts` (~479)**: سلسلة `else if` **عابرة للمنصات** — تفحص
+  عمود Zid ثم Salla بغضّ النظر عن منصة الحدث. `pickExistingIdField` مربوط
+  بمنصة واحدة، فاستخدامه هنا **سيغيّر المطابقات**.
+- **`sync-engine.ts` ~7005/~7036**: منطق `matchStrategy` و`x_zid_id`
+  اليدوي — كما نصّت الخطة، يسبق التوحيد ولا يُمس.
+- **~1888**: أنواع الحقول الافتراضية تخلو `zid_id`/`salla_id` — ليست نفس
+  الجدول.
+- **`stock-sync-engine.ts`, `category-mappings.ts`**: منطق مطابقة مختلف
+  (`x_zid_id_categ`)، خارج نطاق هذا الجدول.
+
+النتيجة: `sync-engine.ts` يفقد ~35 سطراً كما هو متوقع، وإضافة منصة جديدة
+صارت **سطراً واحداً في الجدول** لمنطق current/legacy — أما المواضع
+المستثناة فتحتاج قراراً منتجياً منفصلاً (هل نضيف فرع shopify لمسار الإنشاء؟).
+
+> المواضع غير الموحّدة تحمل الآن تعليقاً قصيراً عند كل موضع يوضّح
+> **سبب** استثنائه، حتى لا "يبسّطه" الشخص التالي إلى تغيير سلوك.
+
+#### شرط السلوك الصارم (مُنفَّذ)
+
+`pickExistingIdField` يحترم نفس ترتيب الأولوية (`current` قبل `legacy`) في
+كل موضع. `npm run type-check` / `lint` / `test` (99) / `build` تمرّ جميعها،
+و`pickExistingIdField` موقّع بـ `{ has(key: string): boolean }` لا `Set`
+لأن `fetchFieldMeta` يُرجع `Map`.
 
 ### المرحلة 2 — نقل دوال Zid إلى `src/lib/zid/`
 

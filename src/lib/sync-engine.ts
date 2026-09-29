@@ -19,6 +19,13 @@ import {
 } from '@/lib/erpnext-engine'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { OdooClient } from '@/lib/odoo-client'
+import {
+  allPlatformIdFieldNames,
+  pickExistingIdField,
+  platformIdField,
+  platformIdFieldNames,
+  platformLegacyIdField,
+} from '@/lib/platform-fields'
 import { resolvePath, resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
 import type {
@@ -462,17 +469,8 @@ export async function resolveSingleRelationId(
 
     // â”€â”€â”€ Case 1: Search by Platform ID (Fixed Mapping check) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (platformId) {
-      let searchField: string | null = null
-      if (platform === 'zid') {
-        if (relationFields.has('x_zid_id')) searchField = 'x_zid_id'
-        else if (relationFields.has('zid_id')) searchField = 'zid_id'
-      } else if (platform === 'salla') {
-        if (relationFields.has('x_salla_id')) searchField = 'x_salla_id'
-        else if (relationFields.has('salla_id')) searchField = 'salla_id'
-      } else if (platform === 'shopify') {
-        if (relationFields.has('x_shopify_id')) searchField = 'x_shopify_id'
-        else if (relationFields.has('shopify_id')) searchField = 'shopify_id'
-      }
+      // Stage 1: current-then-legacy resolution now has a single definition.
+      const searchField = pickExistingIdField(relationFields, platform)
 
       if (searchField) {
         const ids = await client.search(relation, [[searchField, '=', platformId]])
@@ -659,6 +657,9 @@ export async function resolveSingleRelationId(
       }
 
       if (platformId) {
+        // No shopify branch on purpose: this create path has never written
+        // x_shopify_id. Routing it through pickExistingIdField would start
+        // writing the column, so keep it out of the Stage 1 unification.
         if (platform === 'zid') {
           if (relationFields.has('x_zid_id')) createData.x_zid_id = platformId
           else if (relationFields.has('zid_id')) createData.zid_id = platformId
@@ -4045,7 +4046,7 @@ async function processFixedMappingFallback(
       if (stdSettings) {
         if (stdSettings.match_odoo_field && stdSettings.match_zid_field) {
           // Filter out default ID fields mapping so the user's custom match field override is utilized
-          const defaultOdooFields = ['x_zid_id', 'zid_id', 'x_salla_id', 'salla_id', 'x_shopify_id', 'shopify_id']
+          const defaultOdooFields = allPlatformIdFieldNames()
           const defaultPlatformFields = ['id']
           
           const filteredPairs = fieldPairs.filter((r: any) => {
@@ -4570,23 +4571,17 @@ async function persistPlatformIdOnRecord(
   idValue: string
 ) {
   if (!idValue) return
-  const platformIdField = platform === 'salla' ? 'x_salla_id'
-    : platform === 'shopify' ? 'x_shopify_id'
-    : 'x_zid_id'
-  const legacyIdField = platform === 'salla' ? 'salla_id'
-    : platform === 'shopify' ? 'shopify_id'
-    : 'zid_id'
+  const [platformIdFieldName, legacyIdFieldName] = platformIdFieldNames(platform)
   try {
-    const meta = await fetchFieldMeta(client, model, [platformIdField, legacyIdField])
-    if (meta.has(platformIdField)) {
-      await client.write(model, [recordId], { [platformIdField]: idValue })
-      console.info(`[SyncEngine] ✅ Stored ${platformIdField}="${idValue}" on ${model} #${recordId}`)
-    } else if (meta.has(legacyIdField)) {
-      await client.write(model, [recordId], { [legacyIdField]: idValue })
-      console.info(`[SyncEngine] ✅ Stored ${legacyIdField}="${idValue}" on ${model} #${recordId}`)
+    const meta = await fetchFieldMeta(client, model, [platformIdFieldName, legacyIdFieldName])
+    // Stage 1: current-then-legacy resolution, shared with the relation lookup.
+    const idField = pickExistingIdField(meta, platform)
+    if (idField) {
+      await client.write(model, [recordId], { [idField]: idValue })
+      console.info(`[SyncEngine] ✅ Stored ${idField}="${idValue}" on ${model} #${recordId}`)
     }
   } catch (err: any) {
-    console.warn(`[SyncEngine] Failed to persist ${platformIdField} on ${model} #${recordId}:`, err?.message || err)
+    console.warn(`[SyncEngine] Failed to persist ${platformIdFieldName} on ${model} #${recordId}:`, err?.message || err)
   }
 }
 
@@ -5132,15 +5127,14 @@ async function syncChildVariantAsVariant(
   if (fixedMatch?.odoo_field) {
     parentIds = await client.search('product.template', [[fixedMatch.odoo_field, '=', String(parentZidId)]], 1)
   } else {
-    const searchField = platform === 'salla' ? 'x_salla_id'
-      : platform === 'shopify' ? 'x_shopify_id'
-      : 'x_zid_id'
+    // Field names come from the shared table, but the fallback stays
+    // exception-driven on purpose: an empty result here does NOT retry the
+    // legacy column, only a thrown error does (missing column in Odoo).
+    const searchField = platformIdField(platform)
     try {
       parentIds = await client.search('product.template', [[searchField, '=', String(parentZidId)]], 1)
     } catch {
-      const fallbackField = platform === 'salla' ? 'salla_id'
-        : platform === 'shopify' ? 'shopify_id'
-        : 'zid_id'
+      const fallbackField = platformLegacyIdField(platform)
       try {
         parentIds = await client.search('product.template', [[fallbackField, '=', String(parentZidId)]], 1)
       } catch {
@@ -5715,7 +5709,7 @@ async function executeOdooOperation(params: {
       odooValues[odooField] = effectiveOdooValues[odooField]
       
       // Remove default match fields if they are not the configured odoo_field
-      const defaultFields = ['x_zid_id', 'zid_id', 'x_salla_id', 'salla_id', 'x_shopify_id', 'shopify_id']
+      const defaultFields = allPlatformIdFieldNames()
       defaultFields.forEach(f => {
         if (f !== odooField) {
           delete effectiveOdooValues[f]
@@ -6671,10 +6665,8 @@ async function executeOdooOperation(params: {
     // Persist a stable platform ID (x_zid_id/x_salla_id/x_shopify_id) on the new record
     // so future webhooks can re-match it without relying on sync_logs or SKU.
     if ((odooModel === 'product.template' || odooModel === 'res.partner')) {
-      const platformIdFields = execPlatform === 'salla' ? ['x_salla_id', 'salla_id']
-        : execPlatform === 'shopify' ? ['x_shopify_id', 'shopify_id']
-        : ['x_zid_id', 'zid_id']
-      const alreadyStored = platformIdFields.some(f => effectiveOdooValues[f] !== undefined || odooValues[f] !== undefined)
+      const platformIdFieldNamesToCheck = platformIdFieldNames(execPlatform)
+      const alreadyStored = platformIdFieldNamesToCheck.some(f => effectiveOdooValues[f] !== undefined || odooValues[f] !== undefined)
       if (!alreadyStored) {
         await persistPlatformIdOnRecord(client, odooModel, newId, execPlatform, String(zidData.id || zidEntityId))
       }
@@ -7196,9 +7188,10 @@ async function syncProductBom(
   try {
     const resolvedComponents: { product_id: number; product_qty: number }[] = []
 
-    const idField = platform === 'shopify' ? 'x_shopify_id'
-      : platform === 'salla' ? 'x_salla_id'
-      : 'x_zid_id'
+    // Deliberately current-only: this lookup has never had a legacy fallback,
+    // unlike the relation/persist paths. Do not "fix" this to
+    // pickExistingIdField without a migration note for legacy Odoo instances.
+    const idField = platformIdField(platform)
 
     const storeIdStr = String(zidData.store_id || '')
     let zidCreds: any = null
