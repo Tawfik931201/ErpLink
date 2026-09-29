@@ -2,8 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
-import type { Language} from '@/lib/translations';
-import { translations } from '@/lib/translations'
+import { resolveLanguage, translations } from '@/lib/translations'
 
 import OdooConnectionForm from './odoo-form'
 
@@ -24,7 +23,7 @@ export default async function ConnectOdooPage() {
   }
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 

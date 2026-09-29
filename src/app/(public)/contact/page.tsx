@@ -4,11 +4,11 @@ import { cookies } from 'next/headers'
 import { ContactForm } from '@/components/contact-form'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
-import { type Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 export default function ContactPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   return (

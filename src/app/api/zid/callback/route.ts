@@ -4,11 +4,9 @@
  * المسار القديم /api/auth/zid/callback مجرد shim يعيد التوجيه إلى هنا
  * مع نفس query params — لا منطق مكرر.
  *
- * يقبل صيغتي state (لإصلاح mismatch مع الروابط القديمة):
- *   - "<random>" (الحالية من /api/zid/connect)
- *   - "<orgId>:<random>" (القديمة من /api/auth/zid/authorize)
- * الشرط: مساواة تامة مع كوكي zid_oauth_state؛ وإن غاب الكوكي مع صيغة
- * قديمة تحمل ':' تُقبل لمرة واحدة (روابط قيد الطيران) بدل كسر الربط.
+ * يقبل صيغة state الموحّدة فقط (بادئة اختيارية + قيمة عشوائية hex) التي
+ * تولّدها /api/zid/connect وتُحفظ كاملة في كوكي zid_oauth_state — والتحقق يتم
+ * بالمساواة التامة. لا يوجد أي مسار يقبل state بلا كوكي مطابق (CSRF).
  *
  * يسجّل الأحداث الأساسية فقط (ZID_CORE_EVENTS ≈ 7) — البقية opt-in من الإعدادات.
  */
@@ -135,10 +133,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(connectUrl)
   }
 
-  // تحقق state: مساواة تامة مع الكوكي؛ قبول لمرة واحدة للصيغة القديمة
-  // "<orgId>:<random>" عند غياب الكوكي (روابط قيد الطيران قبل التوحيد).
-  const isLegacyState = !!state && !storedState && state.includes(':')
-  if (!state || (!storedState && !isLegacyState) || (storedState && state !== storedState)) {
+  // تحقق state: مساواة تامة مع الكوكي فقط.
+  //
+  // كان هنا فرع يقبل أي state فيه ':' عند غياب الكوكي (لنفّاذ روابط قديمة)،
+  // لكنه كان يجعل فحص CSRF قابلاً للتجاوز: مهاجمcould يرسل رابطاً crafted على
+  // شكل ?code=<code_المهاجم>&state=a:b فيتجاوز الفحص ويُعاد ربط متجره مكان
+  // متجر الضحية. أزل الفرع بالكامل — /api/zid/connect (والمسار القديم
+  // /api/auth/zid/authorize الذي صار shim عليه) يضع الكوكي في كل مرة،
+  // فمسار state صار دائماً "<orgId>:<random>" أو "<random>" وكلاهما
+  // محفوظ في zid_oauth_state ويُقارن بالكامل. لا يوجد رابط صالح بلا كوكي.
+  if (!state || !storedState || state !== storedState) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'invalid_state', message: 'OAuth state mismatch' }, { status: 403 })
     }

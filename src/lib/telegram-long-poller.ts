@@ -23,13 +23,29 @@ interface PollerGlobal {
   __telegramPollerInterval?: NodeJS.Timeout
   __telegramPollerBots?: Map<string, BotPollerState>
   __telegramPollerLastRefresh?: number
+  __telegramPollerProcessing?: boolean
 }
 
 const POLL_INTERVAL_MS = 5_000
 const POLLER_REFRESH_MS = 30_000
 const MAX_CONSECUTIVE_FAILURES = 5
 
+/**
+ * Poller is opt-out via TELEGRAM_POLLER_ENABLED. Unset means enabled, so
+ * existing deployments keep polling; set it to "false" to disable.
+ */
+const POLLER_ENABLED = process.env.TELEGRAM_POLLER_ENABLED !== 'false'
+
 const g = global as unknown as PollerGlobal
+
+/**
+ * Keeps the timer from holding the process open on its own (worker-friendly),
+ * and tolerates runtimes where unref does not exist.
+ */
+function unref(timer: NodeJS.Timeout | undefined): void {
+  const maybe = timer as unknown as { unref?: () => void } | undefined
+  if (typeof maybe?.unref === 'function') maybe.unref()
+}
 
 function getBotsMap(): Map<string, BotPollerState> {
   if (!g.__telegramPollerBots) g.__telegramPollerBots = new Map()
@@ -265,8 +281,31 @@ async function pollAllOnce(): Promise<void> {
   }
 }
 
+/**
+ * One poll cycle. The overlap guard keeps at most one cycle in flight no matter
+ * how long a bot takes to answer: a slow getUpdates would otherwise let ticks
+ * pile up, and overlapping getUpdates on the same token makes Telegram answer
+ * 409 Conflict and drop the update.
+ */
+async function runPollCycle(): Promise<void> {
+  if (g.__telegramPollerProcessing) return
+  try {
+    g.__telegramPollerProcessing = true
+    if (Date.now() - (g.__telegramPollerLastRefresh || 0) > POLLER_REFRESH_MS) {
+      await refreshBotsFromDb()
+      g.__telegramPollerLastRefresh = Date.now()
+    }
+    await pollAllOnce()
+  } catch (err: unknown) {
+    console.warn('[TelegramPoller] poll cycle failed:', err instanceof Error ? err.message : err)
+  } finally {
+    g.__telegramPollerProcessing = false
+  }
+}
+
 export function startTelegramPoller(): void {
   if (process.env.NEXT_PHASE === 'phase-production-build') return
+  if (!POLLER_ENABLED) return
   if (g.__telegramPollerStarted) return
   g.__telegramPollerStarted = true
 
@@ -275,13 +314,10 @@ export function startTelegramPoller(): void {
   void refreshBotsFromDb().then(pollAllOnce)
   g.__telegramPollerLastRefresh = Date.now()
 
-  g.__telegramPollerInterval = setInterval(async () => {
-    if (Date.now() - (g.__telegramPollerLastRefresh || 0) > POLLER_REFRESH_MS) {
-      await refreshBotsFromDb()
-      g.__telegramPollerLastRefresh = Date.now()
-    }
-    void pollAllOnce()
+  g.__telegramPollerInterval = setInterval(() => {
+    void runPollCycle()
   }, POLL_INTERVAL_MS)
+  unref(g.__telegramPollerInterval)
 }
 
 /**
@@ -291,6 +327,7 @@ export function startTelegramPoller(): void {
  */
 export async function forceRefreshTelegramPoller(): Promise<void> {
   startTelegramPoller()
+  if (!POLLER_ENABLED) return
   await refreshBotsFromDb()
   g.__telegramPollerLastRefresh = Date.now()
 }
@@ -299,4 +336,5 @@ export function stopTelegramPoller(): void {
   if (g.__telegramPollerInterval) clearInterval(g.__telegramPollerInterval)
   g.__telegramPollerInterval = undefined
   g.__telegramPollerStarted = false
+  g.__telegramPollerProcessing = false
 }

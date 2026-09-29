@@ -1,5 +1,20 @@
 export type Language = 'ar' | 'en';
 
+export const DEFAULT_LANGUAGE: Language = 'ar';
+
+const SUPPORTED_LANGUAGES: readonly Language[] = ['ar', 'en'];
+
+/**
+ * Narrows an untrusted value (usually the `lang` cookie) to a real Language.
+ *
+ * The cookie is client-writable, so it must never be trusted with a cast:
+ * `lang=xx` used to survive `as Language` and then blow up on
+ * `translations[lang][key]`. Anything unknown falls back to Arabic.
+ */
+export function resolveLanguage(value: string | null | undefined): Language {
+  return SUPPORTED_LANGUAGES.includes(value as Language) ? (value as Language) : DEFAULT_LANGUAGE;
+}
+
 export const translations = {
   ar: {
     // Nav items

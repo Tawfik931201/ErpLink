@@ -139,7 +139,7 @@ export async function saveCategoryMapping(data: {
       }
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[CategoryMappings] Save failed:', error)
@@ -181,7 +181,7 @@ export async function batchImportCategoryMappings(platform: string, categories: 
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true, imported: newCategories.length }
   } catch (error: any) {
     console.error('[CategoryMappings] Batch import failed:', error)
@@ -205,7 +205,7 @@ export async function deleteCategoryMapping(id: string) {
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[CategoryMappings] Delete failed:', error)

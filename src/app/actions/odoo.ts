@@ -25,6 +25,31 @@ async function getOrCreateDbUser() {
   return ensureDbUser(userId)
 }
 
+/** The subset of an `erp_connections` row needed to talk to Odoo over XML-RPC. */
+type OdooConnectionRow = {
+  url: string
+  db_name?: string | null
+  username: string
+  password: string
+}
+
+/**
+ * Builds an Odoo XML-RPC client from a stored ERP connection row.
+ *
+ * The password is decrypted in exactly one place: `password` is stored
+ * encrypted, and a call site that forgets `decrypt()` fails at auth time with
+ * a confusing "access denied" instead of a clear error. Every read path in
+ * this file goes through here.
+ */
+function createOdooClient(connection: OdooConnectionRow): OdooClient {
+  return new OdooClient({
+    url: connection.url,
+    db: connection.db_name || '',
+    username: connection.username,
+    apiKey: decrypt(connection.password),
+  })
+}
+
 
 /**
  * Get active workspace's Odoo connection
@@ -318,8 +343,8 @@ export async function saveErpConnection(data: {
     revalidateTag('erp-connection')
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
-    revalidatePath('/dashboard/connect-odoo')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-odoo')
+    revalidatePath('/app/connect-store')
 
     // Bump stored credentials — drop every memoized Odoo result so the next
     // read is fetched through the new connection.
@@ -377,8 +402,8 @@ export async function disconnectErpConnection(connectionId: string) {
     revalidateTag('erp-connection')
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
-    revalidatePath('/dashboard/connect-odoo')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-odoo')
+    revalidatePath('/app/connect-store')
 
     // Connection removed — drop memoized Odoo results referencing it.
     ttlCache.clear('odoo:')
@@ -421,12 +446,7 @@ async function fetchModelsRaw(connection: any) {
     return []
   }
 
-  const client = new OdooClient({
-    url,
-    db: db_name || '',
-    username,
-    apiKey: decryptedPassword,
-  })
+  const client = createOdooClient(connection)
 
   // Fetch models from ir.model
   return client.execute<Array<{ model: string; name: string }>>(
@@ -565,12 +585,7 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
     return []
   }
 
-  const client = new OdooClient({
-    url,
-    db: db_name || '',
-    username,
-    apiKey: decryptedPassword,
-  })
+  const client = createOdooClient(connection)
 
   // For products, query both product.template and product.product so variants and custom fields on both are found
   const modelsToQuery = (modelName === 'product.template' || modelName === 'product.product')
@@ -798,12 +813,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
         return { success: true, fieldType: 'char', options: [] }
       }
 
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decryptedPassword,
-      })
+      const client = createOdooClient(connRes.connection)
 
       const fieldsMeta = await client.execute<Record<string, {
         string?: string
@@ -888,12 +898,7 @@ export async function getOdooGroups() {
       return { success: true, groups: [] }
     }
 
-    const client = new OdooClient({
-      url: conn.url,
-      db: conn.db_name || '',
-      username: conn.username,
-      apiKey: decrypt(conn.password),
-    })
+    const client = createOdooClient(conn)
 
     const groups = await client.execute<Array<{ id: number; full_name: string; name: string }>>(
       'res.groups',
@@ -939,12 +944,7 @@ export async function getOdooWarehouses(force = false): Promise<{
     if (force) ttlCache.delete(cacheKey)
     const warehouses = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
       const { url, db_name, username, password } = connRes.connection
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decrypt(password),
-      })
+      const client = createOdooClient(connRes.connection)
 
       const records = await client.execute<Array<{ id: number; name: string; code: string }>>(
         'stock.warehouse',
@@ -992,12 +992,7 @@ export async function getOdooTaxes(force = false): Promise<{
 
     const taxes = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
       const { url, db_name, username, password } = connRes.connection
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decrypt(password),
-      })
+      const client = createOdooClient(connRes.connection)
 
       let records: Array<{ id: number; name: string; amount?: number; type_tax_use?: string }> = []
       try {
@@ -1072,12 +1067,7 @@ export async function getOdooLocations(usage?: string, force = false): Promise<{
     if (force) ttlCache.delete(cacheKey)
     const locations = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
       const { url, db_name, username, password } = connRes.connection
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decrypt(password),
-      })
+      const client = createOdooClient(connRes.connection)
 
       const domain: any[][] = []
       if (usage) {
@@ -1126,12 +1116,7 @@ export async function getOdooCategories(): Promise<{
 
     const categories = await ttlCache.get(`odoo:categories:${connRes.connection.id}`, TTL_OPTIONS_MS, async () => {
       const { url, db_name, username, password } = connRes.connection
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decrypt(password),
-      })
+      const client = createOdooClient(connRes.connection)
 
       const records = await client.execute<Array<{ id: number; name: string; parent_id: [number, string] | false; complete_name: string }>>(
         'product.category',
@@ -1176,12 +1161,7 @@ export async function dryRunMatch(args: {
     }
 
     const { url, db_name, username, password } = connRes.connection
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decrypt(password),
-    })
+    const client = createOdooClient(connRes.connection)
 
     await client.authenticate()
 
@@ -1246,13 +1226,7 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
       `odoo:accounts:${connRes.connection.id}:${type}:${companyId || 'all'}`,
       TTL_OPTIONS_MS,
       async () => {
-        const decryptedPassword = decrypt(password)
-        const client = new OdooClient({
-          url,
-          db: db_name || '',
-          username,
-          apiKey: decryptedPassword,
-        })
+        const client = createOdooClient(connRes.connection)
 
         const fieldsMeta = await client.execute<Record<string, any>>(
           'account.account',
@@ -1311,13 +1285,7 @@ export async function searchOdooAccounts(searchTerm: string = '', accountType?: 
       return { success: true, options: [] }
     }
 
-    const decryptedPassword = decrypt(password)
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
+    const client = createOdooClient(connRes.connection)
 
     const domain: any[] = []
     if (accountType) {
@@ -1355,13 +1323,7 @@ export async function searchOdooJournals(searchTerm: string = '', journalType?: 
       return { success: true, options: [] }
     }
 
-    const decryptedPassword = decrypt(password)
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
+    const client = createOdooClient(connRes.connection)
 
     const domain: any[] = []
     if (journalType) {
@@ -1399,13 +1361,7 @@ export async function searchOdooCategories(searchTerm: string = '') {
       return { success: true, options: [] }
     }
 
-    const decryptedPassword = decrypt(password)
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
+    const client = createOdooClient(connRes.connection)
 
     const records = await client.execute<Array<[number, string]>>(
       'product.category',
@@ -1438,13 +1394,7 @@ export async function searchOdooProducts(searchTerm: string = '') {
       return { success: true, options: [] }
     }
 
-    const decryptedPassword = decrypt(password)
-    const client = new OdooClient({
-      url,
-      db: db_name || '',
-      username,
-      apiKey: decryptedPassword,
-    })
+    const client = createOdooClient(connRes.connection)
 
     const records = await client.execute<Array<[number, string]>>(
       'product.template',
@@ -1514,13 +1464,7 @@ export async function getOdooCustomers(force = false): Promise<{
     if (force) ttlCache.delete(cacheKey)
 
     const result = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const decryptedPassword = decrypt(password)
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decryptedPassword,
-      })
+      const client = createOdooClient(connRes.connection)
 
       try {
         const records = await client.execute<Array<{ id: number; name?: string; display_name?: string }>>(
@@ -1606,13 +1550,7 @@ export async function getOdooProducts(force = false): Promise<{
     if (force) ttlCache.delete(cacheKey)
 
     const result = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
-      const decryptedPassword = decrypt(password)
-      const client = new OdooClient({
-        url,
-        db: db_name || '',
-        username,
-        apiKey: decryptedPassword,
-      })
+      const client = createOdooClient(connRes.connection)
 
       try {
         const records = await client.execute<Array<{ id: number; name?: string; display_name?: string; default_code?: string }>>(

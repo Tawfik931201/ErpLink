@@ -1,11 +1,11 @@
 import { cookies } from 'next/headers'
 import React from 'react'
 
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 export default function Loading() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const text = lang === 'en' ? 'Loading...' : 'جاري التحميل...'
 
   return (

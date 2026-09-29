@@ -74,7 +74,7 @@ export async function saveOrderStatusMappings(
       if (deleteError) throw deleteError
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[OrderStatusMappings] Save failed:', error)

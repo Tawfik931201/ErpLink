@@ -257,21 +257,6 @@ export function extractShopifyUpdatedAtMs(payload: any): number {
 }
 
 /**
- * Returns the access scopes currently granted to this shop's token.
- * Useful for diagnostics ("is write_products missing?") and for the
- * app/scopes_update webhook handler. Returns [] instead of throwing.
- */
-export async function getShopifyAccessScopes(shopDomain: string): Promise<string[]> {
-  try {
-    const res = await callShopifyREST(shopDomain, 'GET', '/oauth/access_scopes.json')
-    const scopes = res?.access_scopes || []
-    return scopes.map((s: any) => s?.handle).filter(Boolean)
-  } catch {
-    return []
-  }
-}
-
-/**
  * Finds a product in Shopify by matching SKU or barcode.
  * Uses GraphQL for fast and precise lookup across all variants.
  */

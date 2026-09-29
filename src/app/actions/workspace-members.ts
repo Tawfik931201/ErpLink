@@ -181,7 +181,7 @@ export async function inviteMember(
         return { success: false, error: insertError.message }
       }
 
-      revalidatePath('/dashboard/settings/team')
+      revalidatePath('/app/settings/team')
       return { success: true, message: `User added as member successfully` }
     }
 
@@ -220,7 +220,7 @@ export async function inviteMember(
       return { success: false, error: inviteError.message }
     }
 
-    revalidatePath('/dashboard/settings/team')
+    revalidatePath('/app/settings/team')
     return {
       success: true,
       message: `Invitation sent to ${normalizedEmail}`,
@@ -252,7 +252,7 @@ export async function removeMember(workspaceId: string, memberUserId: string) {
 
     if (error) return { success: false, error: error.message }
 
-    revalidatePath('/dashboard/settings/team')
+    revalidatePath('/app/settings/team')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to remove member:', error)
@@ -289,7 +289,7 @@ export async function revokeInvitation(invitationId: string) {
 
     if (error) return { success: false, error: error.message }
 
-    revalidatePath('/dashboard/settings/team')
+    revalidatePath('/app/settings/team')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to revoke invitation:', error)
@@ -322,7 +322,7 @@ export async function updateMemberPermissions(
 
     if (error) return { success: false, error: error.message }
 
-    revalidatePath('/dashboard/settings/team')
+    revalidatePath('/app/settings/team')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update permissions:', error)
@@ -330,18 +330,21 @@ export async function updateMemberPermissions(
   }
 }
 
-export async function checkPendingInvitations(userId?: string, email?: string) {
+/**
+ * يقبل دعوات الانضمام المعلّقة على بريد صاحب الجلسة ويضيفه كعضو.
+ *
+ * المعاملتان `userId` و`email` كان يُستخدمان كمدخلات موثوقة: أي متصل كان
+ * بإمكانه تمرير (معرّف مستخدم، بريد عميل لديه دعوة معلّقة) فينضم ذلك
+ * المستخدم إلى مساحة عمل ذلك العميل — بلا جلسة ولا تحقق من الملكية.
+ * لذلك صارت القيم تُقرأ من الجلسة دائماً وتُهمَل المدخلات الخارجية.
+ */
+export async function checkPendingInvitations() {
   try {
-    let activeUserId = userId
-    let activeEmail = email
+    const clerkUser = await currentUser()
+    if (!clerkUser) return { success: true, invitations: [] }
 
-    if (!activeUserId || !activeEmail) {
-      const clerkUser = await currentUser()
-      if (!clerkUser) return { success: true, invitations: [] }
-      activeUserId = clerkUser.id
-      activeEmail = clerkUser.emailAddresses[0]?.emailAddress
-    }
-
+    const activeUserId = clerkUser.id
+    const activeEmail = clerkUser.emailAddresses[0]?.emailAddress
     if (!activeEmail) return { success: true, invitations: [] }
 
     // Ensure the user exists in the local users table first, so the

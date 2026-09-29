@@ -9,195 +9,45 @@
  *   5. Logs every attempt to the sync_logs table in Supabase
  */
 
-import { createClient } from '@supabase/supabase-js'
-
 import { getSmartDefaultOrderState } from '@/lib/auto-bootstrap'
 import { decrypt } from '@/lib/crypto'
+import {
+  buildErpNextValues,
+  ErpNextClient,
+  executeErpNextOperation,
+  fetchErpNextFieldMeta,
+} from '@/lib/erpnext-engine'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { OdooClient } from '@/lib/odoo-client'
+import { resolvePath, resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
+import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
+import type {
+  FieldMappingItem,
+  FieldMappingRow,
+  OdooConnectionRow,
+  OdooFieldMeta,
+  OdooOperation,
+  SyncEngineResult,
+} from '@/lib/sync-types'
 import { notifySyncResult } from '@/lib/telegram-notifier'
 import type { SyncRecordSummary } from '@/lib/telegram-notifier'
 import { ttlCache } from '@/lib/ttl-cache'
 
-// â”€â”€â”€ Supabase admin client (bypasses RLS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Webhook requests have NO Clerk auth session, so the standard supabase client
-// would be blocked by Row Level Security on field_mappings / erp_connections.
-// We use the service role key here which has full read access.
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Types live in sync-types.ts so erpnext-engine.ts can share them without
+// importing this file. Re-exported here: this was their original path.
+export type {
+  FieldMappingItem,
+  FieldMappingRow,
+  OdooConnectionRow,
+  OdooFieldMeta,
+  OdooOperation,
+  SyncEngineResult,
+} from '@/lib/sync-types'
 
-// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-export interface FieldMappingRow {
-  id: string
-  workspace_id: string
-  erp_connection_id: string | null
-  merchant_id: string
-  store_id: string | null
-  action: string          // e.g. 'product.create'
-  odoo_model: string      // e.g. 'product.template'
-  odoo_operation?: OdooOperation
-  odoo_match_field?: string | null
-  zid_match_field?: string | null
-  mappings: Record<string, FieldMappingItem[]>
-  name: string
-}
-
-type OdooOperation = 'create' | 'update' | 'delete' | 'cancel' | 'deliver'
-
-interface FieldMappingItem {
-  id: string
-  erpField: string  // Odoo field name  e.g. 'categ_id'
-  zidField?: string  // Zid data path    e.g. 'categories' or 'name.ar'
-  staticValue?: unknown
-}
-
-interface OdooConnectionRow {
-  id: string
-  url: string
-  db_name: string
-  username: string
-  password: string  // API key stored here
-  erp_type?: string
-}
-
-interface OdooFieldMeta {
-  name: string
-  ttype: string      // 'many2one' | 'many2many' | 'char' | 'float' etc.
-  relation: string   // related model, e.g. 'product.category'
-}
-
-export interface SyncEngineResult {
-  processed: number
-  success: number
-  failed: number
-  skipped: number
-  records: Array<{
-    mappingId: string
-    mappingName: string
-    model: string
-    status: 'success' | 'failed' | 'skipped'
-    odooRecordId?: number | string
-    message?: string
-  }>
-}
-
-// â”€â”€â”€ Helper: resolve a nested path like "name.ar" from a plain object â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-export function resolvePath(obj: Record<string, unknown>, path: string): unknown {
-  const subPaths = path.split('||').map(p => p.trim())
-  for (const subPath of subPaths) {
-    const value = subPath.split('.').reduce<unknown>((acc, key) => {
-      // If acc is a string, and it looks like a stringified object/array, try to parse it
-      if (typeof acc === 'string') {
-        const trimmed = acc.trim()
-        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-          try {
-            // First try direct JSON parse (preserves valid JSON and words with apostrophes like Men's)
-            acc = JSON.parse(trimmed)
-          } catch {
-            try {
-              // Convert Python dict format to valid JSON
-              const jsonStr = trimmed
-                .replace(/:\s*None\b/g, ': null')
-                .replace(/:\s*True\b/g, ': true')
-                .replace(/:\s*False\b/g, ': false')
-                .replace(/(^|[{,]\s*)'([^']+)'\s*:/g, '$1"$2":')
-                .replace(/:\s*'([^']*)'/g, ': "$1"')
-              acc = JSON.parse(jsonStr)
-            } catch {
-              // Ignore parsing error, keep it as string
-            }
-          }
-        }
-      }
-
-      if (acc && typeof acc === 'object') {
-        if (Array.isArray(acc)) {
-          const idx = parseInt(key, 10)
-          return isNaN(idx) ? undefined : acc[idx]
-        }
-        return (acc as Record<string, unknown>)[key]
-      }
-      return undefined
-    }, obj)
-
-    if (value !== undefined && value !== null && value !== '') {
-      return value
-    }
-  }
-
-  // Zid can send localized fields either as { ar, en } or as a plain string.
-  // If a mapping asks for "name.ar" but the webhook has "name": "..." use it.
-  const firstPath = subPaths[0] ?? ''
-  const [root] = firstPath.split('.')
-  return obj[root]
-}
-
-// â”€â”€â”€ Helper: resolve a Match Field value with common Zid field aliases â”€â”€â”€â”€â”€â”€â”€â”€
-// Zid webhook payloads use prefixed names ("category_id", "category_uuid"),
-// but the UI dropdown shows generic names ("id", "uuid"). This helper tries
-// the user-selected field first, then common aliases so Match Field values
-// are always extracted regardless of which name the admin picked.
-
-const ZID_FIELD_ALIASES: Record<string, string[]> = {
-  id: ['customer_id', 'product_id', 'category_id', 'category_uuid', 'uuid'],
-  uuid: ['customer_id', 'product_id', 'category_uuid', 'category_id', 'id'],
-  customer_id: ['id', 'uuid'],
-  product_id: ['id', 'uuid'],
-  category_id: ['id', 'uuid', 'category_uuid'],
-  category_uuid: ['uuid', 'id', 'category_id'],
-}
-
-export function resolveZidMatchValue(zidData: Record<string, unknown>, zidField: string): unknown {
-  const direct = resolvePath(zidData, zidField)
-  if (direct !== undefined && direct !== null && direct !== '') return direct
-
-  const aliases = ZID_FIELD_ALIASES[zidField] || []
-  for (const alias of aliases) {
-    const v = resolvePath(zidData, alias)
-    if (v !== undefined && v !== null && v !== '') return v
-  }
-
-  return undefined
-}
-
-// â”€â”€â”€ Helper: extract a display name from a raw value â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-export function toNameString(v: unknown): string {
-  if (typeof v === 'string') return v.trim()
-  if (typeof v === 'number') return String(v)
-  if (v && typeof v === 'object') {
-    const obj = v as Record<string, unknown>
-    
-    // First, look for a string property directly on obj: name, title, ar, en, name_ar, name_en, names
-    const directKeys = ['name', 'title', 'ar', 'en', 'name_ar', 'name_en', 'names']
-    for (const key of directKeys) {
-      const val = obj[key]
-      if (val !== undefined && val !== null) {
-        if (typeof val === 'string') return val.trim()
-        if (typeof val === 'number') return String(val)
-        if (typeof val === 'object') {
-          // Recurse to resolve the sub-object (e.g. obj.name is { ar: "...", en: "..." })
-          const subResolved = toNameString(val)
-          if (subResolved && subResolved !== '[object Object]') {
-            return subResolved
-          }
-        }
-      }
-    }
-
-    // Fallback: If it's a localized object directly, look for any string/number fields
-    if (typeof obj.ar === 'string') return obj.ar.trim()
-    if (typeof obj.en === 'string') return obj.en.trim()
-    
-    // As a last resort, convert it to JSON or string
-    return String(obj.name ?? obj.title ?? obj.ar ?? obj.en ?? JSON.stringify(v))
-  }
-  return String(v ?? '')
-}
+// resolvePath / toNameString moved to sync-helpers.ts, and the supabaseAdmin
+// client + logSync moved to sync-runtime.ts (shared with erpnext-engine.ts).
+// Re-exported here: this was their original path.
+export { resolvePath, toNameString }
 
 /**
  * Look up per-category overrides from the category_mappings table
@@ -3409,145 +3259,6 @@ export async function buildOdooValues(
   return values
 }
 
-// â”€â”€â”€ Log a sync attempt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-async function logSync(entry: {
-  id?: string
-  workspace_id: string
-  field_mapping_id: string
-  event: string
-  store_id: string
-  zid_entity_id: string | undefined
-  odoo_model: string
-  odoo_record_id?: number | string | null
-  status: 'success' | 'failed' | 'skipped' | 'processing'
-  error_message?: string | null
-  payload: Record<string, unknown>
-  trigger_type?: string
-}) {
-  console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}" trigger_type="${entry.trigger_type || 'automatic'}" id="${entry.id || 'new'}"`)
-  try {
-    // field_mapping_id must be a valid UUID or null â€” non-UUID strings (e.g.
-    // "fixed_zid_product_create") cause 22P02 errors in the UUID column.
-    const rawId = entry.field_mapping_id
-    const isUuid = typeof rawId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId)
-    const logData: Record<string, any> = {
-      workspace_id: entry.workspace_id,
-      field_mapping_id: isUuid ? rawId : null,
-      event: entry.event,
-      store_id: entry.store_id,
-      zid_entity_id: entry.zid_entity_id ?? null,
-      odoo_model: entry.odoo_model,
-      odoo_record_id: entry.odoo_record_id ?? null,
-      status: entry.status,
-      error_message: entry.error_message ?? null,
-      payload: entry.payload,
-      trigger_type: entry.trigger_type || 'automatic',
-    }
-
-    let query
-    if (entry.id) {
-      // Fetch current status to check precedence
-      const { data: currentLog } = await supabaseAdmin
-        .from('sync_logs')
-        .select('status, odoo_record_id, error_message, field_mapping_id')
-        .eq('id', entry.id)
-        .maybeSingle()
-
-      if (currentLog) {
-        let finalStatus = entry.status
-        const finalRecordId = entry.odoo_record_id || currentLog.odoo_record_id
-        let finalError = entry.error_message ?? null
-        let finalMappingId = entry.field_mapping_id
-
-        // Status & Mapping ID precedence logic:
-        if (currentLog.status === 'success' && entry.status === 'failed') {
-          finalStatus = 'failed'
-          finalError = entry.error_message ?? null
-          finalMappingId = currentLog.field_mapping_id
-        } else if (currentLog.status === 'failed' && entry.status === 'success') {
-          finalStatus = 'success'
-          finalError = null
-          finalMappingId = entry.field_mapping_id
-        } else if (currentLog.status === 'success' && ['skipped', 'processing'].includes(entry.status)) {
-          finalStatus = 'success'
-          finalError = null
-          finalMappingId = currentLog.field_mapping_id
-        } else if (currentLog.status === 'failed' && ['skipped', 'processing'].includes(entry.status)) {
-          finalStatus = 'failed'
-          finalError = currentLog.error_message ?? null
-          finalMappingId = currentLog.field_mapping_id
-        } else if (currentLog.status === 'skipped' && entry.status === 'success') {
-          finalStatus = 'success'
-          finalError = null
-          finalMappingId = entry.field_mapping_id
-        } else if (currentLog.status === 'skipped' && entry.status === 'failed') {
-          finalStatus = 'failed'
-          finalError = entry.error_message ?? null
-          finalMappingId = entry.field_mapping_id
-        } else if (currentLog.status === 'skipped' && ['skipped', 'processing'].includes(entry.status)) {
-          finalStatus = 'skipped'
-          finalMappingId = currentLog.field_mapping_id
-        }
-
-        logData.status = finalStatus
-        logData.odoo_record_id = finalRecordId
-        logData.error_message = finalError
-        logData.field_mapping_id = finalMappingId
-      }
-
-      query = supabaseAdmin.from('sync_logs').update(logData).eq('id', entry.id)
-    } else {
-      query = supabaseAdmin.from('sync_logs').insert([logData])
-    }
-
-    const { error: logErr } = await query
-    if (logErr) {
-      console.error('[SyncEngine] sync_logs write error:', logErr)
-
-      // Self-healing database adapter fallbacks
-      if (logErr.code === '22P02' || logErr.code === '23514') {
-        console.info('[SyncEngine] Retrying sync_log write with database type-safe fallbacks...')
-        const safeLogData = { ...logData }
-
-        // Fix for 22P02 (invalid input syntax for type integer)
-        if (logErr.code === '22P02') {
-          safeLogData.odoo_record_id = null
-          if (entry.odoo_record_id) {
-            safeLogData.error_message = `[Record Name: ${entry.odoo_record_id}] ${safeLogData.error_message || ''}`.trim()
-          }
-        }
-
-        // Fix for 23514 (check constraint violation for 'processing' status)
-        if (logErr.code === '23514') {
-          if (safeLogData.status === 'processing') {
-            console.info('[SyncEngine] Skipping initial processing log due to check constraint')
-            return
-          }
-        }
-
-        let retryQuery
-        if (entry.id) {
-          retryQuery = supabaseAdmin.from('sync_logs').update(safeLogData).eq('id', entry.id)
-        } else {
-          retryQuery = supabaseAdmin.from('sync_logs').insert([safeLogData])
-        }
-
-        const { error: retryErr } = await retryQuery
-        if (retryErr) {
-          console.error('[SyncEngine] Failed retry sync_log write:', retryErr)
-        } else {
-          console.info('[SyncEngine] sync_log written successfully via database fallback route âœ…')
-        }
-      }
-    } else {
-      console.info(`[SyncEngine] sync_log ${entry.id ? 'updated' : 'written'} âœ…`)
-    }
-  } catch (err) {
-    console.error('[SyncEngine] Failed to write sync_log (exception):', err)
-  }
-}
-
 // â”€â”€â”€ Event normalization â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Zid sometimes sends 'product.created' while field_mappings stores 'product.create'.
 
@@ -3632,6 +3343,25 @@ function normalizeOdooOperation(operation: unknown, event: string): OdooOperatio
   if (normalizedEvent.includes('delete')) return 'delete'
   if (normalizedEvent.includes('update') || normalizedEvent.includes('publish')) return 'update'
   return 'create'
+}
+
+/**
+ * مفتاح الـpreset إلى نوع الكيان الذي يفحصه حارس الإعدادات.
+ * الترتيب مقصود: أول تطابق يفوز (السلوك السابق كان سلسلة `if` متتابعة).
+ * يُرجع null عندما لا يطابق الـpreset أي كيان معروف ⇒ لا يُطبَّق الحارس.
+ */
+const PRESET_ENTITY_TYPES: ReadonlyArray<readonly [string, string]> = [
+  ['category', 'categories'],
+  ['product', 'products'],
+  ['customer', 'customers'],
+  ['order', 'orders'],
+]
+
+function presetEntityType(presetKey: string): string | null {
+  for (const [needle, entityType] of PRESET_ENTITY_TYPES) {
+    if (presetKey.includes(needle)) return entityType
+  }
+  return null
 }
 
 // ─── Helper: cached standard mapping settings lookup ───
@@ -3917,8 +3647,9 @@ export async function processWebhookEvent(
     }
   }
 
-  // Run cleanup of expired logs in the background
-  cleanupExpiredLogs().catch(err => console.error('[SyncEngine] Background cleanup failed:', err))
+  // ملاحظة: تنظيف السجلات المنتهية لا يُشغَّل هنا. كان يعمل عند كل ويب هوك،
+  // أي عمليتا DELETE غير محدودتين على `sync_logs` في المسار الساخن. الآن
+  // `maybeCleanup()` في `sync-queue.ts` يتكفّل به مرة كل ساعة.
 
   // 1. Find all field_mappings matching this store + event
   if (!isProduct) {
@@ -4088,59 +3819,22 @@ async function processFixedMappingFallback(
   }
 
   // ——— Check Standard Mapping settings for entity operation allowance —————
-  if (presetKey.includes('category') && workspaceId) {
+  // كان هذا الحارس مكرراً أربع مرات بنفس Shape تقريباً، مع انحراف: كتلة
+  // الطلبات وحدها كانت تفحص cancel/deliver بينما الثلاث الأخرى لا. الآن
+  // مسار واحد يستعمل `normalizeOdooOperation` — نفس ما يستعمله
+  // `processSingleMapping` — فلا يحدث اختلاف سلوكي بين المسارين.
+  const presetEntity = presetEntityType(presetKey)
+  if (presetEntity) {
     const storeType = presetKey.split('_')[0]
-    const normalizedEvent = normalizeEvent(event)
-    const operation: 'create' | 'update' | 'delete' = normalizedEvent.includes('delete') ? 'delete'
-      : normalizedEvent.includes('update') || normalizedEvent.includes('publish') ? 'update'
-      : 'create'
-    const catCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, 'categories')
-    if (!catCheck.allowed) {
-      console.info(`[FixedMapping] Category operation blocked for preset="${presetKey}": ${catCheck.reason}`)
-      return null
-    }
-  }
-  if (presetKey.includes('product') && workspaceId) {
-    const storeType = presetKey.split('_')[0]
-    const normalizedEvent = normalizeEvent(event)
-    const operation: 'create' | 'update' | 'delete' = normalizedEvent.includes('delete') ? 'delete'
-      : normalizedEvent.includes('update') || normalizedEvent.includes('publish') ? 'update'
-      : 'create'
-    const prodCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, 'products')
-    if (!prodCheck.allowed) {
-      console.info(`[FixedMapping] Product operation blocked for preset="${presetKey}": ${prodCheck.reason}`)
-      return null
-    }
-  }
-  if (presetKey.includes('customer') && workspaceId) {
-    const storeType = presetKey.split('_')[0]
-    const normalizedEvent = normalizeEvent(event)
-    const operation: 'create' | 'update' | 'delete' = normalizedEvent.includes('delete') ? 'delete'
-      : normalizedEvent.includes('update') || normalizedEvent.includes('publish') ? 'update'
-      : 'create'
-    const custCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, 'customers')
-    if (!custCheck.allowed) {
-      console.info(`[FixedMapping] Customer operation blocked for preset="${presetKey}": ${custCheck.reason}`)
-      return null
-    }
-  }
-  if (presetKey.includes('order') && workspaceId) {
-    const storeType = presetKey.split('_')[0]
-    const normalizedEvent = normalizeEvent(event)
-    const operation: 'create' | 'update' | 'cancel' | 'deliver' | 'delete' = normalizedEvent.includes('cancel') ? 'cancel'
-      : normalizedEvent.includes('deliver') ? 'deliver'
-      : normalizedEvent.includes('delete') ? 'delete'
-      : normalizedEvent.includes('update') || normalizedEvent.includes('publish') ? 'update'
-      : 'create'
-    const orderCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, 'orders')
-    if (!orderCheck.allowed) {
-      console.info(`[FixedMapping] Order operation blocked for preset="${presetKey}": ${orderCheck.reason}`)
+    const operation = normalizeOdooOperation(undefined, event)
+    const presetCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, presetEntity)
+    if (!presetCheck.allowed) {
+      console.info(`[FixedMapping] ${presetEntity} operation blocked for preset="${presetKey}": ${presetCheck.reason}`)
       return null
     }
   }
 
   // Merge field rows from DB
-  const defaultFieldPairs: any[] = []
   const { data: customRows } = await supabaseAdmin
     .from('fixed_mappings')
     .select('field_rows')
@@ -4154,7 +3848,7 @@ async function processFixedMappingFallback(
       customFieldPairs.push(...rows)
     }
   }
-  const fieldPairs = [...defaultFieldPairs, ...customFieldPairs]
+  const fieldPairs: any[] = [...customFieldPairs]
 
   const nonArchived = fieldPairs.filter((r: any) => r.odoo_field && r.platform_field && !r.archived)
   if (nonArchived.length === 0) {
@@ -4490,6 +4184,48 @@ async function processFixedMappingFallback(
 
 // ——— Process one field_mapping —————————————————————————————————————————————
 
+/**
+ * لا توجد حقول مُهيّأة لهذا الموديل — تخطٍّ موحّد مع تسجيله في `sync_logs`.
+ *
+ * كان هذا الكتلة بحجم 14 حقلاً مكروراً في فرعي Odoo وERPNext من
+ * `processSingleMapping`. استخراجه يمنع انحراف حمولة السجل بين المسارين.
+ * `delete` لا يمرّ من هنا: الحذف لا يحتاج حقولاً.
+ */
+async function skipNoFieldItems(args: {
+  logId?: string
+  mapping: FieldMappingRow
+  event: string
+  storeId: string
+  zidEntityId: string
+  odooModel: string
+  zidData: Record<string, unknown>
+  triggerType: 'automatic' | 'manual'
+}): Promise<SyncEngineResult['records'][number]> {
+  const { logId, mapping, event, storeId, zidEntityId, odooModel, zidData, triggerType } = args
+  const message = 'No field mapping items configured'
+  console.warn(`[SyncEngine] No field items configured for model "${odooModel}"`)
+  await logSync({
+    id: logId,
+    workspace_id: mapping.workspace_id,
+    field_mapping_id: mapping.id,
+    event,
+    store_id: storeId,
+    zid_entity_id: zidEntityId,
+    odoo_model: odooModel,
+    status: 'skipped',
+    error_message: message,
+    payload: zidData,
+    trigger_type: triggerType,
+  })
+  return {
+    mappingId: mapping.id,
+    mappingName: mapping.name,
+    model: odooModel,
+    status: 'skipped',
+    message,
+  }
+}
+
 export async function processSingleMapping(
   mapping: FieldMappingRow,
   event: string,
@@ -4683,9 +4419,7 @@ export async function processSingleMapping(
 
     const mappingItems: FieldMappingItem[] = mapping.mappings?.[odooModel] ?? []
     if (mappingItems.length === 0 && odooOperation !== 'delete') {
-      console.warn(`[SyncEngine] No field items configured for model "${odooModel}"`)
-      await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'No field mapping items configured', payload: zidData, trigger_type: triggerType })
-      return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'No field mapping items configured' }
+      return skipNoFieldItems({ logId, mapping, event, storeId, zidEntityId, odooModel, zidData, triggerType })
     }
 
     const erpFieldNames = mappingItems.map(m => m.erpField)
@@ -4735,9 +4469,7 @@ export async function processSingleMapping(
   const mappingItems: FieldMappingItem[] = mapping.mappings?.[odooModel] ?? []
 
   if (mappingItems.length === 0 && odooOperation !== 'delete') {
-    console.warn(`[SyncEngine] No field items configured for model "${odooModel}"`)
-    await logSync({ id: logId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: 'No field mapping items configured', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'No field mapping items configured' }
+    return skipNoFieldItems({ logId, mapping, event, storeId, zidEntityId, odooModel, zidData, triggerType })
   }
 
   // ——— 3. Create OdooClient ————————————————————————————————————————————————
@@ -5911,7 +5643,7 @@ async function executeOdooOperation(params: {
         const override: Record<string, any> = { ...stdSettings }
         if (stdSettings.costing_method !== undefined || stdSettings.inventory_valuation !== undefined) {
           override.inventory_valuation = {
-            ...((mergedSettings as any)?.inventory_valuation || {}),
+            ...((mergedSettings)?.inventory_valuation || {}),
             ...(stdSettings.costing_method ? { property_cost_method: stdSettings.costing_method } : {}),
             ...(stdSettings.inventory_valuation ? { property_valuation: stdSettings.inventory_valuation } : {}),
           }
@@ -5922,7 +5654,7 @@ async function executeOdooOperation(params: {
             : entityType === 'customers' ? 'customer'
             : 'order'
           override[matchKey] = {
-            ...((mergedSettings as any)?.[matchKey] || {}),
+            ...((mergedSettings)?.[matchKey] || {}),
             ...(stdSettings[matchKey] && typeof stdSettings[matchKey] === 'object' && !Array.isArray(stdSettings[matchKey]) ? stdSettings[matchKey] : {}),
             ...(stdSettings.match_zid_field ? { zid_match_field: stdSettings.match_zid_field } : {}),
             ...(stdSettings.match_odoo_field ? { odoo_match_field: stdSettings.match_odoo_field } : {}),
@@ -5930,7 +5662,7 @@ async function executeOdooOperation(params: {
         }
         if (stdSettings.on_delete) {
           override.delete = {
-            ...((mergedSettings as any)?.delete || {}),
+            ...((mergedSettings)?.delete || {}),
             strategy: stdSettings.on_delete === 'delete_or_archive' ? 'try_delete_archive'
               : stdSettings.on_delete === 'nothing' ? 'skip'
               : stdSettings.on_delete,
@@ -5950,9 +5682,9 @@ async function executeOdooOperation(params: {
   // Resolve platform once for reuse across order/cancel/deliver operations
   const execPlatform: 'zid' | 'salla' | 'shopify' = platformHint ?? getPlatformFromEvent(event)
 
-  const matchStrategy = (mergedSettings as any)?.matching?.strategy
-  let fixedMatch = (mergedSettings as any)?.matching?.odoo_field && (mergedSettings as any)?.matching?.zid_field
-    ? { odoo_field: (mergedSettings as any).matching.odoo_field, zid_field: (mergedSettings as any).matching.zid_field }
+  const matchStrategy = (mergedSettings)?.matching?.strategy
+  let fixedMatch = (mergedSettings)?.matching?.odoo_field && (mergedSettings)?.matching?.zid_field
+    ? { odoo_field: (mergedSettings).matching.odoo_field, zid_field: (mergedSettings).matching.zid_field }
     : undefined
 
   // ── Entity-specific matching: override fixedMatch with settings ──
@@ -5962,7 +5694,7 @@ async function executeOdooOperation(params: {
       : odooModel === 'product.template' ? 'product'
       : odooModel === 'res.partner' ? 'customer'
       : 'order'
-    const entityCfg = (mergedSettings as any)?.[cfgKey]
+    const entityCfg = (mergedSettings)?.[cfgKey]
     if (entityCfg?.odoo_match_field && entityCfg?.zid_match_field) {
       fixedMatch = { odoo_field: entityCfg.odoo_match_field, zid_field: entityCfg.zid_match_field }
     }
@@ -5993,11 +5725,11 @@ async function executeOdooOperation(params: {
       console.info(`[SyncEngine] Generic Injected Match Field: ${odooField} = ${JSON.stringify(effectiveOdooValues[odooField])}`)
     }
   }
-  const defaultLocationId = (mergedSettings as any)?.inventory?.default_location_id ?? undefined
-  const skipDuplicateCheck = (mergedSettings as any)?.matching?.action === 'create_duplicate'
-  const infiniteValue = (mergedSettings as any)?.stock?.infinite_value
-  const pSettings = (mergedSettings as any)?.price
-    ? { markup_percent: (mergedSettings as any).price.markup_percent || 0, rounding: (mergedSettings as any).price.rounding || 'nearest', decimal_places: (mergedSettings as any).price.decimal_places ?? 2 }
+  const defaultLocationId = (mergedSettings)?.inventory?.default_location_id ?? undefined
+  const skipDuplicateCheck = (mergedSettings)?.matching?.action === 'create_duplicate'
+  const infiniteValue = (mergedSettings)?.stock?.infinite_value
+  const pSettings = (mergedSettings)?.price
+    ? { markup_percent: (mergedSettings).price.markup_percent || 0, rounding: (mergedSettings).price.rounding || 'nearest', decimal_places: (mergedSettings).price.decimal_places ?? 2 }
     : undefined
 
   if (odooModel === 'product.template' && (odooOperation === 'create' || odooOperation === 'update')) {
@@ -6005,8 +5737,8 @@ async function executeOdooOperation(params: {
     const platform: 'zid' | 'salla' | 'shopify' = ev.startsWith('shopify:') || ev.includes('shopify') ? 'shopify'
       : ev.endsWith('.created') || ev.endsWith('.updated') || ev.includes('salla') ? 'salla'
       : 'zid'
-    const variantSyncMode = (mergedSettings as any)?.variant?.sync_mode || (mapping as any).variant_sync_mode || 'AS_VARIANTS'
-    const companyName = (mergedSettings as any)?.company_id ? `المعرف ${(mergedSettings as any).company_id}` : 'الافتراضية'
+    const variantSyncMode = (mergedSettings)?.variant?.sync_mode || (mapping as any).variant_sync_mode || 'AS_VARIANTS'
+    const companyName = (mergedSettings)?.company_id ? `المعرف ${(mergedSettings).company_id}` : 'الافتراضية'
     console.info(`[SyncEngine] ⚙️ إعدادات تسجيل المنتج في أودو: [الشركة: ${companyName}] | [طريقة المزامنة للمتغيرات: ${variantSyncMode}]`)
     console.info(`[SyncEngine] ⏳ محاولة التسجيل في أودو للموديل: ${odooModel} (العملية: ${odooOperation})...`)
 
@@ -6018,7 +5750,7 @@ async function executeOdooOperation(params: {
     // The standard preset may not include categ_id → categories in its field_rows.
     // When category.sync_mode is 'auto' or 'map_existing', resolve from zidData and inject.
     if (effectiveOdooValues.categ_id === undefined) {
-      const _catCfg = (mergedSettings as any)?.category
+      const _catCfg = (mergedSettings)?.category
       const _catSyncMode = _catCfg?.sync_mode || 'auto'
       if (_catSyncMode !== 'skip') {
         const _catRawValue = zidData.categories ?? (zidData as any).category
@@ -6183,7 +5915,7 @@ async function executeOdooOperation(params: {
     effectiveOdooValues = await applyFixedSettingsToValues(odooValues, mergedSettings, zidData, majorVersion, mapping.workspace_id, catPlatform, odooModel)
 
     // Inject the zid match field value into Odoo so the link is persisted
-    const catCfg = (mergedSettings as any)?.category
+    const catCfg = (mergedSettings)?.category
     if (catCfg?.odoo_match_field && catCfg?.zid_match_field && (odooOperation === 'create' || odooOperation === 'update')) {
       const matchVal = resolveZidMatchValue(zidData, catCfg.zid_match_field)
       if (matchVal !== undefined && matchVal !== null && matchVal !== '') {
@@ -6237,7 +5969,7 @@ async function executeOdooOperation(params: {
     delete (effectiveOdooValues as any).location_id
     delete (odooValues as any).location_id
 
-    const orderSettings = (mergedSettings as any)?.order
+    const orderSettings = (mergedSettings)?.order
     // ── Auto-resolve partner_id from customer data ──────────────
     if (!effectiveOdooValues.partner_id) {
       const customerData = (zidData as any)?.customer || (zidData as any)?.order?.customer || {}
@@ -6372,10 +6104,10 @@ async function executeOdooOperation(params: {
             }
           }
 
-          const customerPolicy = (mergedSettings as any)?.customer_fallback_policy
+          const customerPolicy = (mergedSettings)?.customer_fallback_policy
             || orderSettings?.customer_fallback_policy
             || 'create_new'
-          const defaultCustomerId = (mergedSettings as any)?.default_customer_id
+          const defaultCustomerId = (mergedSettings)?.default_customer_id
             || orderSettings?.default_customer_id
             || null
 
@@ -6506,10 +6238,10 @@ async function executeOdooOperation(params: {
 
     // Fallback check if partner_id is still missing after customer processing
     if (!effectiveOdooValues.partner_id) {
-      const customerPolicy = (mergedSettings as any)?.customer_fallback_policy
+      const customerPolicy = (mergedSettings)?.customer_fallback_policy
         || orderSettings?.customer_fallback_policy
         || 'create_new'
-      const defaultCustomerId = (mergedSettings as any)?.default_customer_id
+      const defaultCustomerId = (mergedSettings)?.default_customer_id
         || orderSettings?.default_customer_id
         || null
 
@@ -6605,12 +6337,12 @@ async function executeOdooOperation(params: {
 
     // ── Inject Platform Status into Custom Selection Field on sale.order ──
     const customStatusField = orderSettings?.order_status_custom_field
-      || (mergedSettings as any)?.order_status_custom_field
-      || (mergedSettings as any)?.order?.order_status_custom_field
+      || (mergedSettings)?.order_status_custom_field
+      || (mergedSettings)?.order?.order_status_custom_field
     const isCustomStatusEnabled = (
       orderSettings?.update_custom_status_field !== false &&
-      (mergedSettings as any)?.update_custom_status_field !== false &&
-      (mergedSettings as any)?.order?.update_custom_status_field !== false
+      (mergedSettings)?.update_custom_status_field !== false &&
+      (mergedSettings)?.order?.update_custom_status_field !== false
     )
     if (zidStatus && customStatusField && isCustomStatusEnabled) {
       effectiveOdooValues[customStatusField] = zidStatus
@@ -6871,7 +6603,7 @@ async function executeOdooOperation(params: {
         }
       }
       // Check if partial fulfillment is enabled
-      const partialFulfillment = (mergedSettings as any)?.order?.partial_fulfillment
+      const partialFulfillment = (mergedSettings)?.order?.partial_fulfillment
       if (partialFulfillment) {
         // Partial fulfillment: deliver only the fulfilled items from the payload
         const fulfilledItems = extractFulfilledItems(zidData)
@@ -6898,8 +6630,8 @@ async function executeOdooOperation(params: {
 
   if (odooOperation === 'create' && !skipDuplicateCheck) {
     let duplicateId: number | null = null
-    if (odooModel === 'product.category' && (mergedSettings as any)?.odoo_category_id) {
-      duplicateId = Number((mergedSettings as any).odoo_category_id)
+    if (odooModel === 'product.category' && (mergedSettings)?.odoo_category_id) {
+      duplicateId = Number((mergedSettings).odoo_category_id)
       console.info(`[SyncEngine] Using manual category mapping Odoo ID for create check: ${duplicateId}`)
     } else {
       duplicateId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
@@ -6949,7 +6681,7 @@ async function executeOdooOperation(params: {
     }
 
     // Auto-confirm: convert draft/sent order to a confirmed sales order (action_confirm)
-    const autoConfirm = (mergedSettings as any)?.order?.auto_confirm
+    const autoConfirm = (mergedSettings)?.order?.auto_confirm
     if (odooModel === 'sale.order' && autoConfirm) {
       try {
         const recs = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['state'])
@@ -6963,7 +6695,7 @@ async function executeOdooOperation(params: {
     }
 
     // Auto-invoice: confirm + create invoice if enabled
-    const autoInvoice = (mergedSettings as any)?.order?.auto_invoice
+    const autoInvoice = (mergedSettings)?.order?.auto_invoice
     if (odooModel === 'sale.order' && autoInvoice) {
       try {
         const recs = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['state'])
@@ -6990,8 +6722,8 @@ async function executeOdooOperation(params: {
 
   let existingId: number | null = null
   let deleteModel = odooModel
-  if (odooModel === 'product.category' && (mergedSettings as any)?.odoo_category_id) {
-    existingId = Number((mergedSettings as any).odoo_category_id)
+  if (odooModel === 'product.category' && (mergedSettings)?.odoo_category_id) {
+    existingId = Number((mergedSettings).odoo_category_id)
     console.info(`[SyncEngine] Using manual category mapping Odoo ID for update: ${existingId}`)
   } else {
     // Zid child product delete: search product.product (not template) since variants are product.product records
@@ -7036,7 +6768,7 @@ async function executeOdooOperation(params: {
 
   // odooOperation is 'delete' here
   // Priority: FixedMappingSettings.delete.strategy > DynamicMapping __settings.deleteBehavior > 'try_delete_archive'
-  const deleteStrategy = (mergedSettings as any)?.delete?.strategy
+  const deleteStrategy = (mergedSettings)?.delete?.strategy
     || (mapping.mappings as any)?.__settings?.deleteBehavior
     || 'try_delete_archive'
   
@@ -7126,7 +6858,7 @@ async function executeOdooOperation(params: {
         fallbacksExecuted.push('archive')
 
         // Archive child variants if configured via archive_variants setting
-        const archiveVariants = (mergedSettings as any)?.delete?.archive_variants !== false
+        const archiveVariants = (mergedSettings)?.delete?.archive_variants !== false
         if (archiveVariants && odooModel === 'product.template') {
           try {
             const variantIds = await client.search('product.product', [['product_tmpl_id', '=', existingId], ['active', '=', true]])
@@ -7417,580 +7149,11 @@ export async function cleanupExpiredLogs() {
   }
 }
 
-// â”€â”€â”€ ERPNext Rest Client & Sync Helper Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-export class ErpNextClient {
-  private url: string
-  private authHeader: string
-
-  constructor(params: { url: string; username: string; apiKey: string }) {
-    this.url = params.url.replace(/\/+$/, '')
-    this.authHeader = `token ${params.username.trim()}:${params.apiKey.trim()}`
-  }
-
-  async search(docType: string, filters: any[][]): Promise<string[]> {
-    const filtersStr = JSON.stringify(filters)
-    const url = `${this.url}/api/resource/${docType}?filters=${encodeURIComponent(filtersStr)}&fields=["name"]&limit_page_length=1`
-    
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': this.authHeader,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-    })
-
-    if (!res.ok) {
-      throw new Error(`ERPNext search failed with HTTP ${res.status}: ${res.statusText}`)
-    }
-
-    const json = await res.json()
-    const data = json.data || []
-    return data.map((d: any) => d.name)
-  }
-
-  async create(docType: string, values: any): Promise<string> {
-    const url = `${this.url}/api/resource/${docType}`
-    
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': this.authHeader,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(values),
-      cache: 'no-store',
-    })
-
-    if (!res.ok) {
-      const errText = await res.text()
-      throw new Error(`ERPNext create failed with HTTP ${res.status}: ${errText || res.statusText}`)
-    }
-
-    const json = await res.json()
-    return json.data?.name || ''
-  }
-
-  async update(docType: string, name: string, values: any): Promise<boolean> {
-    const url = `${this.url}/api/resource/${docType}/${encodeURIComponent(name)}`
-    
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Authorization': this.authHeader,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(values),
-      cache: 'no-store',
-    })
-
-    if (!res.ok) {
-      const errText = await res.text()
-      throw new Error(`ERPNext update failed with HTTP ${res.status}: ${errText || res.statusText}`)
-    }
-
-    return true
-  }
-
-  async delete(docType: string, name: string): Promise<boolean> {
-    const url = `${this.url}/api/resource/${docType}/${encodeURIComponent(name)}`
-    
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': this.authHeader,
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-    })
-
-    if (!res.ok) {
-      const errText = await res.text()
-      throw new Error(`ERPNext delete failed with HTTP ${res.status}: ${errText || res.statusText}`)
-    }
-
-    return true
-  }
-}
-
-async function fetchErpNextFieldMeta(
-  client: ErpNextClient,
-  docType: string,
-  fieldNames?: string[]
-): Promise<Map<string, OdooFieldMeta>> {
-  const map = new Map<string, OdooFieldMeta>()
-  try {
-    const url = `${client['url']}/api/resource/DocType/${docType}`
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': client['authHeader'],
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-    })
-
-    if (res.ok) {
-      const json = await res.json()
-      const doc = json.data || {}
-      const rawFields = doc.fields || []
-
-      const systemFields = [
-        { fieldname: 'name', label: 'Name', fieldtype: 'Data' },
-        { fieldname: 'owner', label: 'Owner', fieldtype: 'Data' },
-      ]
-
-      const allFields = [...systemFields, ...rawFields]
-
-      for (const f of allFields) {
-        if (!fieldNames || fieldNames.includes(f.fieldname)) {
-          let ttype = 'char'
-          const ftype = (f.fieldtype || '').toLowerCase()
-          if (ftype === 'link') ttype = 'many2one'
-          else if (ftype === 'table') ttype = 'one2many'
-          else if (ftype === 'check') ttype = 'boolean'
-          else if (['currency', 'float', 'percent'].includes(ftype)) ttype = 'float'
-          else if (ftype === 'int') ttype = 'integer'
-          else if (ftype === 'select') ttype = 'selection'
-
-          map.set(f.fieldname, {
-            name: f.fieldname,
-            ttype,
-            relation: f.options || ''
-          })
-        }
-      }
-    }
-  } catch (err: any) {
-    console.warn('[SyncEngine] fetchErpNextFieldMeta failed, skipping relation resolution:', err.message)
-  }
-  return map
-}
-
-async function resolveSingleErpNextRelationName(
-  client: ErpNextClient,
-  relation: string,
-  itemValue: unknown,
-  platform: 'zid' | 'salla'
-): Promise<string | null> {
-  if (itemValue === undefined || itemValue === null) return null
-
-  let platformId: string | null = null
-  let nameVal: string | null = null
-
-  if (itemValue && typeof itemValue === 'object') {
-    const obj = itemValue as Record<string, unknown>
-    const rawId = obj.id ?? obj.uuid ?? obj.merchant_id
-    if (rawId !== undefined && rawId !== null) {
-      platformId = String(rawId).trim()
-    }
-    nameVal = toNameString(itemValue)
-  } else if (typeof itemValue === 'number') {
-    platformId = String(itemValue)
-    nameVal = String(itemValue)
-  } else if (typeof itemValue === 'string') {
-    const trimmed = itemValue.trim()
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trimmed)
-    const isNumeric = /^\d+$/.test(trimmed)
-    if (isUuid || isNumeric) {
-      platformId = trimmed
-    }
-    nameVal = trimmed
-  }
-
-  if (!nameVal || nameVal === '[object Object]' || nameVal === 'undefined') {
-    if (!platformId) return null
-  }
-
-  try {
-    // Fetch target relation fields meta to verify field existence
-    const relationFields = await fetchErpNextFieldMeta(client, relation)
-
-    // â”€â”€â”€ Case 1: Search by Platform ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (platformId) {
-      let searchField: string | null = null
-      if (platform === 'zid') {
-        if (relationFields.has('x_zid_id')) searchField = 'x_zid_id'
-        else if (relationFields.has('zid_id')) searchField = 'zid_id'
-      } else if (platform === 'salla') {
-        if (relationFields.has('x_salla_id')) searchField = 'x_salla_id'
-        else if (relationFields.has('salla_id')) searchField = 'salla_id'
-      }
-
-      if (searchField) {
-        const names = await client.search(relation, [[searchField, '=', platformId]])
-        if (names && names.length > 0) {
-          console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by platform ID "${platformId}" â†’ "${names[0]}"`)
-          return names[0]
-        }
-      }
-    }
-
-    // â”€â”€â”€ Case 2: Search by Name inside ERPNext â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined') {
-      const names = await client.search(relation, [['name', '=', nameVal]])
-      if (names && names.length > 0) {
-        console.info(`[SyncEngine] Resolved ERPNext relation ${relation} by name="${nameVal}" â†’ "${names[0]}"`)
-        return names[0]
-      }
-
-      if (relationFields.has('item_code')) {
-        const itemNames = await client.search(relation, [['item_code', '=', nameVal]])
-        if (itemNames && itemNames.length > 0) return itemNames[0]
-      }
-    }
-
-    // â”€â”€â”€ Case 3: Create it if not found â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    const systemDocTypes = ['currency', 'uom', 'company', 'warehouse', 'payment_term', 'price_list']
-    if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined' && !systemDocTypes.includes(relation.toLowerCase())) {
-      console.info(`[SyncEngine] Creating new ERPNext "${relation}" with name="${nameVal}"`)
-      
-      const createData: Record<string, any> = {}
-      createData.name = nameVal
-
-      // Set specific fields if they exist in the target DocType:
-      if (relationFields.has('item_group_name')) createData.item_group_name = nameVal
-      if (relationFields.has('customer_name')) createData.customer_name = nameVal
-      if (relationFields.has('uom_name')) createData.uom_name = nameVal
-      
-      // Tree hierarchy defaults
-      if (relationFields.has('parent_item_group')) createData.parent_item_group = 'All Item Groups'
-      if (relationFields.has('parent_customer_group')) createData.parent_customer_group = 'All Customer Groups'
-      if (relationFields.has('parent_territory')) createData.parent_territory = 'All Territories'
-      if (relationFields.has('is_group')) createData.is_group = 0
-
-      // Customer defaults
-      if (relationFields.has('customer_type')) createData.customer_type = 'Individual'
-      if (relationFields.has('customer_group')) createData.customer_group = 'All Customer Groups'
-      if (relationFields.has('territory')) createData.territory = 'All Territories'
-
-      // Item defaults
-      if (relation.toLowerCase() === 'item') {
-        createData.item_code = nameVal
-        createData.item_name = nameVal
-        createData.item_group = 'All Item Groups'
-        createData.stock_uom = 'Nos'
-      }
-
-      if (platformId) {
-        let key: string | null = null
-        if (platform === 'zid') {
-          if (relationFields.has('x_zid_id')) key = 'x_zid_id'
-          else if (relationFields.has('zid_id')) key = 'zid_id'
-        } else if (platform === 'salla') {
-          if (relationFields.has('x_salla_id')) key = 'x_salla_id'
-          else if (relationFields.has('salla_id')) key = 'salla_id'
-        }
-        if (key) createData[key] = platformId
-      }
-
-      try {
-        const newName = await client.create(relation, createData)
-        if (newName) {
-          console.info(`[SyncEngine] Successfully created ERPNext relation "${relation}" â†’ "${newName}"`)
-          return newName
-        }
-      } catch (createErr: any) {
-        console.warn(`[SyncEngine] Failed to create ERPNext relation "${relation}":`, createErr.message)
-      }
-    }
-  } catch (err: any) {
-    console.warn(`[SyncEngine] Error resolving ERPNext relation for ${relation}:`, err.message)
-  }
-
-  return null
-}
-
-async function buildErpNextValues(
-  client: ErpNextClient,
-  mappingItems: FieldMappingItem[],
-  zidData: Record<string, unknown>,
-  fieldMeta: Map<string, OdooFieldMeta>,
-  platform: 'zid' | 'salla' = 'zid'
-): Promise<Record<string, unknown>> {
-  const values: Record<string, unknown> = {}
-
-  for (const item of mappingItems) {
-    if (!item.erpField) continue
-
-    const hasStaticValue = Array.isArray(item.staticValue)
-      ? item.staticValue.length > 0
-      : item.staticValue !== undefined && item.staticValue !== null && item.staticValue !== ''
-
-    const rawValue = hasStaticValue
-      ? item.staticValue
-      : item.zidField
-        ? resolvePath(zidData, item.zidField)
-        : undefined
-    if (rawValue === undefined || rawValue === null) continue
-
-    const meta = fieldMeta.get(item.erpField)
-    const ttype = meta?.ttype ?? ''
-    const relation = meta?.relation ?? ''
-
-    if (ttype === 'many2one' && relation) {
-      if (hasStaticValue) {
-        const valStr = String(Array.isArray(rawValue) ? rawValue[0] : rawValue)
-        values[item.erpField] = valStr
-        continue
-      }
-
-      const singleValue = Array.isArray(rawValue) ? rawValue[0] : rawValue
-      const resolvedName = await resolveSingleErpNextRelationName(client, relation, singleValue, platform)
-      if (resolvedName !== null) {
-        values[item.erpField] = resolvedName
-      } else {
-        const nameStr = toNameString(singleValue)
-        console.warn(`[SyncEngine] Skipping ERPNext "${item.erpField}" â€” could not resolve "${nameStr}" in ${relation}`)
-      }
-      continue
-    }
-
-    if (ttype === 'one2many' && relation) {
-      const items = Array.isArray(rawValue) ? rawValue : [rawValue]
-      const childRows: any[] = []
-      
-      try {
-        const childFields = await fetchErpNextFieldMeta(client, relation)
-        
-        // Find the first Link field in the child schema
-        let linkField: string | null = null
-        let linkRelation: string | null = null
-        
-        for (const [name, meta] of childFields.entries()) {
-          if (meta.ttype === 'many2one' && meta.relation) {
-            linkField = name
-            linkRelation = meta.relation
-            break
-          }
-        }
-
-        for (const childItem of items) {
-          if (childItem !== undefined && childItem !== null) {
-            const rowData: Record<string, any> = {}
-
-            if (linkField && linkRelation) {
-              const resolvedName = await resolveSingleErpNextRelationName(client, linkRelation, childItem, platform)
-              if (resolvedName) {
-                rowData[linkField] = resolvedName
-              }
-            }
-
-            // Copy any other matching fields from childItem if it's an object
-            if (typeof childItem === 'object' && childItem !== null) {
-              const childObj = childItem as Record<string, any>
-              for (const key of Object.keys(childObj)) {
-                let targetKey = key
-                if (key === 'quantity' && childFields.has('qty')) targetKey = 'qty'
-                else if (key === 'qty' && childFields.has('quantity')) targetKey = 'quantity'
-                else if (key === 'price' && childFields.has('rate')) targetKey = 'rate'
-                else if (key === 'rate' && childFields.has('price')) targetKey = 'price'
-
-                if (childFields.has(targetKey)) {
-                  let val = childObj[key]
-                  const type = childFields.get(targetKey)?.ttype
-                  if (type === 'float' || type === 'integer') {
-                    const parsed = parseFloat(val)
-                    if (!isNaN(parsed)) val = parsed
-                  }
-                  rowData[targetKey] = val
-                }
-              }
-            }
-
-            if (Object.keys(rowData).length > 0) {
-              childRows.push(rowData)
-            }
-          }
-        }
-      } catch (err: any) {
-        console.warn(`[SyncEngine] Failed to resolve child table rows for ${relation}:`, err.message)
-      }
-
-      if (childRows.length > 0) {
-        values[item.erpField] = childRows
-      }
-      continue
-    }
-
-    let value: unknown = rawValue
-    if (ttype === 'boolean' && typeof value === 'string') {
-      value = value === 'true'
-    }
-    if (
-      typeof value === 'string' &&
-      (['integer', 'float', 'monetary'].includes(ttype) ||
-       ['qty', 'rate', 'price', 'quantity', 'amount'].includes(item.erpField.toLowerCase()))
-    ) {
-      const parsed = parseFloat(value)
-      if (!isNaN(parsed)) value = parsed
-    }
-
-    if (Array.isArray(value)) {
-      value = value.map(toNameString).join(', ')
-    }
-
-    values[item.erpField] = value
-  }
-
-  return values
-}
-
-async function findExistingErpNextRecord(
-  client: ErpNextClient,
-  model: string,
-  zidData: Record<string, unknown>,
-  erpValues: Record<string, unknown>,
-  mapping?: { odoo_match_field?: string | null; zid_match_field?: string | null }
-): Promise<string | null> {
-  const candidates: any[][] = []
-
-  // 1. User defined matching fields
-  if (mapping?.odoo_match_field && mapping?.zid_match_field) {
-    const matchValue = resolvePath(zidData, mapping.zid_match_field)
-    if (matchValue !== undefined && matchValue !== null && matchValue !== '') {
-      candidates.push([mapping.odoo_match_field, '=', matchValue])
-    }
-  }
-
-  // 2. Platform ID (Zid ID / Salla ID)
-  const zidId = String(
-    zidData.id ??
-    zidData.category_id ??
-    zidData.category_uuid ??
-    zidData.customer_id ??
-    zidData.order_id ??
-    ''
-  )
-  if (zidId) {
-    try {
-      const relationFields = await fetchErpNextFieldMeta(client, model)
-      if (relationFields.has('x_zid_id')) candidates.push(['x_zid_id', '=', zidId])
-      else if (relationFields.has('zid_id')) candidates.push(['zid_id', '=', zidId])
-      else if (relationFields.has('x_salla_id')) candidates.push(['x_salla_id', '=', zidId])
-      else if (relationFields.has('salla_id')) candidates.push(['salla_id', '=', zidId])
-    } catch {}
-  }
-
-  // 3. Match by Name / Item Code / Group Name
-  const nameVal = String(
-    erpValues.name ??
-    erpValues.item_group_name ??
-    erpValues.customer_name ??
-    (zidData.name ? toNameString(zidData.name) : '') ??
-    ''
-  ).trim()
-
-  if (nameVal && nameVal !== '[object Object]' && nameVal !== 'undefined') {
-    candidates.push(['name', '=', nameVal])
-    if (model.toLowerCase() === 'item') {
-      candidates.push(['item_code', '=', nameVal])
-    }
-    if (model.toLowerCase() === 'item group') {
-      candidates.push(['item_group_name', '=', nameVal])
-    }
-  }
-
-  // 4. Match by SKU
-  const sku = String(zidData.sku || erpValues.item_code || erpValues.default_code || '')
-  if (sku && sku !== 'none') {
-    if (model.toLowerCase() === 'item') {
-      candidates.push(['item_code', '=', sku])
-    } else {
-      candidates.push(['name', '=', sku])
-    }
-  }
-
-  for (const filter of candidates) {
-    try {
-      const records = await client.search(model, [filter])
-      if (records.length > 0) return records[0]
-    } catch (err) {
-      console.warn(`[SyncEngine] Duplicate check failed for ERPNext ${model}:`, err)
-    }
-  }
-
-  return null
-}
-
-async function executeErpNextOperation(params: {
-  client: ErpNextClient
-  mapping: FieldMappingRow
-  event: string
-  storeId: string
-  zidEntityId: string
-  zidData: Record<string, unknown>
-  docType: string
-  operation: OdooOperation
-  values: Record<string, unknown>
-  triggerType?: 'automatic' | 'manual'
-  existingLogId?: string
-}): Promise<SyncEngineResult['records'][number]> {
-  const {
-    client,
-    mapping,
-    event,
-    storeId,
-    zidEntityId,
-    zidData,
-    docType,
-    operation,
-    values,
-    triggerType,
-    existingLogId,
-  } = params
-
-  if (operation === 'create') {
-    const duplicateId = await findExistingErpNextRecord(client, docType, zidData, values, mapping)
-    if (duplicateId !== null) {
-      const msg = `Matching ${docType} "${duplicateId}" already exists in ERPNext; create skipped`
-      console.info(`[SyncEngine] ${msg}`)
-      await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: duplicateId, status: 'skipped', error_message: msg, payload: zidData, trigger_type: triggerType })
-      return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'skipped', message: msg }
-    }
-
-    if (docType.toLowerCase() === 'item') {
-      if (!values.item_code && zidData.sku) values.item_code = zidData.sku
-      if (!values.item_name && zidData.name) values.item_name = toNameString(zidData.name)
-      if (!values.item_group) values.item_group = 'All Item Groups'
-      if (!values.stock_uom) values.stock_uom = 'Nos'
-    }
-
-    const newName = await client.create(docType, values)
-    console.info(`[SyncEngine] âœ… Created ${docType} "${newName}" in ERPNext (zid_id="${zidEntityId}")`)
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: newName, status: 'success', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Created record: ${newName}` }
-  }
-
-  const existingId = await findExistingErpNextRecord(client, docType, zidData, values, mapping)
-  if (existingId === null) {
-    const msg = `No matching ${docType} record found in ERPNext for ${operation}`
-    console.warn(`[SyncEngine] ${msg}`)
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, status: 'skipped', error_message: msg, payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'skipped', message: msg }
-  }
-
-  if (operation === 'update') {
-    const ok = await client.update(docType, existingId, values)
-    if (!ok) throw new Error(`ERPNext update returned false for ${docType} "${existingId}"`)
-    console.info(`[SyncEngine] âœ… Updated ${docType} "${existingId}" in ERPNext (zid_id="${zidEntityId}")`)
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Updated record: ${existingId}` }
-  }
-
-  const ok = await client.delete(docType, existingId)
-  if (!ok) throw new Error(`ERPNext delete returned false for ${docType} "${existingId}"`)
-  console.info(`[SyncEngine] âœ… Deleted ${docType} "${existingId}" from ERPNext (zid_id="${zidEntityId}")`)
-  await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: docType, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType })
-  return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Deleted record: ${existingId}` }
-}
-
+// --- ERPNext engine moved ---
+// The ERPNext REST client + its sync helpers now live in
+// src/lib/erpnext-engine.ts. Shared types: src/lib/sync-types.ts.
+
+// ─── BoM / Kit sync (Odoo only — uses OdooClient XML-RPC) ───────────────
 async function syncProductBom(
   client: OdooClient,
   templateId: number,

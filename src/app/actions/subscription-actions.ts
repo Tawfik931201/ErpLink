@@ -332,7 +332,7 @@ export async function registerSubscription(input: {
     }
 
     revalidatePath('/admin/subscriptions')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, subscription: sub }
   } catch (err) {
     console.error('[subscriptions] registerSubscription error:', err)
@@ -425,7 +425,7 @@ export async function extendSubscription(input: {
     })
 
     revalidatePath('/admin/subscriptions')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, subscription: updated }
   } catch (err) {
     console.error('[subscriptions] extendSubscription error:', err)
@@ -458,7 +458,7 @@ export async function cancelSubscription(input: { subscriptionId: string }) {
     })
 
     revalidatePath('/admin/subscriptions')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, subscription: updated }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
@@ -495,7 +495,7 @@ export async function archiveSubscription(input: { subscriptionId: string }) {
     })
 
     revalidatePath('/admin/subscriptions')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, subscription: updated }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
@@ -527,7 +527,7 @@ export async function restoreSubscription(input: { subscriptionId: string }) {
     })
 
     revalidatePath('/admin/subscriptions')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, subscription: updated }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
@@ -611,7 +611,7 @@ export async function addSubscriptionPayment(input: {
 
     revalidatePath('/admin/subscriptions')
     revalidatePath('/admin/clients')
-    revalidatePath('/dashboard')
+    revalidatePath('/app/dashboard')
     return { success: true, payment }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'unexpected_error' }
@@ -822,13 +822,8 @@ export interface AdminStats {
   mrr: number
   totalRevenue: number
   monthRevenue: number
-  // Legacy affiliate fields (system removed). Kept for type-compatibility,
-  // always zero / empty — `partner_*` tables are no longer queried.
-  commissionLiability: number
-  pendingPayouts: number
   expiringSoon: number
   expiredSubscriptions: number
-  topAffiliates: { id: string; display_name: string; total_commission: number }[]
 }
 
 /** Admin: overview figures for the stats page (MRR, revenue). Manual payments only. */
@@ -884,11 +879,8 @@ export async function getAdminStats() {
         mrr,
         totalRevenue,
         monthRevenue,
-        commissionLiability: 0,
-        pendingPayouts: 0,
         expiringSoon,
         expiredSubscriptions,
-        topAffiliates: [],
       } as AdminStats,
     }
   } catch (err) {

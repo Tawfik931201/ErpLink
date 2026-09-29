@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-export type AuditActorRole = 'user' | 'partner' | 'admin' | 'system'
+export type AuditActorRole = 'user' | 'admin' | 'system'
 
 export interface AuditLogInput {
   actorId: string

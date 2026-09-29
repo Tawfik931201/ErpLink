@@ -4,7 +4,7 @@ import { Tajawal, JetBrains_Mono } from 'next/font/google'
 import { cookies } from 'next/headers'
 
 import AppProviders from '@/components/app-providers'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 import './globals.css'
 
@@ -49,7 +49,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   return (

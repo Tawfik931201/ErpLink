@@ -24,7 +24,6 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { recordAudit } from '@/lib/audit-logs'
 import { SALLA_DEFAULT_WEBHOOK_EVENTS } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
-import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 // Events older than this are ignored (Salla redeliveries arriving late must
@@ -185,25 +184,42 @@ export async function POST(req: NextRequest) {
     .eq('merchant_id', merchantId)
     .maybeSingle()
 
-  if (tokenErr || !sallaToken) {
+  if (tokenErr || !sallaToken?.workspace_id) {
+    // لا يوجد ربط متجر لهذا الـmerchant — لا نخمّن المستأجر.
+    //
+    // كان يُعاد 404 هنا، أي رفض نهائي: سالا تعيد 3 محاولات ثم تتوقف، فيضيع
+    // الحدث. الآن نحفظه في صندوق الاستلام كـ«orphan» ونعيد 202: المتجر يتوقف
+    // عن الإرسال بلا فائدة، والحدث يبقى محفوظاً قابلاً للاسترداد فور ربط
+    // المتجر. نفس سلوك مسار زد.
+    console.error('[Salla Webhook] no workspace bound to merchant — event stored as orphan', {
+      event,
+      merchantId,
+    })
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'salla',
+      storeId: merchantId,
+      event,
+      dedupKey: `salla:orphan:${merchantId}:${event}:${
+        webhookId || fingerprintPayload(data as Record<string, unknown>)
+      }`,
+      payload: data as Record<string, unknown>,
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
-      { error: 'Salla store not connected', message_ar: 'متجر سلة غير مربوط. أعد ربط المتجر من صفحة ربط المتجر.' },
-      { status: 404 }
+      { received: true, processed: false, queued: false, reason: 'store_not_linked' },
+      { status: 202 }
     )
   }
 
   // ── 7. Disabled-event early-return (Standard Mapping settings gate) ────────
   const { allowed, reason } = await isWebhookEventEnabled(sallaToken.workspace_id, 'salla', event)
-
-  // Cheap SSE broadcast (in-memory only) for both paths.
-  const broadcastPayload: WebhookEventPayload = {
-    event: event as any,
-    store_id: merchantId,
-    data,
-    timestamp: payload.created_at ?? new Date().toISOString(),
-    receivedAt: new Date().toISOString(),
-  }
-  webhookEmitter.emit('zid-event', broadcastPayload)
 
   if (!allowed) {
     return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings', detail: reason })

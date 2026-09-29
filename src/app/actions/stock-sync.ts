@@ -210,7 +210,7 @@ export async function triggerStockSync(platform: 'zid' | 'salla' | 'shopify'): P
       console.error('[StockSync] Failed to record history:', err)
     }
 
-    revalidatePath('/dashboard/mapping-center/stock')
+    revalidatePath('/app/mapping-center/stock')
     return { success: true, result }
   } catch (error: any) {
     console.error('[StockSync] Failed:', error)

@@ -73,7 +73,7 @@ export async function bulkRetryOrders(logIds: string[]) {
       }
     }
 
-    revalidatePath('/dashboard/mapping-center/orders')
+    revalidatePath('/app/mapping-center/orders')
     return { success: true, results }
   } catch (error: any) {
     return { success: false, error: error.message }

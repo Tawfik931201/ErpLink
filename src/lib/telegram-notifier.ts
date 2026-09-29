@@ -91,39 +91,6 @@ export function parseMappingsFilter(val: unknown): string[] {
   return []
 }
 
-// ─── Event labels (bilingual) ────────────────────────────────────────────────
-
-const EVENT_LABELS: Record<string, { ar: string; en: string }> = {
-  'product.create':     { ar: 'إنشاء منتج',        en: 'Product created' },
-  'product.update':     { ar: 'تحديث منتج',        en: 'Product updated' },
-  'product.delete':     { ar: 'حذف منتج',          en: 'Product deleted' },
-  'product.publish':    { ar: 'نشر منتج',          en: 'Product published' },
-  'order.create':       { ar: 'إنشاء طلب',         en: 'Order created' },
-  'order.update':       { ar: 'تحديث طلب',         en: 'Order updated' },
-  'order.cancel':       { ar: 'إلغاء طلب',         en: 'Order cancelled' },
-  'order.deliver':      { ar: 'تسليم طلب',         en: 'Order delivered' },
-  'order.created':      { ar: 'إنشاء طلب',         en: 'Order created' },
-  'order.updated':      { ar: 'تحديث طلب',         en: 'Order updated' },
-  'order.cancelled':    { ar: 'إلغاء طلب',         en: 'Order cancelled' },
-  'order.delivered':    { ar: 'تسليم طلب',         en: 'Order delivered' },
-  'customer.create':    { ar: 'إنشاء عميل',        en: 'Customer created' },
-  'customer.update':    { ar: 'تحديث عميل',        en: 'Customer updated' },
-  'customer.created':   { ar: 'إنشاء عميل',        en: 'Customer created' },
-  'customer.updated':   { ar: 'تحديث عميل',        en: 'Customer updated' },
-  'category.create':    { ar: 'إنشاء تصنيف',       en: 'Category created' },
-  'category.update':    { ar: 'تحديث تصنيف',       en: 'Category updated' },
-  'category.delete':    { ar: 'حذف تصنيف',         en: 'Category deleted' },
-  'category.created':   { ar: 'إنشاء تصنيف',       en: 'Category created' },
-  'category.updated':   { ar: 'تحديث تصنيف',       en: 'Category updated' },
-  'category.deleted':   { ar: 'حذف تصنيف',         en: 'Category deleted' },
-  'stock.update':       { ar: 'تحديث المخزون',     en: 'Stock updated' },
-  'stock.updated':      { ar: 'تحديث المخزون',     en: 'Stock updated' },
-}
-
-function _labelFor(event: string, lang: 'ar' | 'en'): string {
-  return EVENT_LABELS[event]?.[lang] ?? event
-}
-
 function formatDate(date: Date | string | undefined, lang: 'ar' | 'en'): string {
   const d = date ? new Date(date) : new Date()
   if (isNaN(d.getTime())) return ''

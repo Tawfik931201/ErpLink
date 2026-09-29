@@ -18,7 +18,6 @@ import { type NextRequest, NextResponse } from 'next/server'
 
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
-import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 function verifyZidSignature(body: string, signature: string, secret: string): boolean {
@@ -486,18 +485,6 @@ export async function GET() {
   })
 }
 
-/** بث SSE خفيف: فقط للأحداث التي ستُعالج فعلاً (مفعّلة في الإعدادات). */
-function emitToSse(event: string, store_id: number, data: Record<string, unknown>) {
-  const broadcastPayload: WebhookEventPayload = {
-    event,
-    store_id,
-    data,
-    timestamp: (data.updated_at as string) ?? new Date().toISOString(),
-    receivedAt: new Date().toISOString(),
-  }
-  webhookEmitter.emit('zid-event', broadcastPayload)
-}
-
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
 /**
@@ -553,7 +540,6 @@ async function handleOrderEvent(
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
   }
-  emitToSse(event, storeId, data)
   return 'enqueued'
 }
 
@@ -587,7 +573,6 @@ async function handleProductEvent(
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
   }
-  emitToSse(event, storeId, data)
   return 'enqueued'
 }
 
@@ -621,7 +606,6 @@ async function handleCustomerEvent(
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
   }
-  emitToSse(event, storeId, data)
   return 'enqueued'
 }
 
@@ -656,7 +640,6 @@ async function handleCategoryEvent(
       console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
       return 'error'
     }
-    emitToSse(event, storeId, data)
     return 'enqueued'
   } catch (err) {
     console.error('[Zid Webhook] Failed to enqueue category event', err)
@@ -699,6 +682,5 @@ async function handleAbandonedCartEvent(
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
   }
-  emitToSse(event, storeId, data)
   return 'enqueued'
 }

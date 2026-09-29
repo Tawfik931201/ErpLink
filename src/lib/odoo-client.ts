@@ -183,13 +183,3 @@ export class OdooClient {
     return this.execute<number>(model, 'search_count', [domain])
   }
 }
-
-/** Create an OdooClient from environment variables (for server-side use) */
-export function createOdooClientFromEnv(): OdooClient {
-  return new OdooClient({
-    url: process.env.ODOO_URL!,
-    db: process.env.ODOO_DB!,
-    username: process.env.ODOO_USERNAME!,
-    apiKey: process.env.ODOO_API_KEY!,
-  })
-}

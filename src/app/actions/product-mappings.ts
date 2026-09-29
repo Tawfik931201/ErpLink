@@ -134,7 +134,7 @@ export async function saveProductMapping(data: {
       }
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[ProductMappings] Save failed:', error)
@@ -182,7 +182,7 @@ export async function batchImportProductMappings(platform: string, products: { i
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true, imported: newProducts.length }
   } catch (error: any) {
     console.error('[ProductMappings] Batch import failed:', error)
@@ -206,7 +206,7 @@ export async function deleteProductMapping(id: string) {
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[ProductMappings] Delete failed:', error)
@@ -541,7 +541,7 @@ export async function autoMatchAndLinkProducts(params: {
       console.warn('[ProductMappings] Auto-match Odoo update failed:', odooErr?.message || odooErr)
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return {
       success: true,
       matchedCount,

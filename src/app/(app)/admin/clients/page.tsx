@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 
 import { getAllClients } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 import AdminClientsClient from './AdminClientsClient'
 
@@ -14,7 +14,7 @@ export default async function AdminClientsPage() {
   if (!userId || !isAdmin(userId)) redirect('/dashboard')
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
 
   const { rows } = await getAllClients()
 

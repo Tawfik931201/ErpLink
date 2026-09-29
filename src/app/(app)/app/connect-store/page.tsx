@@ -3,8 +3,7 @@ import { cookies } from 'next/headers'
 import { Suspense } from 'react'
 
 import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
-import type { Language } from '@/lib/translations'
-import { translations } from '@/lib/translations'
+import { resolveLanguage, translations } from '@/lib/translations'
 
 import StoreSelector from './store-selector'
 
@@ -28,7 +27,7 @@ export default async function ConnectZidPage() {
   const shopifyToken = shopifyTokenRes.success ? shopifyTokenRes.token : null
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 

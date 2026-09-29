@@ -1,8 +1,7 @@
 import type { Metadata } from 'next'
 import { headers, cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 
 import { getLayoutUserInfo } from '@/app/actions/layout-info'
 import { getCurrentUserPermissions, checkPendingInvitations } from '@/app/actions/workspace-members'
@@ -13,8 +12,7 @@ import SubscriptionBanner from '@/components/subscription/SubscriptionBanner'
 import { Logo } from '@/components/ui/logo'
 import UserMenu from '@/components/user-menu'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
-import { translations } from '@/lib/translations'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage, translations, type Language } from '@/lib/translations'
 
 export const metadata: Metadata = {
   title: 'لوحة التحكم',
@@ -54,7 +52,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 
@@ -67,7 +65,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const userId = await getActiveUserId()
 
   if (userId && layoutInfo.email) {
-    checkPendingInvitations(userId, layoutInfo.email).catch((err: unknown) =>
+    // بلا وسائط: الدالة تقرأ صاحب الجلسة من Clerk بنفسها (وإلا استطاع أي
+    // متصل تمرير بريد غيره والتحاق بمساحة عميل آخر).
+    checkPendingInvitations().catch((err: unknown) =>
       console.error('[App Layout] Failed to check pending invitations:', err)
     )
   }

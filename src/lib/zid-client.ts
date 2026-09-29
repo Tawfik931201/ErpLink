@@ -24,9 +24,6 @@ import { checkImpersonationWriteBlock } from './auth'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const ZID_BASE_URL = 'https://api.zid.sa'
-export const ZID_OAUTH_BASE_URL = 'https://oauth.zid.sa'
-export const ZID_OAUTH_AUTHORIZE_URL = 'https://oauth.zid.sa/oauth/authorize'
-export const ZID_OAUTH_TOKEN_URL = 'https://oauth.zid.sa/oauth/token'
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -326,73 +323,6 @@ export function buildZidHeaders(creds: ZidCredentials): Record<string, string> {
     headers['Access-Token'] = creds.managerToken
   }
   return headers
-}
-
-// ─── OAuth helpers ────────────────────────────────────────────────────────────
-
-/**
- * Build the Zid OAuth 2.0 authorization URL.
- * Redirect the merchant to this URL to initiate OAuth consent.
- */
-export function buildZidOAuthUrl(params: {
-  clientId: string
-  redirectUri: string
-  scope?: string       // Make scope optional
-  state: string        // CSRF token
-}): string {
-  const url = new URL(ZID_OAUTH_AUTHORIZE_URL)
-  url.searchParams.set('client_id', params.clientId)
-  url.searchParams.set('redirect_uri', params.redirectUri)
-  url.searchParams.set('response_type', 'code')
-  if (params.scope) {
-    url.searchParams.set('scope', params.scope)
-  }
-  url.searchParams.set('state', params.state)
-  return url.toString()
-}
-
-/**
- * Exchange an authorization code for an access token + refresh token.
- */
-export async function exchangeZidOAuthCode(params: {
-  code: string
-  clientId: string
-  clientSecret: string
-  redirectUri: string
-}): Promise<ZidOAuthTokenResponse> {
-  const response = await axios.post<ZidOAuthTokenResponse>(
-    ZID_OAUTH_TOKEN_URL,
-    new URLSearchParams({
-      grant_type: 'authorization_code',
-      code: params.code,
-      client_id: params.clientId,
-      client_secret: params.clientSecret,
-      redirect_uri: params.redirectUri,
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  )
-  return response.data
-}
-
-/**
- * Refresh an expired Zid access token using a refresh token.
- */
-export async function refreshZidOAuthToken(params: {
-  refreshToken: string
-  clientId: string
-  clientSecret: string
-}): Promise<ZidOAuthTokenResponse> {
-  const response = await axios.post<ZidOAuthTokenResponse>(
-    ZID_OAUTH_TOKEN_URL,
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: params.refreshToken,
-      client_id: params.clientId,
-      client_secret: params.clientSecret,
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  )
-  return response.data
 }
 
 // ─── ZidAPI — typed endpoint wrappers ────────────────────────────────────────

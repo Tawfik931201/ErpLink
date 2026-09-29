@@ -5,14 +5,12 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
+import { DEFAULT_ZID_ORDER_STATUSES, type ZidStatusOption } from '@/lib/order-custom-status-constants'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
-
-import { DEFAULT_ZID_ORDER_STATUSES, type ZidStatusOption } from '@/lib/order-custom-status-constants'
-
 
 /**
  * Fetch Zid order statuses — queries the Zid custom-statuses API if connected,
@@ -225,7 +223,6 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
     // 4. Inject into sale.order form view
     let viewWarning: string | null = null
     try {
-      const { createCustomOdooField } = await import('@/app/actions/custom-fields')
       // Inject view using the established robust injector by attempting injection
       const baseViews = await client.execute<Array<{ id: number; name: string; priority: number }>>(
         'ir.ui.view',
@@ -336,7 +333,7 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
     } catch {}
 
     revalidatePath('/app/mapping-center')
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
 
     return {
       success: true,
@@ -388,7 +385,7 @@ export async function checkZidOrderStatusField(fieldName = 'x_zid_order_status')
     if (fieldRecs && fieldRecs.length > 0) {
       const f = fieldRecs[0]
       // Try parsing selection options
-      let parsedOptions: ZidStatusOption[] = []
+      const parsedOptions: ZidStatusOption[] = []
       try {
         if (f.selection) {
           // Eval safely or parse python tuples [('key', 'label'), ...]

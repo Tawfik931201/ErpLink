@@ -4,7 +4,7 @@ import Link from 'next/link'
 
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
-import { type Language, translations } from '@/lib/translations'
+import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 function t(lang: Language, key: string): string {
@@ -206,7 +206,7 @@ The Service includes:
 
 export default function TermsPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   return (

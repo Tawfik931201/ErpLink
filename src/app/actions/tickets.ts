@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
+import { isAdmin } from '@/lib/auth'
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -29,6 +30,44 @@ export interface OdooAttachment {
   id: number;
   name: string;
   mimetype: string;
+}
+
+/**
+ * يتأكد أن التذكرة المطلوب الوصول إليها تخص صاحب الجلسة الحالي.
+ *
+ * أرقام التذاكر في Odoo تسلسلية (1, 2, 3…)، فأي مستخدم مسجّل كان بإمكانه
+ * تمرير رقم تذكرة عميل آخر وقراءتها أو الرد عليها أو إغلاقها. التذاكر
+ * مرتبطة بـ partner_email — وهذا هو معيار الملكية، نفس المعيار المطبّق في
+ * getClientTickets وفي /api/tickets/attachments.
+ *
+ * الأدمن يتجاوز الفحص (نفس المنطق المطبّق في /api/tickets/attachments:54).
+ */
+async function assertOwnsTicket(ticketId: number): Promise<void> {
+  const { userId } = await auth()
+  if (!userId) {
+    throw new Error('Unauthorized')
+  }
+
+  if (isAdmin(userId)) {
+    return
+  }
+
+  const user = await currentUser()
+  const email = user?.emailAddresses[0]?.emailAddress
+  if (!email) {
+    throw new Error('User has no primary email address registered in Clerk')
+  }
+
+  const owned = await executeKw<number[]>(
+    'helpdesk.ticket',
+    'search',
+    [[['id', '=', ticketId], ['partner_email', '=', email]]],
+    { limit: 1 }
+  )
+
+  if (!owned || owned.length === 0) {
+    throw new Error('Forbidden - you do not have access to this ticket')
+  }
 }
 
 /**
@@ -177,7 +216,7 @@ export async function createTicket(formData: FormData) {
     }
 
     // 5. Force a revalidation of the tickets page so the UI updates with the new ticket
-    revalidatePath('/dashboard/tickets')
+    revalidatePath('/app/tickets')
 
     return { success: true, ticketId }
   } catch (error: any) {
@@ -194,6 +233,13 @@ export async function getTicketMessages(ticketId: number) {
   const { userId } = await auth()
   if (!userId) {
     throw new Error('Unauthorized')
+  }
+
+  try {
+    await assertOwnsTicket(ticketId)
+  } catch (error: any) {
+    console.error('Ticket ownership check failed:', error?.message || error)
+    return { success: false, error: error.message || 'Unauthorized' }
   }
 
   try {
@@ -262,6 +308,13 @@ export async function sendTicketMessage(formData: FormData) {
   }
 
   try {
+    await assertOwnsTicket(ticketId)
+  } catch (error: any) {
+    console.error('Ticket ownership check failed:', error?.message || error)
+    return { success: false, error: error.message || 'Unauthorized' }
+  }
+
+  try {
     // 1. Search for existing partner matching email
     const partnerIds = await executeKw<number[]>(
       'res.partner',
@@ -320,7 +373,7 @@ export async function sendTicketMessage(formData: FormData) {
     )
 
     // Revalidate the page path
-    revalidatePath('/dashboard/tickets')
+    revalidatePath('/app/tickets')
     revalidateTag('pending-tickets')
 
     return { success: true }
@@ -337,6 +390,13 @@ export async function closeTicket(ticketId: number) {
   const { userId } = await auth()
   if (!userId) {
     return { success: false, error: 'Unauthorized' }
+  }
+
+  try {
+    await assertOwnsTicket(ticketId)
+  } catch (error: any) {
+    console.error('Ticket ownership check failed:', error?.message || error)
+    return { success: false, error: error.message || 'Unauthorized' }
   }
 
   try {
@@ -374,7 +434,7 @@ export async function closeTicket(ticketId: number) {
       [[ticketId], { stage_id: closedStageId }]
     )
 
-    revalidatePath('/dashboard/tickets')
+    revalidatePath('/app/tickets')
     revalidateTag('pending-tickets')
     return { success: true }
   } catch (error: any) {

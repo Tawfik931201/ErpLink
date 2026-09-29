@@ -46,6 +46,12 @@ const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 30_000, 5_00
 const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000, 60_000)
 
 /**
+ * عدد سجلات صندوق الاستلام المُعاد دفعها في الدورة الواحدة. صغير عمداً:
+ * الاستعادة حالة طوارئ، لا المسار الطبيعي.
+ */
+const WEBHOOK_INBOX_DRAIN_BATCH = 25
+
+/**
  * يمنع المؤقت من إبقاء العملية حية وحده (worker-friendly)، وكل عملية
  * `unref` اختياري على بيئات لا تدعمه.
  */
@@ -57,11 +63,17 @@ function unref(timer: NodeJS.Timeout | undefined): void {
 /**
  * دورة تصريف واحدة. حارس التداخل يضمن توفّر عملية واحدة كحد أقصى مهما تغيّرت
  * الفترة أو تضخّم الطابور — الدورات الزائدة تُتجاهل فوراً بدل أن تتراكم.
+ *
+ * الترتيب مقصود: `webhook_inbox` أولاً. كل ويب هوك يُكتب فيه قبل أي معالجة،
+ * فإن فشل إدراجه في الطابور يبقى `pending` هناك. بلا هذه الخطوة تكون شبكة
+ * الأمان معطّلة على استضافة بلا cron صالح.
  */
 async function runDrainCycle(): Promise<void> {
   if (g.__syncQueueRunnerProcessing) return
   try {
     g.__syncQueueRunnerProcessing = true
+    const { drainWebhookInbox } = await import('./webhook-inbox')
+    await drainWebhookInbox(WEBHOOK_INBOX_DRAIN_BATCH)
     await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
   } catch {
     // الأخطاء مسجلة في عدّادات الطابور — لا console لكل دورة.

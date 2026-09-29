@@ -16,7 +16,8 @@
       `getAllClients`, `getClientStatement`
     - Removed: `getActiveAffiliates`, `detectAffiliateForClient`, `AffiliatePick`,
       all `partner_commissions` auto-creation and affiliate auto-detect.
-- **Email**: `src/lib/email.ts` (Resend), templates in `src/lib/email-templates.ts`
+- **Email**: `src/lib/email.ts` (SendGrid, SMTP fallback, mock in dev),
+  templates in `src/lib/email-templates.ts`
   - Active: `subscriptionRegisteredEmail` only.
   - Deprecated stubs (do not use): `partnerApplicationEmail`, `partnerApprovedEmail`,
     `partnerRejectedEmail`, `clientActivationEmail`, `payoutStatusEmail`.
@@ -46,11 +47,11 @@
 | File | Purpose |
 |------|---------|
 | `src/app/api/sign-up-intent/set/route.ts` | Removed shim — redirects to `/sign-up` so old links don't 404 |
+| `.gitlab-ci.yml` | CI: `type-check` + `lint` + `build` (no tests exist) + GitLab security templates |
 
 ### Schema
 | File | Purpose |
 |------|---------|
-| `prisma/schema.prisma` | Prisma models (for `prisma generate`) |
 | `supabase/migrations/20260711_partner_system.sql` | Legacy affiliate DDL — tables stay in DB, unused |
 | `supabase/migrations/20260803_subscriptions.sql` | `subscriptions` table + RLS |
 
@@ -105,27 +106,68 @@ npm run dev
 - Payouts (`pending` → `approved` → `paid` / `rejected`)
 - Partner tiers (starter/growth/gold), `/partners`, `/onboarding/partner`,
   `/partner/*`, `/admin/partners`, `/admin/commissions`, `/admin/payouts`
+- Server-Sent Events for webhook activity (`webhook-emitter`, the Zid
+  `/api/webhooks/zid/stream` route, `useZidWebhooks`, `WebhookToast`) — the
+  queues and `sync_logs` are the record of truth; nothing reads events live.
 
 ## Admin Checks
 - `ADMIN_USER_IDS` env var (comma-separated Clerk user IDs)
 - `isAdmin(userId)` from `@/lib/auth` checks against that env var
 - All admin subscription actions guarded by `requireAdmin()`
 
+## Routing
+- The signed-in app lives under the route group `(app)/app/*`, so the real
+  dashboard path is **`/app/dashboard`** — there is no top-level `/dashboard`.
+  Redirects and `<Link href=...>` inside `(app)` must use the `/app/...` prefix.
+  (A `/dashboard` redirect in `admin/layout.tsx` shipped broken for this reason
+  and was fixed 2026-09-29.) Public routes (`/pricing`, `/contact`, `/sign-in`,
+  `/invoice/[id]`, …) stay at the root.
+
 ## Notes
 - Always use `supabase` (service_role) for writes — RLS is bypassed intentionally
-- Unused columns in Prisma may exist in SQL (Prisma is tracking model, SQL is source of truth)
 - UI/texts never say "أفلييت/Affiliate" — clients are told to contact support
 - DB tables keep the `partner_*` names where they still exist — do not rename tables;
   do not drop them yet (a later cleanup migration will handle it)
 - `affiliate_id` / `affiliate_name` fields remain in TS interfaces as legacy
   read-only (old `SELECT *` rows) — always `NULL` for new data, never displayed
+- **No ORM.** Prisma was removed entirely on 2026-09-29: `prisma/schema.prisma`,
+  `@prisma/client`, `prisma` and the four `db:*` scripts are gone, and the
+  `serverComponentsExternalPackages` list is now just `['xmlrpc']`. Supabase REST
+  is the only data path and `supabase/migrations/*.sql` is the sole source of
+  truth for the schema. Do not re-add Prisma.
 - Deleted routes: `/onboarding/accept`, `/claim-workspace`, `/admin/workspace-links`,
   all `/partner*` and `/partners*` — do not reintroduce
-- No Stripe integration — manual bank-transfer flow only
-  (`STRIPE_*` keys in `.env.example` are legacy placeholders, unused in `src`)
-- Dead deps (installed but unused in `src` — do not add new imports; remove later):
-  `stripe`, `bull`, `ioredis` (`src/lib/redis.ts` never imported), `node-cron`,
-  `pg`, `next-auth` — real queue is `sync-queue.ts` + `sync-queue-runner.ts` (`setInterval`)
+- No Stripe integration — manual bank-transfer flow only (`STRIPE_*` was removed
+  from `.env.example` on 2026-09-29; there is no placeholder left)
+- Dead deps were **removed from `package.json` and `package-lock.json`** on
+  2026-09-29, together with the dead files they only served. Do not re-add:
+  `stripe`, `bull`, `ioredis`, `node-cron`, `pg`, `crypto-js`, `date-fns`,
+  `jsonwebtoken`, `winston`, `xml2js`, `swr`, `zustand`, and the Radix
+  avatar/separator/tooltip packages.
+  - `crypto-js` and `swr` still resolve as **transitive** deps of
+    `@clerk/nextjs` / `@clerk/shared` — that is expected, not a leftover.
+  - `next-auth` and `@next-auth/*` are gone too (`src/app/api/auth/[...nextauth]`
+    and `src/types/next-auth.d.ts` were deleted; OAuth is unused). Keep
+    `NEXTAUTH_URL` though — `src/app/api/zid/callback/route.ts` still reads it
+    as a fallback for `APP_URL`.
+  - `prisma` / `@prisma/client` remain: `@prisma/client` is still declared and
+    `prisma/schema.prisma` is a tracking model, but no `src` file imports either
+    one. Supabase REST is the only runtime data path.
+- Real queue = `sync-queue.ts` + `sync-queue-runner.ts` (`setInterval`); there is
+  no Redis/Bull and no external cron.
+- Deleted dead files (do not recreate): `src/lib/redis.ts`, `src/lib/prisma.ts`,
+  `src/lib/empty.js`, `src/lib/zid/client.ts`, `src/lib/webhook-emitter.ts`,
+  `src/components/webhook-toast.tsx`, `src/hooks/useZidWebhooks.ts`,
+  `src/components/site-header.tsx`, `src/components/site-footer.tsx`,
+  `src/components/ui/{avatar,separator,skeleton}.tsx`,
+  `src/app/actions/signup-intent.ts`, `src/components/admin/InstallSchemaButton.tsx`,
+  `src/app/api/webhooks/zid/stream/route.ts` (SSE is gone entirely — no client
+  re-reads webhook events live), `vercel.json`.
+- `src/lib/sync-engine.ts` is ~8200 lines but has **no duplicated blocks** — it
+  is organically large, not copy-pasted. Do not split it as a "cleanup" task
+  without a dedicated migration; a 2026-09-29 review found the only genuine
+  repeats were the 4× `isEntityOperationAllowed` preset guard and 2×
+  "no field items" skip, both now single functions.
 
 ## Spec-Kit (AI documentation)
 
@@ -147,16 +189,23 @@ npm run dev
 Source of truth for the reliable-ingest design: this section. SQL migrations are
 the source of truth for the schema; `AGENTS.md` never overrides SQL.
 
-### Required migration (apply BEFORE deploying the code)
-`supabase/migrations/20260922_sync_reliability.sql`
-- `sync_queue.next_retry_at` becomes NULLABLE (frozen = exhausted)
-- `sync_queue.dedup_key` + partial unique index (atomic idempotency)
-- `webhook_inbox` — durable receipt written *before* the queue; 2xx only after it lands
-- `sync_queue_dead` — dead-letter archive (exhausted rows are archived, never hard-deleted)
-- `sync_reconcile_state` — reconciliation watermark per scope
-- `idx_sync_logs_match` — tenant-safe match lookup index
+### Required migrations (apply BEFORE deploying the code)
+In order:
+1. `supabase/migrations/20260922_sync_reliability.sql`
+   - `sync_queue.next_retry_at` becomes NULLABLE (frozen = exhausted)
+   - `sync_queue.dedup_key` + partial unique index (atomic idempotency)
+   - `webhook_inbox` — durable receipt written *before* the queue; 2xx only after it lands
+   - `sync_queue_dead` — dead-letter archive (exhausted rows are archived, never hard-deleted)
+   - `sync_reconcile_state` — reconciliation watermark per scope
+   - `idx_sync_logs_match` — tenant-safe match lookup index
+2. `supabase/migrations/20260928_dedup_key_pending_only.sql`
+   - narrows `uq_sync_queue_dedup_key` to `next_retry_at IS NOT NULL` (pending only)
+   - narrows `uq_webhook_inbox_dedup` to `status = 'pending'`
+   - **both are required** for the Zid fingerprint dedup to work; a *settled* row
+     must stop vetoing new work
+   - idempotent; the file ends with read-only pre-flight + verification queries
 
-If this migration is not applied, every webhook route returns 503
+If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.
 
 ### Ingress contract (all webhook routes)
@@ -166,16 +215,22 @@ If this migration is not applied, every webhook route returns 503
 3. `recordWebhookReceipt` — durable write.
 4. `enqueueWebhookEvent` — atomic `dedup_key` + coalescing.
 5. Respond 2xx **only after** step 3; on failure return 503 so the platform retries.
-   Never 4xx for a store-not-linked event (that is a permanent loss) — the Zid
-   route stores an orphan receipt and returns 202.
+   Never 4xx for a store-not-linked event (that is a permanent loss) — Zid,
+   Salla and Shopify all store an orphan receipt and return 202.
 
 ### dedup_key rules (critical, easy to get wrong)
 `dedup_key` identifies the **event/delivery**, never the **record/entity**.
 - Shopify: `X-Shopify-Webhook-Id`; Salla: `webhook id`; Zid: delivery id if sent.
-- Odoo sends no delivery id → use `write_date` if present, else
-  `fingerprintPayload()` (sha1 of canonicalised JSON).
-- A record-scoped key (`odoo:<model>:<id>`) makes every later update look like a
-  duplicate and silently drops real changes. Do not reintroduce it.
+- No delivery id (Zid, Odoo) → use `write_date` if present, else
+  `fingerprintPayload()` (sha1 of canonicalised JSON). Two genuinely different
+  updates then produce two different keys; an exact redelivery collapses.
+- A record-scoped key (`odoo:<model>:<id>`, or Zid's old `payload.uuid`) makes
+  every later update look like a duplicate and silently drops real changes.
+  This was a live bug: reconciliation every 10 min masked it for **orders only**,
+  so 2nd+ edits of a Zid *product* never reached Odoo. Do not reintroduce it.
+- A unique-violation (23505) on insert is a **benign duplicate**, not a failure —
+  `recordWebhookReceipt` returns `{ ok: true, duplicate: true }`. Do not turn it
+  into a 503.
 - Coalescing (same entity while a row is pending) is handled by `sync_queue`
   via `extractEntityId`, keyed on `odooRecordId` / `quant_id` / `product_id` /
   `order_id` — so repeated updates collapse to one Odoo write.
@@ -189,10 +244,15 @@ If this migration is not applied, every webhook route returns 503
 
 | Path | Period | Does |
 |---|---|---|
-| `startSyncQueueRunner()` in `src/lib/sync-queue-runner.ts` | every **30s** (`SYNC_QUEUE_POLL_INTERVAL_MS`) | `processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)` |
+| `startSyncQueueRunner()` in `src/lib/sync-queue-runner.ts` | every **30s** (`SYNC_QUEUE_POLL_INTERVAL_MS`) | `drainWebhookInbox(25)` → `processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)` |
 | same runner, reconcile ticker | every **10 min** (`SYNC_RECONCILE_INTERVAL_MS`) | `reconcileZidOrders()` — heals dropped webhooks |
 | `GET /api/cron/sync-queue` | on demand only | `drainWebhookInbox` → drain loop (≤40s) → metrics + orphan count |
 | `GET /api/cron/reconcile` | on demand only | single reconciliation cycle |
+
+- The inbox drain runs **before** `processSyncQueue` in every cycle: receipts
+  written by ingress are enqueued in the same tick instead of waiting a full
+  extra period. `WEBHOOK_INBOX_DRAIN_BATCH` is a constant (25) in
+  `sync-queue-runner.ts`, not an env var.
 
 - Started **once** at boot from `src/instrumentation.ts`, which requires
   `experimental.instrumentationHook: true` in `next.config.js` (Next 14.x).
@@ -214,11 +274,15 @@ If this migration is not applied, every webhook route returns 503
 - **Auth differs per route — use the Bearer header, it is the only one both
   accept:** `Authorization: Bearer $CRON_SECRET`. `?key=` works on `reconcile`
   only, `x-cron-secret` on `sync-queue` only. Do not assume a third form works.
-- `vercel.json` crons are irrelevant here.
+- `vercel.json` is deleted — crons are irrelevant here.
 
 ### Load knobs (tune down for shared hosting)
 - `SYNC_QUEUE_CONCURRENCY` (default 10), `SYNC_QUEUE_BATCH_SIZE` (default 50),
-  `SYNC_QUEUE_MAX_RETRIES` (default 5), `COALESCE_WINDOW_MS` (5s).
+  `SYNC_QUEUE_MAX_RETRIES` (default 5).
+- Coalescing has **no time window** (`COALESCE_WINDOW_MS` was removed as dead):
+  `sync_queue` keeps only the newest row per entity within a single drain batch,
+  keyed on `extractEntityId`. `maybeCleanup()` also prunes `webhook_inbox` older
+  than 7 days, once an hour, alongside `cleanupExpiredLogs()`.
 - Reconciliation self-limits: `MAX_API_CALLS_PER_RUN = 4` and
   `MAX_ENQUEUED_PER_RUN = 100` per cycle, sequential (Zid allows 60 req/min).
 - `processSyncQueue` is disabled in `phase-production-build`.

@@ -2,11 +2,11 @@ import { FileQuestion, Home, LifeBuoy } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
 
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 export default function GlobalNotFound() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   const isAr = lang === 'ar'

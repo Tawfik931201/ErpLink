@@ -4,7 +4,7 @@ import Link from 'next/link'
 
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
-import { type Language, translations } from '@/lib/translations'
+import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 function t(lang: Language, key: string): string {
@@ -39,8 +39,9 @@ By using the Service, you consent to the collection and use of information in ac
 
 المعلومات التي تقدمها لنا:
 - معلومات الحساب: الاسم، البريد الإلكتروني، رقم الهاتف، اسم المتجر
-- معلومات الدفع: يتم معالجتها عبر مزود دفع خارجي (نحن لا نخزنها)
+- بيانات الاشتراك: الباقة المدفوعة وتواريخها وسجل الدفعات (الدفع يدوي عبر التحويل البنكي، ولا نطلب ولا نخزّن بيانات بطاقة أو وسيلة دفع)
 - بيانات المتجر: معلومات المنتجات، الطلبات، العملاء، والفئات لغرض المزامنة
+- بيانات الربط: توكنات OAuth لمتجرك وبيانات اعتماد نظام الـ ERP، وتُخزَّن مشفّرة (انظر قسم الأمان)
 
 المعلومات التي نجمعها تلقائياً:
 - بيانات الاستخدام: الصفحات التي تزورها، الإجراءات التي تتخذها في الخدمة
@@ -53,8 +54,9 @@ By using the Service, you consent to the collection and use of information in ac
 
 Information You Provide:
 - Account information: name, email, phone number, store name
-- Payment information: processed through a third-party payment provider (we do not store it)
+- Subscription data: the plan you purchased, its dates, and a payment history (payment is made by manual bank transfer; we never ask for or store card or payment-instrument details)
 - Store data: product information, orders, customers, and categories for synchronization purposes
+- Connection credentials: your store OAuth tokens and your ERP credentials, stored encrypted (see the Security section)
 
 Information We Collect Automatically:
 - Usage data: pages you visit, actions you take within the Service
@@ -91,18 +93,24 @@ Information We Collect Automatically:
     key: 'share',
     ar: {
       title: 'مشاركة البيانات',
-      body: `لا نبيع معلوماتك الشخصية لأطراف ثالثة. قد نشارك معلوماتك في الحالات التالية:
+      body: `لا نبيع معلوماتك الشخصية لأطراف ثالثة. تشارك بياناتك مع الجهات التالية فقط، وبالقدر اللازم لأداء الخدمة:
 
-- مع مزودي الخدمة الذين يساعدوننا في تشغيل المنصة (مثل: Clerk للمصادقة، Supabase لتخزين البيانات، Resend للبريد الإلكتروني)
+- مزودو الخدمات الذين يديرون المنصة: Clerk للمصادقة، Supabase لتخزين البيانات، وSendGrid أو خادم SMTP لإرسال البريد الإلكتروني
+- منصات المتاجر التي تربطها بحسابك (زد، سلة، Shopify): تُقرأ منها بيانات المنتجات والطلبات والعملاء والفئات عبر واجهاتها البرمجية لأغراض المزامنة فقط
+- نظام الـ ERP الذي تربطه بحسابك (Odoo أو ERPNext): تُكتب إليه المنتجات والطلبات وكميات المخزون
+- واجهة Telegram Bot API، إذا ربطت حسابك ببوت لاستقبال إشعارات المزامنة (نستخدم توكن البوت الذي تزودنا به)
 - عند اقتضاء القانون ذلك أو للاستجابة لطلبات قانونية سارية
 - في حالة الاندماج أو الاستحواذ أو بيع الأصول
 - بموافقتك الصريحة`,
     },
     en: {
       title: 'Data Sharing',
-      body: `We do not sell your personal information to third parties. We may share your information in the following cases:
+      body: `We do not sell your personal information to third parties. Your data is shared only with the following, and only to the extent needed to run the Service:
 
-- With service providers who help us operate the platform (e.g., Clerk for authentication, Supabase for data storage, Resend for email)
+- Service providers that run the platform: Clerk for authentication, Supabase for data storage, and SendGrid or an SMTP server for email delivery
+- The store platforms you link to your account (Zid, Salla, Shopify): product, order, customer, and category data is read from them through their APIs for synchronization only
+- The ERP you link to your account (Odoo or ERPNext): products, orders, and stock quantities are written to it
+- The Telegram Bot API, if you link an account bot to receive sync notifications (we use the bot token you supply)
 - When required by law or to respond to valid legal requests
 - In the event of a merger, acquisition, or sale of assets
 - With your explicit consent`,
@@ -115,39 +123,39 @@ Information We Collect Automatically:
       body: `نتخذ إجراءات أمنية مناسبة لحماية معلوماتك:
 
 - تشفير جميع البيانات أثناء النقل باستخدام TLS/SSL
-- تشفير مفاتيح API والتوكنات الحساسة باستخدام AES-256-CBC
+- تشفير مفاتيح API والتوكنات الحساسة (توكنات المتاجر، بيانات اعتماد الـ ERP، توكن بوت تيليجرام) باستخدام AES-256-CBC قبل تخزينها
 - التحكم في الوصول على مستوى الصفحات والصلاحيات (RBAC)
-- المراجعة الدورية للإجراءات الأمنية
-- نسخ احتياطي منتظم للبيانات`,
+- التحقق من ملكية كل مورد قبل السماح بالقراءة أو التعديل
+- المراجعة الدورية للإجراءات الأمنية`,
     },
     en: {
       title: 'Security',
       body: `We implement appropriate security measures to protect your information:
 
 - Encryption of all data in transit using TLS/SSL
-- Encryption of API keys and sensitive tokens using AES-256-CBC
+- Encryption of API keys and sensitive tokens (store tokens, ERP credentials, Telegram bot tokens) using AES-256-CBC before they are stored
 - Page-level access control and permissions (RBAC)
-- Regular review of security procedures
-- Regular data backups`,
+- Ownership checks on every workspace, ticket, and store-scoped resource before it is read or modified
+- Regular review of security procedures`,
     },
   },
   {
     key: 'retention',
     ar: {
       title: 'الاحتفاظ بالبيانات',
-      body: `نحتفظ ببياناتك طوال فترة استخدامك للخدمة. عند حذف حسابك:
+      body: `نحتفظ ببياناتك طوال فترة استخدامك للخدمة. عند إنهاء اشتراكك أو طلب حذف حسابك:
 
-- يتم حذف بيانات المتجر والمزامنة خلال 30 يوماً
-- قد نحتفظ ببعض المعلومات للامتثال للالتزامات القانونية (مثل سجلات الفواتير)
-- يمكنك طلب تصدير بياناتك في أي وقت من خلال لوحة التحكم`,
+- نوقف المزامنة فوراً، وتبقى بياناتك في النظام إلى أن تُحذف بناءً على طلبك عبر الدعم
+- قد نحتفظ بسجلات الاشتراك والفواتير للمدة التي تفرضها الالتزامات المحاسبية والضريبية
+- لتصدير بياناتك أو حذفها، تواصل معنا عبر نموذج الاتصال أو البريد الإلكتروني أدناه، ونؤكد الطلب بالرد عليه`,
     },
     en: {
       title: 'Data Retention',
-      body: `We retain your data for as long as you use the Service. When you delete your account:
+      body: `We retain your data for as long as you use the Service. When you end your subscription or ask us to delete your account:
 
-- Store and sync data is deleted within 30 days
-- We may retain certain information for legal compliance (e.g., invoice records)
-- You can request a data export at any time through the dashboard`,
+- Syncing stops immediately; your data stays in the system until you request its deletion through support
+- We may retain subscription and invoice records for as long as accounting and tax obligations require
+- To export or delete your data, contact us via the form or email address below and we will confirm the request in writing`,
     },
   },
   {
@@ -163,7 +171,7 @@ Information We Collect Automatically:
 - الحق في نقل بياناتك
 - الحق في الاعتراض على معالجة بياناتك
 
-لممارسة هذه الحقوق، يمكنك التواصل معنا عبر قسم الإعدادات في لوحة التحكم أو عبر نموذج الاتصال.`,
+لممارسة هذه الحقوق، تواصل معنا عبر نموذج الاتصال أو البريد الإلكتروني في نهاية هذه السياسة. قد نطلب منك التحقق من هويتك قبل التنفيذ.`,
     },
     en: {
       title: 'Your Rights',
@@ -176,45 +184,41 @@ Information We Collect Automatically:
 - The right to data portability
 - The right to object to processing of your data
 
-To exercise these rights, you can contact us through the settings section in the dashboard or via the contact form.`,
+To exercise these rights, contact us via the form or email address at the end of this Policy. We may ask you to verify your identity before carrying out the request.`,
     },
   },
   {
     key: 'cookies',
     ar: {
       title: 'ملفات تعريف الارتباط (Cookies)',
-      body: `نستخدم ملفات تعريف الارتباط (Cookies) وتقنيات مماثلة لتحسين تجربتك. أنواع الكوكيز التي نستخدمها:
+      body: `نستخدم ملفات تعريف الارتباط (Cookies) لتقليل الحاجة إلى تسجيل الدخول وحفظ تفضيلاتك. الأنواع المستخدمة:
 
-- الكوكيز الأساسية: ضرورية لعمل المنصة (مصادقة Clerk، تفضيلات اللغة)
-- كوكيز الأداء: تساعدنا في فهم كيفية استخدام المنصة وتحسينها
-- كوكيز الوظائف: تذكر تفضيلاتك (اللغة، السمة)
+- كوكيز المصادقة الأساسية: تديرها Clerk وهي ضرورية لتسجيل الدخول
+- كوكيز تفضيل اللغة: تحفظ اللغة المختارة للواجهة العامة
+- كوكيز إدارية مؤقتة: مثل جلسة انتحال الشخصية التي ينشئها المسؤول وينتهي تلقائياً
 
-يمكنك التحكم في إعدادات الكوكيز من خلال متصفحك.`,
+لا نستخدم كوكيز تتبّع أو إعلانات من طرف ثالث. يمكنك التحكم في الكوكيز من إعدادات متصفحك، لكن تعطيل كوكيز المصادقة سيمنع تسجيل الدخول.`,
     },
     en: {
       title: 'Cookies',
-      body: `We use cookies and similar tracking technologies to enhance your experience. Types of cookies we use:
+      body: `We use cookies to keep you signed in and to remember your preferences. The types in use:
 
-- Essential cookies: necessary for the platform to function (Clerk authentication, language preferences)
-- Performance cookies: help us understand how the platform is used and improve it
-- Functional cookies: remember your preferences (language, theme)
+- Essential authentication cookies: managed by Clerk, required to sign in
+- Language preference cookie: remembers the interface language you chose
+- Temporary admin cookies: e.g. the admin impersonation session, which expires automatically
 
-You can control cookie settings through your browser.`,
+We do not use third-party tracking or advertising cookies. You can manage cookies in your browser, but disabling authentication cookies will prevent you from signing in.`,
     },
   },
   {
     key: 'changes',
     ar: {
       title: 'التغييرات على السياسة',
-      body: `قد نقوم بتحديث سياسة الخصوصية هذه من وقت لآخر. سنقوم بإخطارك بأي تغييرات جوهرية عبر البريد الإلكتروني أو من خلال لوحة التحكم. نشجعك على مراجعة هذه الصفحة بشكل دوري للاطلاع على آخر التحديثات.
-
-آخر تحديث: يوليو ٢٠٢٤`,
+      body: `قد نقوم بتحديث سياسة الخصوصية هذه من وقت لآخر. سنقوم بإخطارك بأي تغييرات جوهرية عبر البريد الإلكتروني أو من خلال لوحة التحكم. نشجعك على مراجعة هذه الصفحة بشكل دوري للاطلاع على آخر التحديثات.`,
     },
     en: {
       title: 'Changes to This Policy',
-      body: `We may update this Privacy Policy from time to time. We will notify you of any material changes via email or through the dashboard. We encourage you to review this page periodically for the latest updates.
-
-Last updated: July 2024`,
+      body: `We may update this Privacy Policy from time to time. We will notify you of any material changes via email or through the dashboard. We encourage you to review this page periodically for the latest updates.`,
     },
   },
   {
@@ -242,7 +246,7 @@ Or through the settings section in the dashboard.`,
 
 export default function PrivacyPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   return (

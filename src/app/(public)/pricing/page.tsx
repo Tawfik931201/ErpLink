@@ -11,7 +11,7 @@ import { PricingPlans } from '@/components/pricing-plans'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
-import { type Language, translations } from '@/lib/translations'
+import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 function t(lang: Language, key: string): string {
@@ -24,7 +24,7 @@ function t(lang: Language, key: string): string {
 
 export default function PricingPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   const featureRows = [

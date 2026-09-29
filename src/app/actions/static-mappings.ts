@@ -58,7 +58,7 @@ export async function saveStaticMapping(table: MappingTable, row: Record<string,
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error(`[StaticMappings] Save ${table} failed:`, error)
@@ -82,7 +82,7 @@ export async function deleteStaticMapping(table: MappingTable, id: string) {
 
     if (error) throw error
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error(`[StaticMappings] Delete ${table} failed:`, error)

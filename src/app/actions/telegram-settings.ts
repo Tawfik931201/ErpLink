@@ -105,7 +105,7 @@ export async function addBotToken(token: string, label?: string) {
 
     await forceRefreshTelegramPoller()
     clearTelegramCache(workspaceId)
-    revalidatePath('/dashboard/settings/notifications')
+    revalidatePath('/app/settings/notifications')
 
     return { success: true, bot: data }
   } catch (err: any) {
@@ -127,7 +127,7 @@ export async function deleteBotToken(id: string) {
     if (error) return { success: false, error: error.message }
 
     clearTelegramCache(workspaceId)
-    revalidatePath('/dashboard/settings/notifications')
+    revalidatePath('/app/settings/notifications')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to delete bot' }
@@ -270,7 +270,7 @@ export async function updateSubscription(
     if (error) return { success: false, error: error.message }
 
     clearTelegramCache(workspaceId)
-    revalidatePath('/dashboard/settings/notifications')
+    revalidatePath('/app/settings/notifications')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to update subscription' }
@@ -291,7 +291,7 @@ export async function deleteSubscription(id: string) {
     if (error) return { success: false, error: error.message }
 
     clearTelegramCache(workspaceId)
-    revalidatePath('/dashboard/settings/notifications')
+    revalidatePath('/app/settings/notifications')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to delete subscription' }

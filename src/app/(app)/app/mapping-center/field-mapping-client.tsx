@@ -36,24 +36,20 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 
+import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
+import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
+import {
+  getOdooFieldValueOptions,
+  getOdooLocations,
+  getOdooWarehouses,
+  getOdooCustomers,
+  getOdooProducts,
+  getOdooTaxes,
+} from '@/app/actions/odoo'
 import {
   createZidOrderStatusFieldInOdoo,
   checkZidOrderStatusField,
 } from '@/app/actions/order-custom-status'
-import {
-  DEFAULT_ZID_ORDER_STATUSES,
-  type ZidStatusOption,
-} from '@/lib/order-custom-status-constants'
-import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
-import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
-import { 
-  getOdooFieldValueOptions, 
-  getOdooLocations, 
-  getOdooWarehouses, 
-  getOdooCustomers, 
-  getOdooProducts,
-  getOdooTaxes,
-} from '@/app/actions/odoo'
 import { saveOrderStatusMappings, getOrderStatusMappings } from '@/app/actions/order-status-mappings'
 import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
 import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
@@ -65,7 +61,12 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { ZID_EVENTS, SALLA_EVENTS, SHOPIFY_EVENTS, ZID_FIELDS, SALLA_FIELDS, SHOPIFY_FIELDS } from '@/lib/mapping-constants'
+import {
+  DEFAULT_ZID_ORDER_STATUSES,
+  type ZidStatusOption,
+} from '@/lib/order-custom-status-constants'
 import { formatFieldLabel } from '@/lib/translations'
+import { toOdooFieldOption, type OdooFieldOption } from '@/lib/odoo-field-options'
 import { cn } from '@/lib/utils'
 
 import AddCustomFieldForm from './add-custom-field-form'
@@ -87,6 +88,40 @@ interface FieldMappingClientProps {
   sallaStoreName?: string | null
   shopifyStoreName?: string | null
   initialSubTab?: 'categories' | 'products' | 'customers' | 'orders'
+}
+
+type RawOdooField = { value: string; label?: string; desc?: string }
+
+/**
+ * Loads the field list for one Odoo model into `setFields`, tracking its own
+ * loading flag. Every mapping tab needs exactly this, differing only by model
+ * and target state — so the fetch/transform/finally sequence lives here once
+ * instead of being copy-pasted per tab.
+ */
+function useOdooModelFields(
+  model: string,
+  enabled: boolean,
+  setFields: (fields: OdooFieldOption[]) => void,
+  setLoading: (loading: boolean) => void
+) {
+  return useCallback(
+    async (force = true) => {
+      if (!enabled) return
+      setLoading(true)
+      try {
+        const { getOdooModelFields } = await import('@/app/actions/odoo')
+        const res = await getOdooModelFields(model, force)
+        if (res.success && res.fields) {
+          setFields(res.fields.map(toOdooFieldOption))
+        }
+      } catch (error) {
+        console.error(`Failed to fetch Odoo fields for ${model}:`, error)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [model, enabled, setFields, setLoading]
+  )
 }
 
 export default function FieldMappingClient({
@@ -412,25 +447,12 @@ export default function FieldMappingClient({
   }
 
   // ── Customer Odoo fields ──
-  const fetchOdooCustomerFields = useCallback(async (force = true) => {
-    if (!hasOdooConnection) return
-    setIsLoadingCustomerFields(true)
-    try {
-      const { getOdooModelFields } = await import('@/app/actions/odoo')
-      const res = await getOdooModelFields('res.partner', force)
-      if (res.success && res.fields) {
-        setOdooCustomerFields(res.fields.map((f: any) => ({
-          value: f.value,
-          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
-          desc: f.desc || f.value,
-        })))
-      }
-    } catch (error) {
-      console.error('Failed to fetch Odoo customer fields:', error)
-    } finally {
-      setIsLoadingCustomerFields(false)
-    }
-  }, [hasOdooConnection])
+  const fetchOdooCustomerFields = useOdooModelFields(
+    'res.partner',
+    hasOdooConnection,
+    setOdooCustomerFields,
+    setIsLoadingCustomerFields
+  )
 
   useEffect(() => {
     if (standardSubTab === 'customers') {
@@ -487,25 +509,12 @@ export default function FieldMappingClient({
     }).finally(() => setIsLoadingOdooOpts(false))
   }, [hasOdooConnection, standardSubTab])
 
-  const fetchOdooCategoryFields = useCallback(async (force = true) => {
-    if (!hasOdooConnection) return
-    setIsLoadingOdooFields(true)
-    try {
-      const { getOdooModelFields } = await import('@/app/actions/odoo')
-      const res = await getOdooModelFields('product.category', force)
-      if (res.success && res.fields) {
-        setOdooCategoryFields(res.fields.map((f: any) => ({
-          value: f.value,
-          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
-          desc: f.desc || f.value,
-        })))
-      }
-    } catch (error) {
-      console.error('Failed to fetch Odoo category fields:', error)
-    } finally {
-      setIsLoadingOdooFields(false)
-    }
-  }, [hasOdooConnection])
+  const fetchOdooCategoryFields = useOdooModelFields(
+    'product.category',
+    hasOdooConnection,
+    setOdooCategoryFields,
+    setIsLoadingOdooFields
+  )
 
   useEffect(() => {
     if (standardSubTab === 'categories') {
@@ -514,25 +523,12 @@ export default function FieldMappingClient({
   }, [fetchOdooCategoryFields, standardSubTab])
 
   // ── Product Odoo fields ──
-  const fetchOdooProductFields = useCallback(async (force = true) => {
-    if (!hasOdooConnection) return
-    setIsLoadingProductFields(true)
-    try {
-      const { getOdooModelFields } = await import('@/app/actions/odoo')
-      const res = await getOdooModelFields('product.template', force)
-      if (res.success && res.fields) {
-        setProductOdooFields(res.fields.map((f: any) => ({
-          value: f.value,
-          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
-          desc: f.desc || f.value,
-        })))
-      }
-    } catch (error) {
-      console.error('Failed to fetch Odoo product fields:', error)
-    } finally {
-      setIsLoadingProductFields(false)
-    }
-  }, [hasOdooConnection])
+  const fetchOdooProductFields = useOdooModelFields(
+    'product.template',
+    hasOdooConnection,
+    setProductOdooFields,
+    setIsLoadingProductFields
+  )
 
   useEffect(() => {
     if (standardSubTab === 'products') {

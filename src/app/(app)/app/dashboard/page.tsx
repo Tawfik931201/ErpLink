@@ -18,8 +18,7 @@ import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWork
 import SubscriptionStatusCard from '@/components/subscription/SubscriptionStatusCard'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { translations } from '@/lib/translations'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import { SyncAreaChart, EventPieChart } from './dashboard-client'
@@ -55,7 +54,7 @@ function statusLabel(status: string, dict: Record<string, string>): string {
 
 export default async function DashboardPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const dict = translations[lang] as Record<string, string>
 

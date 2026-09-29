@@ -28,8 +28,9 @@
 ## 4. Supabase service_role للكتابة (DB writes)
 
 - كل الكتابة عبر عميل `supabase` من `@/lib/supabase` (مفتاح service_role) — تجاوز RLS مقصود.
-- ملفات `supabase/migrations/*.sql` هي **مصدر الحقيقة** للسكيمـا؛
-  `prisma/schema.prisma` للتتبع وتوليد العميل فقط (`prisma generate`).
+- ملفات `supabase/migrations/*.sql` هي **مصدر الحقيقة** للسكيمـا بالكامل.
+  حُذف Prisma نهائياً (2026-09-29): لا `prisma/schema.prisma` ولا `@prisma/client`
+  ولا سكربتات `db:*` — لا ORM في المشروع. أي تغيير سكيمـا = ملف migration جديد.
 - أي تغيير سكيمـا = ملف migration جديد، لا تعديل يدوي على قاعدة الإنتاج.
 
 ## 5. Clerk للمصادقة (Auth)

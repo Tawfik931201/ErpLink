@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
 import { Button } from '@/components/ui/button'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import StockSyncClient from './stock-sync-client'
@@ -17,7 +17,7 @@ export const metadata = {
 
 export default async function StockSyncPage() {
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   const [connRes, zidRes, sallaRes, shopifyRes] = await Promise.all([

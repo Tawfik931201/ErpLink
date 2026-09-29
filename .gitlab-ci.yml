@@ -1,19 +1,74 @@
-stages:
-  - test
+# ─── ErpLink CI ───────────────────────────────────────────────────────────────
+# There is no test suite in this project, so CI's job is to prove the four
+# things that actually break deployments:
+#   1. types compile        (type-check)
+#   2. lint rules hold      (lint)
+#   3. the app builds       (build)
+#   4. no secrets are leaked (GitLab security templates)
+#
+# Every job runs `npm ci` against package-lock.json.
 
-# ─── GitLab Security Scanning ─────────────────────────────────────
-# SAST: static analysis of TypeScript/TSX source code
-# Secret Detection: scans for leaked credentials/tokens
-# Dependency Scanning: scans package-lock.json for vulnerable packages
+stages:
+  - verify
+  - test
+  - security
+
+variables:
+  # Next.js reads .env* at build time. The verify jobs must NOT pick up a real
+  # .env, and the build job needs non-empty placeholders because
+  # src/lib/supabase.ts and src/lib/crypto.ts throw at module scope when
+  # NODE_ENV=production and their key is missing. These are throwaway values
+  # for a compile check only — they authenticate nothing.
+  NEXT_PUBLIC_APP_URL: "https://ci.invalid"
+  NEXT_PUBLIC_SUPABASE_URL: "https://ci-placeholder.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-placeholder-anon-key"
+  SUPABASE_SERVICE_ROLE_KEY: "ci-placeholder-service-role-key"
+  ENCRYPTION_KEY: "ci-placeholder-encryption-key"
+  # Clerk's publishable key is base64-decoded during the build, so it must be a
+  # well-formed key even though it points at a non-existent instance. A bare
+  # "pk_test_placeholder" aborts the build with an atob InvalidCharacterError.
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_Y2xlcmsuY2ktcGxhY2Vob2xkZXIubGNsLmRldiQ="
+  CLERK_SECRET_KEY: "sk_test_Y2xlcmsuY2ktcGxhY2Vob2xkZXIubGNsLmRldiQ="
+  # Scan the full git history for leaked secrets on the first run. After the
+  # first successful pipeline, set this back to "false" to keep pipelines fast
+  # (subsequent runs only scan new commits).
+  SECRET_DETECTION_HISTORIC_SCAN: "true"
+  SAST_EXCLUDED_PATHS: "node_modules, .next, out, build, dist, coverage"
+
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - template: Jobs/Dependency-Scanning.gitlab-ci.yml
 
-variables:
-  # Scan the full git history for leaked secrets on the first run.
-  # After the first successful pipeline, set this back to "false"
-  # to keep pipelines fast (subsequent runs only scan new commits).
-  SECRET_DETECTION_HISTORIC_SCAN: "true"
-  # Exclude build artifacts and dependencies from SAST
-  SAST_EXCLUDED_PATHS: "node_modules, .next, out, build, dist, coverage"
+default:
+  image: node:20-alpine
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+
+type-check:
+  stage: verify
+  script:
+    - npm run type-check
+
+lint:
+  stage: verify
+  script:
+    # `next lint` already exits non-zero on errors and zero on warnings, so no
+    # extra grep is needed. The repo currently has many pre-existing `any`
+    # warnings; this gate intentionally does not fail on them.
+    - npm run lint
+
+build:
+  stage: verify
+  script:
+    - npm run build
+
+# The GitLab security templates (SAST, secret detection, dependency scanning)
+# are included above and land in the `test`/`security` stages. They are expected
+# to be allow_failure by default so a new scanner finding reports without
+# blocking an otherwise-good deploy; the three verify jobs above are the
+# blocking gate.

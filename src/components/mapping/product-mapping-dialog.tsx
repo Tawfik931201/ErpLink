@@ -17,6 +17,7 @@ import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
+import { toOdooFieldOption } from '@/lib/odoo-field-options'
 import { getProductName } from '@/lib/product-name'
 import { cn } from '@/lib/utils'
 
@@ -72,10 +73,7 @@ export default function ProductMappingDialog({
       const { getOdooModelFields } = await import('@/app/actions/odoo')
       const res = await getOdooModelFields('product.template', force)
       if (res.success && res.fields) {
-        const mapped = res.fields.map((f: any) => ({
-          value: f.value,
-          label: f.label && f.label !== f.value ? `${f.label} (${f.value})` : f.value,
-        }))
+        const mapped = res.fields.map(toOdooFieldOption)
         setOdooFieldsList(mapped)
         if (force) {
           toast({

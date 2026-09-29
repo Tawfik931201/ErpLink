@@ -110,7 +110,7 @@ export async function createWorkspace(name: string) {
         .eq('id', user.id)
     }
 
-    revalidatePath('/dashboard/workspace')
+    revalidatePath('/app/settings/workspace')
     return { success: true, workspace }
   } catch (error: any) {
     console.error('Failed to create workspace:', error)
@@ -143,7 +143,7 @@ export async function updateWorkspace(id: string, name: string) {
 
     if (error) throw new Error('Failed to update workspace in database')
 
-    revalidatePath('/dashboard/workspace')
+    revalidatePath('/app/settings/workspace')
     return { success: true, workspace: updated }
   } catch (error: any) {
     console.error('Failed to update workspace:', error)
@@ -183,7 +183,7 @@ export async function deleteWorkspace(id: string) {
         .eq('id', user.id)
     }
 
-    revalidatePath('/dashboard/workspace')
+    revalidatePath('/app/settings/workspace')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to delete workspace:', error)
@@ -215,8 +215,8 @@ export async function setActiveWorkspace(id: string) {
 
     if (error) throw new Error('Failed to update active workspace')
 
-    revalidatePath('/dashboard')
-    revalidatePath('/dashboard/workspace')
+    revalidatePath('/app/dashboard')
+    revalidatePath('/app/settings/workspace')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to set active workspace:', error)
@@ -274,9 +274,9 @@ export async function disconnectZidStore(merchantId: string) {
     if (error) throw new Error('Failed to disconnect Zid store: ' + error.message)
 
     revalidateTag('zid-token')
-    revalidatePath('/dashboard/connect-store')
-    revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
+    revalidatePath('/app/settings/workspace')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Zid store:', error)
@@ -307,7 +307,7 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
     )
 
     revalidateTag('zid-token')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update sync settings:', error)
@@ -363,9 +363,9 @@ export async function disconnectSallaStore(merchantId: string) {
     if (error) throw new Error('Failed to disconnect Salla store: ' + error.message)
 
     revalidateTag('salla-token')
-    revalidatePath('/dashboard/connect-store')
-    revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
+    revalidatePath('/app/settings/workspace')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Salla store:', error)
@@ -390,7 +390,7 @@ export async function updateSallaSyncSettings(merchantId: string, settings: any)
     if (error) throw new Error('Failed to update Salla sync settings: ' + error.message)
 
     revalidateTag('salla-token')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update Salla sync settings:', error)
@@ -446,9 +446,9 @@ export async function disconnectShopifyStore(shopDomain: string) {
     if (error) throw new Error('Failed to disconnect Shopify store: ' + error.message)
 
     revalidateTag('shopify-token')
-    revalidatePath('/dashboard/connect-store')
-    revalidatePath('/dashboard/workspace')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
+    revalidatePath('/app/settings/workspace')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to disconnect Shopify store:', error)
@@ -501,7 +501,7 @@ export async function updateShopifySyncSettings(shopDomain: string, settings: an
     }
 
     revalidateTag('shopify-token')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
     return { success: true }
   } catch (error: any) {
     console.error('Failed to update Shopify sync settings:', error)
@@ -544,7 +544,7 @@ export async function syncShopifyWebhooks(shopDomain: string) {
     }
 
     revalidateTag('shopify-token')
-    revalidatePath('/dashboard/connect-store')
+    revalidatePath('/app/connect-store')
     return { success: true, registered, removed }
   } catch (error: any) {
     console.error('Failed to sync Shopify webhooks:', error)
@@ -552,16 +552,65 @@ export async function syncShopifyWebhooks(shopDomain: string) {
   }
 }
 
+/**
+ * يتحقق أن `merchantId` المطلوب يخص مساحة العمل النشطة للمستخدم الحالي،
+ * ويعيده عند التطابق فقط.
+ *
+ * بدون هذا التحقق، أي متصل (حتى غير مسجّل) كان بإمكانه استدعاء دوال زد
+ * بتمرير merchantId الخاص بالعميل، والوصول إلى توكناته وتعديل webhooks متجره.
+ * النمط مطابق لـ disconnectZidStore / updateZidSyncSettings المجاورَين.
+ *
+ * ملاحظة: getAccessToken() يُحدّث التوكن ويكتبه، فالتسريب كان Modification لا قراءة فقط.
+ */
+async function assertOwnsZidMerchant(merchantId: string): Promise<string> {
+  if (!merchantId) {
+    throw new Error('Unauthorized')
+  }
+
+  const user = await getOrCreateDbUser()
+  if (!user.active_workspace_id) {
+    throw new Error('No active workspace selected')
+  }
+
+  const { data: token, error } = await supabase
+    .from('merchant_tokens')
+    .select('merchant_id')
+    .eq('workspace_id', user.active_workspace_id)
+    .eq('merchant_id', merchantId)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error('Failed to verify Zid store ownership: ' + error.message)
+  }
+
+  if (!token) {
+    throw new Error('Unauthorized')
+  }
+
+  return merchantId
+}
+
+/** يبني بيانات الاعتماد لزد بعد التحقق من ملكية المتجر. */
+async function getZidCredsForOwnedMerchant(merchantId: string) {
+  const { getAccessToken } = await import('@/lib/zid/token')
+  const { ZidAPI } = await import('@/lib/zid-client')
+
+  await assertOwnsZidMerchant(merchantId)
+
+  const tokens = await getAccessToken(merchantId)
+  return {
+    ZidAPI,
+    creds: {
+      authorization: tokens.authorization || tokens.accessToken,
+      managerToken: tokens.accessToken,
+    },
+  }
+}
+
 /** ملخص صحة webhooks زد (يُعرض في store-selector). آمن: يعيد null عند الفشل. */
 export async function getZidWebhookHealth(merchantId: string) {
   try {
-    const { getAccessToken } = await import('@/lib/zid/token')
-    const { ZidAPI } = await import('@/lib/zid-client')
-    const tokens = await getAccessToken(merchantId)
-    const creds = {
-      authorization: tokens.authorization || tokens.accessToken,
-      managerToken: tokens.accessToken,
-    }
+    const { ZidAPI, creds } = await getZidCredsForOwnedMerchant(merchantId)
     const res = await ZidAPI.webhooks.healthSummary(creds)
     return { success: true, health: res.data ?? null }
   } catch (error: any) {
@@ -573,13 +622,7 @@ export async function getZidWebhookHealth(merchantId: string) {
 /** زر recoverBroken: يعيد تفعيل webhooks زد المعطلة. */
 export async function recoverZidBrokenWebhooks(merchantId: string) {
   try {
-    const { getAccessToken } = await import('@/lib/zid/token')
-    const { ZidAPI } = await import('@/lib/zid-client')
-    const tokens = await getAccessToken(merchantId)
-    const creds = {
-      authorization: tokens.authorization || tokens.accessToken,
-      managerToken: tokens.accessToken,
-    }
+    const { ZidAPI, creds } = await getZidCredsForOwnedMerchant(merchantId)
     await ZidAPI.webhooks.recoverBroken(creds)
     return { success: true }
   } catch (error: any) {
@@ -594,13 +637,7 @@ export async function recoverZidBrokenWebhooks(merchantId: string) {
  */
 export async function getZidStoreMeta(merchantId: string) {
   try {
-    const { getAccessToken } = await import('@/lib/zid/token')
-    const { ZidAPI } = await import('@/lib/zid-client')
-    const tokens = await getAccessToken(merchantId)
-    const creds = {
-      authorization: tokens.authorization || tokens.accessToken,
-      managerToken: tokens.accessToken,
-    }
+    const { ZidAPI, creds } = await getZidCredsForOwnedMerchant(merchantId)
     const [deliveryOptions, paymentMethods] = await Promise.all([
       ZidAPI.storeMeta.deliveryOptions(creds),
       ZidAPI.storeMeta.paymentMethods(creds),

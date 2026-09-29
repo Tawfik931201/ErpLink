@@ -25,7 +25,7 @@ export default function DashboardError({
         </div>
         <p className="mb-6 text-sm leading-6 text-muted-foreground">
           {isDatabaseError
-            ? 'الاتصال بقاعدة بيانات Supabase غير مضبوط حاليا. تأكد من DATABASE_URL ثم أعد تشغيل السيرفر المحلي.'
+            ? 'الاتصال بقاعدة بيانات Supabase غير مضبوط حاليا. تأكد من NEXT_PUBLIC_SUPABASE_URL و SUPABASE_SERVICE_ROLE_KEY ثم أعد تشغيل السيرفر المحلي.'
             : 'حدث خطأ غير متوقع أثناء تحميل لوحة التحكم.'}
         </p>
         <Button type="button" onClick={reset} className="gap-2">

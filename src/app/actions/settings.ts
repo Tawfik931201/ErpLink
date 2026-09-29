@@ -56,7 +56,7 @@ export async function updateUserSettings(lang: 'ar' | 'en', theme: string) {
 
     if (error) throw error
 
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/app/settings')
     return { success: true, settings: data }
   } catch (error: any) {
     console.error('Failed to update user settings:', error)

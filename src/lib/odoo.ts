@@ -143,8 +143,3 @@ export async function executeKw<T>(
   ]);
 }
 
-/**
- * Alias to executeKw for standard JSON-RPC operations.
- */
-export const odooCall = executeKw;
-

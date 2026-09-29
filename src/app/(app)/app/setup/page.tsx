@@ -5,8 +5,7 @@ import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken, getActiveWorkspaceZidToken } from '@/app/actions/workspaces'
 import { getActiveWorkspaceId } from '@/lib/auth'
 import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
-import type { Language } from '@/lib/translations'
-import { translations } from '@/lib/translations'
+import { resolveLanguage, translations } from '@/lib/translations'
 
 import SetupWizard from './SetupWizard'
 
@@ -43,7 +42,7 @@ export default async function SetupPage() {
   }
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 

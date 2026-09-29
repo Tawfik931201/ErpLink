@@ -7,8 +7,6 @@ import { supabase } from '@/lib/supabase'
 
 export interface LayoutUserInfo {
   appRole: string
-  partnerId: string | null
-  partnerStatus: string | null
   isAdmin: boolean
   name: string | null
   email: string | null
@@ -21,7 +19,7 @@ export interface LayoutUserInfo {
 export const getLayoutUserInfo = cache(async (): Promise<LayoutUserInfo> => {
   const userId = await getActiveUserId()
   if (!userId) {
-    return { appRole: 'user', partnerId: null, partnerStatus: null, isAdmin: false, name: null, email: null }
+    return { appRole: 'user', isAdmin: false, name: null, email: null }
   }
 
   const admin = isAdmin(userId)
@@ -36,8 +34,6 @@ export const getLayoutUserInfo = cache(async (): Promise<LayoutUserInfo> => {
 
   return {
     appRole: admin ? 'admin' : appRole,
-    partnerId: null,
-    partnerStatus: null,
     isAdmin: admin,
     name: userRow?.name || null,
     email: userRow?.email || null,

@@ -174,7 +174,7 @@ export async function startInitialTransfer(data: {
     // Trigger the background task without awaiting it!
     runTransferInBackground(transfer.id, user.active_workspace_id, odooConn, storeToken, { ...data, direction, platform, storeIdentifier })
 
-    revalidatePath('/dashboard/initial-transfer')
+    revalidatePath('/app/initial-transfer')
     return { success: true, transfer }
   } catch (error: any) {
     console.error('[Transfers Action] startInitialTransfer failed:', error)

@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { getOdooModels, getOdooModelFields, getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
 import { Button } from '@/components/ui/button'
-import type { Language } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import FieldMappingClient from '../field-mapping-client'
@@ -49,7 +49,7 @@ export default async function CategoriesPage() {
   }
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   const getErpName = (type: string) => {

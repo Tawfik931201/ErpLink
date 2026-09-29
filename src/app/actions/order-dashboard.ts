@@ -148,7 +148,7 @@ export async function retryOrderSync(logId: string) {
     const { processSingleMapping } = await import('@/lib/sync-engine')
     await processSingleMapping(mapping, log.event, log.store_id, log.payload || {}, 'manual', logId)
 
-    revalidatePath('/dashboard/mapping-center/orders')
+    revalidatePath('/app/mapping-center/orders')
     return { success: true }
   } catch (error: any) {
     return { success: false, error: error.message }

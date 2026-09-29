@@ -14,7 +14,6 @@ import {
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent } from '@/lib/sync-queue'
 import { ttlCache } from '@/lib/ttl-cache'
-import { webhookEmitter, type WebhookEventPayload } from '@/lib/webhook-emitter'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 
 const GDPR_TOPICS: readonly string[] = SHOPIFY_GDPR_TOPICS
@@ -159,20 +158,42 @@ export async function POST(req: NextRequest) {
   )
 
   if (!shopifyToken?.workspace_id) {
-    return NextResponse.json({ error: 'Shopify store not connected' }, { status: 404 })
+    // لا يوجد ربط متجر لهذا الـshop — لا نخمّن المستأجر (تفادي خلط العملاء).
+    //
+    // كان يُعاد 404 هنا، أي رفض نهائي: Shopify توقّف عن الإرسال بعد 3 محاولات
+    // فقـد الحدث. الآن نحفظه في صندوق الاستلام كـ«orphan» ونعيد 202: المتجر
+    // يتوقف عن الإرسال بلا فائدة، والحدث يبقى محفوظاً قابلاً للاسترداد فور
+    // ربط المتجر. نفس سلوك مسار زد.
+    console.error('[Shopify Webhook] no workspace bound to shop — event stored as orphan', {
+      topic,
+      shopDomain,
+    })
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'shopify',
+      storeId: shopDomain,
+      event: topic,
+      dedupKey: `shopify:orphan:${shopDomain}:${topic}:${
+        webhookId || fingerprintPayload(payload as Record<string, unknown>)
+      }`,
+      payload: payload as Record<string, unknown>,
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
+    return NextResponse.json(
+      { received: true, processed: false, queued: false, reason: 'store_not_linked' },
+      { status: 202 }
+    )
   }
 
   // ── فحص إعدادات صفحة Mapping Center (Standard Mapping) ──
   const { allowed, reason } = await isWebhookEventEnabled(shopifyToken.workspace_id, 'shopify', topic)
   if (!allowed) {
-    const broadcastPayload: WebhookEventPayload = {
-      event: topic as never,
-      store_id: shopDomain,
-      data: payload,
-      timestamp: new Date().toISOString(),
-      receivedAt: new Date().toISOString(),
-    }
-    webhookEmitter.emit('zid-event', broadcastPayload)
     return NextResponse.json({ received: true, processed: false, reason: 'disabled_in_settings', detail: reason })
   }
 
@@ -209,14 +230,6 @@ export async function POST(req: NextRequest) {
       // دمج: حدّث الصف المعلَّق بدل enqueue جديد (يضغط bursts)
       if (mergeRowId) {
         await supabase.from('sync_queue').update({ payload: enrichedPayload }).eq('id', mergeRowId)
-        const broadcastPayload: WebhookEventPayload = {
-          event: topic as never,
-          store_id: shopDomain,
-          data: enrichedPayload,
-          timestamp: new Date().toISOString(),
-          receivedAt: new Date().toISOString(),
-        }
-        webhookEmitter.emit('zid-event', broadcastPayload)
         return NextResponse.json({ received: true, queued: true, merged: true })
       }
     } catch {
@@ -225,15 +238,6 @@ export async function POST(req: NextRequest) {
   }
 
   // ── بث SSE (in-memory سريع) ثم enqueue فقط — بلا إثراء ثقيل ──────────
-  const broadcastPayload: WebhookEventPayload = {
-    event: topic as never,
-    store_id: shopDomain,
-    data: enrichedPayload,
-    timestamp: new Date().toISOString(),
-    receivedAt: new Date().toISOString(),
-  }
-  webhookEmitter.emit('zid-event', broadcastPayload)
-
   try {
     const queued = await enqueueWebhookEvent({
       workspaceId: shopifyToken.workspace_id as string,

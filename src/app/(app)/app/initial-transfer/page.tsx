@@ -7,7 +7,7 @@ import { getOdooModels, getOdooModelFields } from '@/app/actions/odoo'
 import { Button } from '@/components/ui/button'
 import { getActiveWorkspaceId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
-import type { Language} from '@/lib/translations';
+import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import TransferClient from './transfer-client'
@@ -44,7 +44,7 @@ export default async function InitialTransferPage() {
   }
 
   const cookieStore = cookies()
-  const lang = (cookieStore.get('lang')?.value || 'ar') as Language
+  const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
   // Detect connected stores for the active workspace

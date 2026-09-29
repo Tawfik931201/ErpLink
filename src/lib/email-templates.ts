@@ -1,53 +1,16 @@
+/**
+ * Transactional email templates.
+ *
+ * Only one template is live: `subscriptionRegisteredEmail`, sent when an admin
+ * registers a subscription manually (manual bank-transfer flow, no Stripe).
+ *
+ * The affiliate/payout templates that used to live here were removed with the
+ * affiliate system (2026-09-10) once nothing imported them any more. The
+ * `partner_*` DB tables are still in the database and untouched — a separate
+ * cleanup migration will drop them later.
+ */
+
 import type { Language } from './translations'
-
-// ─────────────────────────────────────────────────────────────
-// Affiliate system removed (2026-09-10).
-// The interfaces and templates below are kept as deprecated stubs so old
-// imports don't break type-check. Do not use them for new code.
-// The `partner_*` DB tables are left untouched; a cleanup migration will
-// drop them later.
-// ─────────────────────────────────────────────────────────────
-
-/** @deprecated Affiliate system removed — do not use. */
-export interface PartnerApplicationEmailData {
-  partnerName: string
-  reviewUrl: string
-}
-
-/** @deprecated Affiliate system removed — do not use. */
-export interface PartnerApprovedEmailData {
-  partnerName: string
-  displayName: string
-  tier: string
-  commissionRate: number
-  dashboardUrl: string
-}
-
-/** @deprecated Affiliate system removed — do not use. */
-export interface PartnerRejectedEmailData {
-  partnerName: string
-  reason?: string
-}
-
-/** @deprecated Affiliate system removed — do not use. */
-export interface ClientActivationEmailData {
-  clientName: string
-  email: string
-  partnerName: string
-  activationUrl: string
-  workspaceName: string
-}
-
-/** @deprecated Affiliate system removed — do not use. */
-export interface PayoutStatusEmailData {
-  partnerName: string
-  action: 'approved' | 'paid' | 'rejected'
-  amount: number
-  currency: string
-  paymentReference?: string | null
-  note?: string | null
-  payoutsUrl: string
-}
 
 export interface SubscriptionRegisteredEmailData {
   clientName: string
@@ -78,130 +41,8 @@ const wrap = (lang: Language, body: string) => {
 </html>`
 }
 
-const arCta = (url: string, label: string) =>
-  `<p style="margin:20px 0 0 0;">
-     <a href="${url}" style="display:inline-block;background:#0066ff;color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;font-weight:700;font-size:13px;">${label}</a>
-   </p>`
 const arBr = '<br/>'
 const arStrong = (s: string) => `<strong style="color:#0f172a;">${s}</strong>`
-
-/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
-export function partnerApplicationEmail(
-  data: PartnerApplicationEmailData,
-  lang: Language = 'ar',
-): { subject: string; html: string; text: string } {
-  const subject = lang === 'ar' ? 'تم استلام طلب الأفلييت' : 'Affiliate application received'
-  const body = lang === 'ar'
-    ? `مرحباً ${arStrong(data.partnerName)},<br/>تم استلام طلبك للانضمام لبرنامج الأفلييت. سيقوم فريق الإدارة بمراجعته خلال أيام وسيصلك إشعار فور البت في طلبك.`
-    : `Hi ${data.partnerName},<br/>We received your application to the affiliate program. The admin team will review it shortly and we will notify you once a decision is made.`
-  const reviewLine = lang === 'ar'
-    ? `<p style="margin:8px 0 0 0;color:#64748b;font-size:12px;">صفحة المراجعة: <a href="${data.reviewUrl}" style="color:#0066ff;">${data.reviewUrl}</a></p>`
-    : `<p style="margin:8px 0 0 0;color:#64748b;font-size:12px;">Review page: <a href="${data.reviewUrl}" style="color:#0066ff;">${data.reviewUrl}</a></p>`
-  return {
-    subject,
-    html: wrap(lang, body + reviewLine),
-    text: subject + '\n\n' + (lang === 'ar' ? 'تم استلام طلبك.' : 'We received your application.'),
-  }
-}
-
-/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
-export function partnerApprovedEmail(
-  data: PartnerApprovedEmailData,
-  lang: Language = 'ar',
-): { subject: string; html: string; text: string } {
-  const subject = lang === 'ar' ? 'تمت الموافقة على طلب الأفلييت 🎉' : 'Your affiliate application was approved'
-  const body = lang === 'ar'
-    ? `مرحباً ${arStrong(data.partnerName)},<br/>تمت الموافقة على طلبك في برنامج الأفلييت.${arBr}الاسم الظاهر: ${arStrong(data.displayName)}${arBr}الطبقة: ${arStrong(data.tier)}${arBr}نسبة العمولة: ${arStrong(`${Math.round(data.commissionRate * 100)}%`)}${arBr}الآن يمكنك الدخول للوحة الأفلييت وبدء إضافة عملائك.`
-    : `Hi ${data.partnerName},<br/>Your affiliate application has been approved.<br/>Display name: ${data.displayName}<br/>Tier: ${data.tier}<br/>Commission rate: ${Math.round(data.commissionRate * 100)}%<br/>Open your affiliate dashboard to start adding clients.`
-  const cta = lang === 'ar'
-    ? arCta(data.dashboardUrl, 'فتح لوحة الأفلييت')
-    : arCta(data.dashboardUrl, 'Open Affiliate Dashboard')
-  return {
-    subject,
-    html: wrap(lang, body + cta),
-    text: subject + '\n\n' + data.dashboardUrl,
-  }
-}
-
-/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
-export function partnerRejectedEmail(
-  data: PartnerRejectedEmailData,
-  lang: Language = 'ar',
-): { subject: string; html: string; text: string } {
-  const subject = lang === 'ar' ? 'بخصوص طلب الأفلييت' : 'Regarding your affiliate application'
-  const reason = data.reason
-    ? (lang === 'ar' ? `<br/>السبب: ${arStrong(data.reason)}` : `<br/>Reason: ${data.reason}`)
-    : ''
-  const body = lang === 'ar'
-    ? `مرحباً ${arStrong(data.partnerName)},<br/>للأسف لم يتم قبول طلبك للانضمام لبرنامج الأفلييت حالياً.${reason}<br/>يمكنك تقديم طلب جديد لاحقاً.`
-    : `Hi ${data.partnerName},<br/>Unfortunately your application was not approved at this time.${reason}<br/>You may apply again later.`
-  return {
-    subject,
-    html: wrap(lang, body),
-    text: subject,
-  }
-}
-
-/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
-export function clientActivationEmail(
-  data: ClientActivationEmailData,
-  lang: Language = 'ar',
-): { subject: string; html: string; text: string } {
-  const subject = lang === 'ar'
-    ? `${data.partnerName} أضافك كعميل في ErpLink — فعّل حسابك`
-    : `${data.partnerName} added you as a ErpLink client — activate your account`
-  const body = lang === 'ar'
-    ? `مرحباً ${arStrong(data.clientName)},<br/>${arStrong(data.partnerName)} دعاك لبيئة عمل ErpLink باسم "${arStrong(data.workspaceName)}".<br/>اضغط الزر أدناه لتعيين كلمة المرور وبدء الاستخدام.`
-    : `Hi ${data.clientName},<br/>${data.partnerName} invited you to a ErpLink workspace named "${data.workspaceName}".<br/>Click the button below to set your password and start using ErpLink.`
-  const cta = lang === 'ar' ? arCta(data.activationUrl, 'فعّل حسابك') : arCta(data.activationUrl, 'Activate Your Account')
-  return {
-    subject,
-    html: wrap(lang, body + cta),
-    text: subject + '\n\n' + data.activationUrl,
-  }
-}
-
-/** @deprecated Affiliate system removed — kept so old imports don't break. Do not use. */
-export function payoutStatusEmail(
-  data: PayoutStatusEmailData,
-  lang: Language = 'ar',
-): { subject: string; html: string; text: string } {
-  const amount = `${data.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${data.currency}`
-  const actionLabel =
-    data.action === 'paid'
-      ? lang === 'ar' ? 'تم الدفع' : 'Paid'
-      : data.action === 'approved'
-        ? lang === 'ar' ? 'تم الاعتماد' : 'Approved'
-        : lang === 'ar' ? 'تم الرفض' : 'Rejected'
-
-  const subject = lang === 'ar'
-    ? `${actionLabel} — طلب صرف بمبلغ ${amount}`
-    : `${actionLabel} — payout of ${amount}`
-
-  let body: string
-  if (data.action === 'paid') {
-    body = lang === 'ar'
-      ? `مرحباً ${arStrong(data.partnerName)},<br/>تم دفع طلب الصرف الخاص بك بمبلغ ${arStrong(amount)}.${data.paymentReference ? `<br/>مرجع الدفع: ${arStrong(data.paymentReference)}` : ''}${data.note ? `<br/>ملاحظة: ${arStrong(data.note)}` : ''}`
-      : `Hi ${data.partnerName},<br/>Your payout of ${amount} has been paid.${data.paymentReference ? `<br/>Payment reference: ${data.paymentReference}` : ''}${data.note ? `<br/>Note: ${data.note}` : ''}`
-  } else if (data.action === 'approved') {
-    body = lang === 'ar'
-      ? `مرحباً ${arStrong(data.partnerName)},<br/>تم اعتماد طلب الصرف الخاص بك بمبلغ ${arStrong(amount)} وهو قيد الدفع حالياً.${data.note ? `<br/>ملاحظة: ${arStrong(data.note)}` : ''}`
-      : `Hi ${data.partnerName},<br/>Your payout request of ${amount} has been approved and is being processed.${data.note ? `<br/>Note: ${data.note}` : ''}`
-  } else {
-    body = lang === 'ar'
-      ? `مرحباً ${arStrong(data.partnerName)},<br/>للأسف تم رفض طلب الصرف الخاص بك بمبلغ ${arStrong(amount)}.${data.note ? `<br/>السبب: ${arStrong(data.note)}` : ''}`
-      : `Hi ${data.partnerName},<br/>Unfortunately your payout request of ${amount} was rejected.${data.note ? `<br/>Reason: ${data.note}` : ''}`
-  }
-
-  const cta = lang === 'ar'
-    ? arCta(data.payoutsUrl, 'عرض طلبات الصرف')
-    : arCta(data.payoutsUrl, 'View Payouts')
-  return {
-    subject,
-    html: wrap(lang, body + cta),
-    text: subject + '\n\n' + data.payoutsUrl,
-  }
-}
 
 export function subscriptionRegisteredEmail(
   data: SubscriptionRegisteredEmailData,
@@ -216,7 +57,7 @@ export function subscriptionRegisteredEmail(
     : ''
   const body = lang === 'ar'
     ? `مرحباً ${arStrong(data.clientName)},<br/>تم تسجيل اشتراكك في مساحة العمل "${arStrong(data.workspaceName)}".${num}${arBr}الفترة: ${arStrong(data.startDate)} إلى ${arStrong(data.endDate)} (${data.months} شهر)${arBr}المبلغ: ${arStrong(amount)}`
-    : `Hi ${data.clientName},<br/>A subscription has been registered for your workspace "${data.workspaceName}".${num}<br/>Period: ${data.startDate} to ${data.endDate} (${data.months} months)<br/>Amount: ${amount}`
+    : `Hi ${data.clientName},<br/>A subscription has been registered for your workspace "${data.workspaceName}".${num}<br/>Period: ${data.startDate} to ${data.endDate} (${data.months} months)${arBr}Amount: ${amount}`
   return {
     subject,
     html: wrap(lang, body),

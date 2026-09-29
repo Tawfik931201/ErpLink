@@ -100,7 +100,7 @@ const nextConfig = {
     // Still gated at runtime by SYNC_QUEUE_SELF_RUNNER, so platforms without
     // long-lived processes never start a permanent interval.
     instrumentationHook: true,
-    serverComponentsExternalPackages: ['@prisma/client', 'prisma', 'xmlrpc', 'ioredis', 'bull'],
+    serverComponentsExternalPackages: ['xmlrpc'],
   },
 }
 

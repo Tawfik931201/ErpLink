@@ -265,7 +265,7 @@ export async function saveFieldMapping(data: {
       if (error) throw new Error('Failed to create field mapping: ' + error.message)
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
 
     return { success: true }
   } catch (error: any) {
@@ -323,7 +323,7 @@ export async function deleteFieldMapping(id: string) {
 
     if (error) throw new Error('Failed to delete field mapping: ' + error.message)
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
     console.error('[Field Mapping Action] deleteFieldMapping failed:', error)

@@ -23,15 +23,9 @@
 
 import { createHash } from 'crypto'
 
-import { createClient } from '@supabase/supabase-js'
-
 import { processOdooStockEvent } from './stock-sync-engine'
+import { supabase } from './supabase'
 import { processWebhookEvent, cleanupExpiredLogs } from './sync-engine'
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
@@ -41,8 +35,8 @@ export const MAX_CONCURRENT_PER_WORKSPACE = Number(process.env.SYNC_QUEUE_MAX_PE
 export const SYNC_QUEUE_MAX_RETRIES = 5
 const BASE_BACKOFF_MINUTES = 5
 const MAX_BACKOFF_MINUTES = 360
-export const COALESCE_WINDOW_MS = 5_000
 const EXHAUSTED_RETENTION_DAYS = 30
+const INBOX_RETENTION_DAYS = 7
 const CLEANUP_THROTTLE_MS = 60 * 60 * 1000 // ساعة واحدة
 
 /**
@@ -78,6 +72,16 @@ const UPDATED_AT_KEYS = [
   'update_time',
 ] as const
 
+/**
+ * مفاتيح هوية **التسليم** (delivery) — لا هوية السجل.
+ *
+ * ⚠️ لا تضف `uuid` أو `id` هنا. في حمولة زد (وأغلب المتاجر) `uuid` هو
+ * معرّف الكيان نفسه (الطلب/المنتج)، لا معرّف الرسالة. فائدة:
+ * `dedupKey = delivery:<platform>:<store>:<event>:<uuid>` يبقى ثابتاً طوال
+ * حياة السجل، فيتحوّل كل تحديث لاحق إلى «مكرر» ويُسقَط بصمت — وهو بالضبط
+ * ما حذّر منه AGENTS.md. المنصات التي ترسل delivery id حقيقياً هي وحدها
+ * (`webhook_id` / `*_webhook_id` / `delivery_id` / `event_id`).
+ */
 const DELIVERY_KEYS = [
   'salla_webhook_id',
   'shopify_webhook_id',
@@ -85,7 +89,6 @@ const DELIVERY_KEYS = [
   'webhook_id',
   'delivery_id',
   'event_id',
-  'uuid',
 ] as const
 
 export function extractEntityId(payload: Record<string, unknown>): string {
@@ -297,11 +300,16 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
   const metrics = getMetricsStore()
   const entityId = extractEntityId(params.payload)
   const deliveryId = extractDeliveryId(params.payload)
+  // مفتاح التكرار يميّز **التسليم** لا **السجل**:
+  //   1) delivery id صريح من المنصة ⇒ تكرار حقيقي لنفس الرسالة ⇒ مكرّر.
+  //   2) لا delivery id (زد) ⇒ بصمة المحتوى. التحديثان المختلفان لنفس الطلب
+  //      يحملان `updated_at` مختلفاً ⇒ بصمتان مختلفتان ⇒ كلاهما يُعالَج.
+  //      أما إعادة إرسال نفس الرسالة فيعطي البصمة نفسها ⇒ تُدمجان.
   const dedupKey =
     params.dedupKey ??
     (deliveryId
       ? `delivery:${params.platform}:${params.storeId}:${params.event}:${deliveryId}`
-      : null)
+      : `fingerprint:${params.platform}:${params.storeId}:${params.event}:${fingerprintPayload(params.payload)}`)
 
   // ── 0) الاستلام الدائم أولاً ───────────────────────────────────────────────
   // نكتب الحدث في `webhook_inbox` قبل أي شيء آخر. إن فشل ذلك نُرجع error
@@ -755,6 +763,11 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
 
 let lastCleanupAt = 0
 
+/**
+ * تنظيف دوري مخنوق (مرة/ساعة). يشمل أرشفة الصفوف المستنفدة، وحذف سجلات
+ * `sync_logs` المنتهية، وتقليم `webhook_inbox` — بدون هذا الأخير ينمو جدول
+ * الاستلام بلا حد لأن `pruneProcessedInbox` لا يُستدعى من أي مكان آخر.
+ */
 async function maybeCleanup() {
   if (Date.now() - lastCleanupAt < CLEANUP_THROTTLE_MS) return
   lastCleanupAt = Date.now()
@@ -762,6 +775,8 @@ async function maybeCleanup() {
     const cleaned = await cleanupSyncQueue(EXHAUSTED_RETENTION_DAYS)
     getMetricsStore().cleaned += cleaned
     await cleanupExpiredLogs().catch(() => {})
+    const { pruneProcessedInbox } = await import('./webhook-inbox')
+    await pruneProcessedInbox(INBOX_RETENTION_DAYS).catch(() => {})
   } catch {
     // غير قاتل.
   }

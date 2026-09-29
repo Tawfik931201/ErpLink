@@ -230,7 +230,7 @@ export async function retrySyncLog(logId: string) {
       logId // existingLogId
     )
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
 
     return {
       success: true,
@@ -268,7 +268,7 @@ export async function resolveLogManually(logId: string) {
       throw new Error('Failed to resolve log: ' + error.message)
     }
 
-    revalidatePath('/dashboard/mapping-center')
+    revalidatePath('/app/mapping-center')
 
     return {
       success: true,
