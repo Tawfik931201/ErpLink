@@ -64,12 +64,76 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
+# Unit tests — 65 tests, all pure functions (added 2026-09-29)
+npm test
+npm run test:watch
+npm run test:coverage
+
 # Production build — also a gate
 npm run build
 
 # Dev server
 npm run dev
 ```
+
+All four (type-check, lint, test, build) are **blocking** CI jobs.
+
+## Testing (added 2026-09-29)
+
+- Jest is configured via `next/jest` in `jest.config.js` — SWC and the `@/*`
+  aliases come from `tsconfig.json`, so tests compile exactly like the app.
+- `tests/mocks/supabase.ts` is mapped over `@/lib/supabase` in
+  `moduleNameMapper`; **no test may open a real DB connection**. Assert on
+  `supabase.calls`, never on live data.
+- 65 tests over 4 suites, all pure functions:
+  - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
+    `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
+  - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
+    `extractEntityId` (the anti-data-loss rules)
+  - `tests/unit/subscription-dates.test.ts` — `computeSubscriptionEndDate`,
+    `addMonthsToDate`, `isValidIsoDate`
+  - `tests/unit/odoo-operation-routing.test.ts` — `normalizeOdooOperation`,
+    `presetEntityType`
+- ⚠️ **A `'use server'` module may only export async functions.** Next fails
+  the build with "Server actions must be async functions" otherwise — this
+  happened when the subscription date helpers were briefly exported from
+  `subscription-actions.ts`. They now live in `src/lib/subscription-dates.ts`
+  (a normal module) and the action file delegates to them. Put pure logic in a
+  plain `src/lib/*` file, never in `src/app/actions/*`.
+- `resolveZidShippingCost` / `resolveZidCodAmount` / `resolveZidStatus` were
+  made `export` (was private) purely so they can be tested. Do not un-export.
+- `npm run test:coverage` works but is **not** a gate — the codebase is ~63k
+  lines and total coverage is ~4%. Scope coverage, don't chase the number.
+
+### Billing date edge case (deliberately NOT fixed)
+`computeSubscriptionEndDate` overflows for month-end starts: paying on
+2026-01-31 for 1 month yields **2026-03-02** (30 days), where clamping would
+give 2026-02-27/28. The tests pin the current behaviour with a comment. Fixing
+it is a **billing behaviour change** and needs an explicit product decision —
+do not "correct" it silently.
+
+## Known Vulnerabilities (2026-09-29)
+
+`npm audit` is at **10 (1 critical, 9 high)**, down from 16. Everything fixable
+without a major bump was fixed (`npm audit fix` + nodemailer 7→10). The
+remainder all need a framework major upgrade:
+
+| Package | Now | Needs | Real risk here |
+|---|---|---|---|
+| `next` | 14.2.35 | 16.3.7 | Medium — mostly DoS; the RCE is Windows-only (host is Linux) |
+| `@clerk/nextjs` | 5.7.6 (latest v5) | 7.x | **High — auth bypass; the whole app is Clerk-based** |
+| `postcss` | 8.4.31 (nested in Next) | — | Low — build-time only |
+| `glob` | — | via eslint-config-next 16 | Low — lint tool only |
+
+- **Do NOT run `npm audit fix --force`** — it jumps Next 14→16 in one step and
+  breaks the app silently.
+- An `overrides` entry to force `postcss@8.5` into Next 14 was tried and
+  rejected: npm refuses (`EOVERRIDE`, postcss is a direct devDependency), and
+  forcing it would risk the CSS pipeline to fix a build-time-only advisory.
+- Migration plan: `docs/next-16-clerk-7-upgrade-plan.md`. Clerk first (smaller,
+  higher value), then Next 14→15→16 as separate stages.
+- Prior to any upgrade, record a manual baseline: sync an order, sync a
+  product, update an order, cancel, and run a billing + email cycle.
 
 ## Safe Cleanup (2026-09-29)
 
@@ -105,7 +169,8 @@ deliberately kept for old external links.
 
 **Platform code split is planned but NOT started** — see
 `docs/platform-code-split-plan.md`. The unified `/app/connect-store` UI stays
-as-is; only the code layer gets split per platform, and only after tests exist.
+as-is; only the code layer gets split per platform. **Stage 0 of that plan
+(tests) is now done** — 65 tests cover the pure helpers that will move.
 
 ## Data Model
 

@@ -7,6 +7,11 @@ import { recordAudit } from '@/lib/audit-logs'
 import { getActiveUserId, getActiveWorkspaceId, isAdmin } from '@/lib/auth'
 import { sendEmail } from '@/lib/email'
 import { subscriptionRegisteredEmail } from '@/lib/email-templates'
+import {
+  addMonthsToDate,
+  computeSubscriptionEndDate,
+  isValidIsoDate,
+} from '@/lib/subscription-dates'
 import { daysUntilExpiry, isSubscriptionExpired } from '@/lib/subscription-utils'
 import { supabase } from '@/lib/supabase'
 
@@ -41,22 +46,16 @@ async function requireAdmin() {
 
 /** Add `months` calendar months to a YYYY-MM-DD date, return YYYY-MM-DD. */
 function addMonths(dateStr: string, months: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`)
-  d.setUTCMonth(d.getUTCMonth() + months)
-  return d.toISOString().slice(0, 10)
+  return addMonthsToDate(dateStr, months)
 }
 
 /** end_date = start_date + months - 1 day (inclusive period). */
 function computeEndDate(startDate: string, months: number): string {
-  const d = new Date(`${startDate}T00:00:00Z`)
-  d.setUTCMonth(d.getUTCMonth() + months)
-  d.setUTCDate(d.getUTCDate() - 1)
-  return d.toISOString().slice(0, 10)
+  return computeSubscriptionEndDate(startDate, months)
 }
 
 function isValidDate(dateStr: string): boolean {
-  const d = new Date(`${dateStr}T00:00:00Z`)
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === dateStr
+  return isValidIsoDate(dateStr)
 }
 
 // ──────────────────────── Read: my subscription ────────────────────────

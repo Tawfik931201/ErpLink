@@ -72,22 +72,19 @@ src/lib/zid/{auth,config,token,types,webhooks}.ts   ← 817 سطر، منفصل
 
 ## 3) الخطة — 4 مراحل، كل مرحلة commit مستقل
 
-### المرحلة 0 — الاختبارات أولاً (شرط مانع للتشغيل)
+### المرحلة 0 — الاختبارات أولاً (✅ اكتملت 2026-09-29)
 
 بلا اختبارات، التقسيم = تغيير كود إنتاجي بدون شبكة أمان.
 
-1. تفعيل Jest: يوجد `jest` / `jest-environment-jsdom` / Testing Library في
-   `devDependencies`، لكن **لا يوجد `jest.config` ولا ملف اختبار واحد**.
-   أضف `jest.config.js` + `jest.setup.ts`.
-2. أول اختبارات مطلوبة (الأعلى قيمة مقابل الجهد):
-   - `dedupKey` / `fingerprintPayload` — بصمات تكرار webhooks.
-   - `extractEntityId` — دمج الصفوف في الطابور.
-   - `normalizeOdooOperation` + `presetEntityType` — تحويل الحدث → عملية.
-   - `resolveZidShippingCost` / `resolveZidCodAmount` / `isSaudiShippingAddress` /
-     `resolveZidStatus` — منطق خالص، سهل التغطية، ويصبح له شبكة أمان
-     قبل نقله.
-   - `computeEndDate` في `subscription-actions.ts` (الفوترة أساسية).
-3. استخدم `next/jest` (أسهل — يضبط `transform` و`moduleNameMapper` تلقائياً).
+> **تم التنفيذ.** `jest.config.js` عبر `next/jest`، و`tests/mocks/supabase.ts`
+> يمنع أي اتصال بقاعدة بيانات، و`npm test` أصبح job حاجباً في CI.
+> 65 اختباراً في 4 ملفات تغطي بالضبط الدوال التي تنقلها المراحل التالية:
+> `tests/unit/zid-order-helpers.test.ts` (المرحلة 2)،
+> `tests/unit/sync-queue-dedup.test.ts`، `tests/unit/subscription-dates.test.ts`،
+> `tests/unit/odoo-operation-routing.test.ts` (المرحلة 1).
+>
+> تغطية خط واحد (statements) ~4% من 63k سطر — متوقع، والمهم هو تثبيت
+> الدوال الحرجة لا النسبة. الخطط التالية أصبحت آمنة للبدء.
 
 ### المرحلة 1 — توحيد `PLATFORM_ID_FIELDS` (صغير الأثر، بلا واجهة)
 

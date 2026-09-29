@@ -882,7 +882,7 @@ export async function updateOdooStock(client: OdooClient, productId: number, qty
  * payload version / store setup. Try every known path and return the first
  * non-zero value found.
  */
-function resolveZidShippingCost(zidData: Record<string, unknown>): number {
+export function resolveZidShippingCost(zidData: Record<string, unknown>): number {
   // Zid's official order schema carries the fee breakdown in payment.invoice[]
   // (real order payloads have NO `amounts` key). Scan for the shipping/delivery row first.
   try {
@@ -934,7 +934,7 @@ function resolveZidShippingCost(zidData: Record<string, unknown>): number {
 // first — strong COD identifiers, then generic fee words (excluding shipping /
 // tax / discount / total rows so the shipping fee is never double-counted) —
 // then try named keys. Returns 0 when Zid sends no fee.
-function resolveZidCodAmount(zidData: Record<string, unknown>): number {
+export function resolveZidCodAmount(zidData: Record<string, unknown>): number {
   const parseNum = (raw: unknown): number => {
     if (raw === undefined || raw === null || typeof raw === 'object') return 0
     const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
@@ -2547,7 +2547,7 @@ async function resolveOrderState(
 }
 
 // ──── Helper: read the order status value from a platform payload ─────
-function resolveZidStatus(zidData: Record<string, unknown>): string {
+export function resolveZidStatus(zidData: Record<string, unknown>): string {
   const raw = (zidData as any)?.order_status
     || (zidData as any)?.display_status
     || (zidData as any)?.status
@@ -3332,7 +3332,7 @@ function normalizeEvent(event: string): string {
   return EVENT_ALIASES[event] ?? event
 }
 
-function normalizeOdooOperation(operation: unknown, event: string): OdooOperation {
+export function normalizeOdooOperation(operation: unknown, event: string): OdooOperation {
   if (operation === 'create' || operation === 'update' || operation === 'delete' || operation === 'cancel' || operation === 'deliver') {
     return operation as OdooOperation
   }
@@ -3357,7 +3357,7 @@ const PRESET_ENTITY_TYPES: ReadonlyArray<readonly [string, string]> = [
   ['order', 'orders'],
 ]
 
-function presetEntityType(presetKey: string): string | null {
+export function presetEntityType(presetKey: string): string | null {
   for (const [needle, entityType] of PRESET_ENTITY_TYPES) {
     if (presetKey.includes(needle)) return entityType
   }

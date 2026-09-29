@@ -1,10 +1,10 @@
 # ─── ErpLink CI ───────────────────────────────────────────────────────────────
-# There is no test suite in this project, so CI's job is to prove the four
-# things that actually break deployments:
+# CI's job is to prove the five things that actually break deployments:
 #   1. types compile        (type-check)
 #   2. lint rules hold      (lint)
-#   3. the app builds       (build)
-#   4. no secrets are leaked (GitLab security templates)
+#   3. the tests pass       (test)
+#   4. the app builds       (build)
+#   5. no secrets are leaked (GitLab security templates)
 #
 # Every job runs `npm ci` against package-lock.json.
 
@@ -67,8 +67,23 @@ build:
   script:
     - npm run build
 
+# Added 2026-09-29. This is the safety net required before the planned
+# per-platform code split (docs/platform-code-split-plan.md): the pure helpers
+# that split will move are pinned here first. `--ci` keeps it non-interactive.
+test:
+  stage: verify
+  script:
+    - npm test -- --ci
+  coverage:
+    stage: verify
+    script:
+      - npm run test:coverage -- --ci
+    coverage: '/^All files\s*\|\s*([0-9.]+)/'
+    rules:
+      - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
 # The GitLab security templates (SAST, secret detection, dependency scanning)
 # are included above and land in the `test`/`security` stages. They are expected
 # to be allow_failure by default so a new scanner finding reports without
-# blocking an otherwise-good deploy; the three verify jobs above are the
-# blocking gate.
+# blocking an otherwise-good deploy; the four verify jobs above (type-check,
+# lint, test, build) are the blocking gate.
