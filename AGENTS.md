@@ -85,7 +85,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
 - `tests/mocks/supabase.ts` is mapped over `@/lib/supabase` in
   `moduleNameMapper`; **no test may open a real DB connection**. Assert on
   `supabase.calls`, never on live data.
-- 65 tests over 4 suites, all pure functions:
+- 76 tests over 5 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -94,6 +94,8 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     `addMonthsToDate`, `isValidIsoDate`
   - `tests/unit/odoo-operation-routing.test.ts` — `normalizeOdooOperation`,
     `presetEntityType`
+  - `tests/unit/clerk-authz-guard.test.ts` — scans `src/**` to prove the
+    Clerk advisory is unreachable (see Known Vulnerabilities)
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -121,17 +123,60 @@ remainder all need a framework major upgrade:
 | Package | Now | Needs | Real risk here |
 |---|---|---|---|
 | `next` | 14.2.35 | 16.3.7 | Medium — mostly DoS; the RCE is Windows-only (host is Linux) |
-| `@clerk/nextjs` | 5.7.6 (latest v5) | 7.x | **High — auth bypass; the whole app is Clerk-based** |
+| `@clerk/nextjs` | 5.7.6 (latest stable v5) | 6.39.3+ | **None reachable — see below** |
 | `postcss` | 8.4.31 (nested in Next) | — | Low — build-time only |
 | `glob` | — | via eslint-config-next 16 | Low — lint tool only |
+
+### Clerk CVE-2026-42349 is NOT reachable in this app (2026-09-29)
+
+The Clerk advisory is rated High (CVSS 7.6) and is **a call-shape
+vulnerability, not an "any app using Clerk" vulnerability**. Only two shapes
+are vulnerable:
+
+1. `has()` / `auth.protect()` combining **two** authorization dimensions
+   (`reverification` + role/permission/feature/plan, or billing
+   feature/plan + role/permission).
+2. `@clerk/nextjs` only: `auth.protect()` **silently discards** the
+   authorization params when the same argument object also contains
+   `unauthenticatedUrl` / `unauthorizedUrl` / `token`.
+
+This app uses **none** of them, verified across all 210 source files:
+
+- `.protect()` is called **exactly once**, `src/middleware.ts:116`, with **no
+  arguments** — so there are no params to discard (shape 2 impossible).
+- **Zero** `has()` calls on any Clerk object. Every `.has(` in the repo is a
+  JS `Set`/`Map`/`Headers` method.
+- **Zero** uses of `reverification`, `orgRole`, `orgSlug`, `orgId`,
+  `permission`, `plan` or `feature` as authorization params. The app has no
+  Clerk Organizations and no Clerk Billing (subscriptions are manual DB rows
+  — see Status Lifecycle).
+- Authorization is **not** Clerk-based at all: `isAdmin()` is a plain
+  `ADMIN_USER_IDS` env lookup in `src/lib/auth.ts:11`, and impersonation is a
+  `impersonated_user_id` cookie. `auth()` is read only for `userId`.
+- The advisory itself states `clerkMiddleware`, `auth()`, session state and
+  token verification are unaffected, and that single-condition checks "continue
+  to fail closed".
+
+`tests/unit/clerk-authz-guard.test.ts` **pins this conclusion** — it scans
+`src/**` and fails if either vulnerable shape ever appears, if `.protect()`
+ever gains arguments, if the single call is removed, or if the deprecated
+`getAuth()` returns. It has a self-check suite asserting the scanner really
+detects the advisory's own examples and really ignores the safe shapes.
+
+> So: **do not do the Clerk 5→7 major upgrade to fix this CVE.** A major
+> upgrade of the auth system — with no integration tests and no way to verify
+> locally — risks locking out every client, which is a far worse outcome than
+> an unreachable advisory. Revisit only when Clerk ships a patch on the v5
+> line (none exists: 5.7.6 is the newest stable v5, only `5.8.0-snapshot.*`
+> prereleases follow) or when the app actually adopts org/plan authorization.
 
 - **Do NOT run `npm audit fix --force`** — it jumps Next 14→16 in one step and
   breaks the app silently.
 - An `overrides` entry to force `postcss@8.5` into Next 14 was tried and
   rejected: npm refuses (`EOVERRIDE`, postcss is a direct devDependency), and
   forcing it would risk the CSS pipeline to fix a build-time-only advisory.
-- Migration plan: `docs/next-16-clerk-7-upgrade-plan.md`. Clerk first (smaller,
-  higher value), then Next 14→15→16 as separate stages.
+- Migration plan: `docs/next-16-clerk-7-upgrade-plan.md`. **Clerk is not a
+  prerequisite for the Next upgrade** — see that doc for the corrected order.
 - Prior to any upgrade, record a manual baseline: sync an order, sync a
   product, update an order, cancel, and run a billing + email cycle.
 
