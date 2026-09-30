@@ -403,6 +403,29 @@ started. Source of truth: `docs/platform-code-split-plan.md`.
     one. Supabase REST is the only runtime data path.
 - Real queue = `sync-queue.ts` + `sync-queue-runner.ts` (`setInterval`); there is
   no Redis/Bull and no external cron.
+- **Ingress divergences that are deliberate or need a decision — read before
+  "fixing" them:**
+  - `src/app/api/webhooks/odoo/route.ts` does **not** call
+    `isWebhookEventEnabled`, unlike the zid/salla/shopify routes. This is not
+    a missing gate. `isWebhookEventEnabled`'s `storeType` union is
+    `'zid' | 'salla' | 'shopify'` — there is no `'odoo'` member — and
+    `mapEventToEntityAndOp('odoo.model.sync')` returns `null`, which the gate
+    treats as `allowed: true`. Adding the call with today's arguments would be
+    a no-op that merely *looks* like it gates something. Making ERP→store
+    pushes actually respect Mapping Center settings needs a product decision:
+    which `store_type` and `entity_type` an inbound Odoo record is judged
+    against. `odoo/stock/route.ts` is in the same position.
+  - `src/app/api/webhooks/salla/route.ts` hand-rolls the enqueue (its own
+    dedup probe, its own coalescing, `max_retries: 3`) instead of calling
+    `enqueueWebhookEvent`, which uses `max_retries: 5` and coalesces
+    queue-side via `extractEntityId`. It *does* write the receipt and returns
+    503 when the durable write fails, so it is not losing data — it is a
+    second implementation of the same contract. Converging it moves both the
+    retry count and the coalescing behaviour, so it needs a decision.
+  - The odoo routes look receipt-less but are not: `enqueueWebhookEvent`
+    calls `recordWebhookReceipt` itself (`src/lib/sync-queue.ts:317`) *before*
+    the queue insert and returns an error the route turns into a 503. The
+    comment at `odoo/route.ts:125` is accurate — do not "add" a receipt there.
 - Deleted dead files (do not recreate): `src/lib/redis.ts`, `src/lib/prisma.ts`,
   `src/lib/empty.js`, `src/lib/zid/client.ts`, `src/lib/webhook-emitter.ts`,
   `src/components/webhook-toast.tsx`, `src/hooks/useZidWebhooks.ts`,

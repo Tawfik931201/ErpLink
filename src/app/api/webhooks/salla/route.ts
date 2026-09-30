@@ -319,8 +319,8 @@ export async function POST(req: NextRequest) {
         .from('sync_queue')
         .update({ payload: merged, updated_at: new Date().toISOString() })
         .eq('id', pending.id)
-  await recordSallaWebhookMetric(merchantId, event)
-  if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
+      await recordSallaWebhookMetric(merchantId, event)
+      if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
       return NextResponse.json({ received: true, queued: true, coalesced: true })
     }
   }
