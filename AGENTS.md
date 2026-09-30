@@ -285,7 +285,8 @@ started. Source of truth: `docs/platform-code-split-plan.md`.
 - Do **not** add a shopify branch to those skipped sites without a product
   decision — it is a behaviour change, not a refactor.
 
-**Stages 2 and 3 are also DONE (2026-09-29).** Stage 4 (UI) is NOT started.
+**Stages 2 and 3 are also DONE (2026-09-29).** Stage 4 (UI) is **decided
+against** — see below, do not start it.
 
 - **Stage 2**: `resolveZidShippingCost`, `resolveZidCodAmount`,
   `isSaudiShippingAddress` and `resolveZidStatus` moved out of
@@ -303,7 +304,11 @@ started. Source of truth: `docs/platform-code-split-plan.md`.
   `ODOO_FIELDS` / `STORE_VARIANT_FIELDS` live under `platforms/odoo/`
   because they are Odoo-side, not store-side. New code should import from
   `@/lib/platforms/<platform>/fields` directly; the barrel is for
-  backwards compatibility only.
+  backwards compatibility only. `field-mapping-client.tsx` was switched to
+  direct per-platform imports (commit `21285b2`), which drops the
+  `ODOO_*`/`STORE_VARIANT_FIELDS` constants from its import graph — it
+  referenced none of them. `field-mapping-form.tsx` still uses the barrel
+  because it genuinely reads all three.
 - ⚠️ **The Shopify topic lists were deliberately NOT merged, despite what the
   plan said.** They are not duplicates: `shopify.app.toml` and
   `SHOPIFY_CORE_TOPICS` (5 topics) are what the app subscribes to,
@@ -315,6 +320,19 @@ started. Source of truth: `docs/platform-code-split-plan.md`.
   what the app subscribes to and what the mapping UI shows — a behaviour
   change. The relationship is documented in the header of
   `src/lib/platforms/shopify/fields.ts`. Do not "fix" this duplication.
+- ⚠️ **Stage 4 (the UI split) was measured and declined on 2026-09-29 — do not
+  start it.** Two reasons, both verified, not assumed:
+  1. The plan's premise was wrong. It claimed the two mapping files "mix all
+     four platforms equally". Actual reference counts:
+     `field-mapping-client.tsx` (5,233) is **odoo-dominated** — 152 odoo vs
+     65 zid / 15 salla / 15 shopify. Extracting a shared `FieldMappingPanel`
+     per platform would be unifying something that is not evenly split.
+  2. **There are no component tests in this project.** All 99 tests are pure
+     functions. Splitting 8,161 lines of JSX that *is* the mapping UI has no
+     safety net and cannot be visually verified from the CLI.
+  Revisit only once Testing Library covers mapping-center. Stages 1–3 are
+  done and the UI is intentionally left unified. Full reasoning in
+  `docs/platform-code-split-plan.md`.
 
 ## Data Model
 
