@@ -3,7 +3,7 @@ import {
   resolveZidCodAmount,
   resolveZidShippingCost,
   resolveZidStatus,
-} from '@/lib/sync-engine'
+} from '@/lib/zid/order-helpers'
 
 /**
  * These four helpers are pure functions that decide money and tax-relevant
