@@ -60,12 +60,14 @@ import ProductMappingDialog from '@/components/mapping/product-mapping-dialog'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/hooks/use-toast'
-import { ZID_EVENTS, SALLA_EVENTS, SHOPIFY_EVENTS, ZID_FIELDS, SALLA_FIELDS, SHOPIFY_FIELDS } from '@/lib/mapping-constants'
 import { toOdooFieldOption, type OdooFieldOption } from '@/lib/odoo-field-options'
 import {
   DEFAULT_ZID_ORDER_STATUSES,
   type ZidStatusOption,
 } from '@/lib/order-custom-status-constants'
+import { SALLA_EVENTS, SALLA_FIELDS } from '@/lib/platforms/salla/fields'
+import { SHOPIFY_EVENTS, SHOPIFY_FIELDS } from '@/lib/platforms/shopify/fields'
+import { ZID_EVENTS, ZID_FIELDS } from '@/lib/platforms/zid/fields'
 import { formatFieldLabel } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
