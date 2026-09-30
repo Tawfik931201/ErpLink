@@ -179,17 +179,43 @@ src/lib/zid/order-helpers.ts   ← جديد، إنشاؤه هنا
 `sync-engine.ts` يستوردها. المكسب: منطق الشحن/الضريبة/الحالة لزد في مكان
 واحد، واختبارات المرحلة 0 تحميه قبل النقل.
 
-### المرحلة 3 — فصل الثوابت (بسيط، ميكانيكي)
+### المرحلة 3 — فصل الثوابت (✅ اكتملت 2026-09-29)
 
 ```
-src/lib/platforms/zid/fields.ts       ← ZID_EVENTS, ZID_FIELDS
-src/lib/platforms/salla/fields.ts     ← SALLA_EVENTS, SALLA_FIELDS
-src/lib/platforms/shopify/fields.ts   ← SHOPIFY_EVENTS, SHOPIFY_FIELDS
+src/lib/platforms/odoo/fields.ts       ← ODOO_MODELS, ODOO_FIELDS, STORE_VARIANT_FIELDS
+src/lib/platforms/zid/fields.ts        ← ZID_EVENTS, ZID_FIELDS, ZID_SUB_FIELDS
+src/lib/platforms/salla/fields.ts      ← SALLA_EVENTS, SALLA_FIELDS
+src/lib/platforms/shopify/fields.ts    ← SHOPIFY_EVENTS, SHOPIFY_FIELDS
 ```
 
-`mapping-constants.ts` يصبح barrel يُعيد التصدير فقط، فلا يتغير أي
-`import` في المشروع. ⚠️ راجع `src/lib/shopify-topics.ts` — يذكّر أن
-مواضيع Shopify مكررة في 4 أماكن؛ وحّدها في نفس المرحلة.
+`src/lib/mapping-constants.ts` (1,206 → 19 سطراً) صار **barrel** يُعيد التصدير
+فقط، فلا يتغيّر أي `import` في المشروع — شرط نصّت عليه الخطة.
+
+> **تم التنفيذ.** الفصل ميكانيكي: قُطعت الكتل من الملف الأصلي سطراً سطراً
+> (لا نسخ يدوي)، وتحقّق أن **الـ1,163 سطراً غير الفارغة نُقلت جميعها حرفياً**
+> وأن التصديرات العشرة كلها ما زالت مصدّرة. `ODOO_FIELDS` و`STORE_VARIANT_FIELDS`
+> في `platforms/odoo/` لأنها تخص Odoo ولا تخص متجراً بعينه.
+>
+> الكود الجديد يستورد من `@/lib/platforms/<platform>/fields` مباشرة؛ الـbarrel
+> موجود للـbackwards compatibility فقط.
+
+#### ❌ مواضيع Shopify: **لم** تُوحَّد (تصحيح لل plan)
+
+الـplan نصّ على توحيد مواضيع Shopify في نفس المرحلة. **هذا مبني على افتراض
+خاطئ** — القوائم الثلاث ليست نسخاً من بعضها:
+
+| القائمة | الغرض | الحجم |
+|---|---|---:|
+| `shopify.app.toml` | ما يشترك فيه التطبيق فعلياً | — |
+| `SHOPIFY_CORE_TOPICS` | ما يطلبه التطبيق عند الربط | 5 |
+| `SHOPIFY_TOPIC_CATALOG` | الكتالوج الكامل في الإعدادات | ‎~20 |
+| `SHOPIFY_EVENTS` (mapping) | جدول مركز المطابقة، فيه `targetModel` لكل حدث | 11 |
+
+`SHOPIFY_EVENTS` يعرض أحداثاً **لا يشترك فيها التطبيق أصلاً**
+(`products/delete`, `orders/cancelled`, `collections/*`)، و**لا** يحتوي
+`orders/paid` الذي يشترك فيه فعلاً. دمجها يعني تغيير ما يشترك فيه
+التطبيق **أو** ما تعرضه واجهة المطابقة — تغيير سلوك، لا تنظيف.
+العلاقة موثّقة الآن في ترويسة `src/lib/platforms/shopify/fields.ts`.
 
 ### المرحلة 4 — UI المطابقة (الأخطر، اتركها لآخر)
 

@@ -285,6 +285,37 @@ started. Source of truth: `docs/platform-code-split-plan.md`.
 - Do **not** add a shopify branch to those skipped sites without a product
   decision — it is a behaviour change, not a refactor.
 
+**Stages 2 and 3 are also DONE (2026-09-29).** Stage 4 (UI) is NOT started.
+
+- **Stage 2**: `resolveZidShippingCost`, `resolveZidCodAmount`,
+  `isSaudiShippingAddress` and `resolveZidStatus` moved out of
+  `sync-engine.ts` to `src/lib/zid/order-helpers.ts` (7,122 lines now, was
+  7,358). They are pure — no I/O, no Odoo client, no database. All four
+  were used only inside `sync-engine.ts`, so the only caller change is one
+  import. Verified as a pure move: all 229 deleted lines appear verbatim in
+  the new module, and `tests/unit/zid-order-helpers.test.ts` now imports
+  from the new path and still passes unchanged.
+- **Stage 3**: the field catalogues moved to
+  `src/lib/platforms/{odoo,zid,salla,shopify}/fields.ts`, and
+  `src/lib/mapping-constants.ts` is now a **19-line barrel** that
+  re-exports all ten names, so no import changed. Verified mechanically:
+  all 1,163 non-empty original lines are present verbatim in the new files.
+  `ODOO_FIELDS` / `STORE_VARIANT_FIELDS` live under `platforms/odoo/`
+  because they are Odoo-side, not store-side. New code should import from
+  `@/lib/platforms/<platform>/fields` directly; the barrel is for
+  backwards compatibility only.
+- ⚠️ **The Shopify topic lists were deliberately NOT merged, despite what the
+  plan said.** They are not duplicates: `shopify.app.toml` and
+  `SHOPIFY_CORE_TOPICS` (5 topics) are what the app subscribes to,
+  `SHOPIFY_TOPIC_CATALOG` is the full settings catalogue, and
+  `SHOPIFY_EVENTS` (11) is the mapping-centre table that carries a
+  `targetModel` per event. `SHOPIFY_EVENTS` offers events the app never
+  subscribes to (`products/delete`, `orders/cancelled`, `collections/*`)
+  and omits `orders/paid`, which it does subscribe to. Merging them changes
+  what the app subscribes to and what the mapping UI shows — a behaviour
+  change. The relationship is documented in the header of
+  `src/lib/platforms/shopify/fields.ts`. Do not "fix" this duplication.
+
 ## Data Model
 
 - `subscriptions`: workspace_id, user_id, start_date, months_paid, end_date,
