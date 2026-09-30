@@ -119,8 +119,8 @@ do not "correct" it silently.
 ## Known Vulnerabilities (2026-09-29)
 
 `npm audit` is at **10 (1 critical, 9 high)**, down from 16. Everything fixable
-without a major bump was fixed (`npm audit fix` + nodemailer 7→10). The
-remainder all need a framework major upgrade:
+without a major bump was fixed (`npm audit fix` + nodemailer 7→10 + axios
+1.18.1→1.20.0). The remainder all need a framework major upgrade:
 
 | Package | Now | Needs | Real risk here |
 |---|---|---|---|
@@ -128,6 +128,17 @@ remainder all need a framework major upgrade:
 | `@clerk/nextjs` | 5.7.6 (latest stable v5) | 6.39.3+ | **None reachable — see below** |
 | `postcss` | 8.4.31 (nested in Next) | — | Low — build-time only |
 | `glob` | — | via eslint-config-next 16 | Low — lint tool only |
+
+> `axios` was a **direct** dependency (`^1.7.2` → 1.18.1) and had drifted into
+> the affected range `1.0.0 - 1.19.0` with 6 advisories, which the 2026-09-29
+> sweep missed because it only looked at what the earlier fix had touched.
+> Bumped to **1.20.0** (same major, patch-level) — that closed the last
+> non-major advisory. It is imported by `zid-client.ts`, `salla-client.ts` and
+> `shopify-client.ts`, so re-run the sync baseline after any future axios bump.
+> The six advisories were ReDoS in the `data:` URL parser and in proxy
+> host normalisation, prototype-pollution gadgets in `toFormData`, and HTTP/2
+> adapter issues — none reachable against fixed third-party base URLs, but it
+> was a direct dep at a vulnerable version, so it got fixed regardless.
 
 ### The one Critical that did apply: AVIF RCE (mitigated 2026-09-29)
 
