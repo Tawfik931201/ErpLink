@@ -10,11 +10,20 @@ build/
 dist/
 
 # ─── Environment variables ────────────────────────────────────────
+# Every .env* variant is ignored EXCEPT .env.example, which is the only one
+# meant to be committed. `.env.production` and `.env.staging` are NOT ignored
+# by Next's own template, so they have to be listed explicitly or a deploy can
+# commit real credentials.
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+.env.staging
+
+# ─── Build caches ─────────────────────────────────────────────────
+.swc/
 
 # ─── Prisma ──────────────────────────────────────────────────────
 prisma/migrations/

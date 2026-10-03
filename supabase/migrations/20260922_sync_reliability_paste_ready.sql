@@ -2,6 +2,20 @@
 -- Sync Reliability -- paste-ready for Supabase SQL Editor
 -- Safe to run more than once. Wrapped in a transaction: either all of it
 -- applies, or none of it does (no half-broken state).
+--
+-- ⚠️ DUPLICATE OF `20260922_sync_reliability.sql` — NOT THE SOURCE OF TRUTH.
+-- The same statements in the same order. Three differences, all deliberate and
+-- all verified: every identifier is `public.`-qualified (the SQL Editor's
+-- search_path is not the app's), `idx_sync_logs_match` is wrapped in a
+-- `to_regclass('public.sync_logs')` guard so it is skipped instead of erroring
+-- on a project without that table, and the whole thing sits in BEGIN/COMMIT.
+--
+-- That last difference is the reason this file is NOT byte-for-byte identical
+-- (162 lines vs 113) — it is statement-for-statement equivalent, not a copy.
+-- `20260922_sync_reliability.sql` is the canonical file; AGENTS.md names it as
+-- the required migration. This copy exists only because the SQL Editor cannot
+-- open a path, so the statements are handy to paste by hand. Running both is
+-- harmless (every statement is IF NOT EXISTS / DROP-guarded) but pointless.
 -- ============================================================================
 
 BEGIN;

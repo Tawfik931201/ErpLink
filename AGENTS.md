@@ -24,6 +24,14 @@
 - **Audit**: `src/lib/audit-logs.ts` → `audit_logs` table
 - **Translations**: `src/lib/translations.ts` — no `partners.*`, no `admin.partners.*`,
   no `nav.partnerDashboard` / `nav.adminPartners`.
+- **Secrets at rest** (added 2026-10-01): `src/lib/crypto.ts`. `ENCRYPTION_KEY`
+  is the **only** key in source; two hardcoded fallbacks were removed. No
+  in-source dev fallback remains either — without `ENCRYPTION_KEY` a random
+  per-process key is generated, so a restart invalidates anything written
+  before it. `ENCRYPTION_LEGACY_KEYS` (comma-separated, **decrypt only**) exists
+  solely to migrate rows written by a retired key. `decrypt()` throws rather
+  than returning the ciphertext, because the alternative is an API key silently
+  used as a key and a failure indistinguishable from success.
 
 ## File Map
 
@@ -47,13 +55,22 @@
 | File | Purpose |
 |------|---------|
 | `src/app/api/sign-up-intent/set/route.ts` | Removed shim — redirects to `/sign-up` so old links don't 404 |
-| `.gitlab-ci.yml` | CI: `type-check` + `lint` + `build` (no tests exist) + GitLab security templates |
+| `.gitlab-ci.yml` | CI: `type-check` + `lint` + `test` + `build` + GitLab security templates |
 
 ### Schema
 | File | Purpose |
 |------|---------|
 | `supabase/migrations/20260711_partner_system.sql` | Legacy affiliate DDL — tables stay in DB, unused |
 | `supabase/migrations/20260803_subscriptions.sql` | `subscriptions` table + RLS |
+| `supabase/migrations/20260922_sync_reliability.sql` | The canonical sync-reliability migration |
+| `supabase/migrations/20260922_sync_reliability_paste_ready.sql` | Statement-for-statement variant of the above for the Supabase SQL Editor (`public.`-qualified, `to_regclass` guard, wrapped in BEGIN/COMMIT). **Not** the source of truth |
+
+### Security helpers (added 2026-10-01)
+| File | Purpose |
+|------|---------|
+| `src/lib/webhook-secret.ts` | The one `secretMatches` — constant-time, used by both Odoo routes |
+| `src/lib/custom-field-validation.ts` | Server-side validation + XML/selection sanitising for the add-custom-field action |
+| `src/lib/crypto.ts` | `ENCRYPTION_KEY`-only encryption, ephemeral dev key, `ENCRYPTION_LEGACY_KEYS` decrypt-only migration |
 
 ## Common Commands
 
@@ -64,7 +81,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 99 tests, all pure functions (added 2026-09-29)
+# Unit tests — 178 tests over 11 suites (added 2026-09-29, grown 2026-10-01)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -82,10 +99,31 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
 
 - Jest is configured via `next/jest` in `jest.config.js` — SWC and the `@/*`
   aliases come from `tsconfig.json`, so tests compile exactly like the app.
-- `tests/mocks/supabase.ts` is mapped over `@/lib/supabase` in
-  `moduleNameMapper`; **no test may open a real DB connection**. Assert on
-  `supabase.calls`, never on live data.
-- 99 tests over 6 suites:
+- ⚠️ **`moduleNameMapper` cannot override an alias, because SWC gets there
+  first.** `next/jest` hands `tsconfig.paths` to the SWC transform, so an
+  import is rewritten *before* Jest resolves it, and the rewritten specifier
+  depends on the importing file's location (`@/lib/supabase`,
+  `.../src/lib/supabase`, or `../../lib/supabase`). A mapper entry for the
+  alias alone therefore matched **none** of them: `tests/mocks/supabase.ts` was
+  never loaded, and a test importing `@/lib/supabase` silently built a **real
+  Supabase client and hit the real database** (it showed up as a Postgres
+  `invalid input syntax for type uuid` plus 200 ms+ per query).
+  `jest.config.js` now lists all three shapes, with `.*lib[\\/]supabase$` as
+  the one that actually fires. **No test may open a real DB connection** — if a
+  test suddenly gets slow, times out at 5 s, or fails with a Postgres error
+  message, the mapper regressed. Assert on `supabase.calls`, never live data.
+- `supabase.calls` records `{ table, op, args, filters }`; `filters` captures
+  `eq`/`neq`/`match` so a test can prove a query was scoped to a workspace.
+  Its builder `then` must *call* the resolve callback `await` hands it — an
+  `async () => value` there hangs forever. It was broken until the first test
+  that actually awaited a query.
+- `jest.mock()` does not resolve the `@/` alias, even though a static import
+  of the same path does. Use a relative specifier (`../../src/lib/users`).
+  TypeScript *also* resolves the alias, so a test needing the mock's own API
+  (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
+  the same file, hence one instance — `static-mappings-allowlist.test.ts`
+  asserts that explicitly, because two instances would make it vacuous.
+- 178 tests over 11 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -98,12 +136,28 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     Clerk advisory is unreachable (see Known Vulnerabilities)
   - `tests/unit/platform-fields.test.ts` — the `x_<platform>_id` table and
     the `current` → `legacy` resolution order (Stage 1 of the platform split)
+  - `tests/unit/crypto.test.ts` — `encrypt`/`decrypt`, legacy-key rotation,
+    and that the retired production key is in no file under `src/`. The key is
+    **assembled from fragments** in the test: writing it out in full would put
+    the very secret the suite purges back into the repository. A self-check
+    pins the fragments so the assertion cannot degrade into a passing no-op.
+  - `tests/unit/custom-field-validation.test.ts` — the server-side custom-field
+    validation, XML attribute escaping and selection-string sanitising
+  - `tests/unit/static-mappings-allowlist.test.ts` — the seven-table allowlist
+    in `static-mappings.ts`, the `workspace_id`/`platform` overwrite, and that
+    a forbidden table is never touched at all
+  - `tests/unit/webhook-secret.test.ts` — `secretMatches`, and that there is
+    exactly one copy of it
+  - `tests/unit/odoo-webhook-trust.test.ts` — source-level pins for the Odoo →
+    store trust rule (see Sync Reliability). These were checked to actually
+    fail when the rule is reverted, so they are not vacuous.
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
   `subscription-actions.ts`. They now live in `src/lib/subscription-dates.ts`
   (a normal module) and the action file delegates to them. Put pure logic in a
-  plain `src/lib/*` file, never in `src/app/actions/*`.
+  plain `src/lib/*` file, never in `src/app/actions/*`. This is also why
+  `custom-field-validation.ts` and `webhook-secret.ts` are separate modules.
 - `resolveZidShippingCost` / `resolveZidCodAmount` / `resolveZidStatus` were
   made `export` (was private) purely so they can be tested. Do not un-export.
 - `npm run test:coverage` works but is **not** a gate — the codebase is ~63k
@@ -338,9 +392,10 @@ against** — see below, do not start it.
      `field-mapping-client.tsx` (5,233) is **odoo-dominated** — 152 odoo vs
      65 zid / 15 salla / 15 shopify. Extracting a shared `FieldMappingPanel`
      per platform would be unifying something that is not evenly split.
-  2. **There are no component tests in this project.** All 99 tests are pure
-     functions. Splitting 8,161 lines of JSX that *is* the mapping UI has no
-     safety net and cannot be visually verified from the CLI.
+  2. **There are no component tests in this project.** All 178 tests are pure
+     functions or source scans — none render a component. Splitting 8,161 lines
+     of JSX that *is* the mapping UI has no safety net and cannot be visually
+     verified from the CLI.
   Revisit only once Testing Library covers mapping-center. Stages 1–3 are
   done and the UI is intentionally left unified. Full reasoning in
   `docs/platform-code-split-plan.md`.
@@ -596,3 +651,48 @@ RLS while appearing healthy. Dev-only fallback logs a warning.
 `findExistingOdooRecord` in `src/lib/sync-engine.ts` scopes the `sync_logs`
 lookup by `workspace_id` **and** `platform` — `zid_entity_id` alone is not
 unique across merchants. Keep the filter when touching that function.
+
+### Odoo → store: the webhook body is a trigger, never a source (2026-10-01)
+
+`ODOO_WEBHOOK_SECRET` is **one shared secret** that every customer's Odoo
+instance knows. So "the caller passed the secret" does **not** mean "the caller
+owns the record being pushed". Both Odoo routes used to take field values
+straight from the request body, which let a caller write into another tenant's
+store. The rule now, in `src/app/api/webhooks/odoo/route.ts` step 3:
+
+| `odooClient.read()` | what is trusted | outcome |
+|---|---|---|
+| returned the record | **the record only** | body ignored entirely, including the removal signal |
+| returned empty | body | the record really is gone — this is the deletion flow |
+| threw | **nothing** | `FAIL` → retried 5×, then dead-lettered |
+
+The `recordFromOdoo` flag is what carries that decision down to
+`hasRemovalSignal`, which only reads the body when the record was *not* read
+back. Do not "improve availability" by falling back to the body on a read
+error — that hands anyone with the shared secret a way to push arbitrary prices
+into stores exactly while the ERP is down. `tests/unit/odoo-webhook-trust.test.ts`
+pins all three branches and fails if the rule is reverted.
+
+Residual, deployment-level: a caller holding the shared secret can still choose
+*which* `workspace_id` a stock re-push targets. `odoo/stock/route.ts` validates
+the UUID shape and that an `erp_connections` row exists, which drops nonsense
+ids but cannot tell a real tenant from a forged one. Closing it needs a
+per-workspace secret and re-configuring every customer's Odoo Automated Action.
+
+### Ingress auth, 2026-10-01
+
+- `secretMatches` lives in `src/lib/webhook-secret.ts` (one copy — it was
+  duplicated in both Odoo routes) and always uses `crypto.timingSafeEqual`.
+  Length is compared first because `timingSafeEqual` throws on a mismatch, and
+  a throw would be a 500 instead of a 401.
+- A **missing** secret is a hard failure in production (500) for the zid, odoo
+  and shopify routes. Only development skips verification. `ZID_WEBHOOK_SECRET`
+  and a `your_*` placeholder both count as "not configured".
+- Odoo still accepts `?secret=` in the query string because the Automated
+  Actions already deployed in customers' Odoo instances use it. A URL secret
+  lands in access logs and Referer headers — configure new instances with the
+  `x-odoo-secret` header.
+- The OAuth `connect` routes are deliberately **unauthenticated**: Shopify and
+  Zid redirect to them and they are stateless entry points. The real boundary
+  is each `callback`, which now resolves the Clerk session and the active
+  workspace **before** spending the single-use authorization code.
