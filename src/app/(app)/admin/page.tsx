@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import { getAdminStats } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 
+import { ZidWebhooksRefresh } from './ZidWebhooksRefresh'
+
 const fmtMoney = (n: number) =>
   `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -94,6 +96,8 @@ export default async function AdminStatsPage() {
           </div>
         ))}
       </div>
+
+      <ZidWebhooksRefresh isAr={isAr} />
     </div>
   )
 }

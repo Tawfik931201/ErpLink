@@ -8,37 +8,41 @@
  * enqueue فقط في الطابور المركزي → رد 200 فوري. لا مزامنة داخل الطلب،
  * لا setInterval هنا (المعالجة عبر /api/cron/sync-queue).
  *
- * Security: Zid includes an HMAC-SHA256 signature in X-Zid-Signature header
- * (hex أو base64). في الإنتاج إلزامي: غياب ZID_WEBHOOK_SECRET (= أو نسخة
- * placeholder) يُرفض بـ 500 ولا يُعالج الطلب. في التطوير فقط يُتخطى التحقق.
+ * Security: Zid signs nothing — see src/lib/zid/webhook-auth.ts for the full
+ * story. Its one documented inbound mechanism is HTTP Basic, configured per
+ * webhook at creation time, so a webhook registered before that existed keeps
+ * delivering unsigned. Those legacy deliveries are accepted (a hard reject
+ * would silently kill every store's sync) but never trusted for the
+ * destructive uninstall branch. Re-register every store via
+ * POST /api/admin/zid-webhooks/refresh.
  */
-import crypto from 'crypto'
-
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
+import {
+  verifyZidWebhookAuthorization,
+  zidWebhookCredentialFingerprint,
+} from '@/lib/zid/webhook-auth'
 
-function verifyZidSignature(body: string, signature: string, secret: string): boolean {
-  try {
-    const sig = signature.trim().replace(/^sha256=/i, '')
-    if (!sig) return false
-    const hex = crypto.createHmac('sha256', secret).update(body).digest('hex')
-    const b64 = crypto.createHmac('sha256', secret).update(body).digest('base64')
-    for (const candidate of [hex, b64]) {
-      try {
-        if (sig.length === candidate.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(candidate))) {
-          return true
-        }
-      } catch {
-        // جرّب المرشح التالي
-      }
-    }
-    return false
-  } catch {
-    return false
+/**
+ * Deliveries that arrived without Basic Auth, i.e. from a webhook created
+ * before the credential existed. Logged sparsely: this counter is the signal
+ * for "stores still need re-registering", so it must not stay silent, but a
+ * busy store would otherwise flood the log.
+ */
+let legacyUnauthenticatedDeliveries = 0
+
+function reportLegacyDelivery(storeIdHint: string | null) {
+  legacyUnauthenticatedDeliveries += 1
+  const count = legacyUnauthenticatedDeliveries
+  if (count <= 3 || count % 50 === 0) {
+    console.warn(
+      `[Zid Webhook] Unauthenticated delivery #${count} (webhook predates Basic Auth). Accepted, but app.uninstalled is refused. Re-register webhooks: POST /api/admin/zid-webhooks/refresh`,
+      { storeIdHint }
+    )
   }
 }
 
@@ -57,31 +61,38 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text()
   const headersList = headers()
-  const signature = headersList.get('x-zid-signature') ?? ''
-  const webhookSecret = (process.env.ZID_WEBHOOK_SECRET ?? '').trim()
-  const hasRealSecret = Boolean(
-    webhookSecret &&
-    webhookSecret !== 'your_webhook_secret_here' &&
-    !webhookSecret.startsWith('your_')
-  )
 
-  // ── Verify signature ─────────────────────────────────────────
-  // If a real secret is configured it is mandatory. In production a missing
-  // secret is a hard failure: serving unsigned webhooks would let anyone
-  // inject events into any linked store (and trigger app.uninstalled).
-  if (hasRealSecret) {
-    if (!verifyZidSignature(rawBody, signature, webhookSecret)) {
-      console.warn('[Zid Webhook] Signature verification failed', {
-        hasSignature: Boolean(signature),
-      })
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-    }
-  } else if (process.env.NODE_ENV === 'production') {
-    console.error('[Zid Webhook] Security Alert: ZID_WEBHOOK_SECRET is not configured in production.')
+  // ── Ingress auth ─────────────────────────────────────────────
+  // Zid sends no signature; the only mechanism it supports is the Basic
+  // credential attached to each webhook at creation time. Compared with
+  // `secretMatches` (constant time) against a credential derived from
+  // ENCRYPTION_KEY — see src/lib/zid/webhook-auth.ts.
+  const authResult = verifyZidWebhookAuthorization(headersList.get('authorization'))
+  const isUnauthenticated = authResult.status === 'legacy' || authResult.status === 'unconfigured'
+
+  if (authResult.status === 'unconfigured' && process.env.NODE_ENV === 'production') {
+    // Unreachable in production: crypto.ts throws at boot without ENCRYPTION_KEY.
+    // Serving unauthenticated webhooks would let anyone inject events into any
+    // linked store, so fail closed rather than degrade silently.
+    console.error(
+      '[Zid Webhook] Security Alert: no webhook credential is derivable in production (ENCRYPTION_KEY missing).'
+    )
     return NextResponse.json(
-      { error: 'Webhook secret not configured on server', message_ar: 'لم يتم تكوين المفتاح السري للويب هوك في بيئة الإنتاج.' },
+      { error: 'Webhook auth not configured on server', message_ar: 'لم يتم تكوين مصادقة الويب هوك في بيئة الإنتاج.' },
       { status: 500 }
     )
+  }
+
+  if (authResult.status === 'invalid') {
+    console.warn('[Zid Webhook] Authorization verification failed', {
+      credential: zidWebhookCredentialFingerprint(),
+      hasHeader: true,
+    })
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  if (isUnauthenticated) {
+    reportLegacyDelivery(req.nextUrl.searchParams.get('store_id'))
   }
 
   let payload: any
@@ -290,6 +301,18 @@ export async function POST(req: NextRequest) {
 
   // ── App uninstalled → fast 200 + clean the token (before any other lookup) ──
   if (isUninstallEvent(event)) {
+    // This branch deletes the merchant's tokens — the one irreversible thing a
+    // webhook can do. An unauthenticated caller who knows a store_id could
+    // therefore unlink a paying customer, so it is refused outright until the
+    // store's webhooks carry the Basic credential.
+    if (isUnauthenticated) {
+      console.error('[Zid Webhook] Refusing unauthenticated app.uninstalled', { store_id, event })
+      return NextResponse.json({
+        received: true,
+        processed: false,
+        reason: 'unauthenticated_uninstall',
+      })
+    }
     const storeStr = store_id ? String(store_id) : ''
     if (storeStr) {
       try {

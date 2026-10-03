@@ -11,6 +11,7 @@
 
 import { getZidConfig } from './config'
 import { getAccessToken } from './token'
+import { getZidWebhookCredential } from './webhook-auth'
 
 /**
  * Maps internal sync-settings keys → Zid webhook event names.
@@ -139,7 +140,23 @@ export async function registerZidWebhook(
     target_url: targetUrl.toString(),
     original_id: config.clientId,
   }
-  if (process.env.ZID_WEBHOOK_SECRET) body.secret = process.env.ZID_WEBHOOK_SECRET
+  // Zid's only documented inbound authentication is HTTP Basic: supply
+  // `username` + `password` at creation and Zid sends
+  // `Authorization: Basic base64(username:password)` with every delivery.
+  // The `secret` field this used to send is not in Zid's webhook schema, so it
+  // was silently ignored and every delivery arrived unsigned.
+  const credential = getZidWebhookCredential()
+  if (credential) {
+    body.username = credential.username
+    body.password = credential.password
+  } else {
+    // Unreachable in production (crypto.ts refuses to boot without
+    // ENCRYPTION_KEY). Never send a placeholder: Zid would store it as the
+    // real password and every later delivery would fail authentication.
+    console.error(
+      '[Zid Webhook] No credential derivable (ENCRYPTION_KEY missing) — registering without Basic Auth. Deliveries will not authenticate.'
+    )
+  }
 
   try {
     const response = await fetch(
@@ -232,23 +249,31 @@ export async function unregisterZidWebhook(
 
 /**
  * Remove ALL webhooks registered for a specific merchant from Zid.
- * Used on store disconnect to avoid orphaned webhooks hitting our endpoint.
+ * Used on store disconnect to avoid orphaned webhooks hitting our endpoint, and
+ * by the Basic-Auth re-registration flow (credentials live on the webhook row,
+ * so they can only be changed by deleting and re-creating).
  *
  * Unlike the old behaviour (deleting by app `original_id` — which wiped other
  * stores' webhooks), this only targets the webhooks whose target_url belongs to
  * this merchant.
+ *
+ * Returns what was removed so a caller can tell "nothing was registered" from
+ * "the LIST call failed and the blind fallback ran".
  */
-export async function unregisterAllZidWebhooks(merchantId: string): Promise<void> {
+export async function unregisterAllZidWebhooks(
+  merchantId: string
+): Promise<{ removed: number; listFailed: boolean }> {
   const headers = await getMerchantHeaders(merchantId)
   if (!headers) {
     console.error('[Zid Webhook] Merchant tokens not found for cleanup')
-    return
+    return { removed: 0, listFailed: true }
   }
 
   const config = getZidConfig()
   const storeMarker = `store_id=${encodeURIComponent(merchantId)}`
 
   let existing: Array<{ event?: string; target_url?: string; id?: string }> = []
+  let listFailed = false
   try {
     const listUrl = new URL('managers/webhooks', `${config.apiUrl}/`)
     const response = await fetch(listUrl.toString(), { headers, cache: 'no-store' })
@@ -259,6 +284,7 @@ export async function unregisterAllZidWebhooks(merchantId: string): Promise<void
     }
   } catch (err) {
     console.error('[Zid Webhook] Failed to list webhooks during cleanup:', err)
+    listFailed = true
   }
 
   // If we can list webhooks, remove only those belonging to this merchant.
@@ -266,6 +292,7 @@ export async function unregisterAllZidWebhooks(merchantId: string): Promise<void
     (wh.target_url || '').includes(storeMarker) || (wh.target_url || '').includes(merchantId)
   )
 
+  let removed = 0
   for (const wh of toRemove) {
     try {
       const deleteUrl = new URL('managers/webhooks', `${config.apiUrl}/`)
@@ -281,6 +308,7 @@ export async function unregisterAllZidWebhooks(merchantId: string): Promise<void
         body: JSON.stringify(body),
         cache: 'no-store',
       })
+      if (response.ok) removed += 1
       console.info('[Zid Webhook] Removed webhook on disconnect', {
         merchantId,
         event: wh.event,
@@ -298,9 +326,13 @@ export async function unregisterAllZidWebhooks(merchantId: string): Promise<void
     results.forEach((r) => {
       if (r.status === 'rejected') {
         console.error('[Zid Webhook] Unexpected error during cleanup:', r.reason)
+      } else if (r.value?.success) {
+        removed += 1
       }
     })
   }
+
+  return { removed, listFailed }
 }
 
 /**
@@ -313,15 +345,18 @@ export async function unregisterAllZidWebhooks(merchantId: string): Promise<void
  *
  * @param merchantId   - The Zid merchant/store ID
  * @param newSettings  - New sync settings the user just saved
+ * @returns per-call counts, so the Basic-Auth re-registration flow can report
+ *          what actually changed instead of assuming success.
  */
 export async function syncWebhooksWithSettings(
   merchantId: string,
   newSettings: Record<string, { odoo2zid: boolean; zid2odoo: boolean }>
-): Promise<void> {
+): Promise<{ registered: number; failed: number; removed: number }> {
+  const empty = { registered: 0, failed: 0, removed: 0 }
   const headers = await getMerchantHeaders(merchantId)
   if (!headers) {
     console.error('[Zid Webhook] Merchant tokens not found for sync')
-    return
+    return { ...empty, failed: 1 }
   }
 
   const config = getZidConfig()
@@ -395,7 +430,7 @@ export async function syncWebhooksWithSettings(
 
   if (toRegister.length === 0) {
     console.info('[Zid Webhook] No new webhooks to register', { merchantId })
-    return
+    return { ...empty, removed: removals.length }
   }
 
   // If we couldn't list existing webhooks reliably, fall back to registering
@@ -414,11 +449,19 @@ export async function syncWebhooksWithSettings(
     registerKeys.map((k) => registerZidWebhook(merchantId, k))
   )
 
+  let registered = 0
+  let failed = 0
   results.forEach((r) => {
     if (r.status === 'fulfilled' && !r.value.success) {
+      failed += 1
       console.warn('[Zid Webhook] Failed to register webhook:', r.value)
     } else if (r.status === 'rejected') {
+      failed += 1
       console.error('[Zid Webhook] Unexpected error registering webhook:', r.reason)
+    } else {
+      registered += 1
     }
   })
+
+  return { registered, failed, removed: removals.length }
 }
