@@ -49,6 +49,35 @@ function getLegacyKeys(): string[] {
     .filter(Boolean)
 }
 
+/**
+ * Derives a hex secret from `ENCRYPTION_KEY` via HKDF-SHA256.
+ *
+ * Used for credentials we must *hand to a third party* (a webhook target, an
+ * Odoo Automated Action URL) without inventing another env var: what leaves
+ * this process is a derived output, never the key. `purpose` is the domain
+ * separator — a different string yields an unrelated value, so one derived
+ * secret can never be replayed where another is expected.
+ *
+ * Returns `null` when no key is available (development only — production
+ * refuses to boot without `ENCRYPTION_KEY`). Read at call time, like
+ * `getActiveKey`, so a rotated key takes effect without a rebuild.
+ */
+export function hkdfHex(purpose: string, parts: string[] = [], lengthBytes = 32): string | null {
+  const secret = (process.env.ENCRYPTION_KEY ?? '').trim()
+  if (!secret) return null
+
+  const info = parts.length > 0 ? `${purpose}:${parts.join(':')}` : purpose
+  return Buffer.from(
+    crypto.hkdfSync(
+      'sha256',
+      Buffer.from(secret, 'utf8'),
+      Buffer.alloc(0),
+      Buffer.from(info, 'utf8'),
+      lengthBytes
+    )
+  ).toString('hex')
+}
+
 export function encrypt(text: string): string {
   if (!text) return ''
   try {

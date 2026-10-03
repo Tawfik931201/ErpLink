@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getAdminStats } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 
+import { OdooWebhooksRefresh } from './OdooWebhooksRefresh'
 import { ZidWebhooksRefresh } from './ZidWebhooksRefresh'
 
 const fmtMoney = (n: number) =>
@@ -97,7 +98,10 @@ export default async function AdminStatsPage() {
         ))}
       </div>
 
-      <ZidWebhooksRefresh isAr={isAr} />
+      <div className="grid gap-3 md:grid-cols-2">
+        <OdooWebhooksRefresh isAr={isAr} />
+        <ZidWebhooksRefresh isAr={isAr} />
+      </div>
     </div>
   )
 }

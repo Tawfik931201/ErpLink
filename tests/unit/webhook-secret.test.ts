@@ -71,13 +71,19 @@ describe('secretMatches', () => {
 describe('there is exactly one implementation', () => {
   const route = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 
-  it('the Odoo routes import it instead of redefining it', () => {
+it('the Odoo routes compare through the shared helper instead of redefining it', () => {
+    // The two routes no longer call `secretMatches` directly: they hand the
+    // delivery to `authorizeOdooWebhook`, which is the single place the
+    // comparison happens. A leftover local copy would mean the routes could
+    // drift apart again.
     for (const p of ['src/app/api/webhooks/odoo/route.ts', 'src/app/api/webhooks/odoo/stock/route.ts']) {
       const source = route(p)
-      expect(source).toContain("from '@/lib/webhook-secret'")
-      // A leftover local copy would mean the two routes could drift apart.
+      expect(source).toContain("from '@/lib/odoo/webhook-secret'")
+      expect(source).toContain('authorizeOdooWebhook')
       expect(source).not.toMatch(/function\s+secretMatches/)
     }
+    // …and that helper is the one that uses it.
+    expect(route('src/lib/odoo/webhook-secret.ts')).toContain("from '@/lib/webhook-secret'")
   })
 
   it('no route compares a secret with a plain ===', () => {

@@ -1,3 +1,8 @@
+import {
+  odooRecordSecretScope,
+  odooStockSecretScope,
+  withOdooWebhookSecret,
+} from './odoo/webhook-secret'
 import { OdooClient, type OdooConfig } from './odoo-client'
 
 export interface RegisterOdooWebhookOptions {
@@ -5,6 +10,13 @@ export interface RegisterOdooWebhookOptions {
   webhookPath?: string
   /** Optional suffix to distinguish the automation name. */
   labelSuffix?: string
+  /**
+   * Scope the appended ingress secret is derived from — see
+   * `src/lib/odoo/webhook-secret.ts`. Defaults to the record scope for
+   * `fieldMappingId`, which is right unless `webhookPath` points at another
+   * receiver (the stock one passes `odooStockSecretScope(workspaceId)`).
+   */
+  secretScope?: string
 }
 
 /**
@@ -89,9 +101,15 @@ export async function registerOdooWebhook(
     throw new Error('[OdooWebhook] NEXT_PUBLIC_APP_URL environment variable is required for webhook registration')
   }
   const appUrl = process.env.NEXT_PUBLIC_APP_URL
-  const webhookUrl = options?.webhookPath
-    ? `${appUrl}${options.webhookPath}`
-    : `${appUrl}/api/webhooks/odoo?field_mapping_id=${fieldMappingId}`
+  // The ingress secret is appended here — the only place that decides what a
+  // customer's Odoo will call — so every action registered from now on
+  // authenticates itself. Its scope is whichever identifier the URL already
+  // carries: `field_mapping_id` for records, `workspace_id` for stock.
+  const scope = options?.secretScope ?? odooRecordSecretScope(fieldMappingId)
+  const basePath = options?.webhookPath
+    ? options.webhookPath
+    : `/api/webhooks/odoo?field_mapping_id=${fieldMappingId}`
+  const webhookUrl = `${appUrl}${withOdooWebhookSecret(basePath, scope)}`
   const labelSuffix = options?.labelSuffix ? `: ${options.labelSuffix}` : ''
 
   // 4. Inspect base.automation to detect Odoo 17+ vs 16-
@@ -261,6 +279,7 @@ export async function registerOdooStockWebhook(
     {
       webhookPath: `/api/webhooks/odoo/stock?workspace_id=${workspaceId}`,
       labelSuffix: 'Stock',
+      secretScope: odooStockSecretScope(workspaceId),
     }
   )
 }

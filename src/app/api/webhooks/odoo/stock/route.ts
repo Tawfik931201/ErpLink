@@ -1,9 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import {
+  authorizeOdooWebhook,
+  odooStockSecretScope,
+} from '@/lib/odoo/webhook-secret'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
-import { secretMatches } from '@/lib/webhook-secret'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -26,22 +29,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * (each customer's Automated Action must be reconfigured).
  */
 export async function POST(req: NextRequest) {
-  const odooSecret = process.env.ODOO_WEBHOOK_SECRET
-  if (odooSecret) {
-    const authHeader = req.headers.get('authorization') || ''
-    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
-    const headerSecret = req.headers.get('x-odoo-secret') || ''
-    // Query-string secrets stay supported for the Automated Actions already
-    // deployed in customers' Odoo instances; prefer the header for new ones.
-    const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
-    const provided = bearerToken || headerSecret || querySecret
-    if (!provided || !secretMatches(provided, odooSecret)) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
-    }
-  } else if (process.env.NODE_ENV === 'production') {
-    console.error('[Odoo Stock Webhook] Security Alert: ODOO_WEBHOOK_SECRET is not configured in production.')
-    return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
-  }
   let payload: any = {}
   try {
     const raw = await req.text()
@@ -68,6 +55,22 @@ export async function POST(req: NextRequest) {
   // secret from naming a real tenant (see the trust-boundary note above).
   if (!UUID_RE.test(workspaceId)) {
     return NextResponse.json({ error: 'Invalid workspace_id' }, { status: 400 })
+  }
+
+  // Verified before any database work, so an unauthenticated caller never gets
+  // an existence oracle out of the `erp_connections` lookup below. The secret is
+  // scoped to the workspace the URL already names — see
+  // src/lib/odoo/webhook-secret.ts for the migration window on `legacy`.
+  const auth = authorizeOdooWebhook({
+    scope: odooStockSecretScope(workspaceId),
+    authorization: req.headers.get('authorization'),
+    headerSecret: req.headers.get('x-odoo-secret'),
+    querySecret: req.nextUrl.searchParams.get('secret'),
+    token: req.nextUrl.searchParams.get('token'),
+  })
+  if (auth.action === 'reject') {
+    console.warn(`[Odoo Stock Webhook] Rejected delivery: ${auth.error}`)
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
   const { data: erpConn, error: connErr } = await supabase

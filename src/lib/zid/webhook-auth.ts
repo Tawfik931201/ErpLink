@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 
+import { hkdfHex } from '@/lib/crypto'
 import { secretMatches } from '@/lib/webhook-secret'
 
 /**
@@ -52,16 +53,8 @@ export interface ZidWebhookCredential {
   encoded: string
 }
 
-function derivePassword(secret: string): string {
-  return Buffer.from(
-    crypto.hkdfSync(
-      'sha256',
-      Buffer.from(secret, 'utf8'),
-      Buffer.alloc(0),
-      Buffer.from(HKDF_INFO, 'utf8'),
-      DERIVED_PASSWORD_BYTES
-    )
-  ).toString('hex')
+function derivePassword(): string | null {
+  return hkdfHex(HKDF_INFO, [], DERIVED_PASSWORD_BYTES)
 }
 
 /**
@@ -69,11 +62,10 @@ function derivePassword(secret: string): string {
  * (`ENCRYPTION_KEY` unset — development only; production refuses to boot).
  */
 export function getZidWebhookCredential(): ZidWebhookCredential | null {
-  const secret = (process.env.ENCRYPTION_KEY ?? '').trim()
-  if (!secret) return null
+  const password = derivePassword()
+  if (!password) return null
 
   const username = WEBHOOK_AUTH_USERNAME
-  const password = derivePassword(secret)
   const encoded = Buffer.from(`${username}:${password}`, 'utf8').toString('base64')
 
   return { username, password, headerValue: `Basic ${encoded}`, encoded }

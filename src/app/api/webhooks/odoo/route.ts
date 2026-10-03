@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { decrypt } from '@/lib/crypto'
+import { authorizeOdooWebhook, odooRecordSecretScope } from '@/lib/odoo/webhook-secret'
 import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
-import { secretMatches } from '@/lib/webhook-secret'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
 
@@ -28,25 +28,6 @@ const FAIL = (message: string): SyncOutcome => ({ ok: false, message })
 const DONE = (message = 'done'): SyncOutcome => ({ ok: true, message })
 
 export async function POST(req: NextRequest) {
-  const odooSecret = process.env.ODOO_WEBHOOK_SECRET
-  if (odooSecret) {
-    const authHeader = req.headers.get('authorization') || ''
-    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
-    const headerSecret = req.headers.get('x-odoo-secret') || ''
-    // Query-string secrets are kept for backward compatibility with the
-    // Automated Actions already deployed in customers' Odoo instances, but a
-    // URL secret lands in access logs, Referer headers and browser history.
-    // Prefer the header when configuring new instances.
-    const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
-    const provided = bearerToken || headerSecret || querySecret
-    if (!provided || !secretMatches(provided, odooSecret)) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
-    }
-  } else if (process.env.NODE_ENV === 'production') {
-    console.error('[Odoo Webhook] Security Alert: ODOO_WEBHOOK_SECRET is not configured in production.')
-    return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
-  }
-
   let rawText = ''
   let payload: any = {}
   try {
@@ -67,6 +48,22 @@ export async function POST(req: NextRequest) {
   if (!field_mapping_id) {
     console.warn('[Odoo Webhook] Missing field_mapping_id query parameter or body key')
     return NextResponse.json({ error: 'Missing field_mapping_id' }, { status: 400 })
+  }
+
+  // Authenticated before the mapping lookup, so an unauthenticated caller never
+  // learns whether a mapping id exists. The secret is scoped to the very id the
+  // URL carries — see src/lib/odoo/webhook-secret.ts for the migration window
+  // on `legacy` and for why accepting one cannot inject values.
+  const auth = authorizeOdooWebhook({
+    scope: odooRecordSecretScope(field_mapping_id),
+    authorization: req.headers.get('authorization'),
+    headerSecret: req.headers.get('x-odoo-secret'),
+    querySecret: req.nextUrl.searchParams.get('secret'),
+    token: req.nextUrl.searchParams.get('token'),
+  })
+  if (auth.action === 'reject') {
+    console.warn(`[Odoo Webhook] Rejected delivery: ${auth.error}`)
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
   // 1. Fetch FieldMapping to resolve odoo_model if not passed in request

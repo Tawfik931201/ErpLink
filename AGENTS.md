@@ -68,10 +68,12 @@
 ### Security helpers (added 2026-10-01)
 | File | Purpose |
 |------|---------|
-| `src/lib/webhook-secret.ts` | The one `secretMatches` — constant-time, used by both Odoo routes |
+| `src/lib/webhook-secret.ts` | The one `secretMatches` — constant-time, called by `src/lib/odoo/webhook-secret.ts` |
 | `src/lib/custom-field-validation.ts` | Server-side validation + XML/selection sanitising for the add-custom-field action |
-| `src/lib/crypto.ts` | `ENCRYPTION_KEY`-only encryption, ephemeral dev key, `ENCRYPTION_LEGACY_KEYS` decrypt-only migration |
+| `src/lib/crypto.ts` | `ENCRYPTION_KEY`-only encryption, ephemeral dev key, `ENCRYPTION_LEGACY_KEYS` decrypt-only migration, plus `hkdfHex()` (2026-10-03) — the one HKDF used by both derived ingress credentials |
 | `src/lib/zid/webhook-auth.ts` | The Basic credential Zid actually supports, HKDF-derived from `ENCRYPTION_KEY`, and the `ok`/`invalid`/`legacy`/`unconfigured` ingress classification (added 2026-10-03) |
+| `src/lib/odoo/webhook-secret.ts` | Per-scope Odoo ingress credential (`stock:<workspace_id>` / `record:<field_mapping_id>`), the shared `ok`/`invalid`/`legacy`/`unconfigured` decision both Odoo routes use, and the legacy-delivery counter (added 2026-10-03) |
+| `src/app/api/admin/odoo-webhooks/refresh/route.ts` | Re-registers every Odoo Automated Action with a derived secret, create-before-delete; refuses to run if nothing is derivable |
 
 ## Common Commands
 
@@ -82,7 +84,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 197 tests over 12 suites (added 2026-09-29, grown 2026-10-03)
+# Unit tests — 224 tests over 14 suites (added 2026-09-29, grown 2026-10-03)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -124,7 +126,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 197 tests over 12 suites:
+- 224 tests over 14 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -157,6 +159,14 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     the dead HMAC path and the unsupported `secret` registration field stay gone
     (see Ingress auth). It also asserts the refresh route is admin-gated and
     refuses to delete webhooks when no credential is derivable.
+  - `tests/unit/build-odoo-values-mobile.test.ts` — `buildOdooValues`' `mobile`
+    guard: the field is written when Odoo confirms it exists and skipped when it
+    does not, without touching the other hardcoded fields (Odoo 19 removed it)
+  - `tests/unit/odoo-webhook-auth.test.ts` — the per-scope derived credential,
+    the same four-way classification, and source pins that the shared env secret
+    is never *read* again (naming it in a comment is fine) and that verification
+    precedes the first `.select()`. It also asserts the refresh route is
+    admin-gated and refuses to run when nothing is derivable.
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -398,7 +408,7 @@ against** — see below, do not start it.
      `field-mapping-client.tsx` (5,233) is **odoo-dominated** — 152 odoo vs
      65 zid / 15 salla / 15 shopify. Extracting a shared `FieldMappingPanel`
      per platform would be unifying something that is not evenly split.
-  2. **There are no component tests in this project.** All 197 tests are pure
+  2. **There are no component tests in this project.** All 224 tests are pure
      functions or source scans — none render a component. Splitting 8,161 lines
      of JSX that *is* the mapping UI has no safety net and cannot be visually
      verified from the CLI.
@@ -660,11 +670,17 @@ unique across merchants. Keep the filter when touching that function.
 
 ### Odoo → store: the webhook body is a trigger, never a source (2026-10-01)
 
-`ODOO_WEBHOOK_SECRET` is **one shared secret** that every customer's Odoo
-instance knows. So "the caller passed the secret" does **not** mean "the caller
-owns the record being pushed". Both Odoo routes used to take field values
-straight from the request body, which let a caller write into another tenant's
-store. The rule now, in `src/app/api/webhooks/odoo/route.ts` step 3:
+Ingress used to be `ODOO_WEBHOOK_SECRET` — **one shared secret** that every
+customer's Odoo instance knows, and which is **not set on the host**. Since
+`ab55dae` (2026-09-28) that made `odoo/stock/route.ts` answer
+`[Odoo Stock Webhook] Security Alert: ODOO_WEBHOOK_SECRET is not configured in
+production.` — a 500, so **every ERP→store push has been dead since then**,
+with no error on the Odoo side. Setting the env var would not have fixed it: the
+registered Automated Actions send no secret, so the result would have been 401
+instead. Both routes now use per-scope derived secrets (see Ingress auth below).
+
+The value-trust rule is unchanged and independent of auth, in
+`src/app/api/webhooks/odoo/route.ts` step 3:
 
 | `odooClient.read()` | what is trusted | outcome |
 |---|---|---|
@@ -679,13 +695,15 @@ error — that hands anyone with the shared secret a way to push arbitrary price
 into stores exactly while the ERP is down. `tests/unit/odoo-webhook-trust.test.ts`
 pins all three branches and fails if the rule is reverted.
 
-Residual, deployment-level: a caller holding the shared secret can still choose
-*which* `workspace_id` a stock re-push targets. `odoo/stock/route.ts` validates
-the UUID shape and that an `erp_connections` row exists, which drops nonsense
-ids but cannot tell a real tenant from a forged one. Closing it needs a
-per-workspace secret and re-configuring every customer's Odoo Automated Action.
+Residual, deployment-level: the secret proves *which* scope, not *which tenant
+asked*. A caller holding workspace W's secret can still choose *which*
+`workspace_id` a stock re-push targets. `odoo/stock/route.ts` validates the UUID
+shape and that an `erp_connections` row exists, which drops nonsense ids but
+cannot tell a real tenant from a forged one. Closing that needs the URL id bound
+to the credential (a signature over the pair), which Odoo's native webhook cannot
+send.
 
-### Ingress auth, 2026-10-01 (Zid rewritten 2026-10-03 — the earlier text was wrong)
+### Ingress auth, 2026-10-01 (Zid **and Odoo** rewritten 2026-10-03 — the earlier text was wrong)
 
 - `secretMatches` lives in `src/lib/webhook-secret.ts` (one copy — it was
   duplicated in both Odoo routes) and always uses `crypto.timingSafeEqual`.
@@ -732,15 +750,45 @@ per-workspace secret and re-configuring every customer's Odoo Automated Action.
   so a store's events are briefly unregistered. `reconcileZidOrders()` heals
   **orders**; it does not cover products, so re-sync products by hand after
   running the refresh if the gap mattered.
+- ⚠️ **Odoo also signs nothing, and Odoo's native webhook cannot send a custom
+  header.** The previous entry claimed Odoo used a shared `ODOO_WEBHOOK_SECRET`
+  and that new instances should use an `x-odoo-secret` header. Odoo's Automated
+  Action URL accepts a query string only, so the secret must ride in
+  `?secret=`, which lands in access logs and Referer headers — acceptable here
+  because the value is a **derived, per-scope** credential that can be
+  re-registered at any time, not a reusable shared key.
+- **The Odoo credential is derived per scope, not per env.**
+  `src/lib/odoo/webhook-secret.ts` HKDF-SHA256s `ENCRYPTION_KEY` under
+  `odoo-webhook-secret:v1`, scoped `stock:<workspace_id>` or
+  `record:<field_mapping_id>`. Same reason as Zid: no new host env var, and
+  `ENCRYPTION_KEY` is guaranteed in production. Two consequences worth keeping:
+  a stock secret only authorises its own workspace, and a record secret only its
+  own mapping — `authorizeOdooWebhook` runs **before** the first `.select()` in
+  both routes, so an unauthenticated caller gets no existence oracle.
+  Rotating `ENCRYPTION_KEY` invalidates every Odoo action and requires the
+  refresh, same as `ENCRYPTION_LEGACY_KEYS`.
+- **Re-registration is required for Odoo too**, and is *create-before-delete*
+  (`POST /api/admin/odoo-webhooks/refresh`, Clerk + `isAdmin, also a button on
+  `/app/admin`). Delete-first would leave a tenant with no action at all if
+  creation failed; overlap is harmless because ingress is idempotent per
+  delivery. It rewrites `standard_mapping_settings.inventory.odoo_stock_webhook`
+  and each `field_mappings.odoo_webhook_id`. It refuses to touch anything when
+  no secret is derivable.
+- **Legacy (no `?secret=`) Odoo deliveries are accepted for now** — `ok` /
+  `invalid` / `legacy` / `unconfigured`; `invalid` is 401, `unconfigured` is 500
+  in production and skipped only in dev. Accepting `legacy` is survivable
+  *because of the trust rule above*: the body is a trigger, and values are read
+  back from the tenant's own Odoo. The deletion branch is the residual — it
+  needs a real `field_mapping_id` and is counted in the log
+  (`Unauthenticated delivery #N`, first 3 then every 50th). That counter
+  reaching zero is the signal to reject `legacy`, same as Zid.
 - A **missing** secret is still a hard failure in production (500) for the
-  **odoo** and **shopify** routes — both platforms genuinely sign, so those
-  vars must be set on the host. `SALA_WEBHOOK_SECRET` likewise
-  (`salla/route.ts`). All three were added in the same commit as the Zid rule,
-  so check them on any host that never received the vars.
-- Odoo still accepts `?secret=` in the query string because the Automated
-  Actions already deployed in customers' Odoo instances use it. A URL secret
-  lands in access logs and Referer headers — configure new instances with the
-  `x-odoo-secret` header.
+  **shopify** route — Shopify genuinely signs. `SALA_WEBHOOK_SECRET` likewise
+  (`salla/route.ts`). Both were added in the same commit as the Zid rule, so
+  check them on any host that never received the vars. **Not migrated:**
+  Salla and Shopify still use one shared env secret each and will 500 if it is
+  unset — the same class of outage Odoo just had, deliberately not fixed in the
+  same change.
 - The OAuth `connect` routes are deliberately **unauthenticated**: Shopify and
   Zid redirect to them and they are stateless entry points. The real boundary
   is each `callback`, which now resolves the Clerk session and the active

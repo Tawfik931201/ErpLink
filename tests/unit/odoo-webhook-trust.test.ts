@@ -73,15 +73,26 @@ describe('the removal signal cannot be forged by the body', () => {
   })
 })
 
-describe('the shared secret is compared in constant time', () => {
+describe('the ingress secret is compared in constant time', () => {
   const source = fs.readFileSync(ROUTE_PATH, 'utf8')
 
   it('never compares the secret with ===', () => {
     expect(source).not.toMatch(/provided\s*!==\s*odooSecret/)
+    expect(source).not.toMatch(/process\.env\.ODOO_WEBHOOK_SECRET/)
   })
 
   it('routes the comparison through the shared helper', () => {
-    expect(source).toContain("from '@/lib/webhook-secret'")
-    expect(source).toMatch(/!secretMatches\(provided, odooSecret\)/)
+    // The route itself no longer touches the secret: `authorizeOdooWebhook`
+    // classifies the delivery, and that helper is what calls `secretMatches`.
+    expect(source).toContain("from '@/lib/odoo/webhook-secret'")
+    expect(source).toContain('authorizeOdooWebhook')
+
+    const helper = fs.readFileSync(
+      path.join(process.cwd(), 'src/lib/odoo/webhook-secret.ts'),
+      'utf8'
+    )
+    expect(helper).toContain("from '@/lib/webhook-secret'")
+    expect(helper).toMatch(/secretMatches\(value, secret\)/)
+    expect(helper).not.toMatch(/function\s+secretMatches/)
   })
 })
