@@ -2891,6 +2891,19 @@ export async function buildOdooValues(
 
     let meta = fieldMeta.get(item.erpField)
     if (!meta) {
+      // Odoo 19 removed res.partner.mobile. The order-sync path already
+      // excludes it (see the hasPartnerField guard in createOrUpdatePartner),
+      // and buildOdooValues normally skips any field the model lacks — but that
+      // depends on fetchFieldMeta having returned a field set. When the
+      // ir.model.fields read fails (empty map on some SaaS tenants), the next
+      // branch falls into HARDCODED_FIELD_META, where `mobile` exists, and the
+      // resulting write dies with KeyError: 'mobile'. No mapped entity other
+      // than res.partner carries a `mobile` column, so skip the column unless
+      // Odoo positively confirms the field is there.
+      if (item.erpField === 'mobile' && (!fieldMeta || fieldMeta.size === 0)) {
+        console.warn(`[SyncEngine] Skipping field "mobile" (not confirmed on Odoo model; removed in Odoo 19)`)
+        continue
+      }
       if (fieldMeta && fieldMeta.size > 0) {
         console.warn(`[SyncEngine] Skipping field "${item.erpField}" because it does not exist on Odoo model`)
         continue
