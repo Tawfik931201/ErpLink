@@ -71,6 +71,7 @@
 | `src/lib/webhook-secret.ts` | The one `secretMatches` — constant-time, used by both Odoo routes |
 | `src/lib/custom-field-validation.ts` | Server-side validation + XML/selection sanitising for the add-custom-field action |
 | `src/lib/crypto.ts` | `ENCRYPTION_KEY`-only encryption, ephemeral dev key, `ENCRYPTION_LEGACY_KEYS` decrypt-only migration |
+| `src/lib/zid/webhook-auth.ts` | The Basic credential Zid actually supports, HKDF-derived from `ENCRYPTION_KEY`, and the `ok`/`invalid`/`legacy`/`unconfigured` ingress classification (added 2026-10-03) |
 
 ## Common Commands
 
@@ -81,7 +82,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 178 tests over 11 suites (added 2026-09-29, grown 2026-10-01)
+# Unit tests — 197 tests over 12 suites (added 2026-09-29, grown 2026-10-03)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -123,7 +124,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 178 tests over 11 suites:
+- 197 tests over 12 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -151,6 +152,11 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   - `tests/unit/odoo-webhook-trust.test.ts` — source-level pins for the Odoo →
     store trust rule (see Sync Reliability). These were checked to actually
     fail when the rule is reverted, so they are not vacuous.
+  - `tests/unit/zid-webhook-auth.test.ts` — the derived Basic credential, the
+    `ok`/`invalid`/`legacy`/`unconfigured` classification, and source pins that
+    the dead HMAC path and the unsupported `secret` registration field stay gone
+    (see Ingress auth). It also asserts the refresh route is admin-gated and
+    refuses to delete webhooks when no credential is derivable.
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -392,7 +398,7 @@ against** — see below, do not start it.
      `field-mapping-client.tsx` (5,233) is **odoo-dominated** — 152 odoo vs
      65 zid / 15 salla / 15 shopify. Extracting a shared `FieldMappingPanel`
      per platform would be unifying something that is not evenly split.
-  2. **There are no component tests in this project.** All 178 tests are pure
+  2. **There are no component tests in this project.** All 197 tests are pure
      functions or source scans — none render a component. Splitting 8,161 lines
      of JSX that *is* the mapping UI has no safety net and cannot be visually
      verified from the CLI.
@@ -679,15 +685,58 @@ the UUID shape and that an `erp_connections` row exists, which drops nonsense
 ids but cannot tell a real tenant from a forged one. Closing it needs a
 per-workspace secret and re-configuring every customer's Odoo Automated Action.
 
-### Ingress auth, 2026-10-01
+### Ingress auth, 2026-10-01 (Zid rewritten 2026-10-03 — the earlier text was wrong)
 
 - `secretMatches` lives in `src/lib/webhook-secret.ts` (one copy — it was
   duplicated in both Odoo routes) and always uses `crypto.timingSafeEqual`.
   Length is compared first because `timingSafeEqual` throws on a mismatch, and
   a throw would be a 500 instead of a 401.
-- A **missing** secret is a hard failure in production (500) for the zid, odoo
-  and shopify routes. Only development skips verification. `ZID_WEBHOOK_SECRET`
-  and a `your_*` placeholder both count as "not configured".
+- ⚠️ **Zid signs nothing.** The 2026-10-01 entry claimed Zid sends an
+  `X-Zid-Signature` HMAC-SHA256 and that a missing `ZID_WEBHOOK_SECRET` was a
+  hard 500. Both were wrong, and the combination took **every Zid delivery in
+  production to a 500**: the secret was never set, and it could never have
+  worked. Zid's `POST /v1/managers/webhooks` schema is `event`, `target_url`,
+  `original_id`, `conditions`, `username`, `password` — there is no `secret`
+  field, and the old registration sent one that Zid silently ignored.
+- **The mechanism Zid actually supports is HTTP Basic.** Supply `username` +
+  `password` when creating the webhook and Zid sends
+  `Authorization: Basic base64(username:password)` on every delivery
+  ("This allows partners to verify that the webhook request is coming from
+  Zid"). That is now the only ingress check.
+- **The credential is derived, not configured** —
+  `src/lib/zid/webhook-auth.ts` HKDF-SHA256s `ENCRYPTION_KEY` with the
+  domain separator `zid-webhook-basic-auth:v1`. Reason: no new env var could be
+  added on the host, and `ENCRYPTION_KEY` is already guaranteed in production
+  because `crypto.ts` refuses to boot without it. What Zid stores is the HKDF
+  output; the key itself is never sent and never committed. Rotating
+  `ENCRYPTION_KEY` invalidates the credential and requires re-registration —
+  the same operational class as `ENCRYPTION_LEGACY_KEYS`.
+- **Credentials live on the webhook row, so re-registration is mandatory.**
+  A webhook created before this change keeps delivering with no `Authorization`
+  header forever; no server-side config can fix it. `POST
+  /api/admin/zid-webhooks/refresh` (Clerk + `isAdmin`, also a button on
+  `/app/admin`) deletes and re-creates each linked store's webhooks, one store
+  at a time (Zid allows ~60 req/min). It refuses to touch anything when no
+  credential is derivable — deleting first would replace working webhooks with
+  ones that can never authenticate.
+- **Legacy deliveries are currently accepted.** `verifyZidWebhookAuthorization`
+  returns `ok` / `invalid` / `legacy` (no header) / `unconfigured`, and the
+  route accepts `legacy` rather than 401-ing it, because a hard reject would
+  silently kill every store's sync during the migration. What it will not do is
+  act destructively on one: `app.uninstalled` (the only irreversible branch —
+  it deletes the merchant's tokens, and `store_id` sits in the URL) is refused
+  for unauthenticated callers. The server log counts them
+  (`Unauthenticated delivery #N`, logged for the first 3 and every 50th) — that
+  counter reaching zero is the signal to drop the `legacy` branch.
+- **Event loss during the migration window:** the refresh is delete-then-create,
+  so a store's events are briefly unregistered. `reconcileZidOrders()` heals
+  **orders**; it does not cover products, so re-sync products by hand after
+  running the refresh if the gap mattered.
+- A **missing** secret is still a hard failure in production (500) for the
+  **odoo** and **shopify** routes — both platforms genuinely sign, so those
+  vars must be set on the host. `SALA_WEBHOOK_SECRET` likewise
+  (`salla/route.ts`). All three were added in the same commit as the Zid rule,
+  so check them on any host that never received the vars.
 - Odoo still accepts `?secret=` in the query string because the Automated
   Actions already deployed in customers' Odoo instances use it. A URL secret
   lands in access logs and Referer headers — configure new instances with the
