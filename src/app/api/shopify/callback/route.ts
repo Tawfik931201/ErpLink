@@ -46,6 +46,30 @@ export async function GET(request: NextRequest) {
     return redirectToConnectStore(request, { error: 'shopify_missing_code' })
   }
 
+  // Resolve the session before spending the single-use authorization code. The
+  // workspace was already required further down, but only *after* the exchange,
+  // so a signed-out visitor could burn a code for nothing.
+  const { userId } = await auth()
+  if (!userId) {
+    return redirectToConnectStore(request, { error: 'unauthorized' })
+  }
+
+  const { data: userDb, error: userDbErr } = await supabase
+    .from('users')
+    .select('active_workspace_id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (userDbErr) {
+    console.error('[Shopify OAuth] Could not load the user profile:', userDbErr.message)
+    return redirectToConnectStore(request, { error: 'no_active_workspace' })
+  }
+
+  const activeWorkspaceId: string | null = userDb?.active_workspace_id ?? null
+  if (!activeWorkspaceId) {
+    return redirectToConnectStore(request, { error: 'no_active_workspace' })
+  }
+
   try {
     const clientId = process.env.SHOPIFY_CLIENT_ID!
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET!
@@ -82,22 +106,9 @@ export async function GET(request: NextRequest) {
     const shopName = shopData?.name ?? null
     const email = shopData?.email ?? null
 
-    // 3. Retrieve the active workspace for Clerk user
-    const { userId } = await auth()
-    let workspaceId: string | null = null
-    if (userId) {
-      const { data: userDb } = await supabase
-        .from('users')
-        .select('active_workspace_id')
-        .eq('id', userId)
-        .single()
-
-      workspaceId = userDb?.active_workspace_id ?? null
-    }
-
-    if (!workspaceId) {
-      return redirectToConnectStore(request, { error: 'no_active_workspace' })
-    }
+    // 3. The active workspace was resolved (and required) before the code was
+    //    exchanged, so `activeWorkspaceId` is guaranteed non-null from here on.
+    const workspaceId = activeWorkspaceId
 
     // 4. Save Shopify token details in DB
     const tokenData = {

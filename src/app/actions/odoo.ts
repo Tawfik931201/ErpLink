@@ -366,9 +366,20 @@ export async function saveErpConnection(data: {
 
 /**
  * Force refresh Odoo models/fields cache (clear 24h cache)
+ *
+ * Requires a signed-in user. Without a check this Server Action was callable
+ * by anyone: `revalidateTag` drops the shared Next data cache and
+ * `ttlCache.clear('odoo:')` drops the in-process memo for *every* tenant, so an
+ * unauthenticated caller could loop this and force all customers' next request
+ * to re-fetch their full model/field list over XML-RPC.
  */
 export async function refreshOdooCache() {
   try {
+    const userId = await getActiveUserId()
+    if (!userId) {
+      return { success: false, error: 'غير مصرح - يرجى تسجيل الدخول أولاً (Unauthorized)' }
+    }
+
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
     // Also bust any per-model tags if they exist

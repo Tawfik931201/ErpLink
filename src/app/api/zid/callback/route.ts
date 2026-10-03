@@ -156,6 +156,38 @@ export async function GET(request: NextRequest) {
     return redirectToConnectZid(request, { error: 'zid_missing_code' })
   }
 
+  // A store can only be attached to a workspace, so both must exist before the
+  // authorization code is spent. Without this check an unauthenticated caller
+  // could drive the whole OAuth handshake and leave a `merchant_tokens` row with
+  // a NULL workspace_id — an orphan nobody can ever use, but anyone can create.
+  // Checking first also means we fail fast instead of burning the single-use code.
+  const { userId } = await auth()
+  if (!userId) {
+    if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
+      return NextResponse.json({ error: 'unauthorized', message: 'Sign in before connecting a store' }, { status: 401 })
+    }
+    return redirectToConnectZid(request, { error: 'unauthorized' })
+  }
+
+  const { data: userDb, error: userDbErr } = await supabase
+    .from('users')
+    .select('active_workspace_id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (userDbErr) {
+    console.error('[Zid OAuth] Could not load the user profile:', userDbErr.message)
+    return redirectToConnectZid(request, { error: 'workspace_lookup_failed' })
+  }
+
+  const workspaceId: string | null = userDb?.active_workspace_id ?? null
+  if (!workspaceId) {
+    if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
+      return NextResponse.json({ error: 'no_workspace', message: 'Select a workspace before connecting a store' }, { status: 400 })
+    }
+    return redirectToConnectZid(request, { error: 'no_workspace' })
+  }
+
   try {
     const rawResponse = await exchangeAuthorizationCodeForResponse(code)
     const tokens = toStoredTokens(rawResponse)
@@ -203,18 +235,8 @@ export async function GET(request: NextRequest) {
       (authorizationPayload?.sub ? String(authorizationPayload.sub) : null) ??
       storeId
 
-    // 4. Retrieve the active workspace for the currently logged-in Clerk user
-    const { userId } = await auth()
-    let workspaceId: string | null = null
-    if (userId) {
-      const { data: userDb } = await supabase
-        .from('users')
-        .select('active_workspace_id')
-        .eq('id', userId)
-        .single()
-      
-      workspaceId = userDb?.active_workspace_id ?? null
-    }
+    // 4. The active workspace was resolved (and required) before the code was
+    //    exchanged, so `workspaceId` is guaranteed non-null from here on.
 
     // 5. Save the token mapped to the real store ID and workspace ID
     if (merchantId) {
@@ -369,7 +391,10 @@ export async function GET(request: NextRequest) {
       throw new ZidOAuthError({
         code: 'missing_store_id',
         message: 'Zid OAuth completed, but store_id/merchant_id could not be resolved.',
-        details: { rawResponse, authorizationPayload, user, store },
+        // `rawResponse` is deliberately excluded: it holds the access_token and
+        // refresh_token, and this object is returned to the caller verbatim when
+        // ZID_CALLBACK_RESPONSE=json.
+        details: { store, user, hasAuthorizationPayload: Boolean(authorizationPayload) },
       })
     }
 
@@ -393,8 +418,15 @@ export async function GET(request: NextRequest) {
     }
 
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
+      // Debug shape only. `rawResponse` carried Zid's access_token and
+      // refresh_token straight into an HTTP response body (browser history,
+      // devtools, proxy logs), so it is not returned here. The `user`/`store`
+      // payloads are what a developer actually needs to debug the handshake.
       const response = NextResponse.json({
-        oauth_response: rawResponse,
+        success: true,
+        store_id: storeId ?? null,
+        merchant_id: merchantId ?? null,
+        workspace_id: workspaceId,
         user,
         store,
         webhook_registration: webhookRegistration,

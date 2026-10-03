@@ -9,7 +9,8 @@
  * لا setInterval هنا (المعالجة عبر /api/cron/sync-queue).
  *
  * Security: Zid includes an HMAC-SHA256 signature in X-Zid-Signature header
- * (hex أو base64). يُتحقق فقط عند ضبط ZID_WEBHOOK_SECRET.
+ * (hex أو base64). في الإنتاج إلزامي: غياب ZID_WEBHOOK_SECRET (= أو نسخة
+ * placeholder) يُرفض بـ 500 ولا يُعالج الطلب. في التطوير فقط يُتخطى التحقق.
  */
 import crypto from 'crypto'
 
@@ -64,7 +65,10 @@ export async function POST(req: NextRequest) {
     !webhookSecret.startsWith('your_')
   )
 
-  // ── Verify signature (when a real secret is configured) ─────
+  // ── Verify signature ─────────────────────────────────────────
+  // If a real secret is configured it is mandatory. In production a missing
+  // secret is a hard failure: serving unsigned webhooks would let anyone
+  // inject events into any linked store (and trigger app.uninstalled).
   if (hasRealSecret) {
     if (!verifyZidSignature(rawBody, signature, webhookSecret)) {
       console.warn('[Zid Webhook] Signature verification failed', {
@@ -72,6 +76,12 @@ export async function POST(req: NextRequest) {
       })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    console.error('[Zid Webhook] Security Alert: ZID_WEBHOOK_SECRET is not configured in production.')
+    return NextResponse.json(
+      { error: 'Webhook secret not configured on server', message_ar: 'لم يتم تكوين المفتاح السري للويب هوك في بيئة الإنتاج.' },
+      { status: 500 }
+    )
   }
 
   let payload: any

@@ -4,6 +4,11 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
+import {
+  buildSelectionString,
+  escapeXmlAttr,
+  validateCustomFieldInput,
+} from '@/lib/custom-field-validation'
 import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
@@ -38,6 +43,7 @@ async function getOdooClient() {
       apiKey: decrypt(conn.password),
     }),
     workspaceId: user.active_workspace_id,
+    erpType: (conn.erp_type as string | null) || 'odoo',
   }
 }
 
@@ -168,24 +174,32 @@ async function injectFieldIntoViews(
 
     // ── Step 3: Build & create view ──────────────────────────────────────
     // We try to place inside a group named 'erp_link_group' so all custom fields are grouped together under "ERP Link"
+    //
+    // fieldLabel is user text interpolated into a real XML attribute, so it
+    // MUST be escaped: a label containing `"` would otherwise close the
+    // attribute and inject arbitrary arch markup into the customer's Odoo.
+    // fieldName is machine-validated (x_[a-z0-9_]) upstream, so it cannot
+    // contain anything structural.
+    const safeLabel = escapeXmlAttr(fieldLabel)
+    const group = `<group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${safeLabel}"/></group>`
     const archAttempts = [
       // 1. Try to inject into the existing erp_link_group group (if already created by another field)
-      `<data><xpath expr="//group[@name='erp_link_group']" position="inside"><field name="${fieldName}" string="${fieldLabel}"/></xpath></data>`,
-      
+      `<data><xpath expr="//group[@name='erp_link_group']" position="inside"><field name="${fieldName}" string="${safeLabel}"/></xpath></data>`,
+
       // 2. Try to create the erp_link_group inside the <sheet> (standard Odoo template)
-      `<data><xpath expr="//sheet" position="inside"><group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${fieldLabel}"/></group></xpath></data>`,
-      
+      `<data><xpath expr="//sheet" position="inside">${group}</xpath></data>`,
+
       // 3. Try to create it after the last group in sheet
-      `<data><xpath expr="//sheet//group[last()]" position="after"><group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${fieldLabel}"/></group></xpath></data>`,
-      
+      `<data><xpath expr="//sheet//group[last()]" position="after">${group}</xpath></data>`,
+
       // 4. Try to create it inside a notebook
-      `<data><xpath expr="//notebook" position="before"><group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${fieldLabel}"/></group></xpath></data>`,
-      
+      `<data><xpath expr="//notebook" position="before">${group}</xpath></data>`,
+
       // 5. Try to create it after the 'name' field
-      `<data><xpath expr="//field[@name='name']" position="after"><group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${fieldLabel}"/></group></xpath></data>`,
-      
+      `<data><xpath expr="//field[@name='name']" position="after">${group}</xpath></data>`,
+
       // 6. Absolute last resort: inside the <form> tag
-      `<data><xpath expr="//form" position="inside"><group name="erp_link_group" string="ERP Link"><field name="${fieldName}" string="${fieldLabel}"/></group></xpath></data>`,
+      `<data><xpath expr="//form" position="inside">${group}</xpath></data>`,
     ]
 
     let created = false
@@ -237,18 +251,39 @@ export async function createCustomOdooField(data: CreateCustomFieldData) {
   console.log('[createCustomOdooField] Starting...', { technicalName: data.technicalName, model: data.odooModel })
 
   try {
-    const { client, workspaceId } = await getOdooClient()
+    const { client, workspaceId, erpType } = await getOdooClient()
+
+    // 0. Validate on the server. The form validates too, but a Server Action is
+    //    a public endpoint — anything reaching it did not pass through the UI.
+    const check = validateCustomFieldInput(
+      {
+        technicalName: data.technicalName,
+        fieldLabel: data.fieldLabel,
+        fieldType: data.fieldType,
+        odooModel: data.odooModel,
+        relation: data.relation,
+        selectionOptions: data.selectionOptions,
+        groupIds: data.groupIds,
+        help: data.help,
+      },
+      erpType
+    )
+    if (!check.ok) {
+      console.warn('[createCustomOdooField] Rejected invalid input:', check.error)
+      return { success: false, error: check.error }
+    }
+    const v = check.value
 
     // 1. Find model_id
     const modelRecords = await client.execute<Array<{ id: number; model: string; name: string }>>(
       'ir.model',
       'search_read',
-      [[['model', '=', data.odooModel]]],
+      [[['model', '=', v.odooModel]]],
       { fields: ['id', 'model', 'name'], limit: 1 }
     )
 
     if (!modelRecords || modelRecords.length === 0) {
-      throw new Error(`Model "${data.odooModel}" not found in Odoo`)
+      throw new Error(`Model "${v.odooModel}" not found in Odoo`)
     }
 
     const modelId = modelRecords[0].id
@@ -256,32 +291,29 @@ export async function createCustomOdooField(data: CreateCustomFieldData) {
 
     // 2. Build field payload
     const fieldPayload: Record<string, unknown> = {
-      name: data.technicalName,
-      field_description: data.fieldLabel,
+      name: v.technicalName,
+      field_description: v.fieldLabel,
       model_id: modelId,
-      ttype: data.fieldType,
+      ttype: v.fieldType,
       store: true,
       tracking: true,
       readonly: data.readonly ?? false,
       required: data.required ?? false,
       copied: data.copy ?? true,
-      help: data.help || '',
+      help: v.help || '',
     }
 
-    if (data.fieldType === 'many2one' && data.relation) {
-      fieldPayload.relation = data.relation
+    if (v.fieldType === 'many2one' && v.relation) {
+      fieldPayload.relation = v.relation
     }
 
-    if (data.fieldType === 'selection' && data.selectionOptions && data.selectionOptions.length > 0) {
-      const selStr = data.selectionOptions
-        .map(opt => `('${opt.key.replace(/'/g, "\\'")}', '${opt.label.replace(/'/g, "\\'")}')`)
-        .join(', ')
-      fieldPayload.selection = `[${selStr}]`
+    if (v.fieldType === 'selection' && v.selectionOptions && v.selectionOptions.length > 0) {
+      fieldPayload.selection = buildSelectionString(v.selectionOptions)
     }
 
-    if (data.groupIds && data.groupIds.length > 0) {
+    if (v.groupIds && v.groupIds.length > 0) {
       // In Odoo, M2M fields are written using command format: [(6, 0, [ids])]
-      fieldPayload.groups = [[6, 0, data.groupIds]]
+      fieldPayload.groups = [[6, 0, v.groupIds]]
     }
 
     // 3. Create field in Odoo
@@ -294,9 +326,9 @@ export async function createCustomOdooField(data: CreateCustomFieldData) {
     try {
       viewResults = await injectFieldIntoViews(
         client,
-        data.technicalName,
-        data.fieldLabel,
-        data.odooModel,
+        v.technicalName,
+        v.fieldLabel,
+        v.odooModel,
       )
       console.log('[createCustomOdooField] View injection results:', JSON.stringify(viewResults))
     } catch (viewErr: any) {
@@ -308,19 +340,19 @@ export async function createCustomOdooField(data: CreateCustomFieldData) {
       await supabase.from('custom_odoo_fields').insert([{
         workspace_id: workspaceId,
         odoo_field_id: newFieldId,
-        field_name: data.technicalName,
-        field_label: data.fieldLabel,
-        odoo_model: data.odooModel,
-        field_type: data.fieldType,
+        field_name: v.technicalName,
+        field_label: v.fieldLabel,
+        odoo_model: v.odooModel,
+        field_type: v.fieldType,
         views: 'form',
         properties: {
           readonly: data.readonly ?? false,
           required: data.required ?? false,
           copy: data.copy ?? true,
-          help: data.help || '',
-          relation: data.relation || null,
-          selection_options: data.selectionOptions || [],
-          group_ids: data.groupIds || [],
+          help: v.help || '',
+          relation: v.relation || null,
+          selection_options: v.selectionOptions || [],
+          group_ids: v.groupIds || [],
           injected_views: viewResults,
         },
         created_at: new Date().toISOString(),
@@ -414,6 +446,14 @@ export async function deleteCustomOdooField(odooFieldId: number, supabaseId?: st
     if (fieldRecords && fieldRecords.length > 0) {
       const fieldName = fieldRecords[0].name
       const modelSlug = fieldRecords[0].model.replace(/\./g, '_')
+
+      // Only ever unlink an `x_` / `custom_` field. Without this the action
+      // could delete any column in the customer's Odoo by passing its id —
+      // including Odoo's own core fields, which breaks their ERP.
+      if (!/^(x_|custom_)[a-z][a-z0-9_]*$/.test(fieldName)) {
+        console.warn('[deleteCustomOdooField] Refusing to delete non-custom field', fieldName)
+        return { success: false, error: 'Only custom (x_*) fields can be deleted here' }
+      }
       
       // 2. Find and delete the inherited views created by our app
       // e.g. zidlink_product_template_x_myfield_form or zidlink_product_template_x_myfield_tree
@@ -467,10 +507,37 @@ export interface UpdateCustomFieldData {
 
 export async function updateCustomOdooField(data: UpdateCustomFieldData) {
   try {
-    const { client } = await getOdooClient()
+    const { client, workspaceId } = await getOdooClient()
+
+    // The Supabase side used to be filtered by row id only, so passing another
+    // workspace's `data.id` rewrote that workspace's label and properties.
+    // Both the read and the write are now scoped to the caller's workspace.
+    const { data: existing } = await supabase
+      .from('custom_odoo_fields')
+      .select('properties, odoo_field_id')
+      .eq('id', data.id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+
+    if (!existing) {
+      console.warn('[updateCustomOdooField] No custom field', data.id, 'in workspace', workspaceId)
+      return { success: false, error: 'Custom field not found' }
+    }
+
+    // Never write a field the workspace does not actually own.
+    const odooFieldId = existing.odoo_field_id ?? data.odooFieldId
+    if (typeof odooFieldId !== 'number' || odooFieldId !== data.odooFieldId) {
+      console.warn('[updateCustomOdooField] odooFieldId does not match the stored field')
+      return { success: false, error: 'Custom field not found' }
+    }
+
+    const fieldLabel = String(data.fieldLabel ?? '').trim()
+    if (!fieldLabel) {
+      return { success: false, error: 'Field label is required' }
+    }
 
     const fieldPayload: Record<string, unknown> = {
-      field_description: data.fieldLabel,
+      field_description: fieldLabel,
       readonly: data.readonly,
       required: data.required,
       copied: data.copy,
@@ -478,10 +545,9 @@ export async function updateCustomOdooField(data: UpdateCustomFieldData) {
     }
 
     if (data.selectionOptions && data.selectionOptions.length > 0) {
-      const selStr = data.selectionOptions
-        .map(opt => `('${opt.key.replace(/'/g, "\\'")}', '${opt.label.replace(/'/g, "\\'")}')`)
-        .join(', ')
-      fieldPayload.selection = `[${selStr}]`
+      fieldPayload.selection = buildSelectionString(
+        data.selectionOptions.map(o => ({ key: String(o?.key ?? ''), label: String(o?.label ?? '') }))
+      )
     }
 
     if (data.groupIds) {
@@ -490,17 +556,11 @@ export async function updateCustomOdooField(data: UpdateCustomFieldData) {
       fieldPayload.groups = [[5, 0, 0]] // clear groups
     }
 
-    console.log('[updateCustomOdooField] Writing to ir.model.fields...', data.odooFieldId, fieldPayload)
-    await client.execute('ir.model.fields', 'write', [[data.odooFieldId], fieldPayload])
+    console.log('[updateCustomOdooField] Writing to ir.model.fields...', odooFieldId, fieldPayload)
+    await client.execute('ir.model.fields', 'write', [[odooFieldId], fieldPayload])
 
     // Update in Supabase
-    const { data: existing } = await supabase
-      .from('custom_odoo_fields')
-      .select('properties')
-      .eq('id', data.id)
-      .single()
-
-    const oldProps = existing?.properties || {}
+    const oldProps = (existing.properties || {}) as Record<string, unknown>
     const newProps = {
       ...oldProps,
       readonly: data.readonly,
@@ -514,10 +574,11 @@ export async function updateCustomOdooField(data: UpdateCustomFieldData) {
     await supabase
       .from('custom_odoo_fields')
       .update({
-        field_label: data.fieldLabel,
+        field_label: fieldLabel,
         properties: newProps,
       })
       .eq('id', data.id)
+      .eq('workspace_id', workspaceId)
 
     revalidatePath('/app/mapping-center')
     return { success: true }

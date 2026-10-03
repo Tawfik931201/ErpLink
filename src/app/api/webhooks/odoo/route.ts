@@ -5,6 +5,7 @@ import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
+import { secretMatches } from '@/lib/webhook-secret'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
 
@@ -32,9 +33,13 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization') || ''
     const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
     const headerSecret = req.headers.get('x-odoo-secret') || ''
+    // Query-string secrets are kept for backward compatibility with the
+    // Automated Actions already deployed in customers' Odoo instances, but a
+    // URL secret lands in access logs, Referer headers and browser history.
+    // Prefer the header when configuring new instances.
     const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
     const provided = bearerToken || headerSecret || querySecret
-    if (!provided || provided !== odooSecret) {
+    if (!provided || !secretMatches(provided, odooSecret)) {
       return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
@@ -193,33 +198,69 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
 
   let matchField = mapping.odoo_match_field
   let odooRecord: Record<string, any>
+  // True only when `odooRecord` came back from Odoo itself. Everything else
+  // about the body's trustworthiness hangs off this flag — see step 3 and
+  // hasRemovalSignal.
+  let recordFromOdoo = false
 
-  // 3. Use the payload data if already received, otherwise fetch from Odoo via XML-RPC
-  // Check if payloadData contains actual Odoo field values (not just meta keys)
+  // 3. Odoo is the authoritative source for the record's field values.
+  //
+  // The webhook body is only a *trigger*: ODOO_WEBHOOK_SECRET is a single
+  // shared secret, so every customer's Odoo instance knows it. When the body
+  // carried the record and was used as-is, a caller could push arbitrary
+  // prices/titles (and deletion signals) into another tenant's store. So we
+  // always read the mapped fields back from the ERP, and the body is consulted
+  // in exactly one case — the read succeeded and reported the record gone:
+  //   - read returned the record → the record is the only source. Not even a
+  //     deletion signal from the body is honoured, otherwise a caller who
+  //     knows the shared secret could archive a product in some *other*
+  //     tenant's store at will.
+  //   - read returned empty   → the record really is gone, which is the
+  //     deletion flow this endpoint has to support, and the body is all that
+  //     is left.
+  //   - read threw            → we could not verify anything, so we do not
+  //     guess. The job fails and retries (5 attempts, then the dead-letter
+  //     table). Falling back to the body here would hand anyone who knows the
+  //     shared secret a way to push arbitrary values into the stores precisely
+  //     when the ERP is unreachable.
   const metaKeys = new Set(['field_mapping_id', 'model', 'odooRecordId', '_model', '_name', '_id', 'id', 'odoo_model', 'erp_connection_id'])
-  const hasActualFields = payloadData && Object.keys(payloadData).some(k => !metaKeys.has(k))
-  if (hasActualFields) {
-    odooRecord = payloadData
-  } else {
-    // Fallback: Connect to Odoo and fetch the record fields
-    const decryptedPassword = decrypt(odooConn.password)
-    const odooClient = new OdooClient({
-      url: odooConn.url,
-      db: odooConn.db_name || '',
-      username: odooConn.username,
-      apiKey: decryptedPassword,
-    })
+  const hasActualFields = Boolean(payloadData && Object.keys(payloadData).some(k => !metaKeys.has(k)))
 
-    const erpFields = modelMappings.map((m: any) => m.erpField)
-    if (matchField && !erpFields.includes(matchField)) erpFields.push(matchField)
+  const erpFields = modelMappings.map((m: any) => m.erpField)
+  if (matchField && !erpFields.includes(matchField)) erpFields.push(matchField)
 
-    console.info(`[Odoo Webhook Bg] Reading record ID=${odooRecordId} for fields:`, erpFields)
-    const odooRecords = await odooClient.read<any>(model, [odooRecordId], erpFields)
-    if (!odooRecords || odooRecords.length === 0) {
-      console.warn(`[Odoo Webhook Bg] Record ID=${odooRecordId} not found in Odoo`)
-      return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
-    }
+  const decryptedPassword = decrypt(odooConn.password)
+  const odooClient = new OdooClient({
+    url: odooConn.url,
+    db: odooConn.db_name || '',
+    username: odooConn.username,
+    apiKey: decryptedPassword,
+  })
+
+  console.info('[Odoo Webhook Bg] Reading record ID=' + odooRecordId + ' for fields: ' + JSON.stringify(erpFields))
+  let readError: string | null = null
+  let odooRecords: any[] | null = null
+  try {
+    odooRecords = await odooClient.read<any>(model, [odooRecordId], erpFields)
+  } catch (err: any) {
+    readError = err?.message ?? String(err)
+  }
+
+  if (readError) {
+    console.warn('[Odoo Webhook Bg] read() failed, refusing to trust the webhook body:', readError)
+    return FAIL(`Could not read ${model}#${odooRecordId} from Odoo: ${readError}`)
+  }
+
+  if (odooRecords && odooRecords.length > 0) {
     odooRecord = odooRecords[0]
+    recordFromOdoo = true
+  } else if (hasActualFields) {
+    // The read succeeded and the record is gone → this is the deletion flow.
+    console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo — using webhook body`)
+    odooRecord = payloadData as Record<string, any>
+  } else {
+    console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo and body carried no field values`)
+    return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
   }
 
   // 4. Determine platform from event naming convention
@@ -313,7 +354,7 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   }
 
   // Detect removal intent (product archived/deleted in Odoo)
-  const removalRequested = hasRemovalSignal(payloadData, odooRecord, model)
+  const removalRequested = hasRemovalSignal(payloadData, odooRecord, model, recordFromOdoo)
 
   // 5. Push to target platform
   if (platform === 'shopify') {
@@ -1033,31 +1074,48 @@ async function resolveZidCategoryId(
 
 /**
  * Detect whether an Odoo product record signals removal (deleted or archived).
- * Supports both the webhook payload and the read() record.
+ *
+ * `record` is the authoritative signal and is enough on its own: a product
+ * archived in Odoo still reads back as `active: false`, and a hard-deleted one
+ * falls into the "record is gone" branch of step 3, where the body is used.
+ *
+ * The webhook body is consulted ONLY when `record` is not a real read-back — it
+ * is `undefined`/empty exactly when step 3 fell back to the body, i.e. the read
+ * succeeded and reported the record gone. Letting the body override a record
+ * that Odoo just reported as `active: true` would hand anyone who knows the
+ * shared secret the ability to archive products in other tenants' stores, so
+ * the caller's `recordFromOdoo` flag decides which sources are admissible.
  */
 function hasRemovalSignal(
   payloadData: Record<string, any> | undefined,
   record: Record<string, any>,
-  model: string
+  model: string,
+  recordFromOdoo: boolean
 ): boolean {
   if (model !== 'product.template' && model !== 'product.product') return false
 
   const metaKeys = new Set(['field_mapping_id', 'model', 'odooRecordId', '_model', '_name', '_id', 'id', 'odoo_model', 'erp_connection_id'])
   const hasActualFields = payloadData && Object.keys(payloadData).some(k => !metaKeys.has(k))
-  const src = hasActualFields ? payloadData : record
 
-  if (src.active !== undefined && (src.active === false || src.active === 'false' || src.active === 0 || src.active === '0')) {
-    return true
-  }
+  const sources: Array<Record<string, any> | undefined> = [record]
+  if (!recordFromOdoo && hasActualFields) sources.push(payloadData)
 
-  for (const key of ['is_deleted', 'deleted', 'is_archived']) {
-    const val = src[key]
-    if (val === true || val === 'true' || val === 1 || val === '1') return true
-  }
+  for (const src of sources) {
+    if (!src) continue
 
-  if (src.deleted_at !== undefined && src.deleted_at !== null) {
-    const s = String(src.deleted_at).trim()
-    if (s !== '' && s !== 'false') return true
+    if (src.active !== undefined && (src.active === false || src.active === 'false' || src.active === 0 || src.active === '0')) {
+      return true
+    }
+
+    for (const key of ['is_deleted', 'deleted', 'is_archived']) {
+      const val = src[key]
+      if (val === true || val === 'true' || val === 1 || val === '1') return true
+    }
+
+    if (src.deleted_at !== undefined && src.deleted_at !== null) {
+      const s = String(src.deleted_at).trim()
+      if (s !== '' && s !== 'false') return true
+    }
   }
 
   return false
@@ -1066,3 +1124,4 @@ function hasRemovalSignal(
 export async function GET() {
   return NextResponse.json({ ok: true, message: 'Odoo Webhook Receiver is ready.' })
 }
+

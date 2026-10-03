@@ -3,7 +3,39 @@ import { cookies } from 'next/headers'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
+import { recordAudit } from '@/lib/audit-logs'
 import { isAdmin } from '@/lib/auth'
+
+/**
+ * A Clerk user id: the literal prefix `user_` followed by base62 characters.
+ * Validating the shape on both the confirmation page and the POST means an
+ * attacker-controlled value can never be reflected as markup into an
+ * `text/html` response served from the app's own origin, where the admin
+ * session and the impersonation cookie live.
+ */
+const CLERK_USER_ID_RE = /^user_[0-9a-zA-Z]{6,64}$/
+
+function isClerkUserId(value: unknown): value is string {
+  return typeof value === 'string' && CLERK_USER_ID_RE.test(value)
+}
+
+/** HTML text/attribute escaping. Used for every interpolated value below. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, c => {
+    switch (c) {
+      case '&':
+        return '&amp;'
+      case '<':
+        return '&lt;'
+      case '>':
+        return '&gt;'
+      case '"':
+        return '&quot;'
+      default:
+        return '&#39;'
+    }
+  })
+}
 
 /**
  * API route to start user impersonation.
@@ -20,9 +52,11 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const targetUserId = searchParams.get('userId')
 
-  if (!targetUserId) {
-    return new NextResponse('Bad Request - Missing userId parameter', { status: 400 })
+  if (!isClerkUserId(targetUserId)) {
+    return new NextResponse('Bad Request - userId is not a valid user id', { status: 400 })
   }
+
+  const safeTargetUserId = escapeHtml(targetUserId)
 
   const html = `<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -46,9 +80,9 @@ export async function GET(request: NextRequest) {
 <body>
   <div class="card">
     <h1>⚠️ تأكيد محاكاة حساب العميل</h1>
-    <p>أنت على وشك الدخول إلى لوحة التحكم بصلاحية العميل: <br><strong style="color:#f8fafc; word-break: break-all;">${targetUserId}</strong>.<br>هل ترغب في المتابعة؟</p>
+    <p>أنت على وشك الدخول إلى لوحة التحكم بصلاحية العميل: <br><strong style="color:#f8fafc; word-break: break-all;">${safeTargetUserId}</strong>.<br>هل ترغب في المتابعة؟</p>
     <form method="POST" action="/api/admin/impersonate" class="actions">
-      <input type="hidden" name="userId" value="${targetUserId}" />
+      <input type="hidden" name="userId" value="${safeTargetUserId}" />
       <button type="submit" class="btn-confirm">تأكيد الدخول كعميل</button>
       <a href="/admin" class="btn-cancel">إلغاء</a>
     </form>
@@ -59,6 +93,10 @@ export async function GET(request: NextRequest) {
   return new NextResponse(html, {
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy':
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'no-store',
     },
   })
 }
@@ -84,8 +122,8 @@ export async function POST(request: NextRequest) {
     targetUserId = searchParams.get('userId')
   }
 
-  if (!targetUserId) {
-    return new NextResponse('Bad Request - Missing userId parameter', { status: 400 })
+  if (!isClerkUserId(targetUserId)) {
+    return new NextResponse('Bad Request - userId is not a valid user id', { status: 400 })
   }
 
   const cookieStore = cookies()
@@ -97,6 +135,16 @@ export async function POST(request: NextRequest) {
     sameSite: 'lax',
     maxAge: 3600, // 1 hour
     path: '/',
+  })
+
+  // Starting impersonation grants access to another tenant's data, so it is a
+  // privileged action and belongs in the security audit trail.
+  await recordAudit({
+    actorId: realUserId,
+    actorRole: 'admin',
+    action: 'impersonation.start',
+    entityType: 'user',
+    entityId: targetUserId,
   })
 
   const baseUrl = new URL(request.url).origin

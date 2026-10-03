@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
+import { secretMatches } from '@/lib/webhook-secret'
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * Odoo → Stores real-time stock receiver.
@@ -12,6 +16,14 @@ import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
  * payload only carries its id), then enqueue an idempotent job. The sync-queue
  * coalesces repeated events for the same product before the stock-sync engine
  * pushes the balance to linked stores at the paired location.
+ *
+ * Trust boundary: the quantity in the body is NEVER used as a value — it only
+ * feeds the dedup fingerprint. `processOdooStockEvent` re-reads the real
+ * balance from the customer's own Odoo (readOdooQtyAtLocation) before pushing,
+ * so a forged body cannot set a stock level. What a caller with the shared
+ * secret *can* do is choose which workspace/product/location gets a re-push;
+ * closing that needs a per-tenant secret, which is a deployment change
+ * (each customer's Automated Action must be reconfigured).
  */
 export async function POST(req: NextRequest) {
   const odooSecret = process.env.ODOO_WEBHOOK_SECRET
@@ -19,9 +31,11 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization') || ''
     const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
     const headerSecret = req.headers.get('x-odoo-secret') || ''
+    // Query-string secrets stay supported for the Automated Actions already
+    // deployed in customers' Odoo instances; prefer the header for new ones.
     const querySecret = req.nextUrl.searchParams.get('secret') || req.nextUrl.searchParams.get('token') || ''
     const provided = bearerToken || headerSecret || querySecret
-    if (!provided || provided !== odooSecret) {
+    if (!provided || !secretMatches(provided, odooSecret)) {
       return NextResponse.json({ error: 'Unauthorized: Invalid or missing Odoo webhook secret' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
@@ -46,6 +60,28 @@ export async function POST(req: NextRequest) {
 
   if (!workspaceId) {
     return NextResponse.json({ error: 'Missing workspace_id' }, { status: 400 })
+  }
+
+  // The destination is caller-chosen (it arrives in the URL/body), so it is
+  // checked against real rows instead of being trusted. This drops nonsense
+  // ids before they reach the queue; it does NOT stop a caller with the shared
+  // secret from naming a real tenant (see the trust-boundary note above).
+  if (!UUID_RE.test(workspaceId)) {
+    return NextResponse.json({ error: 'Invalid workspace_id' }, { status: 400 })
+  }
+
+  const { data: erpConn, error: connErr } = await supabase
+    .from('erp_connections')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+
+  if (connErr) {
+    console.error('[Odoo Stock Webhook] erp_connections lookup failed:', connErr.message)
+    return NextResponse.json({ error: 'Failed to validate workspace', detail: 'lookup_failed' }, { status: 503 })
+  }
+  if (!erpConn) {
+    return NextResponse.json({ error: 'Unknown workspace' }, { status: 404 })
   }
 
   const quantId = toId(actual._id || actual.id || payload.id)

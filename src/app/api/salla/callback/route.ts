@@ -27,6 +27,7 @@ const AR = {
   profile_failed: 'تعذر جلب بيانات متجر سلة. أعد الربط، وإن تكررت المشكلة تواصل مع الدعم.',
   no_merchant: 'تعذر التعرف على معرف متجر سلة من حساب سلة. سجل الدخول بحساب مالك المتجر ثم أعد المحاولة.',
   no_workspace: 'اختر مساحة عمل نشطة أولاً من لوحة التحكم ثم أعد ربط المتجر.',
+  unauthorized: 'سجّل الدخول إلى حسابك ثم أعد ربط المتجر.',
   save_failed: 'تعذر حفظ بيانات الربط. حاول مجدداً، وإن تكررت المشكلة تواصل مع الدعم.',
 } as const
 
@@ -57,6 +58,31 @@ export async function GET(request: NextRequest) {
 
   if (!code) {
     return redirectToConnectStore(request, { error: 'salla_missing_code', description: AR.missing_code })
+  }
+
+  // Resolve the session before spending the single-use authorization code.
+  // The workspace was already required further down, but only *after* the token
+  // exchange — so an unauthenticated visitor could burn a code and hit Salla's
+  // token endpoint for nothing. Failing here makes that impossible.
+  const { userId } = await auth()
+  if (!userId) {
+    return redirectToConnectStore(request, { error: 'unauthorized', description: AR.unauthorized })
+  }
+
+  const { data: userDb, error: userDbErr } = await supabase
+    .from('users')
+    .select('active_workspace_id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (userDbErr) {
+    console.error('[Salla OAuth] Could not load the user profile:', userDbErr.message)
+    return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
+  }
+
+  const workspaceId: string | null = userDb?.active_workspace_id ?? null
+  if (!workspaceId) {
+    return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
   }
 
   try {
@@ -127,22 +153,8 @@ export async function GET(request: NextRequest) {
     const email = sallaData.email ?? null
     const mobile = sallaData.mobile ?? null
 
-    // 3. Retrieve the active workspace for the currently logged-in Clerk user
-    const { userId } = await auth()
-    let workspaceId: string | null = null
-    if (userId) {
-      const { data: userDb } = await supabase
-        .from('users')
-        .select('active_workspace_id')
-        .eq('id', userId)
-        .single()
-
-      workspaceId = userDb?.active_workspace_id ?? null
-    }
-
-    if (!workspaceId) {
-      return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
-    }
+    // 3. The active workspace was resolved (and required) before the code was
+    //    exchanged, so `workspaceId` is guaranteed non-null from here on.
 
     // 4. Upsert SallaToken record in supabase
     // (expires_in is BIGINT — plain number, never BigInt: JSON
