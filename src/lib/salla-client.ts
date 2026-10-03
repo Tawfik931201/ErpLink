@@ -147,6 +147,17 @@ export async function getSallaAccessToken(merchantId: string): Promise<string> {
 }
 
 /**
+ * Per-request timeout for every Salla Merchant API call.
+ *
+ * Without it a hung Salla connection blocks the caller indefinitely — and the
+ * caller is usually a sync-queue worker holding a concurrency slot, so one
+ * stalled TCP connection leaks a slot until the process restarts. Matches the
+ * 30s used by zidClient. A timeout surfaces as a normal axios error, so the
+ * queue treats it as a transient failure and retries.
+ */
+const SALLA_REQUEST_TIMEOUT_MS = 30_000
+
+/**
  * Helper to call Salla Merchant API.
  */
 async function callSallaApi(merchantId: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', endpoint: string, data?: any) {
@@ -157,6 +168,7 @@ async function callSallaApi(merchantId: string, method: 'GET' | 'POST' | 'PUT' |
     const response = await axios({
       method,
       url,
+      timeout: SALLA_REQUEST_TIMEOUT_MS,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',

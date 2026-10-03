@@ -183,5 +183,11 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  // tailwindcss-animate backs the `animate-in` / `animate-out` / `fade-in-*` /
+  // `slide-in-from-*` utilities used by src/components/ui/{dialog,toast}.tsx and
+  // ~30 more files. Without registering the plugin those ~101 class names
+  // produced no CSS at all, so every dialog, toast and dropdown appeared with
+  // no motion. The dependency was already in package.json — only the
+  // registration was missing.
+  plugins: [require('tailwindcss-animate')],
 }

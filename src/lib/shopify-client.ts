@@ -27,8 +27,6 @@ export {
   SHOPIFY_TOPIC_CATALOG,
   isShopifyUpdateTopic,
 } from './shopify-topics'
-import { SHOPIFY_CORE_TOPICS as _CORE } from './shopify-topics'
-void _CORE
 
 /** نطاق متجر شوبيفاي الصالح: xxx.myshopify.com فقط (يُرفض أي مسار/استعلام). */
 const SHOP_DOMAIN_RE = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i
@@ -128,6 +126,17 @@ export async function getShopifyAccessToken(shopDomain: string): Promise<string>
 }
 
 /**
+ * Per-request timeout for every Shopify Admin API call (GraphQL and REST).
+ *
+ * Without it a hung Shopify connection blocks the caller indefinitely — and the
+ * caller is usually a sync-queue worker holding a concurrency slot, so one
+ * stalled TCP connection leaks a slot until the process restarts. Matches the
+ * 30s used by zidClient. A timeout surfaces as a normal axios error, so the
+ * queue treats it as a transient failure and retries.
+ */
+const SHOPIFY_REQUEST_TIMEOUT_MS = 30_000
+
+/**
  * Helper to call Shopify GraphQL Admin API.
  */
 export async function callShopifyGraphQL(shopDomain: string, query: string, variables?: any, _retried = false) {
@@ -138,6 +147,7 @@ export async function callShopifyGraphQL(shopDomain: string, query: string, vari
     const response = await axios({
       method: 'POST',
       url,
+      timeout: SHOPIFY_REQUEST_TIMEOUT_MS,
       headers: {
         'X-Shopify-Access-Token': token,
         'Content-Type': 'application/json',
@@ -178,6 +188,7 @@ export async function callShopifyREST(
     const response = await axios({
       method,
       url,
+      timeout: SHOPIFY_REQUEST_TIMEOUT_MS,
       headers: {
         'X-Shopify-Access-Token': token,
         'Content-Type': 'application/json',
@@ -211,6 +222,7 @@ async function shopifyRestGetWithHeaders(
     const response = await axios({
       method: 'GET',
       url,
+      timeout: SHOPIFY_REQUEST_TIMEOUT_MS,
       headers: {
         'X-Shopify-Access-Token': token,
         'Content-Type': 'application/json',
