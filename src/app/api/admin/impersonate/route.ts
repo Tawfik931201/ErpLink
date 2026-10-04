@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
     return new NextResponse('Bad Request - userId is not a valid user id', { status: 400 })
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   cookieStore.set({
     name: 'impersonated_user_id',
     value: targetUserId,

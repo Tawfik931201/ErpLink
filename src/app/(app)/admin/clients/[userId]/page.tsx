@@ -20,15 +20,16 @@ import ClientStatementClient from './ClientStatementClient'
 
 export const metadata = { title: 'Client Statement — Admin' }
 
-export default async function AdminClientStatementPage({
-  params,
-}: {
-  params: { userId: string }
-}) {
+export default async function AdminClientStatementPage(
+  props: {
+    params: Promise<{ userId: string }>
+  }
+) {
+  const params = await props.params
   const userId = await getActiveUserId()
   if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

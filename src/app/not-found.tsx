@@ -4,8 +4,10 @@ import Link from 'next/link'
 
 import { resolveLanguage } from '@/lib/translations'
 
-export default function GlobalNotFound() {
-  const cookieStore = cookies()
+// Async on purpose: `cookies()` is async since Next 15. See the note in
+// src/components/ImpersonationBanner.tsx.
+export default async function GlobalNotFound() {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

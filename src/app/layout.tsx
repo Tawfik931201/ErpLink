@@ -47,8 +47,8 @@ export const metadata: Metadata = {
   },
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies()
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

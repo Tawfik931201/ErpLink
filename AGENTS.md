@@ -194,18 +194,28 @@ give 2026-02-27/28. The tests pin the current behaviour with a comment. Fixing
 it is a **billing behaviour change** and needs an explicit product decision —
 do not "correct" it silently.
 
-## Known Vulnerabilities (2026-09-29)
+## Known Vulnerabilities (updated 2026-10-04, Next 15 upgrade)
 
-`npm audit` is at **10 (1 critical, 9 high)**, down from 16. Everything fixable
-without a major bump was fixed (`npm audit fix` + nodemailer 7→10 + axios
-1.18.1→1.20.0). The remainder all need a framework major upgrade:
+`npm audit` is now **49 (0 critical, 1 moderate, 48 high)**, down from
+**50 (1 critical, 49 high)**. **The one critical is gone.** Nothing fixable
+without a major bump was left behind (`npm audit fix` + nodemailer 7→10 + axios
+1.18.1→1.20.0). What remains needs a framework major upgrade:
 
 | Package | Now | Needs | Real risk here |
 |---|---|---|---|
-| `next` | 14.2.35 | 15.5.24+ (16.3.3+) | **One critical RCE — mitigated, see below**; the rest is DoS/cache |
+| `next` | 15.5.27 | 16.3.3+ | **None known** — its only advisory now arrives `via: postcss` (build-time, see below) |
 | `@clerk/nextjs` | 5.7.6 (latest stable v5) | 6.39.3+ | **None reachable — see below** |
-| `postcss` | 8.4.31 (nested in Next) | — | Low — build-time only |
+| `postcss` | (nested in Next) | — | Low — build-time only; this is the *only* thing `next` still reports |
 | `glob` | — | via eslint-config-next 16 | Low — lint tool only |
+
+The Next 14→15.5.27 upgrade (see **Next.js 15 — upgraded 2026-10-04** below)
+closed the critical and is why `next` has no direct advisory any more. The 48
+highs are overwhelmingly **dev-tooling only** — `jest` + `@jest/*`,
+`@types/jest`, `eslint-config-next`, `@next/eslint-plugin-next`,
+`@typescript-eslint/*`, `tailwindcss`, `lint-staged`, and their transitive
+deps (`braces`, `chokidar`, `fast-glob`, `globby`, `micromatch`). None of it
+ships to the server. The only runtime-relevant highs left are Clerk and
+`js-cookie` (a Clerk transitive), both already reasoned about below.
 
 > `axios` was a **direct** dependency (`^1.7.2` → 1.18.1) and had drifted into
 > the affected range `1.0.0 - 1.19.0` with 6 advisories, which the 2026-09-29
@@ -218,10 +228,10 @@ without a major bump was fixed (`npm audit fix` + nodemailer 7→10 + axios
 > adapter issues — none reachable against fixed third-party base URLs, but it
 > was a direct dep at a vulnerable version, so it got fixed regardless.
 
-### The one Critical that did apply: AVIF RCE (mitigated 2026-09-29)
+### The one Critical that did apply: AVIF RCE — **FIXED 2026-10-04**
 
-Of the 30 distinct advisories npm reports, almost none are reachable. One is,
-and it is not hypothetical.
+Of the 30 distinct advisories npm reported on Next 14, almost none were
+reachable. One was, and it was not hypothetical.
 
 **GHSA-2xp9-vwfh-vxw4 — "Unauthenticated Remote Code Execution in Image
 Optimization API when AVIF files are used"** — Critical, **CVSS 9.5**,
@@ -236,13 +246,37 @@ It was reachable in this app on all three counts:
    optimiser endpoint is **public** — no session, no account needed.
 3. `src/components/ui/logo.tsx` uses `next/image`, so the endpoint is live.
 
-**Mitigation applied:** `formats: ['image/webp']`. This is the advisory's own
-interim guidance. Cost is negligible — `next/image` is used in exactly one
-place in the whole app, so only the logo changes format.
+**Timeline:** on 2026-09-29 it was mitigated the advisory's own way —
+`formats: ['image/webp']`. On **2026-10-04** the framework moved to
+`next@15.5.27`, which is inside the patched range, so the mitigation was
+**reverted** and `formats: ['image/avif', 'image/webp']` is back.
 
-> ⚠️ **Never re-add `'image/avif'` while next is 14.x.** Re-enable it only when
-> `next >= 15.5.24`. The same applies to any new `next/image` usage: the
-> endpoint is unauthenticated by design, so it is public attack surface.
+> ⚠️ **The real mitigation was always the version, not the format.** `AVIF off`
+> only closed this one advisory while leaving every other Next 14 advisory open.
+> If Next is ever downgraded below `15.5.24`, removing `'image/avif'` is
+> **necessary but not sufficient** — the whole `>=10.0.0 <15.5.24` range is
+> affected. `/_next/image` is unauthenticated by design (`src/middleware.ts`
+> excludes it from the Clerk matcher), so it is public attack surface for any
+> image format.
+>
+> Worth knowing: `next/image` is used in **exactly one place** in the whole app
+> (`src/components/ui/logo.tsx`), and it points at a **local** path
+> (`/logo*.png`). No remote image is ever optimised. That is also why the
+> `images.remotePatterns` entries are effectively unused config today, and why
+> they are deliberately **exact-hostname** rather than `**.zid.store` /
+> `**.odoo.com` — `domains` allowed subdomains, `remotePatterns` does not, and
+> widening them again would grow the public endpoint's reach for zero benefit.
+
+> `axios` was a **direct** dependency (`^1.7.2` → 1.18.1) and had drifted into
+> the affected range `1.0.0 - 1.19.0` with 6 advisories, which the 2026-09-29
+> sweep missed because it only looked at what the earlier fix had touched.
+> Bumped to **1.20.0** (same major, patch-level) — that closed the last
+> non-major advisory. It is imported by `zid-client.ts`, `salla-client.ts` and
+> `shopify-client.ts`, so re-run the sync baseline after any future axios bump.
+> The six advisories were ReDoS in the `data:` URL parser and in proxy
+> host normalisation, prototype-pollution gadgets in `toFormData`, and HTTP/2
+> adapter issues — none reachable against fixed third-party base URLs, but it
+> was a direct dep at a vulnerable version, so it got fixed regardless.
 
 ### Not reachable despite high/CVSS scores — do not chase these
 
@@ -261,6 +295,74 @@ What the Next upgrade *does* still buy: the DoS cluster on the Server Actions
 surface (5 advisories at 7.5, and this app has ~25 `'use server'` modules),
 RSC response cache poisoning, the Image Optimizer DoS, and unbounded image
 disk-cache growth — which is a real operational risk on shared hosting.
+
+### Next.js 15 — upgraded 2026-10-04 (14.2.35 → 15.5.27, React 18 → 19)
+
+**Why 15.5.27 and not 16.** The host is a Node process, not a serverless
+platform, so nothing forced the major-16 jump, and `15.5.27` is inside the
+`>=15.5.24` patched range — i.e. it is the version that actually fixes the AVIF
+RCE. Clerk was **not** touched (`@clerk/nextjs@5.7.6` supports Next 15 and
+React 19), which was the whole point: see the Clerk section below for why a
+Clerk major upgrade is the one thing to avoid here.
+
+**What the codemod changed, and the two edits a codemod cannot make.**
+
+`npx @next/codemod@next-async-request-api .` touched **34 files**:
+
+1. `cookies()` and `headers()` became `Promise`-returning, so every call site
+   gained an `await`. This includes files with **no** `params` — plain server
+   components and layouts such as `src/app/layout.tsx`, every page under
+   `src/app/(public)/`, and the three webhook routes.
+2. `params` / `searchParams` in page signatures became `Promise<…>`.
+
+Two follow-ups were required and are easy to miss:
+
+- **`UnsafeUnwrappedCookies` escape hatches.** Where `cookies()` was called in a
+  **non-async** function (4 files: `src/app/not-found.tsx`,
+  `src/app/(app)/app/dashboard/{loading,not-found}.tsx`,
+  `src/components/ImpersonationBanner.tsx`) the codemod could not `await`, so
+  it inserted the `as unknown as UnsafeUnwrappedCookies` cast instead. That
+  **compiles and works**, but it logs a deprecation warning on every render in
+  production and the escape hatch is deleted in Next 16. All four are now real
+  `async` components. **Do not let that cast back into the tree.**
+- **A mangled dynamic import.** `src/lib/auth.ts:83` reads cookies through a
+  lazy `await import('next/headers')` (deliberately lazy — it runs in a
+  `try/catch` for the impersonation write-block), and the codemod injected an
+  explanatory comment **between** the `await` and the `import`. It parsed, but
+  it is mangled. Rewritten by hand to a single clean line.
+
+**Exactly one real React 19 type break**, in `src/components/ui/button.tsx`:
+`React.isValidElement()` / `React.Children.only()` now narrow to
+`ReactElement<unknown>`, so the shadcn `asChild` pattern's `child.props.className`
+stopped type-checking. Fixed with a narrow assertion to
+`ReactElement<{ className?: string }>` — type-only, no runtime change.
+
+**`next.config.js` moves** (all three are Next 15 stabilisations, not choices):
+
+| Removed | Replacement |
+|---|---|
+| `experimental.instrumentationHook: true` | nothing — `instrumentation.js` is stable in 15, and the build still emits `.next/server/instrumentation.js` |
+| `experimental.serverComponentsExternalPackages` | top-level `serverExternalPackages: ['xmlrpc']` |
+| `images.domains` | `images.remotePatterns` |
+| `swcMinify: true` | nothing — SWC minification is the default |
+
+**Gotcha — do not run `npx prettier --write "src/**/*"`.** The repo has **never**
+been prettier-clean: `npm run format:check` reports **236 files** with style
+issues at `HEAD`. Formatting the tree after a codemod buries the upgrade diff
+under ~10k lines of unrelated churn (`sync-engine.ts` alone was 3102 changed
+lines). If a codemod introduces trailing semicolons, strip them with a targeted
+script instead — the codemod's own output style is the repo's style.
+
+> **Verification recorded 2026-10-04:** `type-check` 0 errors, `lint` 0 errors
+> (1 pre-existing `no-explicit-any` warning in
+> `tests/unit/build-odoo-values-mobile.test.ts`), `npm test` 236/236 across 16
+> suites, `npm run build` compiled successfully with zero warnings, and
+> `.next/server/instrumentation.js` confirmed emitted. One caveat recorded
+> honestly: `tests/unit/crypto.test.ts` (legacy-key decryption) failed **once**
+> in ~6 full-suite runs and passed every other time, including 5 consecutive
+> clean runs. Not caused by this upgrade — neither `src/lib/crypto.ts` nor
+> `tests/` is in the diff — but it is a **latent flake in a security test** and
+> worth hardening separately.
 
 ### Clerk CVE-2026-42349 is NOT reachable in this app (2026-09-29)
 
@@ -488,9 +590,10 @@ against** — see below, do not start it.
   read-only (old `SELECT *` rows) — always `NULL` for new data, never displayed
 - **No ORM.** Prisma was removed entirely on 2026-09-29: `prisma/schema.prisma`,
   `@prisma/client`, `prisma` and the four `db:*` scripts are gone, and the
-  `serverComponentsExternalPackages` list is now just `['xmlrpc']`. Supabase REST
-  is the only data path and `supabase/migrations/*.sql` is the sole source of
-  truth for the schema. Do not re-add Prisma.
+  `serverExternalPackages` list (top-level since Next 15) is now just
+  `['xmlrpc']`. Supabase REST is the only data path and
+  `supabase/migrations/*.sql` is the sole source of truth for the schema. Do
+  not re-add Prisma.
 - Deleted routes: `/onboarding/accept`, `/claim-workspace`, `/admin/workspace-links`,
   all `/partner*` and `/partners*` — do not reintroduce
 - No Stripe integration — manual bank-transfer flow only (`STRIPE_*` was removed
@@ -633,9 +736,11 @@ If `20260922` is not applied, every webhook route returns 503
   extra period. `WEBHOOK_INBOX_DRAIN_BATCH` is a constant (25) in
   `sync-queue-runner.ts`, not an env var.
 
-- Started **once** at boot from `src/instrumentation.ts`, which requires
-  `experimental.instrumentationHook: true` in `next.config.js` (Next 14.x).
-  `instrumentation.ts` skips Vercel and `phase-production-build`.
+- Started **once** at boot from `src/instrumentation.ts`. `instrumentation.js`
+  is **stable since Next 15**, so no `experimental.instrumentationHook` is
+  needed any more — the flag was removed on 2026-10-04 and the build still
+  emits `.next/server/instrumentation.js`, which is what proves the hook is
+  registered. `instrumentation.ts` skips Vercel and `phase-production-build`.
 - **`SYNC_QUEUE_SELF_RUNNER=true` is required in production.** Without it the
   runner returns early and a boot-time warning fires, because no external
   scheduler exists to take over.

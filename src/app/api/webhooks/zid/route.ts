@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rawBody = await req.text()
-  const headersList = headers()
+  const headersList = await headers()
 
   // ── Ingress auth ─────────────────────────────────────────────
   // Zid sends no signature; the only mechanism it supports is the Basic

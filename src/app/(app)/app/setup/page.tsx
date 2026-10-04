@@ -41,7 +41,7 @@ export default async function SetupPage() {
     }).catch(() => {})
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]

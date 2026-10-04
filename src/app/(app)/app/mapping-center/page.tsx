@@ -16,11 +16,12 @@ export const metadata: Metadata = {
   description: 'تخصيص ربط الحقول وإعدادات المزامنة بين المتجر ونظام ERP',
 }
 
-export default async function MappingCenterPage({
-  searchParams,
-}: {
-  searchParams?: { [key: string]: string | string[] | undefined }
-}) {
+export default async function MappingCenterPage(
+  props: {
+    searchParams?: Promise<{ [key: string]: string | string[] | undefined }>
+  }
+) {
+  const searchParams = await props.searchParams
   const subtabParam = typeof searchParams?.subtab === 'string' ? searchParams.subtab : undefined
   const initialSubTab = subtabParam === 'orders' || subtabParam === 'products' || subtabParam === 'customers'
     ? subtabParam
@@ -57,7 +58,7 @@ export default async function MappingCenterPage({
     }
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

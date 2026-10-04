@@ -50,7 +50,12 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, children, ...props }, ref) => {
     if (asChild && React.isValidElement(children)) {
-      const child = React.Children.only(children)
+      // React 19 types narrow isValidElement/Children.only to
+      // ReactElement<unknown>, so `child.props` is `unknown` instead of `any`.
+      // Assert only the field we read; runtime behaviour is unchanged.
+      const child = React.Children.only(children) as React.ReactElement<{
+        className?: string
+      }>
 
       return React.cloneElement(child, {
         ...props,

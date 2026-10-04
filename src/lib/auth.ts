@@ -39,7 +39,7 @@ export const getActiveUserId = safeCache(async (): Promise<string | null> => {
 
   // If the user is an admin, check if they are impersonating another user
   if (isAdmin(userId)) {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const impersonatedUserId = cookieStore.get('impersonated_user_id')?.value
     if (impersonatedUserId) {
       return impersonatedUserId
@@ -80,7 +80,7 @@ export const getActiveWorkspaceId = safeCache(async (): Promise<string | null> =
 export async function checkImpersonationWriteBlock(serviceName: string): Promise<void> {
   try {
     const { cookies } = await import('next/headers')
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const impersonated = cookieStore.get('impersonated_user_id')?.value
     if (impersonated) {
       throw new Error(`[Read-Only Mode] Modifications on ${serviceName} are disabled during user impersonation. | [وضع القراءة فقط] لا يمكن تعديل أو حذف البيانات في ${serviceName} أثناء محاكاة حساب العميل.`)

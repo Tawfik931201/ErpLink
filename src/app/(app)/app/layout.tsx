@@ -23,7 +23,7 @@ async function ensureWorkspaceAccess() {
   const userId = await getActiveUserId()
   if (!userId) return
 
-  const pathname = headers().get('x-pathname') || ''
+  const pathname = (await headers()).get('x-pathname') || ''
   if (pathname === '/app/settings/workspace') return
 
   const activeId = await getActiveWorkspaceId()
@@ -51,7 +51,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     console.error("Failed to verify workspace access:", err)
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
@@ -87,7 +87,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     '/app/settings/billing': 'settings-billing',
   }
 
-  const currentPath = headers().get('x-pathname') || ''
+  const currentPath = (await headers()).get('x-pathname') || ''
   const isPageRestricted = !isOwner
     && currentPath !== '/app/settings/workspace'
     && (permissionMap[currentPath] && !permissions.includes(permissionMap[currentPath]))

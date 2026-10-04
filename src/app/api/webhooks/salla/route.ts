@@ -102,7 +102,7 @@ async function recordSallaWebhookMetric(storeId: string, event: string): Promise
 export async function POST(req: NextRequest) {
   // لا setInterval هنا — المعالجة عبر GET /api/cron/sync-queue بمجدول خارجي.
   const rawBody = await req.text()
-  const headersList = headers()
+  const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
   const signature = getHeader('x-salla-signature') ?? getHeader('salla-signature') ?? ''
   const webhookSecret = process.env.SALLA_WEBHOOK_SECRET ?? ''

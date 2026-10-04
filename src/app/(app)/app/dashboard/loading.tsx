@@ -3,8 +3,10 @@ import React from 'react'
 
 import { resolveLanguage } from '@/lib/translations'
 
-export default function Loading() {
-  const cookieStore = cookies()
+// Async on purpose: `cookies()` is async since Next 15. See the note in
+// src/components/ImpersonationBanner.tsx.
+export default async function Loading() {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const text = lang === 'en' ? 'Loading...' : 'جاري التحميل...'
 

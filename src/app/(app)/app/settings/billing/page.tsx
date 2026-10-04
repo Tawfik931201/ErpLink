@@ -8,7 +8,7 @@ import BillingClient from './BillingClient'
 export const metadata = { title: 'Subscriptions & Billing' }
 
 export default async function BillingSettingsPage() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const res = await getMyWorkspaceBillingDetails()
 

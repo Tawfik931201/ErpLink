@@ -7,8 +7,8 @@ import { resolveLanguage } from '@/lib/translations'
 
 export const dynamic = 'force-dynamic'
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = cookies()
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
 
   return (

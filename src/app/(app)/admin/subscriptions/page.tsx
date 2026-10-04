@@ -13,7 +13,7 @@ export default async function AdminSubscriptionsPage() {
   const userId = await getActiveUserId()
   if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
 
   const subsRes = await getAllSubscriptions()

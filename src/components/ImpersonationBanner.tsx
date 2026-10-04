@@ -3,8 +3,11 @@ import { cookies } from 'next/headers'
 
 import StopImpersonationButton from './StopImpersonationButton'
 
-export default function ImpersonationBanner() {
-  const cookieStore = cookies()
+// Async on purpose: `cookies()` is async since Next 15. The codemod's
+// `UnsafeUnwrappedCookies` escape hatch would compile, but it logs a warning
+// on every render in production and is removed in Next 16.
+export default async function ImpersonationBanner() {
+  const cookieStore = await cookies()
   const impersonatedUserId = cookieStore.get('impersonated_user_id')?.value
 
   if (!impersonatedUserId) {

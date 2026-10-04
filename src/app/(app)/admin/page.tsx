@@ -14,7 +14,7 @@ export default async function AdminStatsPage() {
   const userId = await getActiveUserId()
   if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = (cookieStore.get('lang')?.value || 'ar') as 'ar' | 'en'
   const isAr = lang === 'ar'
 

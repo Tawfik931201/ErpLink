@@ -22,7 +22,7 @@ export default async function ConnectOdooPage() {
     connection = safeConnection
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]

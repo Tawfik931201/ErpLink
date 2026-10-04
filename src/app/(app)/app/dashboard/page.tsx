@@ -53,7 +53,7 @@ function statusLabel(status: string, dict: Record<string, string>): string {
 }
 
 export default async function DashboardPage() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const dict = translations[lang] as Record<string, string>

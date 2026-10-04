@@ -26,7 +26,7 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set([
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text()
-  const headersList = headers()
+  const headersList = await headers()
 
   const signature = (headersList.get('x-shopify-hmac-sha256') ?? '').trim()
   const shopDomain = (headersList.get('x-shopify-shop-domain') ?? '').trim().toLowerCase()

@@ -33,8 +33,8 @@ import { Button } from '@/components/ui/button'
 import { resolveLanguage, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
-export default function HomePage() {
-  const cookieStore = cookies()
+export default async function HomePage() {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
   const t = (key: keyof typeof translations['ar']) =>

@@ -43,7 +43,7 @@ export default async function InitialTransferPage() {
     }
   }
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

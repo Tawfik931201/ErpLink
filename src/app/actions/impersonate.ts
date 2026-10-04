@@ -10,7 +10,7 @@ import { cookies } from 'next/headers'
  * بدء هنا: مسارها كان بلا أي مستهلك ويستخدم مساراً غير موجود (/dashboard).
  */
 export async function stopImpersonation(): Promise<void> {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   cookieStore.delete('impersonated_user_id')
   revalidatePath('/')
 }

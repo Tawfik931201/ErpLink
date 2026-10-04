@@ -11,7 +11,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const userId = await getActiveUserId()
   if (!userId || !isAdmin(userId)) redirect('/app/dashboard')
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 

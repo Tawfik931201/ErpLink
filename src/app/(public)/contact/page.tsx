@@ -6,8 +6,8 @@ import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { resolveLanguage } from '@/lib/translations'
 
-export default function ContactPage() {
-  const cookieStore = cookies()
+export default async function ContactPage() {
+  const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
