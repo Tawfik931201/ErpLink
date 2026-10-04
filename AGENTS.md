@@ -73,6 +73,7 @@
 | `src/lib/crypto.ts` | `ENCRYPTION_KEY`-only encryption, ephemeral dev key, `ENCRYPTION_LEGACY_KEYS` decrypt-only migration, plus `hkdfHex()` (2026-10-03) — the one HKDF used by both derived ingress credentials |
 | `src/lib/zid/webhook-auth.ts` | The Basic credential Zid actually supports, HKDF-derived from `ENCRYPTION_KEY`, and the `ok`/`invalid`/`legacy`/`unconfigured` ingress classification (added 2026-10-03) |
 | `src/lib/odoo/webhook-secret.ts` | Per-scope Odoo ingress credential (`stock:<workspace_id>` / `record:<field_mapping_id>`), the shared `ok`/`invalid`/`legacy`/`unconfigured` decision both Odoo routes use, and the legacy-delivery counter (added 2026-10-03) |
+| `src/lib/telegram/link-code.ts` | The pure `/start <code>` parsing rule the Telegram poller uses — kept import-free so it can be unit-tested without a database (added 2026-10-03) |
 | `src/app/api/admin/odoo-webhooks/refresh/route.ts` | Re-registers every Odoo Automated Action with a derived secret, create-before-delete; refuses to run if nothing is derivable |
 
 ## Common Commands
@@ -84,7 +85,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 224 tests over 14 suites (added 2026-09-29, grown 2026-10-03)
+# Unit tests — 236 tests over 16 suites (added 2026-09-29, grown 2026-10-03)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -126,7 +127,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 224 tests over 14 suites:
+- 236 tests over 16 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -162,6 +163,13 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   - `tests/unit/build-odoo-values-mobile.test.ts` — `buildOdooValues`' `mobile`
     guard: the field is written when Odoo confirms it exists and skipped when it
     does not, without touching the other hardcoded fields (Odoo 19 removed it)
+- `tests/unit/telegram-link-code.test.ts` — the `/start <code>` parsing rule,
+    including that a 6-character token the generator cannot produce is rejected
+    (see Telegram bot)
+  - `tests/unit/telegram-poller-boot.test.ts` — source pins proving the poller is
+    started from `instrumentation.ts` and not only by a server action, and that
+    the decrypt / `getUpdates` / ignored-update paths still log. Checked to fail
+    when the boot wiring is removed, so it is not vacuous
   - `tests/unit/odoo-webhook-auth.test.ts` — the per-scope derived credential,
     the same four-way classification, and source pins that the shared env secret
     is never *read* again (naming it in a comment is fine) and that verification
@@ -702,6 +710,40 @@ shape and that an `erp_connections` row exists, which drops nonsense ids but
 cannot tell a real tenant from a forged one. Closing that needs the URL id bound
 to the credential (a signature over the pair), which Odoo's native webhook cannot
 send.
+
+### Telegram bot: the poller is started at boot, not by an action (2026-10-03)
+
+**This was a live "the chat never links" bug, and the cause was invisible from
+the UI.** The bot token check in `addBotToken` is a direct `getMe` fetch from the
+server action, so a token can be perfectly valid while *nothing is polling that
+bot*. `startTelegramPoller()` was called from exactly two places — `addBotToken`
+and `generateChatLinkCode` — and from nowhere else. `src/instrumentation.ts`
+started only the sync queue runner. So the poller existed only inside whichever
+process happened to run those actions, and after a restart or a deploy there was
+no poller at all: `getUpdates` was never called, `/start <code>` was silently
+dropped, the customer got no reply from the bot, and the app sat on "waiting for
+link…" until the user happened to re-add the token by hand.
+
+- `src/instrumentation.ts` now starts the poller next to `startSyncQueueRunner()`,
+  behind the same `!process.env.VERCEL` gate — long polling needs the long-lived
+  Node process the sync runner already relies on. `forceRefreshTelegramPoller()`
+  stays in the two actions, but it is now an optimisation (wake the new bot up
+  without waiting for the 30s DB refresh), never the reason the poller runs.
+- **Never make a failure path in the poller silent again.** All three were, and
+  each one is indistinguishable from a quiet bot:
+  `decrypt()` of a token saved under a retired `ENCRYPTION_KEY` (a `catch {}`
+  that only bumped a counter), a `getUpdates` error (logged only as a count at
+  exactly 5, without Telegram's `description` — 409 means two pollers on one
+  token, 401 a revoked token), and a received-but-ignored update.
+- The bot now logs its start-up line, how many bots it is polling, every update
+  it receives, the code it extracted, and the success line. **"0 bots"** or no
+  `update … from chat …` line is the first thing to look at.
+- Code parsing lives in `src/lib/telegram/link-code.ts` (pure, no imports) so it
+  is testable without a database. It accepts `/start CODE`, `/start@Bot CODE`,
+  the bare code, lower case and extra words, and it rejects 6-character tokens
+  containing `I`, `O`, `0` or `1` — the generator's alphabet omits those four
+  (`generateLinkCode`), so such a token can never be one of our codes and used to
+  cause a pointless lookup and a misleading "invalid code" reply.
 
 ### Ingress auth, 2026-10-01 (Zid **and Odoo** rewritten 2026-10-03 — the earlier text was wrong)
 

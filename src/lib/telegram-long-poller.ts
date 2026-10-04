@@ -1,5 +1,6 @@
 import { decrypt } from '@/lib/crypto'
 import { supabase } from '@/lib/supabase'
+import { extractLinkCode, looksLikeLinkAttempt } from '@/lib/telegram/link-code'
 import { callTelegramApi, sendTelegramWelcomeRaw } from '@/lib/telegram-notifier'
 
 interface BotPollerState {
@@ -28,7 +29,6 @@ interface PollerGlobal {
 
 const POLL_INTERVAL_MS = 5_000
 const POLLER_REFRESH_MS = 30_000
-const MAX_CONSECUTIVE_FAILURES = 5
 
 /**
  * Poller is opt-out via TELEGRAM_POLLER_ENABLED. Unset means enabled, so
@@ -129,16 +129,9 @@ async function handleStartCommand(
   text: string,
   chatId: string | number
 ): Promise<void> {
-  // Strip "/start" prefix or take the full message — look for a 6-char code
-  // anywhere in the text. This supports:
-  //   /start ABC123
-  //   /start ABC123 hi
-  //   ABC123
-  //   abc123
-  //   hi abc123 please
-  const cleaned = text.replace(/^\/start(@\w+)?\s*/i, '').trim()
-  const codeMatch = cleaned.match(/\b[A-Z0-9]{6}\b/i)
-  const code = codeMatch ? codeMatch[0].toUpperCase() : ''
+  // The parsing rule lives in src/lib/telegram/link-code.ts so it can be tested
+  // without a database; see that file for the shapes it accepts.
+  const code = extractLinkCode(text)
 
   // Nothing that looks like a code — send help message
   if (!code) {
@@ -155,6 +148,8 @@ async function handleStartCommand(
     return
   }
 
+  console.info(`[TelegramPoller] Bot ${botId}: chat ${chatId} sent link code ${code}`)
+
   // Lookup the code
   const { data: codeRow, error: codeErr } = await supabase
     .from('telegram_bot_codes')
@@ -163,6 +158,10 @@ async function handleStartCommand(
     .maybeSingle()
 
   if (codeErr || !codeRow) {
+    console.warn(
+      `[TelegramPoller] Bot ${botId}: code ${code} not found` +
+        (codeErr ? ` (${codeErr.message})` : ' (no such code — expired, already used, or a typo)')
+    )
     await callTelegramApi(botTokenPlain, 'sendMessage', {
       chat_id: chatId,
       text: '❌ كود الربط غير صحيح أو منتهي الصلاحية. أعد إنشاء كود جديد من التطبيق.',
@@ -209,6 +208,10 @@ async function handleStartCommand(
   // Delete the used code
   await supabase.from('telegram_bot_codes').delete().eq('code', code)
 
+  console.info(
+    `[TelegramPoller] Bot ${botId}: chat ${chatId} linked to workspace ${codeRow.workspace_id} via ${code}`
+  )
+
   // Send welcome
   await sendTelegramWelcomeRaw(botTokenPlain, String(chatId))
 }
@@ -223,20 +226,35 @@ async function handleUpdate(
   if (!text || chatId === undefined) return
 
   // Accept either an explicit /start command OR any message that contains
-  // a 6-character alphanumeric token (the link code format).
-  const looksLikeStart = /^\/start/i.test(text)
-  const looksLikeCode = /\b[A-Z0-9]{6}\b/i.test(text)
-
-  if (looksLikeStart || looksLikeCode) {
-    await handleStartCommand(botTokenPlain, botId, text, chatId)
+  // a 6-character code (the link code format).
+  if (!looksLikeLinkAttempt(text)) {
+    console.info(
+      `[TelegramPoller] Bot ${botId}: ignoring update ${update.update_id} from chat ${chatId} — not a link attempt`
+    )
+    return
   }
+
+  console.info(
+    `[TelegramPoller] Bot ${botId}: update ${update.update_id} from chat ${chatId}: ${JSON.stringify(
+      text.slice(0, 80)
+    )}`
+  )
+  await handleStartCommand(botTokenPlain, botId, text, chatId)
 }
 
 async function pollOneBot(state: BotPollerState): Promise<void> {
   let botTokenPlain: string
   try {
     botTokenPlain = decrypt(state.botTokenEncrypted)
-  } catch {
+  } catch (err: any) {
+    // Used to be silent: a token encrypted with a retired ENCRYPTION_KEY looked
+    // exactly like a bot that simply never answered.
+    if (state.failureCount === 0) {
+      console.warn(
+        `[TelegramPoller] Bot ${state.botId} token cannot be decrypted — was it saved with a different ENCRYPTION_KEY? ` +
+          `${err?.message ?? err}`
+      )
+    }
     state.failureCount += 1
     return
   }
@@ -249,8 +267,13 @@ async function pollOneBot(state: BotPollerState): Promise<void> {
 
   if (!response.ok) {
     state.failureCount += 1
-    if (state.failureCount === MAX_CONSECUTIVE_FAILURES) {
-      console.warn(`[TelegramPoller] Bot ${state.botId} hit ${MAX_CONSECUTIVE_FAILURES} consecutive failures`)
+    // Telegram's own text is the only clue to what went wrong (409 = two
+    // pollers on one token, 401 = the token was revoked), so it must be logged.
+    if (state.failureCount === 1 || state.failureCount % 50 === 0) {
+      console.warn(
+        `[TelegramPoller] Bot ${state.botId} getUpdates failed ${state.failureCount} time(s) in a row: ` +
+          `HTTP ${response.statusCode ?? '-'} ${response.description ?? '(no description)'}`
+      )
     }
     return
   }
@@ -311,7 +334,17 @@ export function startTelegramPoller(): void {
 
   console.info('[TelegramPoller] Started Telegram long-poller')
 
-  void refreshBotsFromDb().then(pollAllOnce)
+  // Report what is actually being polled. "0 bots" is the single most useful
+  // line when a chat refuses to link: it separates "no poller" from
+  // "poller with nothing to poll".
+  void refreshBotsFromDb()
+    .then(() => {
+      console.info(`[TelegramPoller] Polling ${getBotsMap().size} bot(s) every ${POLL_INTERVAL_MS / 1000}s`)
+      return pollAllOnce()
+    })
+    .catch((err: any) => {
+      console.warn('[TelegramPoller] initial refresh failed:', err?.message ?? err)
+    })
   g.__telegramPollerLastRefresh = Date.now()
 
   g.__telegramPollerInterval = setInterval(() => {

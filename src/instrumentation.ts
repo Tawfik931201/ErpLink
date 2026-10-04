@@ -13,6 +13,16 @@ export async function register() {
     if (!process.env.VERCEL) {
       const { startSyncQueueRunner } = await import('@/lib/sync-queue-runner')
       startSyncQueueRunner()
+
+      // The Telegram poller used to be started only as a side effect of the
+      // server actions that add a bot token or generate a link code. That made
+      // it survive exactly as long as the process that ran the action: after
+      // any restart or deploy no poller existed at all, so `/start <code>`
+      // was silently ignored until the user re-added the token by hand. It
+      // reads its bots and pending codes from the database on a 30s refresh,
+      // so it does not need an action to wake it up.
+      const { startTelegramPoller } = await import('@/lib/telegram-long-poller')
+      startTelegramPoller()
     }
   }
 }
