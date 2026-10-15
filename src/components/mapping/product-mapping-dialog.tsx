@@ -25,6 +25,8 @@ interface ProductMappingDialogProps {
   isOpen: boolean
   onClose: () => void
   platform?: string
+  /** Multi-store: merchant_id / shop_domain of the active store tab. */
+  storeKey?: string
   defaultStoreField?: string
   defaultOdooField?: string
   odooFieldOptions?: { value: string; label: string }[]
@@ -34,6 +36,7 @@ export default function ProductMappingDialog({
   isOpen,
   onClose,
   platform = 'zid',
+  storeKey = '',
   defaultStoreField = 'sku',
   defaultOdooField = 'default_code',
   odooFieldOptions = [],
@@ -110,14 +113,14 @@ export default function ProductMappingDialog({
 
   const loadMappings = useCallback(async () => {
     setIsLoading(true)
-    const res = await getProductMappings(platform)
+    const res = await getProductMappings(platform, storeKey)
     if (res.success) {
       setMappings(res.mappings)
     } else {
       toast({ title: lang === 'ar' ? 'خطأ' : 'Error', description: res.error, variant: 'destructive' })
     }
     setIsLoading(false)
-  }, [platform, lang, toast])
+  }, [platform, storeKey, lang, toast])
 
   const loadOdooProducts = async () => {
     setIsLoadingOdoo(true)
@@ -130,7 +133,7 @@ export default function ProductMappingDialog({
 
   const loadStoreProducts = async () => {
     setIsLoadingStore(true)
-    const res = await fetchStoreProducts(platform)
+    const res = await fetchStoreProducts(platform, storeKey || undefined)
     if (res.success) {
       setStoreProducts(res.products || [])
     }
@@ -160,6 +163,7 @@ export default function ProductMappingDialog({
     try {
       const res = await autoMatchAndLinkProducts({
         platform,
+        storeId: storeKey || undefined,
         storeField: autoStoreField,
         odooField: autoOdooField,
         skipAlreadyMapped: autoSkipMapped,
@@ -252,6 +256,7 @@ export default function ProductMappingDialog({
 
     const payload: any = {
       platform,
+      storeId: storeKey || undefined,
       source_product_id: form.source_product_id || null,
       source_product_name: selectedStoreProduct ? getProductName(selectedStoreProduct) : '',
       source_sku: selectedStoreProduct?.sku || '',
@@ -293,7 +298,7 @@ export default function ProductMappingDialog({
 
   const handleBatchImport = async () => {
     setIsBatchImporting(true)
-    const res = await fetchStoreProducts(platform)
+    const res = await fetchStoreProducts(platform, storeKey || undefined)
     if (!res.success || !res.products?.length) {
       toast({
         title: lang === 'ar' ? 'خطأ' : 'Error',
@@ -308,7 +313,7 @@ export default function ProductMappingDialog({
       name: getProductName(p),
       sku: p.sku || '',
     })).filter((p: any) => p.id && p.name)
-    const result = await batchImportProductMappings(platform, items)
+    const result = await batchImportProductMappings(platform, items, storeKey)
     if (result.success) {
       toast({
         title: lang === 'ar' ? 'تم الاستيراد' : 'Imported',

@@ -3,6 +3,7 @@
 import { auth } from '@clerk/nextjs/server'
 
 import { supabase } from '@/lib/supabase'
+import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import type {
   DashboardStats,
@@ -21,20 +22,21 @@ async function getOrCreateDbUser() {
 const HOURS_72 = 72 * 60 * 60 * 1000
 const DAYS_7 = 7 * 24 * 60 * 60 * 1000
 
+// Dashboard reads are the hottest path in the app: the page fires 9 parallel
+// server actions, each rendering for every visitor. A 45s TTL with
+// single-flight dedupe means 50 users opening the dashboard together collapse
+// into ONE upstream query set instead of 50. Failures are never cached (the
+// key is dropped on !success) so an error never sticks to the screen.
+const DASH_TTL_MS = 45 * 1000
+
 // ─── Aggregated Stats ──────────────────────────────────────────────────────────
 
-export async function getDashboardStats(): Promise<{
+async function fetchDashboardStats(ws: string): Promise<{
   success: boolean
   stats?: DashboardStats
   error?: string
 }> {
   try {
-    const user = await getOrCreateDbUser()
-    if (!user.active_workspace_id) {
-      return { success: true, stats: emptyStats() }
-    }
-    const ws = user.active_workspace_id
-
     const [
       successCount,
       failedCount,
@@ -49,21 +51,21 @@ export async function getDashboardStats(): Promise<{
     ] = await Promise.all([
       supabase
         .from('sync_logs')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', ws)
         .eq('status', 'success')
         .gt('created_at', new Date(Date.now() - HOURS_72).toISOString()),
 
       supabase
         .from('sync_logs')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', ws)
         .eq('status', 'failed')
         .gt('created_at', new Date(Date.now() - DAYS_7).toISOString()),
 
       supabase
         .from('sync_logs')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', ws)
         .eq('status', 'skipped')
         .gt('created_at', new Date(Date.now() - DAYS_7).toISOString()),
@@ -78,7 +80,7 @@ export async function getDashboardStats(): Promise<{
 
       supabase
         .from('data_transfers')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', ws)
         .in('status', ['pending', 'running']),
 
@@ -86,17 +88,20 @@ export async function getDashboardStats(): Promise<{
         .from('data_transfers')
         .select('records_created, records_failed')
         .eq('workspace_id', ws)
-        .gt('created_at', new Date(Date.now() - DAYS_7).toISOString()),
+        .gt('created_at', new Date(Date.now() - DAYS_7).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(500),
 
       supabase
         .from('field_mappings')
-        .select('*', { count: 'exact', head: true })
+        .select('id', { count: 'exact', head: true })
         .eq('workspace_id', ws),
 
       supabase
         .from('merchant_tokens')
         .select('merchant_id')
         .eq('workspace_id', ws)
+        .limit(1)
         .maybeSingle(),
 
       supabase
@@ -153,29 +158,46 @@ export async function getDashboardStats(): Promise<{
   }
 }
 
-// ─── Event Distribution (Pie chart data) ───────────────────────────────────────
-
-export async function getEventDistribution(): Promise<{
+export async function getDashboardStats(): Promise<{
   success: boolean
-  distribution?: EventDistribution[]
+  stats?: DashboardStats
   error?: string
 }> {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
-      return { success: true, distribution: [] }
+      return { success: true, stats: emptyStats() }
     }
-    const ws = user.active_workspace_id
+    const key = `dash:stats:${user.active_workspace_id}`
+    const res = await ttlCache.get(key, DASH_TTL_MS, () =>
+      fetchDashboardStats(user.active_workspace_id as string)
+    )
+    if (!res.success) ttlCache.delete(key)
+    return res
+  } catch (error: any) {
+    console.error('[Dashboard Action] getDashboardStats failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch stats' }
+  }
+}
 
+// ─── Event Distribution (Pie chart data) ───────────────────────────────────────
+
+async function fetchEventDistribution(ws: string): Promise<{
+  success: boolean
+  distribution?: EventDistribution[]
+  error?: string
+}> {
+  try {
     // Supabase JS client does not support GROUP BY directly, so we fetch logs
-    // for the retention window (72h) up to a reasonable cap and aggregate in JS.
+    // for the retention window (72h) up to a hard cap and aggregate in JS.
+    // The cap keeps a busy workspace from pushing megabytes per dashboard view.
     const { data: logs, error } = await supabase
       .from('sync_logs')
       .select('event')
       .eq('workspace_id', ws)
       .gt('created_at', new Date(Date.now() - HOURS_72).toISOString())
       .order('created_at', { ascending: false })
-      .limit(5000)
+      .limit(2000)
 
     if (error) throw new Error('Failed to query events: ' + error.message)
 
@@ -196,21 +218,37 @@ export async function getEventDistribution(): Promise<{
   }
 }
 
-// ─── Daily Activity (Area chart data) ──────────────────────────────────────────
-
-export async function getDailyActivity(days = 7): Promise<{
+export async function getEventDistribution(): Promise<{
   success: boolean
-  activity?: DailyActivity[]
+  distribution?: EventDistribution[]
   error?: string
 }> {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
-      return { success: true, activity: [] }
+      return { success: true, distribution: [] }
     }
-    const ws = user.active_workspace_id
+    const key = `dash:events:${user.active_workspace_id}`
+    const res = await ttlCache.get(key, DASH_TTL_MS, () =>
+      fetchEventDistribution(user.active_workspace_id as string)
+    )
+    if (!res.success) ttlCache.delete(key)
+    return res
+  } catch (error: any) {
+    console.error('[Dashboard Action] getEventDistribution failed:', error)
+    return { success: false, error: error.message }
+  }
+}
 
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+// ─── Daily Activity (Area chart data) ──────────────────────────────────────────
+
+async function fetchDailyActivity(ws: string, safeDays: number): Promise<{
+  success: boolean
+  activity?: DailyActivity[]
+  error?: string
+}> {
+  try {
+    const since = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000).toISOString()
 
     const { data: logs, error } = await supabase
       .from('sync_logs')
@@ -218,6 +256,7 @@ export async function getDailyActivity(days = 7): Promise<{
       .eq('workspace_id', ws)
       .gt('created_at', since)
       .order('created_at', { ascending: true })
+      .limit(5000)
 
     if (error) throw new Error('Failed to query daily activity: ' + error.message)
 
@@ -225,7 +264,7 @@ export async function getDailyActivity(days = 7): Promise<{
     const buckets = new Map<string, DailyActivity>()
 
     // Initialize buckets for the full range (fill missing days with zeros)
-    for (let i = days - 1; i >= 0; i--) {
+    for (let i = safeDays - 1; i >= 0; i--) {
       const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
       const dateKey = d.toISOString().slice(0, 10)
       buckets.set(dateKey, {
@@ -256,6 +295,31 @@ export async function getDailyActivity(days = 7): Promise<{
   }
 }
 
+export async function getDailyActivity(days = 7): Promise<{
+  success: boolean
+  activity?: DailyActivity[]
+  error?: string
+}> {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: true, activity: [] }
+    }
+    // Clamp before keying so getDailyActivity(7) and getDailyActivity(700)
+    // don't each burn a cache slot (and a query) for the same chart.
+    const safeDays = Math.min(31, Math.max(1, Math.floor(days) || 7))
+    const key = `dash:activity:${user.active_workspace_id}:${safeDays}`
+    const res = await ttlCache.get(key, DASH_TTL_MS, () =>
+      fetchDailyActivity(user.active_workspace_id as string, safeDays)
+    )
+    if (!res.success) ttlCache.delete(key)
+    return res
+  } catch (error: any) {
+    console.error('[Dashboard Action] getDailyActivity failed:', error)
+    return { success: false, error: error.message }
+  }
+}
+
 // ─── Recent Logs ───────────────────────────────────────────────────────────────
 
 export async function getRecentLogs(limit = 10): Promise<{
@@ -270,6 +334,9 @@ export async function getRecentLogs(limit = 10): Promise<{
     }
     const ws = user.active_workspace_id
 
+    // Cap client-supplied limits: server actions accept arbitrary args, and
+    // an unbounded limit here turns one click into a full-table scan.
+    const safeLimit = Math.min(100, Math.max(1, Math.floor(limit) || 10))
     const { data: logs, error } = await supabase
       .from('sync_logs')
       .select(
@@ -277,7 +344,7 @@ export async function getRecentLogs(limit = 10): Promise<{
       )
       .eq('workspace_id', ws)
       .order('created_at', { ascending: false })
-      .limit(limit)
+      .limit(safeLimit)
 
     if (error) throw new Error('Failed to query recent logs: ' + error.message)
 
@@ -313,6 +380,7 @@ export async function getRecentTransfers(limit = 5): Promise<{
     }
     const ws = user.active_workspace_id
 
+    const safeLimit = Math.min(50, Math.max(1, Math.floor(limit) || 5))
     const { data: transfers, error } = await supabase
       .from('data_transfers')
       .select(
@@ -320,7 +388,7 @@ export async function getRecentTransfers(limit = 5): Promise<{
       )
       .eq('workspace_id', ws)
       .order('created_at', { ascending: false })
-      .limit(limit)
+      .limit(safeLimit)
 
     if (error)
       throw new Error('Failed to query recent transfers: ' + error.message)

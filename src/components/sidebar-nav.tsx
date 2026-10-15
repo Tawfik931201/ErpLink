@@ -13,7 +13,7 @@ import {
   Users,
   ShoppingCart,
   CreditCard,
-  Rocket,
+  ScrollText,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -35,7 +35,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   users: Users,
   order: ShoppingCart,
   card: CreditCard,
-  setup: Rocket,
+  logs: ScrollText,
 }
 
 interface NavItem {

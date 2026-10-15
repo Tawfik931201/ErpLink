@@ -74,11 +74,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const permissionMap: Record<string, string> = {
     '/app/dashboard': 'dashboard',
-    '/app/setup': 'dashboard',
     '/app/connect-store': 'connect-store',
     '/app/connect-odoo': 'connect-odoo',
     '/app/mapping-center': 'mapping-center',
-    '/app/mapping-center/orders': 'mapping-center',
+    '/app/mapping-center/custom': 'mapping-center',
+    '/app/mapping-center/add-field': 'mapping-center',
+    '/app/mapping-center/values': 'mapping-center',
+    '/app/mapping-center/categories': 'mapping-center',
+    '/app/queue': 'mapping-center',
+    '/app/logs': 'mapping-center',
     '/app/initial-transfer': 'transfers',
     '/app/tickets': 'tickets',
     '/app/settings': 'settings',
@@ -114,7 +118,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       label: lang === 'ar' ? 'الرئيسية' : 'Home',
       items: [
         { href: '/app/dashboard', icon: 'dashboard', label: t('nav.dashboard') },
-        { href: '/app/setup', icon: 'setup', label: t('nav.setup') },
       ]
     },
     {
@@ -128,7 +131,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       label: lang === 'ar' ? 'المزامنة' : 'Sync',
       items: [
         { href: '/app/mapping-center', icon: 'mapping', label: t('nav.fieldMapping') },
-        { href: '/app/mapping-center/orders', icon: 'order', label: t('nav.orderDashboard') },
+        { href: '/app/queue', icon: 'order', label: t('nav.queue') },
+        { href: '/app/logs', icon: 'logs', label: t('nav.logs') },
         { href: '/app/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
       ]
     },

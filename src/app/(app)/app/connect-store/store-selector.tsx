@@ -2,7 +2,8 @@
 
 import {
   Store, ExternalLink, Mail, Calendar, Hash, RefreshCw,
-  User, AlertCircle, Globe, Check, CheckCircle2, Activity, Wrench
+  User, AlertCircle, Globe, CheckCircle2, Activity, Wrench,
+  Plus, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState, useCallback } from 'react'
@@ -43,28 +44,36 @@ const ShopifyLogo = () => (
 )
 
 interface StoreSelectorProps {
-  token: any
-  sallaToken?: any
-  shopifyToken?: any
+  zidTokens?: any[]
+  sallaTokens?: any[]
+  shopifyTokens?: any[]
   installUrl: string
   sallaInstallUrl?: string
   lang: Language
   dir: 'rtl' | 'ltr'
 }
 
-const isStoreConnected = (storeId: string, token: any, sallaToken: any, shopifyToken: any) => {
-  if (storeId === 'zid') return !!token
-  if (storeId === 'salla') return !!sallaToken
-  if (storeId === 'shopify') return !!shopifyToken
-  return null
+interface ConnectedRow {
+  platform: string
+  key: string
+  token: any
+  name: string
+  code: string
 }
 
-export default function StoreSelector({ token, sallaToken, shopifyToken, installUrl, sallaInstallUrl, lang, dir }: StoreSelectorProps) {
+const storeKeyFor = (platform: string, tk: any): string =>
+  platform === 'shopify' ? String(tk?.shop_domain ?? '') : String(tk?.merchant_id ?? '')
+
+export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopifyTokens = [], installUrl, sallaInstallUrl, lang, dir }: StoreSelectorProps) {
   const searchParams = useSearchParams()
   const error = searchParams.get('error')
   const errorDescription = searchParams.get('description')
   const success = searchParams.get('success')
-  const [selectedStore, setSelectedStore] = useState<string>('zid')
+  // Odoo-style single screen: only one of list / connect-form / details is
+  // visible at a time — never stacked together.
+  const [view, setView] = useState<'list' | 'connect' | 'details'>('list')
+  const [detail, setDetail] = useState<{ platform: string; key: string } | null>(null)
+  const [connectPlatform, setConnectPlatform] = useState<string>('zid')
 
   const getSuccessMessage = (s: string) => {
     const platformName = s === 'salla_connected' ? (lang === 'ar' ? 'سلة' : 'Salla')
@@ -117,7 +126,59 @@ export default function StoreSelector({ token, sallaToken, shopifyToken, install
     { id: 'shopify', name: lang === 'ar' ? 'شوبيفاي' : 'Shopify', logo: ShopifyLogo, isActive: true },
   ]
 
-  const selectedPlatform = stores.find(s => s.id === selectedStore)
+  const selectedPlatform = stores.find(s => s.id === connectPlatform)
+
+  const tokensFor = (platform: string): any[] =>
+    platform === 'zid' ? zidTokens : platform === 'salla' ? sallaTokens : shopifyTokens
+
+  // Basic row data: store name + merchant code, e.g. Demo(403476178).
+  const displayFor = (platform: string, tk: any): { name: string; code: string } => {
+    if (platform === 'zid') return { name: tk?.name || (lang === 'ar' ? 'زد' : 'Zid'), code: tk?.merchant_id ? String(tk.merchant_id) : '' }
+    if (platform === 'salla') return { name: tk?.store_name || tk?.name || (lang === 'ar' ? 'سلة' : 'Salla'), code: tk?.merchant_id ? String(tk.merchant_id) : '' }
+    return { name: tk?.name || (lang === 'ar' ? 'شوبيفاي' : 'Shopify'), code: tk?.shop_domain || '' }
+  }
+
+  // Multi-store: one row per connected STORE (a platform may appear several
+  // times). Lists arrive newest-first from the server.
+  const connectedRows: ConnectedRow[] = stores.flatMap(store =>
+    tokensFor(store.id).map(tk => {
+      const { name, code } = displayFor(store.id, tk)
+      return { platform: store.id, key: storeKeyFor(store.id, tk), token: tk, name, code }
+    })
+  )
+
+  const openDetails = (platform: string, key: string) => {
+    setDetail({ platform, key })
+    setView('details')
+  }
+
+  const detailToken = detail?.platform
+    ? tokensFor(detail.platform).find(tk => storeKeyFor(detail.platform, tk) === detail.key) ?? null
+    : null
+
+  // After an OAuth redirect (?success=salla_connected …) jump straight to
+  // that platform's newest store instead of leaving the user on the list.
+  useEffect(() => {
+    if (!success) return
+    const id = success === 'salla_connected' ? 'salla' : success === 'shopify_connected' ? 'shopify' : 'zid'
+    const rows = tokensFor(id)
+    if (rows.length > 0) {
+      setDetail({ platform: id, key: storeKeyFor(id, rows[0]) })
+      setView('details')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [success])
+
+  const BackButton = (
+    <button
+      type="button"
+      onClick={() => setView('list')}
+      className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
+    >
+      {dir === 'rtl' ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+      <span>{lang === 'ar' ? 'رجوع' : 'Back'}</span>
+    </button>
+  )
 
   return (
     <div className="space-y-5" dir={dir}>
@@ -149,100 +210,195 @@ export default function StoreSelector({ token, sallaToken, shopifyToken, install
         </div>
       )}
 
-      {/* Platform ListView Table */}
+      {/* ── List View: connected stores ─────────────────────────── */}
+      {view === 'list' && (
       <div className="border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-muted/30">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-medium text-foreground">{t('connect.selectStore')}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {lang === 'ar' ? `${connectedRows.length} متاجر متصلة` : `${connectedRows.length} connected stores`}
+            </span>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>{stores.filter(s => isStoreConnected(s.id, token, sallaToken, shopifyToken)).length} / {stores.length} connected</span>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setView('connect')}
+            className="h-7 text-[11px] gap-1"
+          >
+            <Plus className="h-3 w-3" />
+            <span>{lang === 'ar' ? 'إضافة متجر' : 'Add store'}</span>
+          </Button>
         </div>
 
+        {connectedRows.length > 0 ? (
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-border text-muted-foreground">
-              <th className="px-3 py-2 text-start font-medium w-8">
-                <span className="sr-only">Select</span>
-              </th>
-              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'المنصة' : 'Platform'}</th>
+              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'المتجر' : 'Store'}</th>
+              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'معرف التاجر' : 'Merchant ID'}</th>
               <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
               <th className="px-3 py-2 text-end font-medium w-10" />
             </tr>
           </thead>
           <tbody>
-            {stores.map((store) => {
-              const StoreIcon = store.logo
-              const connected = isStoreConnected(store.id, token, sallaToken, shopifyToken)
-              const isSelected = selectedStore === store.id
-              const statusTxt = connected ? t('connect.connected')
-                : store.isActive ? t('connect.active')
-                : t('connect.comingSoon')
+            {connectedRows.map((row) => {
+              const StoreIcon = stores.find(s => s.id === row.platform)?.logo ?? Store
 
               return (
                 <tr
-                  key={store.id}
-                  onClick={() => setSelectedStore(store.id)}
-                  className={cn(
-                    "border-b border-border/50 cursor-pointer transition-colors",
-                    isSelected ? "bg-muted/50" : "hover:bg-muted/30"
-                  )}
+                  key={`${row.platform}:${row.key}`}
+                  onClick={() => openDetails(row.platform, row.key)}
+                  className="border-b border-border/50 last:border-b-0 cursor-pointer transition-colors hover:bg-muted/30"
                 >
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center justify-center">
-                      <div className={cn(
-                        "h-3.5 w-3.5 rounded border transition-colors",
-                        isSelected ? "border-foreground bg-foreground" : "border-border"
-                      )}>
-                        {isSelected && <Check className="h-3.5 w-3.5 text-background" strokeWidth={3} />}
-                      </div>
-                    </div>
-                  </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2">
                       <StoreIcon />
-                      <span className="text-foreground">{store.name}</span>
+                      <span className="text-foreground" dir="auto">{row.name}</span>
                     </div>
                   </td>
                   <td className="px-3 py-2.5">
+                    <span className="font-mono text-muted-foreground" dir="ltr">{row.code || '—'}</span>
+                  </td>
+                  <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
-                      <span className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        connected === true ? "bg-foreground" : connected === false && store.isActive ? "bg-muted-foreground/50" : "bg-muted-foreground/30"
-                      )} />
-                      <span className={cn(
-                        "text-muted-foreground",
-                        connected === true && "text-foreground"
-                      )}>{statusTxt}</span>
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span className="text-foreground">{t('connect.connected')}</span>
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-end">
-                    <span className="text-[10px] text-muted-foreground">{isSelected ? '✓' : ''}</span>
+                    <span className="inline-flex text-muted-foreground">
+                      {dir === 'rtl' ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </span>
                   </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
+        ) : (
+        <div className="p-5 flex flex-col sm:flex-row items-start gap-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded border border-border shrink-0">
+            <Store className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <div className="flex-1 space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">{lang === 'ar' ? 'لا يوجد متجر متصل' : 'No store connected'}</h2>
+              <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
+                {lang === 'ar'
+                  ? 'اضغط على إضافة متجر واختر منصتك لإتمام الربط — المزامنة تعمل تلقائياً بعد الموافقة.'
+                  : 'Click Add store, pick your platform and approve — sync runs automatically afterwards.'}
+              </p>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setView('connect')} className="h-8 text-[11px] gap-1.5">
+              <Plus className="h-3 w-3" />
+              <span>{lang === 'ar' ? 'إضافة متجر' : 'Add store'}</span>
+            </Button>
+          </div>
+        </div>
+        )}
       </div>
+      )}
 
-      {/* Detail Panel */}
+      {/* ── Connect View: pick a platform + connect ─────────────── */}
+      {view === 'connect' && (
       <div className="border border-border bg-card overflow-hidden">
-        {/* Toolbar */}
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2 text-[11px] font-medium text-foreground">
-            {selectedPlatform && <selectedPlatform.logo />}
-            {selectedPlatform?.name}
-            {isStoreConnected(selectedStore, token, sallaToken, shopifyToken) && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-foreground/70">
-                <span className="h-1 w-1 rounded-full bg-foreground" />
-                {t('zid.activeStatus')}
-              </span>
-            )}
+            <Store className="h-3.5 w-3.5 text-muted-foreground" />
+            {lang === 'ar' ? 'إضافة متجر' : 'Add store'}
           </div>
-          <div className="flex items-center gap-1">
-            {selectedStore === 'zid' && isStoreConnected('zid', token, sallaToken, shopifyToken) && (
+          {BackButton}
+        </div>
+
+        <div className="p-4 space-y-4 max-w-xl">
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-muted-foreground">
+              {lang === 'ar' ? 'اختر المتجر' : 'Choose store'}
+            </label>
+            <select
+              value={connectPlatform}
+              onChange={e => setConnectPlatform(e.target.value)}
+              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+            >
+              {stores.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{tokensFor(s.id).length > 0 ? (lang === 'ar' ? ` (متصل: ${tokensFor(s.id).length})` : ` (connected: ${tokensFor(s.id).length})`) : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {connectPlatform === 'shopify' ? (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {lang === 'ar'
+                  ? 'أدخل نطاق متجرك على شوبيفاي ثم اضغط ربط للموافقة على الصلاحيات.'
+                  : 'Enter your Shopify shop domain, then click Connect to approve permissions.'}
+              </p>
+              <form action="/api/shopify/connect" method="GET" className="flex flex-col sm:flex-row gap-2">
+                <input type="text" name="shop" placeholder="store-name.myshopify.com" required
+                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                <Button type="submit" variant="outline" size="sm" className="h-9 text-[11px] gap-1.5 shrink-0">
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{lang === 'ar' ? 'اتصال' : 'Connect'}</span>
+                </Button>
+              </form>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {selectedPlatform && <selectedPlatform.logo />}
+                <span className="text-sm font-semibold text-foreground">{selectedPlatform?.name}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {lang === 'ar'
+                  ? `اربط متجرك على ${selectedPlatform?.name} لتتمكن من مزامنة المنتجات، المخزون، والطلبات تلقائياً مع نظام ERP. بعد الضغط على الاتصال يتم تلقائياً: تسجيل التنبيهات الأساسية + تفعيل المزامنة — بلا أي إعداد يدوي.`
+                  : `Connect your store on ${selectedPlatform?.name} to automatically sync products, stock, and orders with your ERP system. After clicking connect, everything is automatic: core webhooks + sync turn on with zero manual setup.`}
+              </p>
+              <div className="p-2.5 border border-border bg-muted/30">
+                <div className="text-[10px] text-muted-foreground mb-1">{t('zid.redirectUrl')}</div>
+                <code className="font-mono text-[10px] text-foreground/80 break-all">
+                  {connectPlatform === 'salla' ? sallaInstallUrl : installUrl}
+                </code>
+              </div>
+              <a href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+                 className="inline-flex items-center gap-1.5 rounded border border-foreground/20 bg-background hover:bg-muted px-3 h-9 text-[11px] font-medium text-foreground transition-colors">
+                <ExternalLink className="h-3 w-3" />
+                {lang === 'ar' ? 'اتصال' : 'Connect'}
+              </a>
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+
+      {/* ── Details View: one connected store, standalone ──────────── */}
+      {view === 'details' && detail && detailToken && (
+      <div className="border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5 bg-muted/30">
+          <div className="flex items-center gap-2 text-[11px] font-medium text-foreground min-w-0">
+            {(() => {
+              const meta = stores.find(s => s.id === detail.platform)
+              const StoreIcon = meta?.logo ?? Store
+              const display = displayFor(detail.platform, detailToken)
+              return (
+                <>
+                  <StoreIcon />
+                  <span className="truncate" dir="auto">{display.name}</span>
+                  {display.code && <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">({display.code})</span>}
+                  <span className="inline-flex items-center gap-1 text-[10px] text-foreground/70 shrink-0">
+                    <span className="h-1 w-1 rounded-full bg-emerald-500" />
+                    {t('connect.connected')}
+                  </span>
+                </>
+              )
+            })()}
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {BackButton}
+            {detail.platform === 'zid' && (
               <>
                 <a href="/api/zid/connect"
                    className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors">
@@ -250,13 +406,14 @@ export default function StoreSelector({ token, sallaToken, shopifyToken, install
                   {t('zid.reconnect')}
                 </a>
                 <DisconnectButton
-                  merchantId={token.merchant_id}
+                  merchantId={String(detailToken.merchant_id)}
                   confirmText={t('zid.disconnectConfirm')}
                   buttonText={t('zid.disconnect')}
+                  onDone={() => setView('list')}
                 />
               </>
             )}
-            {selectedStore === 'salla' && isStoreConnected('salla', token, sallaToken, shopifyToken) && (
+            {detail.platform === 'salla' && (
               <>
                 <a href="/api/salla/connect"
                    className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors">
@@ -264,37 +421,31 @@ export default function StoreSelector({ token, sallaToken, shopifyToken, install
                   {t('zid.reconnect')}
                 </a>
                 <DisconnectButton
-                  merchantId={sallaToken.merchant_id}
+                  merchantId={String(detailToken.merchant_id)}
                   confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر سلة؟' : 'Are you sure you want to disconnect Salla store?'}
                   buttonText={t('zid.disconnect')}
                   platform="salla"
+                  onDone={() => setView('list')}
                 />
               </>
             )}
-            {selectedStore === 'shopify' && isStoreConnected('shopify', token, sallaToken, shopifyToken) && (
+            {detail.platform === 'shopify' && (
               <DisconnectButton
-                merchantId={shopifyToken.shop_domain}
+                merchantId={detailToken.shop_domain}
                 confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر شوبيفاي؟' : 'Are you sure you want to disconnect Shopify store?'}
                 buttonText={t('zid.disconnect')}
                 platform="shopify"
+                onDone={() => setView('list')}
               />
             )}
           </div>
         </div>
 
-        {/* Content */}
-        {selectedStore === 'zid' ? (
-          token ? <ConnectedContent token={token} lang={lang} t={t} formatDate={formatDate} /> : <DisconnectedContent connectHref="/api/zid/connect" installUrl={installUrl} t={t} lang={lang} platformName="Zid" />
-        ) : selectedStore === 'salla' ? (
-          sallaToken ? <ConnectedSallaContent token={sallaToken} lang={lang} t={t} formatDate={formatDate} /> : <DisconnectedContent connectHref={sallaInstallUrl!} installUrl={sallaInstallUrl!} t={t} lang={lang} platformName="Salla" />
-        ) : selectedStore === 'shopify' ? (
-          shopifyToken ? <ConnectedShopifyContent token={shopifyToken} lang={lang} t={t} formatDate={formatDate} /> : <DisconnectedShopifyContent lang={lang} />
-        ) : (
-          <div className="p-5 text-[11px] text-muted-foreground">
-            {lang === 'ar' ? 'يرجى اختيار منصة للربط.' : 'Please select a platform to connect.'}
-          </div>
-        )}
+        {detail.platform === 'zid' && <ConnectedContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
+        {detail.platform === 'salla' && <ConnectedSallaContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
+        {detail.platform === 'shopify' && <ConnectedShopifyContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
       </div>
+      )}
     </div>
   )
 }
@@ -507,68 +658,6 @@ function ConnectedShopifyContent({ token, lang, t, formatDate }: any) {
           <ShopifySyncSettingsTable shopDomain={token.shop_domain} initialSettings={token.sync_settings} />
         </div>
       </details>
-    </div>
-  )
-}
-
-function DisconnectedContent({ connectHref, installUrl, t, lang, platformName }: { connectHref: string; installUrl: string; t: any; lang: string; platformName: string }) {
-  return (
-    <div className="p-5 flex flex-col sm:flex-row items-start gap-4">
-      <div className="flex h-10 w-10 items-center justify-center rounded border border-border shrink-0">
-        <Store className="h-5 w-5 text-muted-foreground" />
-      </div>
-      <div className="flex-1 space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">{lang === 'ar' ? `ربط متجر ${platformName}` : `Connect ${platformName} Store`}</h2>
-          <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-            {lang === 'ar'
-              ? `اربط متجرك على ${platformName} لتتمكن من مزامنة المنتجات، المخزون، والطلبات تلقائياً مع نظام ERP.`
-              : `Connect your store on ${platformName} to automatically sync products, stock, and orders with your ERP system.`}
-          </p>
-          <p className="mt-1.5 text-[11px] text-muted-foreground leading-relaxed">
-            {lang === 'ar'
-              ? 'بعد الضغط على الربط يتم تلقائياً: تسجيل التنبيهات الأساسية + تفعيل المزامنة — بلا أي إعداد يدوي.'
-              : 'After clicking connect, everything is automatic: core webhooks + sync turn on with zero manual setup.'}
-          </p>
-        </div>
-        <div className="p-2.5 border border-border bg-muted/30">
-          <div className="text-[10px] text-muted-foreground mb-1">{t('zid.redirectUrl')}</div>
-          <code className="font-mono text-[10px] text-foreground/80 break-all">{installUrl}</code>
-        </div>
-        <a href={connectHref}
-           className="inline-flex items-center gap-1.5 rounded border border-foreground/20 bg-background hover:bg-muted px-3 h-8 text-[11px] font-medium text-foreground transition-colors">
-          <ExternalLink className="h-3 w-3" />
-          {lang === 'ar' ? `ربط متجر ${platformName}` : `Connect ${platformName} Store`}
-        </a>
-      </div>
-    </div>
-  )
-}
-
-function DisconnectedShopifyContent({ lang }: { lang: string }) {
-  return (
-    <div className="p-5 flex flex-col sm:flex-row items-start gap-4">
-      <div className="flex h-10 w-10 items-center justify-center rounded border border-border shrink-0">
-        <Store className="h-5 w-5 text-muted-foreground" />
-      </div>
-      <div className="flex-1 space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">{lang === 'ar' ? 'ربط متجر شوبيفاي' : 'Connect Shopify Store'}</h2>
-          <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-            {lang === 'ar'
-              ? 'اربط متجرك على شوبيفاي لتتمكن من مزامنة المنتجات، المخزون، والطلبات تلقائياً مع نظام ERP.'
-              : 'Connect your store on Shopify to automatically sync products, stock, and orders with your ERP system.'}
-          </p>
-        </div>
-        <form action="/api/shopify/connect" method="GET" className="flex flex-col sm:flex-row gap-2 max-w-md">
-          <input type="text" name="shop" placeholder="store-name.myshopify.com" required
-            className="flex h-8 w-full rounded border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-          <Button type="submit" variant="outline" size="sm" className="h-8 text-[11px]">
-            <ExternalLink className="h-3 w-3" />
-            <span>{lang === 'ar' ? 'ربط' : 'Connect'}</span>
-          </Button>
-        </form>
-      </div>
     </div>
   )
 }

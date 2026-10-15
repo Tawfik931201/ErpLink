@@ -9,6 +9,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 
+import { upsertEntityLink } from './entity-links'
+
 // ─── Supabase admin client (bypasses RLS) ─────────────────────────────────────
 // Webhook requests have NO Clerk auth session, so the standard supabase client
 // would be blocked by Row Level Security on field_mappings / erp_connections.
@@ -31,6 +33,15 @@ export async function logSync(entry: {
   error_message?: string | null
   payload: Record<string, unknown>
   trigger_type?: string
+  /**
+   * Store platform for the durable entity link (`odoo_entity_links`).
+   * When present with a successful numeric record id, the link
+   * (workspace, platform, store, model, store-entity → Odoo id) is
+   * refreshed best-effort so later update/delete events resolve without
+   * depending on sync_logs (whose success rows are purged after 72h).
+   * Omit it and no link is written — ERPNext callers do exactly that.
+   */
+  platform?: string
 }) {
   console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}" trigger_type="${entry.trigger_type || 'automatic'}" id="${entry.id || 'new'}"`)
   try {
@@ -149,6 +160,21 @@ export async function logSync(entry: {
       }
     } else {
       console.info(`[SyncEngine] sync_log ${entry.id ? 'updated' : 'written'} ✓`)
+      // Durable entity link (best-effort, never fails the sync): a later
+      // update/delete for the same store entity resolves the Odoo record
+      // from odoo_entity_links instead of the purged/transient sync_logs.
+      if (logData.status === 'success' && entry.platform && logData.odoo_record_id && entry.zid_entity_id) {
+        void upsertEntityLink(
+          {
+            workspaceId: entry.workspace_id,
+            platform: entry.platform as 'zid' | 'salla' | 'shopify',
+            storeId: entry.store_id,
+            odooModel: entry.odoo_model,
+            storeEntityId: entry.zid_entity_id,
+          },
+          logData.odoo_record_id
+        )
+      }
     }
   } catch (err) {
     console.error('[SyncEngine] Failed to write sync_log (exception):', err)

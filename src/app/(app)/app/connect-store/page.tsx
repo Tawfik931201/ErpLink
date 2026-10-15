@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import { Suspense } from 'react'
 
-import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
+import { getActiveWorkspaceZidTokens, getActiveWorkspaceSallaTokens, getActiveWorkspaceShopifyTokens } from '@/app/actions/workspaces'
 import { resolveLanguage, translations } from '@/lib/translations'
 
 import StoreSelector from './store-selector'
@@ -17,14 +17,14 @@ export default async function ConnectZidPage() {
   const installUrl = `${baseUrl}/api/zid/connect`
   const sallaInstallUrl = `${baseUrl}/api/salla/connect`
 
-  const tokenRes = await getActiveWorkspaceZidToken()
-  const token = tokenRes.success ? tokenRes.token : null
+  const tokenRes = await getActiveWorkspaceZidTokens()
+  const zidTokens = tokenRes.success ? tokenRes.tokens : []
 
-  const sallaTokenRes = await getActiveWorkspaceSallaToken()
-  const sallaToken = sallaTokenRes.success ? sallaTokenRes.token : null
+  const sallaTokenRes = await getActiveWorkspaceSallaTokens()
+  const sallaTokens = sallaTokenRes.success ? sallaTokenRes.tokens : []
 
-  const shopifyTokenRes = await getActiveWorkspaceShopifyToken()
-  const shopifyToken = shopifyTokenRes.success ? shopifyTokenRes.token : null
+  const shopifyTokenRes = await getActiveWorkspaceShopifyTokens()
+  const shopifyTokens = shopifyTokenRes.success ? shopifyTokenRes.tokens : []
 
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
@@ -49,9 +49,9 @@ export default async function ConnectZidPage() {
 
       <Suspense fallback={<div className="animate-pulse h-48 rounded-xl bg-muted/40" />}>
         <StoreSelector
-          token={token}
-          sallaToken={sallaToken}
-          shopifyToken={shopifyToken}
+          zidTokens={zidTokens}
+          sallaTokens={sallaTokens}
+          shopifyTokens={shopifyTokens}
           installUrl={installUrl}
           sallaInstallUrl={sallaInstallUrl}
           lang={lang}

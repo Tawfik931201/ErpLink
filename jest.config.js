@@ -18,14 +18,19 @@ const customJestConfig = {
     //   `@/lib/supabase`   (unrewritten, e.g. from a test file)
     //   `.../src/lib/supabase`  (absolute, from tsconfig baseUrl resolution)
     //   `../../lib/supabase`    (relative, from a file inside src/)
+    //   `./supabase`            (relative, from a file directly in src/lib/)
     // Matching only the alias matched none of them in practice: the mock was
     // never loaded, and a test that reached for `@/lib/supabase` silently built
     // a real client and hit the real database. `.*lib[\\/]supabase$` covers all
     // three. It cannot self-match, because the mock itself is
     // `tests/mocks/supabase.ts` and has no `lib/` segment.
+    // The fourth entry covers the `./supabase` shape (2026-10-11: the first
+    // test to await a query through a module living directly in src/lib/
+    // proved it matched nothing and fell back to a real client).
     '^@/lib/supabase$': '<rootDir>/tests/mocks/supabase.ts',
     '^.*[\\/]src[\\/]lib[\\/]supabase$': '<rootDir>/tests/mocks/supabase.ts',
     '^.*[\\/]lib[\\/]supabase$': '<rootDir>/tests/mocks/supabase.ts',
+    '^\\./supabase$': '<rootDir>/tests/mocks/supabase.ts',
   },
   testPathIgnorePatterns: ['<rootDir>/.next/', '<rootDir>/node_modules/'],
   collectCoverageFrom: [

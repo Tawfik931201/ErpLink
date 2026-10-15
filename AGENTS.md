@@ -85,7 +85,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 236 tests over 16 suites (added 2026-09-29, grown 2026-10-03)
+# Unit tests — 301 tests over 18 suites (added 2026-09-29, grown 2026-10-05)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -127,7 +127,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 236 tests over 16 suites:
+- 301 tests over 18 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -170,6 +170,19 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     started from `instrumentation.ts` and not only by a server action, and that
     the decrypt / `getUpdates` / ignored-update paths still log. Checked to fail
     when the boot wiring is removed, so it is not vacuous
+  - `tests/unit/salla-webhook-auth.test.ts` — the dual-path credential (native
+    HMAC **and** the derived header), the four-way classification, the `token`
+    strategy resolved against Salla's self-contradicting docs, the published-event
+    allowlist that stops invented slugs, and source pins that the unauthenticated
+    `app.uninstalled` guard and the stale-event receipt stay put. All four pins
+    were **checked to actually fail** when the rule is reverted, so none is
+    vacuous. The negative assertions run against a comment-stripped copy of the
+    source: these files deliberately *name* the retired `SALLA_WEBHOOK_SECRET` in
+    their comments, and a comment is not a read
+  - `tests/unit/event-operation.test.ts` — the event→operation routing contract
+    (26 tests): every one of the 29 subscribed Salla events classified
+    explicitly, gate↔writer agreement, and the shipment regressions. Every pin
+    was **checked to actually fail** when the rule is reverted
   - `tests/unit/odoo-webhook-auth.test.ts` — the per-scope derived credential,
     the same four-way classification, and source pins that the shared env secret
     is never *read* again (naming it in a comment is fine) and that verification
@@ -196,15 +209,18 @@ do not "correct" it silently.
 
 ## Known Vulnerabilities (updated 2026-10-04, Next 15 upgrade)
 
-`npm audit` is now **49 (0 critical, 1 moderate, 48 high)**, down from
-**50 (1 critical, 49 high)**. **The one critical is gone.** Nothing fixable
+`npm audit` was **49 (0 critical, 1 moderate, 48 high)** after the Next 15
+upgrade, down from **50 (1 critical, 49 high)**. **The one critical is gone.**
+After the Clerk 5→6 upgrade (2026-10-08) it reports **52 (8 moderate,
+44 high)** — the delta is Clerk v6's own dependency tree, still 0 critical.
+Nothing fixable
 without a major bump was left behind (`npm audit fix` + nodemailer 7→10 + axios
 1.18.1→1.20.0). What remains needs a framework major upgrade:
 
 | Package | Now | Needs | Real risk here |
 |---|---|---|---|
 | `next` | 15.5.27 | 16.3.3+ | **None known** — its only advisory now arrives `via: postcss` (build-time, see below) |
-| `@clerk/nextjs` | 5.7.6 (latest stable v5) | 6.39.3+ | **None reachable — see below** |
+| `@clerk/nextjs` | 6.39.7 (v6 line, since 2026-10-08 — v5 broke every route, see below) | 7.x | **None reachable — see below** |
 | `postcss` | (nested in Next) | — | Low — build-time only; this is the *only* thing `next` still reports |
 | `glob` | — | via eslint-config-next 16 | Low — lint tool only |
 
@@ -304,6 +320,22 @@ platform, so nothing forced the major-16 jump, and `15.5.27` is inside the
 RCE. Clerk was **not** touched (`@clerk/nextjs@5.7.6` supports Next 15 and
 React 19), which was the whole point: see the Clerk section below for why a
 Clerk major upgrade is the one thing to avoid here.
+
+> **Update 2026-10-08 — Clerk 5.7.6 → 6.39.7, forced by a runtime break (not
+> the CVE).** Clerk v5's `ClerkProvider` calls `headers()` **synchronously**
+> (`dist/cjs/app-router/server/ClerkProvider.js:44`, plus `buildRequestLike`
+> in `utils.js`), and Next 15.5 turns that into a hard `sync-dynamic-apis`
+> error — so **no route rendered at all** (`/` and `/sign-in` both threw
+> ``headers()` should be awaited``). v6 makes `ClerkProvider` async with
+> `await headers()` (verified in the 6.39.7 source before upgrading). Code
+> changes were two lines: `public-site-header.tsx` became `async` with
+> `await auth()`, and `middleware.ts` uses the v6 `await auth.protect()`
+> form (confirmed against the installed `clerkMiddleware.d.ts`/`auth.d.ts`).
+> Everything else already used `await auth()` / `await clerkClient()` /
+> `await currentUser()`. `clerk-authz-guard.test.ts` still passes unchanged
+> (the `.protect(` scan matches `auth.protect()` the same way). Do **not**
+> downgrade back to v5 — staying there re-breaks every page. v7 is still
+> out of scope.
 
 **What the codemod changed, and the two edits a codemod cannot make.**
 
@@ -534,7 +566,16 @@ against** — see below, do not start it.
   `SELECT *`; new rows are always `NULL` — never write it, never display it).
 - `subscription_payments`: per-payment rows (subscription_id, amount, paid_at, notes, created_by)
 - `workspaces`: id, user_id, name, subscription_number (no affiliate linkage)
-- `users`: id, email, name, phone, active_workspace_id
+- `users`: id, email, name, active_workspace_id (+ `created_at`).
+  ⚠️ **`phone` is NOT reliably there.** It exists only in migration
+  `20260805_client_phone_and_archive.sql`, which was never applied in some
+  environments — selecting it fails the query with `column users.phone does
+  not exist` (2026-10-10 outage: it was added to the per-action `users.ts`
+  lookup and took the whole app down, because that lookup runs inside every
+  server action). Live columns were probed 2026-10-10: id, email, name,
+  `active_workspace_id`, `created_at`. Never assume a `users` column without
+  probing the live table; `getAllClients` maps `phone: null` until the
+  migration is applied.
 - `audit_logs`: security audit trail
 - Legacy (unused, **do not delete yet** — cleanup migration later):
   `partner_profiles`, `partner_tier_history`, `partner_commissions`,
@@ -626,13 +667,12 @@ against** — see below, do not start it.
     pushes actually respect Mapping Center settings needs a product decision:
     which `store_type` and `entity_type` an inbound Odoo record is judged
     against. `odoo/stock/route.ts` is in the same position.
-  - `src/app/api/webhooks/salla/route.ts` hand-rolls the enqueue (its own
-    dedup probe, its own coalescing, `max_retries: 3`) instead of calling
-    `enqueueWebhookEvent`, which uses `max_retries: 5` and coalesces
-    queue-side via `extractEntityId`. It *does* write the receipt and returns
-    503 when the durable write fails, so it is not losing data — it is a
-    second implementation of the same contract. Converging it moves both the
-    retry count and the coalescing behaviour, so it needs a decision.
+- ~~`salla/route.ts` hand-rolls the enqueue~~ — **converged 2026-10-05.** It
+    now calls `enqueueWebhookEvent` like every other route, so Salla gets the
+    shared `max_retries: 5`, queue-side coalescing via `extractEntityId`, and the
+    atomic dedup key. It previously keyed `dedup_key = null` whenever Salla sent
+    no delivery id, which meant no duplicate protection at all.
+
   - The odoo routes look receipt-less but are not: `enqueueWebhookEvent`
     calls `recordWebhookReceipt` itself (`src/lib/sync-queue.ts:317`) *before*
     the queue insert and returns an error the route turns into a 503. The
@@ -686,6 +726,36 @@ In order:
    - **both are required** for the Zid fingerprint dedup to work; a *settled* row
      must stop vetoing new work
    - idempotent; the file ends with read-only pre-flight + verification queries
+3. `supabase/migrations/20261009_sync_logs_speed.sql`
+   - `sync_logs.resolved_manually` boolean + one-time backfill from the legacy
+     `Resolved manually` error text (the ilike text scan it replaces could never
+     use an index and made every stats call a full-table scan)
+   - composite list indexes `(workspace_id, created_at)`, `(workspace_id,
+     status, created_at)`, `(workspace_id, event, created_at)` + a partial
+     resolved index — the `/app/logs` list, filters and head-counts are
+     index-only after this
+   - idempotent (`IF NOT EXISTS` throughout); **required by
+     `src/app/actions/sync-logs.ts`** (status filter + stats read the column —
+     without it those queries 400)
+4. `supabase/migrations/20261010_app_read_speed.sql`
+   - read-path indexes for every hot page query (added 2026-10-10, dashboard
+     connection review): `data_transfers(workspace_id, created_at)` +
+     `(workspace_id, status, created_at)`, `field_mappings(workspace_id)`,
+     `subscriptions(workspace_id, status, end_date)` +
+     `(workspace_id, created_at)`, `sync_queue(workspace_id, created_at)`,
+     `sync_queue_dead(workspace_id, died_at)`, a partial orphan index on
+     `webhook_inbox(store_id, received_at) WHERE pending AND workspace_id IS
+     NULL`, `erp_connections(workspace_id)`, `workspaces(user_id, created_at)`,
+     `users(created_at)`
+   - every index is guarded by `to_regclass` (core tables were created from the
+     Supabase dashboard, outside the migrations folder, so a missing table
+     skips its index instead of failing the file) + `IF NOT EXISTS`
+   - pairs with the code-side fixes of the same date: 45s single-flight
+     `ttlCache` on `getDashboardStats`/`getEventDistribution`/`getDailyActivity`
+     (50 concurrent dashboard loads collapse to one upstream query set), lean
+     selects instead of `select('*')` on counts and admin lists, hard `limit`
+     caps on unbounded list queries, and `getAllClients` scoped to the page's
+     workspaces with optional `{ limit, offset }` pagination
 
 If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.
@@ -930,12 +1000,127 @@ link…" until the user happened to re-add the token by hand.
   (`Unauthenticated delivery #N`, first 3 then every 50th). That counter
   reaching zero is the signal to reject `legacy`, same as Zid.
 - A **missing** secret is still a hard failure in production (500) for the
-  **shopify** route — Shopify genuinely signs. `SALA_WEBHOOK_SECRET` likewise
-  (`salla/route.ts`). Both were added in the same commit as the Zid rule, so
-  check them on any host that never received the vars. **Not migrated:**
-  Salla and Shopify still use one shared env secret each and will 500 if it is
-  unset — the same class of outage Odoo just had, deliberately not fixed in the
-  same change.
+  **shopify** route — Shopify genuinely signs, and nothing derives a fallback
+  for it. **Check it on any host that never received the var.**
+  **Salla is no longer in this class** — see below. **Still not migrated:**
+  Shopify uses one shared env secret and will 500 if it is unset.
+
+### Salla ingress, rewritten 2026-10-05 — it was the live outage, and it is dual-path
+
+`SALLA_WEBHOOK_SECRET` was empty on the host and the route treated that as a hard
+500 **before parsing anything**, so every Salla delivery was lost with no error on
+Salla's side. Setting the var would not have fixed it either: registration
+attached the secret to a `x-erplink-webhook-secret` header that the route never
+read, so only the native signature was ever accepted. Both halves are fixed in
+`src/lib/salla/webhook-auth.ts` + `src/app/api/webhooks/salla/route.ts`.
+
+- **Salla does sign natively**, unlike Zid. `signature` is the default strategy
+  for every Partner App: `X-Salla-Security-Strategy: signature` plus
+  `X-Salla-Signature` = HMAC-SHA256 hex of the **raw** body, keyed with the
+  Portal secret. Verified first when the host holds that secret. The raw-body
+  requirement is why the route reads `await req.text()` and never re-stringifies.
+- **The derived header is the always-on path.** Registration attaches
+  `x-erplink-webhook-secret`, HKDF-derived from `ENCRYPTION_KEY` under
+  `salla-webhook-header:v1` — no new host env var, and `ENCRYPTION_KEY` is
+  already guaranteed in production. Same reasoning and same operational class as
+  the Zid and Odoo credentials: **rotating `ENCRYPTION_KEY` invalidates it and
+  requires re-registration.**
+- ⚠️ **Salla's docs contradict themselves about the `token` strategy, and we
+  resolved it deliberately.** The strategy table and the AsyncAPI spec both put
+  the token in `Authorization`; one prose paragraph instead claims a 32-char
+  SHA256 of the request body in `X-Salla-Signature` — the Signature section
+  copied with the name swapped, and impossible, since a hash of *this* body
+  cannot be a token stored ahead of time. **We follow the table and the spec:
+  `Authorization`, compared statically.** Hashing it would 401 every legitimate
+  token delivery. This is defence in depth, not an outage fix — the app is on
+  `signature`, so a stray token delivery previously classified `legacy`.
+- **Four-way classification** `ok` / `invalid` / `legacy` / `unconfigured`, with
+  `unconfigured` reachable **only** when nothing is derivable *and* no env secret
+  (dev). A signed delivery on a secretless host is `legacy`, never
+  `unconfigured` — failing closed there is the outage itself. The derived header
+  is compared **first**, so a wrong header is `invalid` rather than falling
+  through to a signature check.
+- **Legacy deliveries are accepted** and counted (`Unauthenticated delivery #N`,
+  first 3 then every 50th); that counter reaching zero is the signal to drop the
+  `legacy` branch. `app.uninstalled` is refused for unauthenticated callers —
+  it deletes the merchant's tokens and `merchant_id` is in the payload.
+- **Re-registration: `POST /api/admin/salla-webhooks/refresh`** (Clerk +
+  `isAdmin`, also a button on `/app/admin`). It **re-subscribes**, it does not
+  delete first: Salla's `/webhooks/subscribe` upserts by URL, so there is no
+  outage window — the opposite trade-off from Zid (delete-then-create) and Odoo
+  (create-before-delete). It refuses to touch anything when no credential is
+  derivable, and registers stores sequentially.
+- `registerSallaWebhooks` now returns
+  `SallaWebhookRegistrationResult { registered, failed, credentialAttached }`
+  instead of a bare count, so a partial failure is reportable instead of only
+  warnable. The OAuth callback passes `undefined` rather than the env value — an
+  empty string used to mean "attach no header at all".
+- ⚠️ **The webhook event catalogue was wrong and is now verified.** An earlier
+  pass added `order.shipment.ready`, `order.shipment.in_transit`,
+  `order.shipment.out_for_delivery`, `order.shipment.delivered`,
+  `order.shipment.updated`, `order.shipment.deleted`, `product.publish`,
+  `abandoned.cart.update` and `abandoned.cart.purchased` — **none of which
+  Salla publishes.** They were counted in `failed` and warned, so it was loud,
+  but the deliver preset still had nothing real to fire on. Verified against the
+  Portal's `salla_events action=list` for this app, cross-checked with
+  `https://docs.salla.dev/webhooks`. `tests/unit/salla-webhook-auth.test.ts`
+  now holds the published catalogue as an allowlist and fails on any slug that is
+  not in it — **do not add a slug from memory; verify it first.**
+  - The real shipment family is `order.shipment.{creating,created,cancelled}` and
+    `order.shipment.return.{creating,created,cancelled}`, all of which map to the
+    `orders` entity because the name contains `order`. Salla's **bare**
+    `shipment.*` events also exist and are the tempting choice, but they map to
+    **no entity** in `webhook-gate.ts`, so they would be enqueued with nothing to
+    sync against. Subscribe the `order.`-prefixed ones only.
+  - `product.available` is struck through in Salla's own list as deprecated;
+    `product.quantity.low` is the live one.
+  - ⚠️ **`category.deleted` does not exist** — it predates this work and was
+    asserted in a test as "needed, without it delete sync can never run". Salla's
+    category catalogue is `created`/`updated` only. It was removed: subscribing a
+    non-existent event buys nothing. **But note it does not reliably *error*** —
+    the app-level `webhook_config.development.subscribed_events` in the Portal
+    still carries `product.publish`, `abandoned.cart.update`,
+    `abandoned.cart.purchased`, `product.available` and the `store.branch.*`
+    family, none of which the Portal offers in `salla_events action=list`. So an
+    unknown slug can persist silently rather than fail the call, which means the
+    per-store `failed` counter is **not** a complete picture of what is live —
+    inspect the Portal list directly. The engine's category-**delete** path is
+    real but **not webhook-drivable**; do not re-add the subscription as if it
+    were.
+- **Portal state for app `1691480817` ("ERP لينك" / "ERPLink"), verified
+  2026-10-05.** `status: development`, `subscribers: 0`, `latest_publication:
+  null`, `approved: null`, `is_publishable: false`. So **no merchant store exists
+  on this app yet** — every store is a demo store, and demo stores get app-level
+  config changes immediately, while merchants' live stores only get them after a
+  publication is approved. Two consequences: a per-store
+  `POST /api/admin/salla-webhooks/refresh` has nothing real to re-register until
+  there is a live store, and the publication itself is blocked until the merchant
+  settings form (`settings: null`) and its sections are filled.
+- ⚠️ **All three Portal URLs are three *different* ephemeral ngrok subdomains** —
+  `app_url` `bd46-…`, `redirect_urls` `6f06-…`, `webhook_url` `a77d-…`. Any ngrok
+  restart mints new ones, which silently breaks OAuth callbacks and webhook
+  delivery. Set them to one real domain before treating any of this as
+  production, then re-run the refresh.
+- The Portal **does** hold a 64-hex `webhook_secret` and `webhook_security_strategy:
+  signature`. That value is the `SALLA_WEBHOOK_SECRET` for the native HMAC path —
+  read it from the Portal, never paste it into a file or a log.
+- The `carts` scope is **deselected**, which is why `abandoned.cart` is not
+  subscribed (the slug is real; there is simply no scope to deliver it).
+- **A stale delivery is saved, not discarded.** `STALE_EVENT_MAX_AGE_MS` (15 min)
+  still refuses to *enqueue* a late redelivery, because re-running it would push
+  an old price/status over newer state. It is no longer silently dropped: it is
+  written to `webhook_inbox` with a **null `workspace_id`**, which
+  `drainWebhookInbox` excludes by query — durable and recoverable by hand, but
+  unable to regress the store on its own. This matters because
+  `reconcileZidOrders` has **no Salla peer**, so nothing else would ever recover
+  a genuinely late event. A failed write there returns 503, not 2xx.
+- **Salla order enrichment is no longer size-based.** `keys.length <= 4` let an
+  `order.updated` payload with a dozen fields but no `items` through untouched,
+  writing an Odoo order with no line items that looked like it had synced.
+  Enrichment is now driven by `items` being absent for `order.*`; the size
+  heuristic remains for customers and categories.
+
+
 - The OAuth `connect` routes are deliberately **unauthenticated**: Shopify and
   Zid redirect to them and they are stateless entry points. The real boundary
   is each `callback`, which now resolves the Clerk session and the active

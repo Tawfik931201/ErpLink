@@ -4,9 +4,11 @@ import {
   authorizeOdooWebhook,
   odooStockSecretScope,
 } from '@/lib/odoo/webhook-secret'
+import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
+import { isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -29,9 +31,21 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * (each customer's Automated Action must be reconfigured).
  */
 export async function POST(req: NextRequest) {
+  const getHeader = (name: string) => req.headers.get(name)
+  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'odoo-stock-webhook'), 120, 60_000)
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   let payload: any = {}
   try {
     const raw = await req.text()
+    if (raw && isWebhookBodyTooLarge(raw)) {
+      return NextResponse.json(
+        { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
+        { status: 413 }
+      )
+    }
     if (raw) payload = JSON.parse(raw)
   } catch {
     // ignore malformed body

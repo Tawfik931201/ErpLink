@@ -45,8 +45,9 @@ export const ZID_EVENT_MAP: Record<string, string> = {
 }
 
 /**
- * The 7 core events auto-registered on connect. They cover ~90% of ERP value
- * (catalog + sales + customer). Everything else is opt-in from Advanced settings.
+ * The 12 core events auto-registered on connect. They cover catalog (products
+ * + categories, full create/update/delete), sales (all order events) and
+ * customers. Everything else is opt-in from Advanced settings.
  */
 export const ZID_CORE_EVENTS = [
   'order_create',
@@ -55,10 +56,12 @@ export const ZID_CORE_EVENTS = [
   'product_create',
   'product_update',
   'product_delete',
+  'product_publish',
   'customer_create',
   'customer_update',
   'category_create',
   'category_update',
+  'category_delete',
 ]
 
 interface MerchantAuthHeaders {

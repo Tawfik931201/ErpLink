@@ -30,6 +30,9 @@ async function timeout<T>(operation: PromiseLike<T>): Promise<T> {
 export async function GET(request: NextRequest) {
   const store = request.nextUrl.searchParams.get('store') || ''
   const entity = request.nextUrl.searchParams.get('entity') || ''
+  // Multi-store: merchant_id (zid/salla) or shop_domain (shopify). Empty =
+  // platform defaults (backward compatible with callers that pass none).
+  const storeId = request.nextUrl.searchParams.get('storeId') || ''
 
   if (!STORES.has(store) || !ENTITIES.has(entity)) {
     return NextResponse.json({ error: 'Invalid mapping settings request' }, { status: 400 })
@@ -46,35 +49,47 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    // Per-store row first, platform default ('') as fallback. maybeSingle is
+    // never used here: a store row plus the platform row would trip it.
     const settingsQuery = supabase
       .from('standard_mapping_settings')
-      .select('settings')
+      .select('store_id, settings')
       .eq('workspace_id', user.active_workspace_id)
       .eq('store_type', store)
       .eq('entity_type', entity)
-      .maybeSingle()
+      .in('store_id', storeId ? [storeId, ''] : [''])
 
     const statusQuery = entity === 'orders'
       ? supabase
         .from('order_status_mappings')
-        .select('zid_status, odoo_state, enabled')
+        .select('zid_status, odoo_state, enabled, store_id')
         .eq('workspace_id', user.active_workspace_id)
         .eq('platform', store)
+        .in('store_id', storeId ? [storeId, ''] : [''])
       : Promise.resolve({ data: [], error: null })
 
     const [settingsRes, statusRes] = await timeout(Promise.all([settingsQuery, statusQuery]))
     if (settingsRes.error) throw settingsRes.error
     if (statusRes.error) throw statusRes.error
 
+    const settingsRows = (settingsRes.data || []) as Array<{ store_id: string; settings: unknown }>
+    const settingsHit = settingsRows.find(r => r.store_id === storeId) ?? settingsRows.find(r => r.store_id === '')
+
     const orderStatusMappings: Record<string, { state: string; enabled: boolean }> = {}
-    for (const row of statusRes.data || []) {
+    const byStatus = new Map<string, { state: string; enabled: boolean; store: string }>()
+    for (const row of (statusRes.data || []) as Array<{ zid_status: string; odoo_state: string; enabled?: boolean; store_id?: string }>) {
       if (row.zid_status && row.odoo_state) {
-        orderStatusMappings[row.zid_status] = { state: row.odoo_state, enabled: row.enabled !== false }
+        const prev = byStatus.get(row.zid_status)
+        const rowStore = row.store_id || ''
+        if (!prev || (prev.store === '' && rowStore !== '')) {
+          byStatus.set(row.zid_status, { state: row.odoo_state, enabled: row.enabled !== false, store: rowStore })
+        }
       }
     }
+    for (const [k, v] of byStatus) orderStatusMappings[k] = { state: v.state, enabled: v.enabled }
 
     return NextResponse.json({
-      settings: settingsRes.data?.settings || null,
+      settings: (settingsHit?.settings as unknown) || null,
       orderStatusMappings: entity === 'orders' && Object.keys(orderStatusMappings).length > 0
         ? orderStatusMappings
         : null,

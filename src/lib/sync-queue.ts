@@ -35,6 +35,33 @@ export const MAX_CONCURRENT_PER_WORKSPACE = Number(process.env.SYNC_QUEUE_MAX_PE
 export const SYNC_QUEUE_MAX_RETRIES = 5
 const BASE_BACKOFF_MINUTES = 5
 const MAX_BACKOFF_MINUTES = 360
+/**
+ * وضع الموسم (P3-1): `SYNC_SEASON_MODE=true` يقصّر أول إعادة من 5 دقائق إلى
+ * دقيقة واحدة ويكبح السقف عند 15 دقيقة — تسلسل 1/2/4/8/15 يمنح الطلب فرصه
+ * العادلة الخمس داخل نافذة ~30 دقيقة بدل أن تتجاوزها المحاولات الأولى.
+ * الوضع العادي يبقى كما هو (5/10/20/... بحد 360) خارج الموسم.
+ */
+export function isSeasonMode(): boolean {
+  return process.env.SYNC_SEASON_MODE === 'true'
+}
+function seasonBaseMinutes(): number {
+  return isSeasonMode() ? 1 : BASE_BACKOFF_MINUTES
+}
+
+/**
+ * Pure: يحسب دقائق الانتظار قبل المحاولة رقم newCount (1-based).
+ * مصدَّر خالصاً ليُختبَر بلا قاعدة بيانات.
+ */
+export function computeBackoffMinutes(
+  newCount: number,
+  opts: { rateLimited?: boolean; connRefused?: boolean; season?: boolean } = {}
+): number {
+  const base = opts.season ? 1 : BASE_BACKOFF_MINUTES
+  const cap = opts.season ? 15 : MAX_BACKOFF_MINUTES
+  const floor =
+    opts.rateLimited || opts.connRefused ? Math.max(base, opts.season ? 1 : 5) : base
+  return Math.min(Math.pow(2, Math.max(1, newCount) - 1) * floor, cap)
+}
 const EXHAUSTED_RETENTION_DAYS = 30
 const INBOX_RETENTION_DAYS = 7
 const CLEANUP_THROTTLE_MS = 60 * 60 * 1000 // ساعة واحدة
@@ -44,7 +71,7 @@ const CLEANUP_THROTTLE_MS = 60 * 60 * 1000 // ساعة واحدة
  * NOT NULL (ترحيل قاعدة البيانات لم يُطبَّق بعد). يضمن ألّا يُلتقط الصف
  * مجدداً، مع بقائه محفوظاً في قاعدة البيانات.
  */
-const FROZEN_SENTINEL = '2999-12-31T23:59:59.000Z'
+export const FROZEN_SENTINEL = '2999-12-31T23:59:59.000Z'
 
 // ─── Entity / timestamp / delivery extraction ────────────────────────────────
 
@@ -258,11 +285,11 @@ interface EnqueueParams {
 }
 
 /**
- * Enqueue a failed sync for retry (first retry in 5 minutes).
+ * Enqueue a failed sync for retry (first retry in 5 minutes — 1 in season mode).
  */
 export async function enqueueFailedSync(params: EnqueueParams & { errorMessage: string }) {
   if (!params.workspaceId) return
-  const backoffMinutes = BASE_BACKOFF_MINUTES
+  const backoffMinutes = seasonBaseMinutes()
 
   await supabase.from('sync_queue').insert({
     workspace_id: params.workspaceId,
@@ -589,6 +616,89 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
 }
 
 /**
+ * "إرسال الآن" اليدوي لنطاق مساحة عمل واحدة (P2-2).
+ *
+ * يحجز حتى maxItems من الصفوف المستحقة لهذه المساحة فقط (نفس الحجز الذري
+ * والحجز الزمني للدورة العامة) ثم يعالجها بنفس العامل — فيحترم سقف التوازي
+ * لكل عميل فلا يضرب الزر اليدوي أودوو بعاصفة. يُستخدم من زر التاجر في شاشة
+ * الطابور، لا من cron.
+ *
+ * سقف maxItems مقصود (1..50): الزر اليدوي دفعة تفاعلية لا تصريف موسم.
+ */
+export interface WorkspaceDrainResult {
+  claimed: number
+  processed: number
+  succeeded: number
+  retried: number
+}
+
+export async function processWorkspaceQueue(
+  workspaceId: string,
+  maxItems = 25
+): Promise<WorkspaceDrainResult> {
+  const empty: WorkspaceDrainResult = { claimed: 0, processed: 0, succeeded: 0, retried: 0 }
+  if (!workspaceId) return empty
+  if (process.env.NEXT_PHASE === 'phase-production-build') return empty
+  const limit = Math.min(50, Math.max(1, Math.trunc(maxItems) || 25))
+
+  const metrics = getMetricsStore()
+  const before = { succeeded: metrics.succeeded, retried: metrics.retried }
+  const nowIso = new Date().toISOString()
+
+  let items: QueueItem[] = []
+  try {
+    const { data, error } = await supabase
+      .from('sync_queue')
+      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at')
+      .eq('workspace_id', workspaceId)
+      .not('next_retry_at', 'is', null)
+      .lte('next_retry_at', nowIso)
+      .order('next_retry_at', { ascending: true })
+      .limit(limit)
+    if (error) {
+      metrics.lastError = error.message?.slice(0, 300) ?? 'workspace queue fetch failed'
+      return empty
+    }
+    items = ((data ?? []) as QueueItem[]).filter(
+      (r) => (r.retry_count ?? 0) < (r.max_retries ?? SYNC_QUEUE_MAX_RETRIES)
+    )
+  } catch (err: unknown) {
+    metrics.lastError = err instanceof Error ? err.message.slice(0, 300) : 'workspace queue fetch failed'
+    return empty
+  }
+  if (items.length === 0) return empty
+
+  const CLAIM_LEASE_MS = 15 * 60 * 1000
+  const claimed: QueueItem[] = []
+  for (const item of items) {
+    try {
+      const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
+      const { data: locked } = await supabase
+        .from('sync_queue')
+        .update({ next_retry_at: leaseUntil })
+        .eq('id', item.id)
+        .not('next_retry_at', 'is', null)
+        .lte('next_retry_at', new Date().toISOString())
+        .select('id')
+      if (locked && locked.length > 0) claimed.push(item)
+    } catch {
+      // فشل الحجز غير قاتل — تخطَّ هذا الصف.
+    }
+  }
+  if (claimed.length === 0) return empty
+
+  await processClaimedFairly(claimed)
+
+  const after = getMetricsStore()
+  return {
+    claimed: claimed.length,
+    processed: claimed.length,
+    succeeded: after.succeeded - before.succeeded,
+    retried: after.retried - before.retried,
+  }
+}
+
+/**
  * معالج متزامن ذكي:
  *  - سقف توازي كلي عبر جميع العملاء: SYNC_QUEUE_CONCURRENCY
  *  - سقف توازي لكل عميل / أودو منفرد: MAX_CONCURRENT_PER_WORKSPACE
@@ -679,6 +789,7 @@ async function processOneItem(item: QueueItem) {
       if (result.ok) {
         await supabase.from('sync_queue').delete().eq('id', item.id)
         metrics.succeeded += 1
+        noteWorkspaceSuccess(item.workspace_id)
       } else {
         metrics.retried += 1
         await incrementRetry(item, result.message || 'Sync failed')
@@ -706,10 +817,96 @@ async function processOneItem(item: QueueItem) {
   }
 }
 
+// ─── Circuit breaker لكل عميل (P3-1) ───────────────────────────────────────
+// المشكلة: أودوو عميل واحد ساقط = كل طلباته تفشل 10 ثواني × 5 محاولات، فتحرق
+// slots العامل العشرة وتُبطئ بقية العملاء رغم سقف التوازي. الحل: عدّاد إخفاقات
+// متتالية لكل مساحة (في الذاكرة — الـ runner عملية واحدة)، وعند العتبة تُركن
+// صفوفه المستحقة قريباً إلى ما بعد فترة التهدئة بدل حرق المحاولات. النجاح
+// يصفّر العداد فوراً. الصفوف ذات الـ backoff البعيد (أبعد من التهدئة) لا تُمس.
+const cbFailures = new Map<string, number>()
+const cbParkedUntil = new Map<string, number>()
+
+function cbThreshold(): number {
+  const n = Number(process.env.SYNC_CB_THRESHOLD)
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 10
+}
+
+function cbCooldownMs(): number {
+  const m = Number(process.env.SYNC_CB_COOLDOWN_MIN)
+  const mins = Number.isFinite(m) && m > 0 ? m : 15
+  return mins * 60 * 1000
+}
+
+/** للمراقبة (P3-2): حالة القواطع الحالية. */
+export function getCircuitBreakerState(): Array<{
+  workspaceId: string
+  parkedUntil: string
+  consecutiveFailures: number
+}> {
+  const now = Date.now()
+  const out: Array<{ workspaceId: string; parkedUntil: string; consecutiveFailures: number }> = []
+  for (const [ws, until] of cbParkedUntil) {
+    if (until > now) {
+      out.push({
+        workspaceId: ws,
+        parkedUntil: new Date(until).toISOString(),
+        consecutiveFailures: cbFailures.get(ws) ?? 0,
+      })
+    }
+  }
+  return out
+}
+
+function noteWorkspaceSuccess(workspaceId: string | null | undefined): void {
+  if (!workspaceId) return
+  cbFailures.delete(workspaceId)
+}
+
+/** تنظيف ذاكرة القاطع عند حذف مساحة عمل — لا تبقى حالة لعميل رحل. */
+export function clearWorkspaceFailureState(workspaceId: string): void {
+  if (!workspaceId) return
+  cbFailures.delete(workspaceId)
+  cbParkedUntil.delete(workspaceId)
+}
+
+async function noteWorkspaceFailure(
+  workspaceId: string | null | undefined,
+  errorMessage?: string
+): Promise<void> {
+  if (!workspaceId) return
+  const count = (cbFailures.get(workspaceId) ?? 0) + 1
+  cbFailures.set(workspaceId, count)
+  if (count < cbThreshold()) return
+  const now = Date.now()
+  if ((cbParkedUntil.get(workspaceId) ?? 0) > now) return // مركون أصلاً
+  const until = now + cbCooldownMs()
+  const untilIso = new Date(until).toISOString()
+  cbParkedUntil.set(workspaceId, until)
+  cbFailures.set(workspaceId, 0)
+  try {
+    // فقط الصفوف المستحقة قبل نهاية التهدئة — البعيدة تُترك لموعدها.
+    await supabase
+      .from('sync_queue')
+      .update({
+        next_retry_at: untilIso,
+        error_message: `circuit-breaker parked after ${count} consecutive failures: ${(errorMessage || '').slice(0, 200)}`,
+      })
+      .eq('workspace_id', workspaceId)
+      .not('next_retry_at', 'is', null)
+      .lte('next_retry_at', untilIso)
+    getMetricsStore().lastError = `circuit-breaker parked workspace ${workspaceId.slice(0, 8)}… for ${Math.round(cbCooldownMs() / 60000)}min`
+  } catch {
+    // الركن best-effort — الفشل هنا لا يوقف المحاولات العادية.
+  }
+}
+
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const metrics = getMetricsStore()
   const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
+
+  // كل فشل يمر من هنا — نقطة الربط الوحيدة لقاطع الدائرة لكل عميل.
+  await noteWorkspaceFailure(item.workspace_id, errorMessage).catch(() => {})
 
   if (newCount >= maxRetries) {
     // استُنفدت المحاولات — يُجمَّد الصف (next_retry_at = NULL) للمراجعة اليدوية.
@@ -741,11 +938,15 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
     }
   } else {
     // Backoff أسّي مع jitter: يتعرّف على 429 و502/ECONNREFUSED فيمنح
-    // السيرفر وقتاً للتعافي بدل إعادة الضرب فوراً.
+    // السيرفر وقتاً للتعافي بدل إعادة الضرب فوراً. وضع الموسم
+    // (SYNC_SEASON_MODE=true) يقصّر التسلسل ليناسب نافذة 30 دقيقة.
     const isRateLimited = typeof errorMessage === 'string' && (/429|rate\s*limit|too\s*many\s*requests/i).test(errorMessage)
     const isConnRefused = typeof errorMessage === 'string' && (/ECONNREFUSED|ETIMEDOUT|502|504/i).test(errorMessage)
-    const baseMinutes = isRateLimited || isConnRefused ? Math.max(BASE_BACKOFF_MINUTES, 5) : BASE_BACKOFF_MINUTES
-    const backoffMinutes = Math.min(Math.pow(2, newCount - 1) * baseMinutes, MAX_BACKOFF_MINUTES)
+    const backoffMinutes = computeBackoffMinutes(newCount, {
+      rateLimited: isRateLimited,
+      connRefused: isConnRefused,
+      season: isSeasonMode(),
+    })
     const jitterMs = Math.floor(Math.random() * 60_000)
     await supabase
       .from('sync_queue')

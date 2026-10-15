@@ -40,6 +40,31 @@ export function resolveZidShippingCost(zidData: Record<string, unknown>): number
       }
     }
   } catch { /* fall through to path candidates */ }
+  // Shopify carries the fee in `shipping_lines[]` (one row per rate) and in
+  // `total_shipping_price_set.shop_money.amount`. Zid payloads have neither
+  // key, so this branch is a no-op for them (pinned by subscription-dates /
+  // zid-order-helpers tests).
+  try {
+    const lines = zidData.shipping_lines
+    if (Array.isArray(lines) && lines.length > 0) {
+      let sum = 0
+      for (const row of lines) {
+        const r = (row && typeof row === 'object') ? row as Record<string, unknown> : {}
+        const raw = r.price ?? r.amount ?? r.total
+        if (raw === undefined || raw === null || typeof raw === 'object') continue
+        const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+        if (!isNaN(num) && num > 0) sum += num
+      }
+      if (sum > 0) return sum
+    }
+    const set = zidData.total_shipping_price_set as Record<string, unknown> | undefined
+    const shopMoney = set?.shop_money as Record<string, unknown> | undefined
+    const setRaw = shopMoney?.amount ?? (set as Record<string, unknown> | undefined)?.amount
+    if (setRaw !== undefined && setRaw !== null && typeof setRaw !== 'object') {
+      const num = parseFloat(String(setRaw).replace(/[^0-9.\-]/g, ''))
+      if (!isNaN(num) && num > 0) return num
+    }
+  } catch { /* fall through to path candidates */ }
   const candidates = [
     'amounts.shipping_cost.amount',
     'amounts.delivery_cost.amount',
@@ -49,6 +74,9 @@ export function resolveZidShippingCost(zidData: Record<string, unknown>): number
     'shipping.cost',
     'shipping.amount',
     'amounts.shipping_cost',
+    // Shopify flat fallbacks (the array/set shapes are handled above).
+    'total_shipping_price',
+    'shipping_lines.0.price',
   ]
   for (const path of candidates) {
     const raw = resolvePath(zidData, path)
@@ -113,7 +141,15 @@ export function resolveZidCodAmount(zidData: Record<string, unknown>): number {
 /**
  * Detect whether the destination shipping address of an order is within Saudi Arabia.
  * Checks shipping_address, shipping.address, order.shipping_address, delivery_address,
- * customer address, and falls back to city and phone prefix.
+ * the Salla shipment destination (shipments[0].ship_to), customer address, and
+ * falls back to city and phone prefix.
+ *
+ * Cross-platform by design: Zid uses shipping_address/country objects, Salla
+ * uses shipping.address ({country, country_code, city} strings), a customer
+ * object ({country, city, mobile, mobile_code}) and shipments[].ship_to.
+ * Verified against Salla's published order payload (docs.salla.dev/doc-433804):
+ * non-Saudi orders carry e.g. customer.country "الامارات" with mobile
+ * "+971..." while Saudi ones carry country "SA"/"السعودية".
  */
 export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolean {
   if (!zidData || typeof zidData !== 'object') return true
@@ -124,6 +160,7 @@ export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolea
     (zidData as any)?.order?.shipping_address,
     (zidData as any)?.order?.shipping?.address,
     (zidData as any)?.delivery_address,
+    (zidData as any)?.shipments?.[0]?.ship_to,
     (zidData as any)?.shipping,
     (zidData as any)?.billing_address,
     (zidData as any)?.customer?.address,
@@ -145,11 +182,17 @@ export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolea
   if (typeof rawCountry === 'string') {
     countryStr = rawCountry.trim()
   } else if (rawCountry && typeof rawCountry === 'object') {
+    // Salla/branch-style objects use name_en alongside code/name.
+    const nm = rawCountry.name
+    const nameStr = typeof nm === 'string'
+      ? nm
+      : String(nm?.ar || nm?.en || nm?.name_en || '')
     countryStr = String(
       rawCountry.code ||
       rawCountry.country_code ||
-      rawCountry.name ||
+      nameStr ||
       rawCountry.en ||
+      rawCountry.name_en ||
       rawCountry.ar ||
       ''
     ).trim()
@@ -173,12 +216,13 @@ export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolea
     return false
   }
 
-  // Fallback: Check city name
+  // Fallback: Check city name (Salla also carries a top-level customer.city)
   const cityCandidates = [
     (zidData as any)?.shipping_address?.city,
     (zidData as any)?.shipping?.address?.city,
     (zidData as any)?.order?.shipping_address?.city,
     (zidData as any)?.delivery_address?.city,
+    (zidData as any)?.customer?.city,
     (zidData as any)?.city,
   ]
   const saudiCities = [
@@ -190,21 +234,32 @@ export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolea
   ]
   for (const rawCity of cityCandidates) {
     if (!rawCity) continue
-    const cityStr = (typeof rawCity === 'string' ? rawCity : (rawCity.name || rawCity.en || rawCity.ar || '')).trim().toLowerCase()
+    const cityStr = (
+      typeof rawCity === 'string'
+        ? rawCity
+        : (rawCity.name || rawCity.name_en || rawCity.en || rawCity.ar || '')
+    ).trim().toLowerCase()
     if (cityStr && saudiCities.some(c => cityStr.includes(c))) {
       return true
     }
   }
 
-  // Fallback: Check phone prefix (e.g. +966, 05...)
+  // Fallback: Check phone prefix. Salla sends the national number bare
+  // (e.g. mobile 501806978) with the country in mobile_code ("+966"), so the
+  // code is composed in when the number itself carries no international
+  // prefix. Digit-normalised: equivalent to the old +966/00966/966/05 checks.
+  const cust = (zidData as any)?.customer
   const phone = String(
-    (zidData as any)?.customer?.phone ||
-    (zidData as any)?.customer?.mobile ||
+    cust?.phone ||
+    cust?.mobile ||
     (zidData as any)?.shipping_address?.phone ||
     (zidData as any)?.shipping_address?.mobile ||
     ''
   ).trim()
-  if (phone.startsWith('+966') || phone.startsWith('00966') || phone.startsWith('966') || phone.startsWith('05')) {
+  const mobileCode = String(cust?.mobile_code || '').trim()
+  const dialled = (!/^(?:\+|00)/.test(phone) && mobileCode) ? `${mobileCode}${phone}` : phone
+  const digits = dialled.replace(/\D/g, '')
+  if (/^05/.test(digits) || digits.replace(/^0+/, '').startsWith('966')) {
     return true
   }
 
@@ -227,7 +282,10 @@ export function resolveZidStatus(zidData: Record<string, unknown>): string {
     || ''
   let statusStr = ''
   if (typeof raw === 'object' && raw !== null) {
-    statusStr = String(raw.code || raw.status || raw.id || raw.name || '')
+    // Salla sends {id, name, slug} — the slug is the canonical key
+    // (id is a numeric row id, useless for matching). Zid objects carry
+    // code/status, so preferring slug first is a no-op for them.
+    statusStr = String(raw.slug || raw.code || raw.status || raw.id || raw.name || '')
   } else {
     statusStr = String(raw || '')
   }
@@ -250,6 +308,13 @@ export function resolveZidStatus(zidData: Record<string, unknown>): string {
     'استرجاع': 'reversed',
     'مسترجع جزئيا': 'partially_reversed',
     'جاري الاسترجاع': 'reverse_in_progress',
+    // Salla Arabic display names (docs.salla.dev examples: 'بإنتظار
+    // المراجعة' on under_review, 'تم التنفيذ' on completed) → canonical
+    // slugs, so the Odoo custom selection field and the status-mapping
+    // rows match instead of receiving raw Arabic text.
+    'بإنتظار المراجعة': 'under_review',
+    'بانتظار المراجعة': 'under_review',
+    'تم التنفيذ': 'completed',
   }
   return ARABIC_TO_KEY[statusStr] || statusStr
 }

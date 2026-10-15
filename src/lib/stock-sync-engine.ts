@@ -1,14 +1,21 @@
 /**
- * Odoo → Zid Stock Sync Engine
+ * Odoo → Store Stock Sync Engine (Zid + Salla)
  *
- * Real-time inventory sync from Odoo to Zid (per linked location pair).
+ * Real-time inventory sync from Odoo to the linked store (per paired
+ * Odoo location ↔ store location/branch).
  *
  * Direction: Odoo is the source of truth for stock when the "مزامنة المخزون"
  * checkbox is enabled in the Products tab (mapping-center). Purchases, sales,
  * inventory adjustments and production in Odoo all write `stock.quant`, an Odoo
  * Automated Action notifies our webhook route, which enqueues into sync_queue,
  * and this module reads the current balance from Odoo and updates the matching
- * Zid product at the paired Zid location.
+ * product in each enabled store (Zid, Salla).
+ *
+ * The engine keeps the Zid path exactly as it was when only Zid existed: for a
+ * Zid-only workspace, `runZidArm` reproduces the original flow verbatim (same
+ * skip messages, same log/telegram/throw behavior). Salla runs as a second,
+ * independent arm with the same pairing model, matched against `x_salla_id` /
+ * `salla_id` / sku / barcode / name and pushed via Salla's bulk quantities API.
  *
  * `processOdooStockEvent` is invoked from the sync-queue runner for
  * platform='odoo' items. It returns { ok:true } for skips (feature disabled,
@@ -17,8 +24,9 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { decrypt } from './crypto'
-import { getInventorySyncSettings } from './inventory-sync-settings'
+import { getInventorySyncSettings, isInventorySyncActive, type InventorySyncSettings } from './inventory-sync-settings'
 import { OdooClient } from './odoo-client'
+import { findSallaProductByMatchField, SALLA_DEFAULT_BRANCH_ID, updateSallaStockBulk } from './salla-client'
 import { getAccessToken } from './zid/token'
 import { ZidAPI, type ZidCredentials } from './zid-client'
 
@@ -35,13 +43,22 @@ interface ProcessResult {
 
 /**
  * نتيجة الدفع لمنتج واحد.
- *   pushed  — الرصيد وصل زد.
- *   skipped — لا يوجد ما يُفعل (المنتج غير مربوط بمنتج زد، أو مخزونه غير
- *             محدود في زد). هذه حالة دائمة لا تحلها إعادة المحاولة، فحسابها
- *            فشلاً كان يحرق خمس محاولات ثم يذهب الصف إلى صندوق الموتى.
+ *   pushed  — الرصيد وصل المتجر.
+ *   skipped — لا يوجد ما يُفعل (المنتج غير مربوط بمنتج المتجر، أو مخزونه
+ *             غير محدود في المتجر). هذه حالة دائمة لا تحلها إعادة المحاولة،
+ *             فحسابها فشلاً كان يحرق خمس محاولات ثم يذهب الصف إلى صندوق الموتى.
  *   failed  — خطأ عابر (شبكة/مصادقة/حدRate) ⇒ يستحق إعادة المحاولة.
  */
 type PushOutcome = 'pushed' | 'skipped' | 'failed'
+
+/** Result of one store arm that did real work. */
+interface ArmResult {
+  worked: boolean
+  transferred: number
+  skipped: number
+  failed: number
+  errors: string[]
+}
 
 function toInt(v: unknown): number | null {
   if (v === undefined || v === null || v === '') return null
@@ -53,8 +70,9 @@ function toInt(v: unknown): number | null {
 
 /**
  * رسالة خطأ مفيدة. axios يبتلع جسم الاستجابة في `message` ويكتفي بـ
- * "Request failed with status code 400" — وهو لا يقول شيئاً عن سبب رفض زد.
- * هنا نُخرج تفاصيل Zid (رسائل التحقق) لأن تشخيص 400 بدونها مستحيل.
+ * "Request failed with status code 400" — وهو لا يقول شيئاً عن سبب رفض
+ * المتجر. هنا نُخرج تفاصيل الاستجابة (رسائل التحقق) لأن تشخيص 400 بدونها
+ * مستحيل.
  */
 function describeError(err: unknown): string {
   const e = err as {
@@ -86,13 +104,19 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
   const workspaceId = String(payload.workspace_id || '')
   if (!workspaceId) return { ok: true, skipped: true }
 
-  const settings = await getInventorySyncSettings(workspaceId)
-  if (!settings.sync_enabled) {
+  // Load per-platform dispatch gates — a platform runs when its default OR
+  // any linked store enabled the push. Each store then runs with its own
+  // effective settings inside the arms below.
+  const [zidEnabled, sallaEnabled] = await Promise.all([
+    isInventorySyncActive(workspaceId, 'zid'),
+    isInventorySyncActive(workspaceId, 'salla'),
+  ])
+  if (!zidEnabled && !sallaEnabled) {
     console.info('[StockSync] Odoo stock event ignored — inventory sync is disabled.')
     return { ok: true, skipped: true }
   }
 
-  // 1. Odoo connection
+  // 1. Odoo connection (shared — Odoo is the single source of truth)
   const { data: erpConn } = await supabaseAdmin
     .from('erp_connections')
     .select('*')
@@ -109,16 +133,91 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     apiKey: decrypt(erpConn.password),
   })
 
-  // 2. Zid token (stock is pushed to the Zid store only)
-  const { data: zidTok } = await supabaseAdmin
-    .from('merchant_tokens')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .maybeSingle()
-  if (!zidTok) {
-    console.warn('[StockSync] No Zid token for workspace', workspaceId)
+  // 2. Dispatch each enabled store arm. Each arm fans out per linked store
+  // (each with its own effective settings) and logs its own transfer row,
+  // so every enabled store gets full bookkeeping.
+  const results: ArmResult[] = []
+  if (zidEnabled) {
+    const res = await runZidArm({ workspaceId, client, erpConn, settings: await getInventorySyncSettings(workspaceId, 'zid'), payload })
+    if (res) results.push(res)
+  }
+  if (sallaEnabled) {
+    const res = await runSallaArm({ workspaceId, client, settings: await getInventorySyncSettings(workspaceId, 'salla'), payload })
+    if (res) results.push(res)
+  }
+
+  // Skips لا تُعدّ فشلاً: لا تعالجها إعادة المحاولة. نعيد ok طالما نجحت
+  // محاولة واحدة على الأقل، وإلا نُبلّغ العميل بالسبب الحقيقي.
+  const worked = results.filter((r) => r.worked)
+  const allFailed = worked.filter((r) => r.failed > 0 && r.transferred === 0 && r.skipped === 0)
+  if (allFailed.length > 0) {
+    const reasons = allFailed.map((r) => (r.errors.length ? r.errors.join(' ; ') : '')).filter(Boolean)
+    throw new Error(
+      `[StockSync] All stock updates failed: ${reasons.length ? reasons.join(' ; ') : 'no reason recorded'}`
+    )
+  }
+  if (worked.length === 0) {
     return { ok: true, skipped: true }
   }
+  return { ok: true, transferred: worked.reduce((sum, r) => sum + r.transferred, 0) }
+}
+
+/** Merge per-store arm results (multi-store fan-out) into one. */
+function mergeArmResults(results: (ArmResult | null)[], tag: (i: number) => string): ArmResult | null {
+  const done = results.filter((r): r is ArmResult => !!r && r.worked)
+  if (done.length === 0) return null
+  return {
+    worked: true,
+    transferred: done.reduce((s, r) => s + r.transferred, 0),
+    skipped: done.reduce((s, r) => s + r.skipped, 0),
+    failed: done.reduce((s, r) => s + r.failed, 0),
+    errors: done.flatMap((r, i) => r.errors.map(e => `${tag(i)} ${e}`)),
+  }
+}
+
+// ─── Zid arm (preserved verbatim from the pre-Salla engine) ──────────────────
+
+async function runZidArm(args: {
+  workspaceId: string
+  client: OdooClient
+  erpConn: any
+  settings: InventorySyncSettings
+  payload: Record<string, unknown>
+  /** Multi-store fan-out: when set, push to this store only. */
+  storeTok?: any
+}): Promise<ArmResult | null> {
+  const { workspaceId, client, erpConn, settings, payload } = args
+
+  // Multi-store: push the same stock event to EVERY linked Zid store, each
+  // with full bookkeeping (the body below logs per store). Pairs in
+  // warehouse_mappings are platform-level; a pair pointing at a location id
+  // the store does not know simply fails that push visibly in the log.
+  if (!args.storeTok) {
+    const { data: toks } = await supabaseAdmin
+      .from('merchant_tokens')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    if (!toks || toks.length === 0) {
+      console.warn('[StockSync] No Zid token for workspace', workspaceId)
+      return null
+    }
+    const perStore: (ArmResult | null)[] = []
+    for (const t of toks) {
+      // Each store runs with its own effective settings (store row, else the
+      // platform default) — a store that turned its push off is skipped.
+      const s = await getInventorySyncSettings(workspaceId, 'zid', String((t as any).merchant_id))
+      if (!s.sync_enabled) {
+        console.info(`[StockSync] Inventory push disabled for Zid store ${(t as any).merchant_id} — skipping.`)
+        continue
+      }
+      perStore.push(await runZidArm({ ...args, settings: s, storeTok: t }))
+    }
+    return mergeArmResults(perStore, i => `[store ${(toks[i] as any)?.merchant_id}]`)
+  }
+
+  // 2. Zid token (stock is pushed to this Zid store)
+  const zidTok = args.storeTok
   const tokenData = await getAccessToken(zidTok.merchant_id)
   const zidCreds: ZidCredentials = {
     authorization: tokenData.authorization || '',
@@ -140,38 +239,16 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
   }
   if (pairByOdooLoc.size === 0) {
     console.info('[StockSync] No warehouse location pairs configured for workspace', workspaceId)
-    return { ok: true, skipped: true }
+    return null
   }
 
   // 4. Identify the affected Odoo product + location
-  let odooProductId = toInt(payload.product_id)
-  let odooLocationId = toInt(payload.location_id)
-  const quantId = toInt(payload.quant_id)
-
-  const quantFields: Array<[number, number]> = []
-  if (odooProductId && odooLocationId) {
-    quantFields.push([odooProductId, odooLocationId])
-  } else {
-    // Resolve from the quant itself
-    try {
-      const qid = quantId || (await findQuantForProduct(client, odooProductId)) || null
-      if (qid) {
-        const q = await readQuant(client, qid)
-        if (q) {
-          odooProductId = q.product_id
-          odooLocationId = q.location_id
-          quantFields.push([q.product_id, q.location_id])
-        }
-      }
-    } catch (err: any) {
-      console.warn('[StockSync] Failed to resolve quant record:', err?.message ?? err)
-    }
-  }
-
-  if (!odooProductId || !odooLocationId) {
+  const target = await identifyStockTarget(client, payload)
+  if (!target) {
     console.info('[StockSync] No product/location to sync for workspace', workspaceId)
-    return { ok: true, skipped: true }
+    return null
   }
+  const { odooProductId, odooLocationId, quantId, quantFields } = target
 
   // Only sync locations the user paired via the mapping-center UI
   const filtered = quantFields.filter(([pid, loc]) => {
@@ -182,7 +259,7 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     const zidLocOnly = pairByOdooLoc.get(odooLocationId)
     if (!zidLocOnly) {
       console.info(`[StockSync] Location #${odooLocationId} is not paired — skipping.`)
-      return { ok: true, skipped: true }
+      return null
     }
     filtered.push([odooProductId, odooLocationId])
   }
@@ -216,6 +293,7 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
 
   await logStockTransfer({
     workspaceId,
+    name: `Stock Sync — Odoo → Zid`,
     direction: 'odoo_to_zid',
     transferred,
     failed,
@@ -270,17 +348,227 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     // best-effort
   }
 
-  // Skips لا تُعدّ فشلاً: لا تعالجها إعادة المحاولة. نعيد ok طالما نجحت
-  // محاولة واحدة على الأقل، وإلا نُبلّغ العميل بالسبب الحقيقي.
-  if (failed > 0 && transferred === 0 && skipped === 0) {
-    throw new Error(
-      `[StockSync] All stock updates failed: ${errors.length ? errors.join(' ; ') : 'no reason recorded'}`
-    )
+  return { worked: true, transferred, skipped, failed, errors }
+}
+
+// ─── Salla arm ───────────────────────────────────────────────────────────────
+
+async function runSallaArm(args: {
+  workspaceId: string
+  client: OdooClient
+  settings: InventorySyncSettings
+  payload: Record<string, unknown>
+  /** Multi-store fan-out: when set, push to this store only. */
+  storeTok?: any
+}): Promise<ArmResult | null> {
+  const { workspaceId, client, settings, payload } = args
+
+  // Multi-store: same fan-out as runZidArm — every linked Salla store gets
+  // the push with its own bookkeeping.
+  if (!args.storeTok) {
+    const { data: toks } = await supabaseAdmin
+      .from('salla_tokens')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    if (!toks || toks.length === 0) {
+      console.warn('[StockSync] No Salla token for workspace', workspaceId)
+      return null
+    }
+    const perStore: (ArmResult | null)[] = []
+    for (const t of toks) {
+      const s = await getInventorySyncSettings(workspaceId, 'salla', String((t as any).merchant_id))
+      if (!s.sync_enabled) {
+        console.info(`[StockSync] Inventory push disabled for Salla store ${(t as any).merchant_id} — skipping.`)
+        continue
+      }
+      perStore.push(await runSallaArm({ ...args, settings: s, storeTok: t }))
+    }
+    return mergeArmResults(perStore, i => `[store ${(toks[i] as any)?.merchant_id}]`)
   }
-  return { ok: true, transferred }
+
+  // 1. Salla token + merchant id (stock is pushed to this Salla store)
+  const sallaTok = args.storeTok
+  if (!sallaTok?.merchant_id) {
+    console.warn('[StockSync] No Salla token for workspace', workspaceId)
+    return null
+  }
+  const merchantId = String(sallaTok.merchant_id)
+
+  // 2. Location pairing (Salla branch ↔ Odoo stock.location). A mapping whose
+  // source_location_id is SALLA_DEFAULT_BRANCH_ID means "Salla default branch"
+  // (the engine then omits `branch` from the bulk call).
+  const { data: whRows } = await supabaseAdmin
+    .from('warehouse_mappings')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .eq('platform', 'salla')
+  const pairByOdooLoc = new Map<number, string>()
+  for (const row of whRows || []) {
+    const odooLoc = toInt(row.odoo_location_id)
+    const sallaLoc = String(row.source_location_id || '')
+    if (odooLoc && sallaLoc) pairByOdooLoc.set(odooLoc, sallaLoc)
+  }
+  if (pairByOdooLoc.size === 0) {
+    console.info('[StockSync] No warehouse location pairs configured for workspace (salla)', workspaceId)
+    return null
+  }
+
+  // 3. Identify the affected Odoo product + location
+  const target = await identifyStockTarget(client, payload)
+  if (!target) {
+    console.info('[StockSync] No product/location to sync for workspace (salla)', workspaceId)
+    return null
+  }
+  const { odooProductId, odooLocationId, quantId, quantFields } = target
+
+  // Only sync locations the user paired via the mapping-center UI
+  const filtered = quantFields.filter(([pid, loc]) => {
+    const sallaLoc = pairByOdooLoc.get(Number(loc))
+    return Boolean(sallaLoc) && pid
+  })
+  if (filtered.length === 0) {
+    const sallaLocOnly = pairByOdooLoc.get(odooLocationId)
+    if (!sallaLocOnly) {
+      console.info(`[StockSync] Location #${odooLocationId} is not paired (salla) — skipping.`)
+      return null
+    }
+    filtered.push([odooProductId, odooLocationId])
+  }
+
+  const matchSettings = await loadSallaProductMatchField(workspaceId, merchantId)
+  const matchSallaField = matchSettings.match_salla_field || 'sku'
+  const matchOdooField = matchSettings.match_odoo_field || (matchSallaField === 'id' ? 'x_salla_id' : 'default_code')
+
+  // 4. Read balances and push
+  let transferred = 0
+  let skipped = 0
+  let failed = 0
+  const errors: string[] = []
+
+  for (const [pid, loc] of filtered) {
+    const sallaBranchId = pairByOdooLoc.get(Number(loc))!
+    try {
+      const qty = await readOdooQtyAtLocation(client, Number(pid), Number(loc), settings.sync_mode)
+      const outcome = await pushStockToSalla({
+        client,
+        merchantId,
+        workspaceId,
+        sallaBranchId,
+        odooProductId: Number(pid),
+        quantity: qty,
+        matchSallaField,
+        matchOdooField,
+      })
+      if (outcome === 'pushed') transferred++
+      else if (outcome === 'skipped') skipped++
+      else failed++
+    } catch (err: any) {
+      failed++
+      errors.push(`product#${pid}: ${describeError(err)}`)
+    }
+  }
+
+  await logStockTransfer({
+    workspaceId,
+    name: `Stock Sync — Odoo → Salla`,
+    direction: 'odoo_to_salla',
+    transferred,
+    failed,
+    errors,
+    payload: {
+      mode: settings.sync_mode,
+      products: filtered.map(([pid, loc]) => ({ product_id: pid, location_id: loc })),
+      quant_id: quantId || null,
+    },
+  })
+
+  // Telegram notification for stock sync
+  try {
+    let sku = String(payload.default_code || payload.sku || '')
+    let name = String(payload.product_name || payload.name || '')
+    if ((!sku || !name) && odooProductId) {
+      try {
+        const prods = await client.execute<Array<{ default_code?: string; name?: string }>>(
+          'product.product',
+          'read',
+          [[odooProductId]],
+          { fields: ['default_code', 'name'] }
+        )
+        if (prods?.[0]) {
+          sku = sku || prods[0].default_code || ''
+          name = name || prods[0].name || ''
+        }
+      } catch { /* best effort */ }
+    }
+
+    const { notifySyncResult } = await import('@/lib/telegram-notifier')
+    await notifySyncResult({
+      workspaceId,
+      record: {
+        status: failed > 0 ? (transferred > 0 ? 'success' : 'failed') : transferred > 0 ? 'success' : 'skipped',
+        event: 'stock.updated',
+        mappingName: 'تحديث المخزون (أودوو ⬅️ سلة)',
+        mappingId: 'stock_sync_odoo_salla',
+        model: 'stock.quant',
+        odooRecordId: odooProductId,
+        storeName: (sallaTok as any).store_name || 'Salla Store',
+        storeId: merchantId,
+        errorMessage: errors.length > 0 ? errors.join(', ') : null,
+        details: {
+          productSku: sku || undefined,
+          productName: name || undefined,
+          stockQuantity: transferred,
+        }
+      }
+    }).catch(() => {})
+  } catch {
+    // best-effort
+  }
+
+  return { worked: true, transferred, skipped, failed, errors }
 }
 
 // ─── Odoo quant helpers ───────────────────────────────────────────────────────
+
+/**
+ * Identify the affected Odoo product + location from the webhook payload,
+ * falling back to reading the `stock.quant` record itself when the payload
+ * only carries a product id (or only a quant id).
+ */
+async function identifyStockTarget(
+  client: OdooClient,
+  payload: Record<string, unknown>
+): Promise<null | { odooProductId: number; odooLocationId: number; quantId: number | null; quantFields: Array<[number, number]> }> {
+  let odooProductId = toInt(payload.product_id)
+  let odooLocationId = toInt(payload.location_id)
+  const quantId = toInt(payload.quant_id)
+
+  const quantFields: Array<[number, number]> = []
+  if (odooProductId && odooLocationId) {
+    quantFields.push([odooProductId, odooLocationId])
+  } else {
+    // Resolve from the quant itself
+    try {
+      const qid = quantId || (await findQuantForProduct(client, odooProductId)) || null
+      if (qid) {
+        const q = await readQuant(client, qid)
+        if (q) {
+          odooProductId = q.product_id
+          odooLocationId = q.location_id
+          quantFields.push([q.product_id, q.location_id])
+        }
+      }
+    } catch (err: any) {
+      console.warn('[StockSync] Failed to resolve quant record:', err?.message ?? err)
+    }
+  }
+
+  if (!odooProductId || !odooLocationId) {
+    return null
+  }
+  return { odooProductId, odooLocationId, quantId, quantFields }
+}
 
 async function findQuantForProduct(
   client: OdooClient,
@@ -383,17 +671,23 @@ async function readOdooQtyAtLocation(
   return Math.max(0, Math.round(q.quantity * 100) / 100)
 }
 
-// ─── Zid stock push ───────────────────────────────────────────────────────────
+// ─── Store stock push ─────────────────────────────────────────────────────────
 
+/**
+ * Read the Odoo product's store-matching values (`default_code`, `barcode`,
+ * plus the platform's own id column when present on the model). `idFields`
+ * defaults to the Zid columns so the Zid path is unchanged.
+ */
 async function readOdooProductMatchValues(
   client: OdooClient,
   productId: number,
-  matchOdooField: string
+  matchOdooField: string,
+  idFields: string[] = ['x_zid_id', 'zid_id']
 ): Promise<Record<string, any>> {
   const fields = ['id', 'default_code', 'barcode']
   if (matchOdooField && !fields.includes(matchOdooField)) fields.push(matchOdooField)
-  for (const f of ['x_zid_id', 'zid_id']) {
-    if (await odooModelHasField(client, 'product.product', f)) fields.push(f)
+  for (const f of idFields) {
+    if (!fields.includes(f) && (await odooModelHasField(client, 'product.product', f))) fields.push(f)
   }
   try {
     const rows = await client.read<any>('product.product', [productId], fields)
@@ -407,6 +701,8 @@ async function readOdooProductMatchValues(
   }
   return {}
 }
+
+// ─── Zid stock push ───────────────────────────────────────────────────────────
 
 async function findZidProductByMatch(
   creds: ZidCredentials,
@@ -563,10 +859,151 @@ async function loadZidProductMatchField(workspaceId: string): Promise<{ match_od
   }
 }
 
+// ─── Salla stock push ─────────────────────────────────────────────────────────
+
+/**
+ * Resolve the Salla product that corresponds to an Odoo product (Salla-side,
+ * so by the real Salla product id), in order:
+ *   1. sync_logs — the last successful sync row for this Odoo record,
+ *      scoped to THIS Salla store via `store_id = merchantId` (sync_logs has
+ *      no platform column, so the store id is the only disambiguator in a
+ *      workspace that also syncs Zid).
+ *   2. Odoo-persisted id columns (`x_salla_id` / `salla_id`), then the
+ *      configured match field, then default_code/barcode/name via
+ *      `findSallaProductByMatchField`.
+ */
+async function resolveSallaProductId(
+  merchantId: string,
+  workspaceId: string,
+  odooProductId: number,
+  matchSallaField: string,
+  matchOdooField: string,
+  odooValues: Record<string, any>
+): Promise<Record<string, any> | null> {
+  try {
+    const { data: log } = await supabaseAdmin
+      .from('sync_logs')
+      .select('zid_entity_id')
+      .eq('odoo_record_id', odooProductId)
+      .in('odoo_model', ['product.product', 'product.template'])
+      .eq('workspace_id', workspaceId)
+      .eq('store_id', merchantId)
+      .eq('status', 'success')
+      .not('zid_entity_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (log?.zid_entity_id) {
+      const product = await findSallaProductByMatchField(merchantId, 'id', String(log.zid_entity_id))
+      if (product?.id) {
+        console.info(`[StockSync] Resolved Salla product from sync_logs (Odoo #${odooProductId} → Salla #${product.id})`)
+        return product
+      }
+    }
+  } catch {
+  }
+  const matchValue = String(
+    odooValues.x_salla_id ?? odooValues.salla_id ?? odooValues[matchOdooField] ?? odooValues.default_code ?? odooValues.barcode ?? ''
+  ).trim()
+  if (!matchValue) return null
+  if (matchSallaField === 'id') {
+    const byId = await findSallaProductByMatchField(merchantId, 'id', matchValue)
+    if (byId?.id) return byId
+    const skuValue = String(odooValues.default_code ?? odooValues.barcode ?? '').trim()
+    return skuValue ? findSallaProductByMatchField(merchantId, 'sku', skuValue) : null
+  }
+  const found = await findSallaProductByMatchField(merchantId, matchSallaField, matchValue)
+  if (found) {
+    console.info(`[StockSync] Matched Salla product by ${matchSallaField} (Odoo #${odooProductId} → Salla #${String(found.id)})`)
+  }
+  return found
+}
+
+/**
+ * Update a Salla product's quantity at the paired Salla branch.
+ * Uses POST /products/quantities/bulk with mode 'overwrite' (absolute value).
+ * A branch id of SALLA_DEFAULT_BRANCH_ID omits `branch`, so Salla applies the
+ * change to its default branch. Products marked `unlimited_quantity` are
+ * skipped (mirrors the Zid `is_infinite` guard).
+ */
+async function pushStockToSalla(params: {
+  client: OdooClient
+  merchantId: string
+  workspaceId: string
+  sallaBranchId: string
+  odooProductId: number
+  quantity: number
+  matchSallaField: string
+  matchOdooField: string
+}): Promise<PushOutcome> {
+  const { client, merchantId, workspaceId, sallaBranchId, odooProductId, quantity, matchSallaField, matchOdooField } = params
+
+  const odooValues = await readOdooProductMatchValues(client, odooProductId, matchOdooField, ['x_salla_id', 'salla_id'])
+  const sallaProduct = await resolveSallaProductId(
+    merchantId,
+    workspaceId,
+    odooProductId,
+    matchSallaField,
+    matchOdooField,
+    odooValues
+  )
+  if (!sallaProduct) {
+    const shown =
+      odooValues[matchOdooField] ?? odooValues.x_salla_id ?? odooValues.salla_id ?? odooValues.default_code ?? odooValues.barcode ?? '-'
+    console.info(`[StockSync] Salla product not found for Odoo #${odooProductId} (${matchSallaField}=${String(shown)}) — skipped.`)
+    return 'skipped'
+  }
+  if (sallaProduct.unlimited_quantity === true) {
+    console.info(`[StockSync] Salla product #${sallaProduct.id} has unlimited quantity — skipped.`)
+    return 'skipped'
+  }
+
+  const sallaProductId = String(sallaProduct.id)
+  const branch = sallaBranchId === SALLA_DEFAULT_BRANCH_ID ? undefined : sallaBranchId
+  await updateSallaStockBulk(merchantId, [
+    {
+      identifer_type: 'id',
+      identifer: sallaProductId,
+      quantity: Math.round(quantity),
+      mode: 'overwrite',
+      branch,
+    },
+  ])
+  console.info(`[StockSync] ✅ Updated Salla product #${sallaProductId}${branch ? ` @ branch ${branch}` : ' @ default branch'} → ${quantity}`)
+  return 'pushed'
+}
+
+async function loadSallaProductMatchField(workspaceId: string, storeId = ''): Promise<{ match_odoo_field: string; match_salla_field: string }> {
+  try {
+    // Per-store row first, platform default ('') as fallback — a bare
+    // maybeSingle() breaks (PostgREST 406) once both rows exist, which
+    // silently dropped the configured match down to sku/default_code.
+    const { data } = await supabaseAdmin
+      .from('standard_mapping_settings')
+      .select('store_id, settings')
+      .eq('workspace_id', workspaceId)
+      .eq('store_type', 'salla')
+      .eq('entity_type', 'products')
+      .in('store_id', storeId ? [storeId, ''] : [''])
+    const rows = (data ?? []) as Array<{ store_id: string; settings: unknown }>
+    const hit = rows.find(r => r.store_id === storeId) ?? rows.find(r => r.store_id === '')
+    const s = (hit?.settings as any) || {}
+    return {
+      match_odoo_field: String(s.match_odoo_field || ''),
+      // Salla reuses the same generic settings key as Zid (the Odoo→Salla
+      // product push in the odoo webhook route reads `mapping.zid_match_field`).
+      match_salla_field: String(s.match_zid_field || 'sku'),
+    }
+  } catch {
+    return { match_odoo_field: '', match_salla_field: 'sku' }
+  }
+}
+
 // ─── Logging ──────────────────────────────────────────────────────────────────
 
 async function logStockTransfer(params: {
   workspaceId: string
+  name: string
   direction: string
   transferred: number
   failed: number
@@ -577,7 +1014,7 @@ async function logStockTransfer(params: {
     await supabaseAdmin.from('data_transfers').insert([
       {
         workspace_id: params.workspaceId,
-        name: `Stock Sync — Odoo → Zid`,
+        name: params.name,
         data_type: 'stock',
         direction: params.direction,
         status: params.failed > 0 && params.transferred === 0 ? 'failed' : 'completed',

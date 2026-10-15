@@ -27,6 +27,16 @@ function redirectToConnectStore(request: NextRequest, params: Record<string, str
 }
 
 export async function GET(request: NextRequest) {
+  const { checkRateLimit, rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
+  const cbRl = checkRateLimit(
+    rateLimitKeyFromHeaders((n) => request.headers.get(n), 'oauth-shopify-callback'),
+    30,
+    60_000
+  )
+  if (!cbRl.allowed) {
+    return redirectToConnectStore(request, { error: 'rate_limited' })
+  }
+
   const code = request.nextUrl.searchParams.get('code')
   const shopParam = request.nextUrl.searchParams.get('shop')
   const state = request.nextUrl.searchParams.get('state')
@@ -111,6 +121,10 @@ export async function GET(request: NextRequest) {
     const workspaceId = activeWorkspaceId
 
     // 4. Save Shopify token details in DB
+    // New connections start with the full core preset syncing store→ERP
+    // (products + collections + all order topics + customers), built from
+    // SHOPIFY_CORE_TOPICS so the saved toggles can never drift from what the
+    // auto-registration loop below subscribes.
     const tokenData = {
       shop_domain: shop,
       access_token,
@@ -119,14 +133,9 @@ export async function GET(request: NextRequest) {
       workspace_id: workspaceId,
       name: shopName,
       email,
-      // New connections start with the 5 core topics syncing store→ERP.
-      sync_settings: {
-        'products/create': { shopify2odoo: true },
-        'products/update': { shopify2odoo: true },
-        'orders/create': { shopify2odoo: true },
-        'orders/paid': { shopify2odoo: true },
-        'orders/fulfilled': { shopify2odoo: true },
-      },
+      sync_settings: Object.fromEntries(
+        SHOPIFY_CORE_TOPICS.map((topic) => [topic, { shopify2odoo: true }])
+      ),
     }
 
     const { data: existingToken } = await supabase
@@ -146,6 +155,8 @@ export async function GET(request: NextRequest) {
 
       if (updateError) throw updateError
     } else {
+      // Multi-store: a workspace may link several Shopify shops, so a new
+      // shop is always INSERTED and sibling rows are never touched here.
       const { error: insertError } = await supabase
         .from('shopify_tokens')
         .insert([tokenData])

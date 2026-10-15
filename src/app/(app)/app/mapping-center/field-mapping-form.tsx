@@ -16,6 +16,7 @@ import {
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 
+import { getEntityLinkStats } from '@/app/actions/entity-links'
 import { saveFieldMapping } from '@/app/actions/field-mappings'
 import { getOdooFieldValueOptions, getOdooModelFields, refreshOdooCache } from '@/app/actions/odoo'
 import { useLanguage } from '@/components/language-provider'
@@ -74,6 +75,13 @@ const ODOO_OPERATIONS = [
 
 const EMPTY_SELECT_OPTION = { value: '', label: 'فارغ (Clear)' }
 
+// Reserved platform-side match field meaning "the Odoo id saved for this
+// record" (see STORED_ODOO_ID_FIELD in src/lib/entity-links.ts — pinned
+// equal by tests/unit/entity-links.test.ts). Literal here on purpose:
+// importing entity-links would drag the Supabase client into this browser
+// bundle for a single string.
+const STORED_ODOO_ID_LITERAL = '__odoo_record_id'
+
 type MappingLine = {
   id: string
   erpField: string
@@ -123,7 +131,11 @@ export default function FieldMappingForm({
   onSuccess,
   fixedMappings = [],
   initialSyncDirection,
-  allMappings = []
+  allMappings = [],
+  initialStoreKey = '',
+  zidStores = [],
+  sallaStores = [],
+  shopifyStores = []
 }: {
   initialModels?: Array<{ model: string; name: string }>
   hasOdooConnection?: boolean
@@ -151,6 +163,12 @@ export default function FieldMappingForm({
   fixedMappings?: any[]
   initialSyncDirection?: string
   allMappings?: any[]
+  /** Multi-store: merchant_id / shop_domain the new mapping attaches to (create view). */
+  initialStoreKey?: string
+  /** Multi-store: every linked store per platform, for the create-view store picker. */
+  zidStores?: { id: string; name: string | null }[]
+  sallaStores?: { id: string; name: string | null }[]
+  shopifyStores?: { id: string; name: string | null }[]
 }) {
   const { t, lang, dir } = useLanguage()
   const [name, setName] = useState(initialName || '')
@@ -226,6 +244,33 @@ export default function FieldMappingForm({
     return initialOdooVariantZidMatchField || (initialMappings as any)?.__settings?.variantZidMatchField || ''
   })
   const [syncDirection, setSyncDirection] = useState<string>(initialSyncDirection || 'store_to_erp')
+  // Multi-store: the store a NEW mapping attaches to (merchant_id / shop_domain).
+  // Editing keeps the row's own store server-side unless the platform changes,
+  // which resets to the platform default (newest store).
+  const [storeKey, setStoreKey] = useState<string>(initialStoreKey || '')
+
+  // Stores of a platform, for the create-view store picker.
+  const storesOf = (p: string): { id: string; name: string | null }[] =>
+    p === 'zid' ? (zidStores || []) : p === 'salla' ? (sallaStores || []) : (shopifyStores || [])
+  const platformStores = storesOf(platform)
+  const firstStoreIdOf = (p: string): string => storesOf(p)[0]?.id || ''
+
+  // Normalize once on mount: the incoming store key may belong to another
+  // platform than the form's initial one — snap it to this platform so the
+  // picker and the saved row never disagree.
+  useEffect(() => {
+    if (storeKey && !storesOf(platform).some(s => s.id === storeKey)) {
+      setStoreKey(firstStoreIdOf(platform))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const switchPlatform = (p: 'zid' | 'salla' | 'shopify', defaultEvent: string) => {
+    setPlatform(p)
+    setStoreKey(firstStoreIdOf(p))
+    setZidEvent(defaultEvent)
+    setIsSaved(false)
+  }
   const [zidEvent, setZidEvent] = useState(initialAction || (isSallaConnected && !isZidConnected ? 'product.created' : 'product.create'))
 
   // Selected related models array (chips/tags state)
@@ -410,6 +455,13 @@ export default function FieldMappingForm({
   const [isSaved, setIsSaved] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+
+  // Durable Odoo-link stats for the picked store (update/delete hint).
+  const [linkStats, setLinkStats] = useState<{
+    count: number
+    last: { storeEntityId: string; odooRecordId: number; lastSyncedAt: string } | null
+  } | null>(null)
+  const [isLoadingLinkStats, setIsLoadingLinkStats] = useState(false)
 
   // Smart match modal states
   const [activeFuzzyLine, setActiveFuzzyLine] = useState<MappingLine | null>(null)
@@ -678,6 +730,20 @@ export default function FieldMappingForm({
       }
     }
 
+    // 1c. Order-line tab: offer the line-item catalogue (incl. the line `id`)
+    // for every platform and every order event/operation. The shared resolver
+    // below is header-oriented (sale.order / orders/create), so without this
+    // the line tab shows header fields and the line `id` is unreachable —
+    // while the engine already reads any mapped path (incl. `id`) from each
+    // item via resolvePath over the products/items/line_items candidates.
+    if (currentModelKey === 'sale.order.line') {
+      const lineFields =
+        platform === 'salla' ? SALLA_FIELDS['sale.order.line']
+        : platform === 'shopify' ? SHOPIFY_FIELDS['sale.order.line']
+        : ZID_FIELDS['sale.order.line']
+      if (lineFields && lineFields.length > 0) return lineFields
+    }
+
     // 2. Use shared resolver for all platforms
     return resolvePlatformFields(zidEvent, platform, activeTab, activeTabLower, odooModel)
   })()
@@ -767,6 +833,69 @@ export default function FieldMappingForm({
     initialOdooModel,
     initialOdooOperation,
   ])
+
+  // Saved-Odoo-ID auto-suggest: for a NEW sale.order update/delete mapping,
+  // default the match pair to (id, __odoo_record_id) so the update targets
+  // the record the create flow saved — per store, no manual lookup.
+  // Transition-based (fires when the operation SWITCHES into update/delete),
+  // because the generic defaults effect above fills (id, id) first and a
+  // fill-blanks-only approach would never win that race. A later manual
+  // pick is never overwritten — only the switch moment suggests.
+  const prevSuggestOp = useRef(odooOperation)
+  const prevSuggestModel = useRef(odooModel)
+  useEffect(() => {
+    const switched =
+      prevSuggestOp.current !== odooOperation || prevSuggestModel.current !== odooModel
+    prevSuggestOp.current = odooOperation
+    prevSuggestModel.current = odooModel
+    if (!switched) return
+    if (editingId) return
+    if (odooModel !== 'sale.order') return
+    if (odooOperation !== 'update' && odooOperation !== 'delete') return
+    if (!primaryMatchErpFields.some(field => field.value === 'id')) return
+    if (!primaryMatchZidFields.some(field => field.value === STORED_ODOO_ID_LITERAL)) return
+    setOdooMatchField('id')
+    setZidMatchField(STORED_ODOO_ID_LITERAL)
+    setIsSaved(false)
+  }, [
+    odooOperation,
+    odooModel,
+    editingId,
+    platform,
+    primaryMatchErpFields,
+    primaryMatchZidFields,
+  ])
+
+  // Durable-link stats for the picked store: shown under the match fields so
+  // the merchant sees how many orders already have a saved Odoo id.
+  useEffect(() => {
+    const needsMatch = odooOperation === 'update' || odooOperation === 'delete' ||
+      syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')
+    if (!needsMatch || odooModel !== 'sale.order' || !storeKey) {
+      setLinkStats(null)
+      return
+    }
+    let cancelled = false
+    setIsLoadingLinkStats(true)
+    getEntityLinkStats({ platform, storeKey, odooModel })
+      .then(res => {
+        if (cancelled) return
+        if (res.success) {
+          setLinkStats({ count: res.count ?? 0, last: res.last ?? null })
+        } else {
+          setLinkStats(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLinkStats(null)
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingLinkStats(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [odooOperation, odooModel, syncDirection, platform, storeKey])
 
   const AUTO_PAYLOAD_PATHS: Record<string, string> = {
     'sale.order.line': 'products',
@@ -1147,6 +1276,7 @@ export default function FieldMappingForm({
         odooFallbackPolicy,
         mappings: mappingsWithSettings,
         platform,
+        storeKey: storeKey || undefined,
         syncDirection,
         variantSyncMode,
         variantOdooMatchField,
@@ -1299,9 +1429,10 @@ export default function FieldMappingForm({
         {/* Master Details Block */}
         <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 max-w-5xl mb-6 text-xs">
           
-          {/* Store Platform (always first, full width) */}
+          {/* Store Platform + Store picker — always on the same row */}
+          <div className="sm:col-span-2 grid grid-cols-2 gap-x-5 gap-y-4">
           {((isZidConnected ? 1 : 0) + (isSallaConnected ? 1 : 0) + (isShopifyConnected ? 1 : 0) >= 2) && !editingId ? (
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className="space-y-1.5 min-w-0">
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
@@ -1311,9 +1442,7 @@ export default function FieldMappingForm({
                     type="button"
                     variant="ghost"
                     onClick={() => {
-                      setPlatform('zid')
-                      setZidEvent('product.create')
-                      setIsSaved(false)
+                      switchPlatform('zid', 'product.create')
                     }}
                     className={cn(
                       "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
@@ -1330,9 +1459,7 @@ export default function FieldMappingForm({
                     type="button"
                     variant="ghost"
                     onClick={() => {
-                      setPlatform('salla')
-                      setZidEvent('product.created')
-                      setIsSaved(false)
+                      switchPlatform('salla', 'product.created')
                     }}
                     className={cn(
                       "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
@@ -1349,9 +1476,7 @@ export default function FieldMappingForm({
                     type="button"
                     variant="ghost"
                     onClick={() => {
-                      setPlatform('shopify')
-                      setZidEvent('products/create')
-                      setIsSaved(false)
+                      switchPlatform('shopify', 'products/create')
                     }}
                     className={cn(
                       "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
@@ -1366,7 +1491,7 @@ export default function FieldMappingForm({
               </div>
             </div>
           ) : (
-            <div className="space-y-1.5 sm:col-span-2">
+            <div className={cn("space-y-1.5 min-w-0", (!editingId && platformStores.length > 1) ? "" : "col-span-2")}>
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
@@ -1375,6 +1500,35 @@ export default function FieldMappingForm({
               </div>
             </div>
           )}
+
+          {/* Store picker (create view, when the platform links several stores) */}
+          {!editingId && platformStores.length > 1 && (
+            <div className="space-y-1.5 min-w-0">
+              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                {lang === 'ar' ? 'المتجر' : 'Store'}
+              </label>
+              <select
+                value={platformStores.some(s => s.id === storeKey) ? storeKey : (platformStores[0]?.id || '')}
+                onChange={e => {
+                  setStoreKey(e.target.value)
+                  setIsSaved(false)
+                }}
+                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all max-w-sm"
+              >
+                {platformStores.map(s => (
+                  <option key={s.id} value={s.id} dir="auto">
+                    {(s.name || platform) + ` (${s.id})`}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted-foreground font-medium">
+                {lang === 'ar'
+                  ? 'سيُربط هذا الإعداد بالمتجر المحدد فقط.'
+                  : 'This mapping will attach to the selected store only.'}
+              </p>
+            </div>
+          )}
+          </div>
 
           {/* Sync Direction Block */}
           <div className="space-y-1.5">
@@ -1424,37 +1578,6 @@ export default function FieldMappingForm({
               {lang === 'ar' ? `العملية التي ينفذها المحرك تلقائياً داخل ${getErpName(erpType)} لهذا الربط.` : `The operation executed automatically by the sync engine in ${getErpNameEn(erpType)} for this mapping.`}
             </p>
           </div>
-
-          {/* Fallback Policy (when record not found) */}
-          {(odooOperation === 'update' || odooOperation === 'delete') && (
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-muted-foreground">
-                {lang === 'ar' ? 'السياسة البديلة (عند عدم وجود السجل)' : 'Fallback Policy (when record not found)'}
-              </label>
-              <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
-                <SearchableSelect
-                  value={odooFallbackPolicy}
-                  onChange={(val) => {
-                    if (val === 'none' || val === 'create' || val === 'block') {
-                      setOdooFallbackPolicy(val)
-                      setIsSaved(false)
-                    }
-                  }}
-                  options={[
-                    { value: 'none', label: lang === 'ar' ? 'تجاهل (سكيب صامت)' : 'Skip silently (none)' },
-                    { value: 'create', label: lang === 'ar' ? 'إنشاء السجل تلقائياً' : 'Create record (upsert)' },
-                    { value: 'block', label: lang === 'ar' ? 'إيقاف المزامنة مع خطأ' : 'Block sync with error' },
-                  ]}
-                  placeholder={lang === 'ar' ? 'اختر سياسة بديلة...' : 'Select fallback policy...'}
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-                {lang === 'ar'
-                  ? `ما الذي يحدث عندما لا يجد المحرك السجل في ${getErpName(erpType)} أثناء تنفيذ عملية ${odooOperation === 'update' ? 'التحديث' : 'الحذف'}؟.`
-                  : `What happens when the sync engine can't find the record in ${getErpNameEn(erpType)} during a ${odooOperation} operation.`}
-              </p>
-            </div>
-          )}
 
           {/* ERP Model & Store Event (side-by-side) */}
           <div className="space-y-1.5">
@@ -1569,12 +1692,67 @@ export default function FieldMappingForm({
                     ? (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بسلة ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Salla webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)
                     : (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بزد ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Zid webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)}
                 </p>
+                {zidMatchField === STORED_ODOO_ID_LITERAL && (
+                  <p className="text-[10px] font-semibold text-foreground/80">
+                    {lang === 'ar'
+                      ? 'الحقل المحفوظ: سيُحل تلقائياً إلى رقم الأوردر داخل أودوو الذي سُجل عند الإنشاء — خاص بهذا المتجر فقط.'
+                      : 'Saved-ID field: resolves automatically to the Odoo order number recorded at creation — scoped to this store only.'}
+                  </p>
+                )}
+                {isLoadingLinkStats ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    {lang === 'ar' ? 'جارٍ قراءة الروابط المحفوظة لهذا المتجر...' : 'Loading saved links for this store...'}
+                  </p>
+                ) : linkStats && linkStats.count > 0 && linkStats.last ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    {lang === 'ar'
+                      ? `لهذا المتجر ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} طلب مربوط — آخرها طلب المتجر ${linkStats.last.storeEntityId} ← أودوو #${linkStats.last.odooRecordId}.`
+                      : `This store has ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} linked orders — latest: store order ${linkStats.last.storeEntityId} → Odoo #${linkStats.last.odooRecordId}.`}
+                  </p>
+                ) : linkStats && linkStats.count === 0 ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    {lang === 'ar'
+                      ? 'لا روابط محفوظة بعد لهذا المتجر — نفّذ مزامنة إنشاء أولاً حتى يُحفظ رقم الأوردر.'
+                      : 'No saved links for this store yet — run a create sync first so the order number gets saved.'}
+                  </p>
+                ) : null}
               </div>
             </>
           )}
 
+          {/* Fallback Policy + Related Models (side-by-side on the same row, at the end) */}
+          {(odooOperation === 'update' || odooOperation === 'delete') && (
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold text-muted-foreground">
+                {lang === 'ar' ? 'السياسة البديلة (عند عدم وجود السجل)' : 'Fallback Policy (when record not found)'}
+              </label>
+              <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+                <SearchableSelect
+                  value={odooFallbackPolicy}
+                  onChange={(val) => {
+                    if (val === 'none' || val === 'create' || val === 'block') {
+                      setOdooFallbackPolicy(val)
+                      setIsSaved(false)
+                    }
+                  }}
+                  options={[
+                    { value: 'none', label: lang === 'ar' ? 'تجاهل (سكيب صامت)' : 'Skip silently (none)' },
+                    { value: 'create', label: lang === 'ar' ? 'إنشاء السجل تلقائياً' : 'Create record (upsert)' },
+                    { value: 'block', label: lang === 'ar' ? 'إيقاف المزامنة مع خطأ' : 'Block sync with error' },
+                  ]}
+                  placeholder={lang === 'ar' ? 'اختر سياسة بديلة...' : 'Select fallback policy...'}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+                {lang === 'ar'
+                  ? `ما الذي يحدث عندما لا يجد المحرك السجل في ${getErpName(erpType)} أثناء تنفيذ عملية ${odooOperation === 'update' ? 'التحديث' : 'الحذف'}؟.`
+                  : `What happens when the sync engine can't find the record in ${getErpNameEn(erpType)} during a ${odooOperation} operation.`}
+              </p>
+            </div>
+          )}
+
           {/* Related Models & Mapping Tip (side-by-side) */}
-          <div className="space-y-1.5">
+          <div className={cn("space-y-1.5", (odooOperation !== 'update' && odooOperation !== 'delete') && "sm:col-span-2")}>
             <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} Models`}
             </label>

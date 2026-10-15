@@ -6,12 +6,13 @@
  * "disabled" صريح أو enabled_actions محدد → يُحترم.
  */
 
+import { resolveEventOperation, type SyncOperation } from '@/lib/event-operation'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 
 const TTL_MS = 30_000
 
-export type Operation = 'create' | 'update' | 'delete' | 'cancel' | 'deliver'
+export type Operation = SyncOperation
 
 export type StandardMappingSettings = {
   disabled?: boolean
@@ -19,75 +20,73 @@ export type StandardMappingSettings = {
   on_delete?: string
 } & Record<string, any>
 
-function getCacheKey(workspaceId: string, storeType: string, entityType: string): string {
-  return `webhook-gate:${workspaceId}:${storeType}:${entityType}`
+function getCacheKey(workspaceId: string, storeType: string, entityType: string, storeId = ''): string {
+  return `webhook-gate:${workspaceId}:${storeType}:${storeId}:${entityType}`
 }
 
-function mapEventToEntityAndOp(event: string): { entityType: string; operation: Operation } | null {
-  const n = event.toLowerCase()
-
-  if (n.includes('order')) {
-    if (n.includes('cancel')) return { entityType: 'orders', operation: 'cancel' }
-    if (n.includes('deliver') || n.includes('fulfil') || n.includes('shipped')) return { entityType: 'orders', operation: 'deliver' }
-    if (n.includes('create') || n.includes('created')) return { entityType: 'orders', operation: 'create' }
-    return { entityType: 'orders', operation: 'update' }
-  }
-
-  if (n.includes('product')) {
-    if (n.includes('delete') || n.includes('deleted')) return { entityType: 'products', operation: 'delete' }
-    if (n.includes('create') || n.includes('created')) return { entityType: 'products', operation: 'create' }
-    if (n.includes('update') || n.includes('updated') || n.includes('publish') || n.includes('stock')) return { entityType: 'products', operation: 'update' }
-    return { entityType: 'products', operation: 'update' }
-  }
-
-  if (n.includes('customer')) {
-    if (n.includes('delete') || n.includes('deleted')) return { entityType: 'customers', operation: 'delete' }
-    if (n.includes('create') || n.includes('created')) return { entityType: 'customers', operation: 'create' }
-    if (n.includes('update') || n.includes('updated') || n.includes('login')) return { entityType: 'customers', operation: 'update' }
-    return { entityType: 'customers', operation: 'update' }
-  }
-
-  if (n.includes('category')) {
-    if (n.includes('delete') || n.includes('deleted')) return { entityType: 'categories', operation: 'delete' }
-    if (n.includes('create') || n.includes('created')) return { entityType: 'categories', operation: 'create' }
-    if (n.includes('update') || n.includes('updated')) return { entityType: 'categories', operation: 'update' }
-    return { entityType: 'categories', operation: 'update' }
-  }
-
-  if (n.includes('abandoned') && n.includes('cart')) {
-    return { entityType: 'orders', operation: 'create' }
-  }
-
-  return null
+/**
+ * Resolve a webhook's store key to the merchant key used by the settings
+ * rows (merchant_id for zid/salla, shop_domain for shopify). Zid deliveries
+ * carry the numeric store_id, which is mapped through the token row; the
+ * other platforms already arrive keyed by merchant.
+ */
+async function resolveSettingsStoreKey(
+  workspaceId: string,
+  storeType: string,
+  storeKey: string
+): Promise<string> {
+  if (!storeKey) return ''
+  if (storeType !== 'zid') return storeKey
+  if (!/^\d+$/.test(storeKey)) return storeKey
+  const merchant = await ttlCache.get<string | null>(
+    `webhook-gate:merchant:zid:${storeKey}`,
+    TTL_MS,
+    async () => {
+      const { data } = await supabase
+        .from('merchant_tokens')
+        .select('merchant_id')
+        .or(`store_id.eq.${storeKey},merchant_id.eq.${storeKey}`)
+        .maybeSingle()
+      return ((data as { merchant_id?: unknown } | null)?.merchant_id ?? null) as string | null
+    }
+  )
+  return merchant ? String(merchant) : storeKey
 }
 
 export async function isWebhookEventEnabled(
   workspaceId: string,
   storeType: 'zid' | 'salla' | 'shopify',
-  event: string
+  event: string,
+  storeKey = ''
 ): Promise<{ allowed: boolean; reason?: string }> {
-  const mapped = mapEventToEntityAndOp(event)
+  // The classifier lives in @/lib/event-operation so the gate and the sync
+  // engine cannot disagree about what an event means — see that module's header.
+  const mapped = resolveEventOperation(event, storeType)
   if (!mapped) {
     return { allowed: true }
   }
 
   const { entityType, operation } = mapped
-  const cacheKey = getCacheKey(workspaceId, storeType, entityType)
+  const merchant = await resolveSettingsStoreKey(workspaceId, storeType, storeKey)
+  const cacheKey = getCacheKey(workspaceId, storeType, entityType, merchant)
 
   const settings = await ttlCache.get<StandardMappingSettings | null>(
     cacheKey,
     TTL_MS,
     async () => {
+      // Per-store row first, platform default ('') as fallback.
       const { data, error } = await supabase
         .from('standard_mapping_settings')
-        .select('settings')
+        .select('store_id, settings')
         .eq('workspace_id', workspaceId)
         .eq('store_type', storeType)
         .eq('entity_type', entityType)
-        .maybeSingle()
+        .in('store_id', merchant ? [merchant, ''] : [''])
 
       if (error) throw error
-      return (data?.settings as StandardMappingSettings) || null
+      const rows = (data ?? []) as Array<{ store_id: string; settings: unknown }>
+      const hit = rows.find(r => r.store_id === merchant) ?? rows.find(r => r.store_id === '')
+      return (hit?.settings as StandardMappingSettings) || null
     }
   )
 

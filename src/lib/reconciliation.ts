@@ -156,7 +156,7 @@ export async function reconcileZidOrders(
       }
 
       // نحترم إعداد «تفعيل مزامنة الطلبات» من إعدادات الاستندر ماب.
-      const gate = await isWebhookEventEnabled(row.workspace_id, 'zid', 'order.updated')
+      const gate = await isWebhookEventEnabled(row.workspace_id, 'zid', 'order.updated', merchantKey)
       if (!gate.allowed) {
         result.disabledBySettings += 1
         result.merchantsChecked += 1

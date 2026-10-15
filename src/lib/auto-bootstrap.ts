@@ -184,6 +184,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           toInsert.push({
             workspace_id: workspaceId,
             platform,
+            store_id: '',
             zid_status: key,
             odoo_state: odooState,
             enabled: true,
@@ -192,9 +193,11 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
       }
 
       if (toInsert.length > 0) {
+        // Unique key since migration 20261013 is
+        // (workspace_id, platform, store_id, zid_status).
         await supabase
           .from('order_status_mappings')
-          .upsert(toInsert, { onConflict: 'workspace_id, platform, zid_status' })
+          .upsert(toInsert, { onConflict: 'workspace_id, platform, store_id, zid_status' })
         bootstrapped.push(`order_status_mappings:${platform}`)
       }
     }
@@ -207,6 +210,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
         .select('id')
         .eq('workspace_id', workspaceId)
         .eq('store_type', storeType)
+        .eq('store_id', '')
         .eq('entity_type', 'products')
         .maybeSingle()
 
@@ -215,6 +219,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           {
             workspace_id: workspaceId,
             store_type: storeType,
+            store_id: '',
             entity_type: 'products',
             settings: {
               product_type: 'product',
@@ -234,6 +239,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
         .select('id')
         .eq('workspace_id', workspaceId)
         .eq('store_type', storeType)
+        .eq('store_id', '')
         .eq('entity_type', 'customers')
         .maybeSingle()
 
@@ -242,6 +248,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           {
             workspace_id: workspaceId,
             store_type: storeType,
+            store_id: '',
             entity_type: 'customers',
             settings: {
               customer_type: 'person',
@@ -261,6 +268,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
         .select('id')
         .eq('workspace_id', workspaceId)
         .eq('store_type', storeType)
+        .eq('store_id', '')
         .eq('entity_type', 'categories')
         .maybeSingle()
 
@@ -269,6 +277,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           {
             workspace_id: workspaceId,
             store_type: storeType,
+            store_id: '',
             entity_type: 'categories',
             settings: {
               costing_method: 'fifo',
@@ -291,6 +300,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
         .select('id, settings')
         .eq('workspace_id', workspaceId)
         .eq('store_type', storeType)
+        .eq('store_id', '')
         .eq('entity_type', 'orders')
         .maybeSingle()
 
@@ -299,6 +309,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           {
             workspace_id: workspaceId,
             store_type: storeType,
+            store_id: '',
             entity_type: 'orders',
             settings: {
               match_zid_field: 'id',
@@ -332,18 +343,22 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
     }
 
     // 4. Backfill missing sync_settings events for existing connections
-    const { data: merchantToken } = await supabase
+    // (multi-store: every Zid row of the workspace, adding only absent keys —
+    // never overwriting the merchant's own toggles).
+    const { data: merchantTokens } = await supabase
       .from('merchant_tokens')
       .select('id, sync_settings')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
 
-    if (merchantToken?.sync_settings) {
+    for (const merchantToken of merchantTokens ?? []) {
+      if (!merchantToken?.sync_settings) continue
       const ss = merchantToken.sync_settings as Record<string, { odoo2zid?: boolean; zid2odoo?: boolean }>
       const defaults = {
         customer_update: { odoo2zid: false, zid2odoo: true },
         category_create: { odoo2zid: false, zid2odoo: true },
         category_update: { odoo2zid: false, zid2odoo: true },
+        category_delete: { odoo2zid: false, zid2odoo: true },
+        product_publish: { odoo2zid: false, zid2odoo: true },
       }
       let changed = false
       for (const [key, val] of Object.entries(defaults)) {

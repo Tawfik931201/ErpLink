@@ -248,6 +248,8 @@ interface ChatRow {
   enabled: boolean
   workspace_filter: unknown
   mapping_filter: unknown
+  /** اشتراك العميل في تنبيه "وصول طلب جديد" (P1-1) — يُخزَّن داخل mapping_filter JSON. */
+  notify_on_arrival: boolean
   // from joined bot
   bot_token: string
 }
@@ -322,6 +324,7 @@ async function getWorkspaceChats(workspaceId: string): Promise<ChatRow[]> {
     enabled: !!r.enabled,
     workspace_filter: r.workspace_filter ?? [],
     mapping_filter: r.mapping_filter ?? [],
+    notify_on_arrival: parseArrivalFilter(r.mapping_filter),
     bot_token: r.bot?.bot_token ?? '',
   })).filter((r: ChatRow) => r.bot_token)
 
@@ -458,4 +461,128 @@ export async function notifySyncResult(args: {
 
 export function botTokenFingerprint(botToken: string): string {
   return createHash('sha256').update(botToken).digest('hex').slice(0, 16)
+}
+
+// ─── Arrival notifications (P1-1: "order received, sending to Odoo") ─────────
+// الفكرة: التاجر يعتمد على أودوو لتجهيز الطلبات، والطلب قد يتأخر في الطابور.
+// رسالة الوصول تجعل تليجرام بديلاً مؤقتاً ينتبه به التاجر فور وصول الطلب من
+// المتجر، ثم تصله رسالة النتيجة (نجاح/فشل) عند اكتمال التسجيل في أودوو.
+//
+// قواعد صارمة:
+// - نارٍ وانسى: المتصل لا ينتظر أبداً (void + catch) فلا تلمس زمن الاستلام.
+// - للطلبات فقط: فئات المنتجات/العملاء الجماعية ستغرق المحادثة.
+// - الإدراج الطازج فقط: يُستدعى عند صف جديد (id موجود) لا عند duplicate —
+//   إعادة التسليم لا تعني طلباً جديداً.
+// - فشل الإرسال لا يفشل الطلب أبداً (يُبتلع مع console فقط).
+
+const PLATFORM_LABEL: Record<string, { ar: string; en: string }> = {
+  zid: { ar: 'زد', en: 'Zid' },
+  salla: { ar: 'سلة', en: 'Salla' },
+  shopify: { ar: 'شوبيفاي', en: 'Shopify' },
+}
+
+/**
+ * Pure: يقرأ راية الاشتراك من mapping_filter JSON (كائن اختياري).
+ * الافتراضي false — لا شيء يتغير للمشتركين الحاليين.
+ * مصدَّر خالصاً ليُختبَر بلا قاعدة بيانات.
+ */
+export function parseArrivalFilter(val: unknown): boolean {
+  if (val && typeof val === 'object' && !Array.isArray(val) && 'notify_on_arrival' in val) {
+    return (val as { notify_on_arrival?: unknown }).notify_on_arrival === true
+  }
+  return false
+}
+
+export interface ArrivalInfo {
+  platform: string
+  event: string
+  entityId?: string | null
+  storeId?: string | null
+  receivedAt?: string
+}
+
+/**
+ * Pure: يبني نص رسالة الوصول (ar/en). مصدَّر خالصاً ليُختبَر.
+ */
+export function buildArrivalMessage(info: ArrivalInfo, lang: 'ar' | 'en'): string {
+  const isAr = lang === 'ar'
+  const label = PLATFORM_LABEL[(info.platform || '').toLowerCase()] ?? {
+    ar: info.platform,
+    en: info.platform,
+  }
+  const lines: string[] = []
+  lines.push(
+    isAr
+      ? `📥 طلب جديد من ${label.ar}`
+      : `📥 New order from ${label.en}`
+  )
+  lines.push('─────────────────')
+  if (info.entityId) {
+    lines.push(isAr ? `🔢 رقم الطلب: #${info.entityId}` : `🔢 Order #: #${info.entityId}`)
+  }
+  if (info.storeId) {
+    lines.push(isAr ? `🏪 المتجر: ${clip(String(info.storeId), 50)}` : `🏪 Store: ${clip(String(info.storeId), 50)}`)
+  }
+  lines.push(
+    isAr
+      ? '⏳ جاري الإرسال إلى أودوو… سيصلك تأكيد التسجيل فور اكتماله'
+      : '⏳ Sending to Odoo… you will receive a confirmation once registered'
+  )
+  const date = formatDate(info.receivedAt, lang)
+  if (date) {
+    lines.push(isAr ? `🕒 وقت الوصول: ${date}` : `🕒 Received: ${date}`)
+  }
+  return lines.join('\n')
+}
+
+export async function notifyOrderArrival(args: {
+  workspaceId: string | null | undefined
+  platform: string
+  event: string
+  storeId?: string | null
+  payload?: Record<string, unknown>
+}): Promise<void> {
+  try {
+    const { workspaceId, platform, event, storeId } = args
+    if (!workspaceId) return
+    // الوصول يُعلن للطلبات فقط.
+    if (getEventCategory(event) !== 'orders') return
+
+    const chats = await getWorkspaceChats(workspaceId)
+    if (chats.length === 0) return
+
+    let entityId: string | null = null
+    try {
+      const { extractEntityId } = await import('@/lib/sync-queue')
+      entityId = extractEntityId((args.payload ?? {}) as Record<string, unknown>) || null
+    } catch {
+      // استخراج الرقم best-effort — غيابه لا يمنع التنبيه.
+    }
+
+    for (const chat of chats) {
+      if (!chat.notify_on_arrival) continue
+      let tokenPlain = ''
+      try {
+        tokenPlain = decrypt(chat.bot_token)
+      } catch {
+        continue
+      }
+      if (!tokenPlain) continue
+      const text = buildArrivalMessage(
+        { platform, event, entityId, storeId: storeId ?? null, receivedAt: new Date().toISOString() },
+        chat.language === 'en' ? 'en' : 'ar'
+      )
+      const sendRes = await callTelegramApi(tokenPlain, 'sendMessage', {
+        chat_id: chat.chat_id,
+        text,
+      })
+      if (!sendRes.ok) {
+        console.error(
+          `[TelegramNotifier] Arrival send failed chat=${chat.chat_id}: status=${sendRes.statusCode} desc=${sendRes.description}`
+        )
+      }
+    }
+  } catch {
+    // تنبيه الوصول لا يكسر الاستلام أبداً.
+  }
 }

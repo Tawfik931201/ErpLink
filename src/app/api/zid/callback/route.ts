@@ -8,7 +8,7 @@
  * تولّدها /api/zid/connect وتُحفظ كاملة في كوكي zid_oauth_state — والتحقق يتم
  * بالمساواة التامة. لا يوجد أي مسار يقبل state بلا كوكي مطابق (CSRF).
  *
- * يسجّل الأحداث الأساسية فقط (ZID_CORE_EVENTS ≈ 7) — البقية opt-in من الإعدادات.
+ * يسجّل الأحداث الأساسية فقط (ZID_CORE_EVENTS: الطلبات + المنتجات + العملاء + الكاتيجوري) — البقية opt-in من الإعدادات.
  */
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
@@ -115,6 +115,19 @@ async function registerProductCreatedWebhook(_headers: Headers) {
 }
 
 export async function GET(request: NextRequest) {
+  const { checkRateLimit, rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
+  const cbRl = checkRateLimit(
+    rateLimitKeyFromHeaders((n) => request.headers.get(n), 'oauth-zid-callback'),
+    30,
+    60_000
+  )
+  if (!cbRl.allowed) {
+    if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
+      return NextResponse.json({ error: 'rate_limited' }, { status: 429 })
+    }
+    return redirectToConnectZid(request, { error: 'rate_limited' })
+  }
+
   const code = request.nextUrl.searchParams.get('code')
   const error = request.nextUrl.searchParams.get('error')
   const state = request.nextUrl.searchParams.get('state')
@@ -258,7 +271,8 @@ export async function GET(request: NextRequest) {
         username: finalUsername,
         uuid: storeData.uuid ?? userData.uuid ?? null,
         old_id: storeId ? Number(storeId) : null,
-        // New connections start with the 7 core events syncing store→ERP.
+        // New connections start with the 12 core events syncing store→ERP
+        // (orders + products incl. publish + customers + categories incl. delete).
         // ERP→store stays off by default (safe, one toggle to enable later).
         sync_settings: {
           order_create: { odoo2zid: false, zid2odoo: true },
@@ -267,15 +281,17 @@ export async function GET(request: NextRequest) {
           product_create: { odoo2zid: false, zid2odoo: true },
           product_update: { odoo2zid: false, zid2odoo: true },
           product_delete: { odoo2zid: false, zid2odoo: true },
+          product_publish: { odoo2zid: false, zid2odoo: true },
           customer_create: { odoo2zid: false, zid2odoo: true },
           customer_update: { odoo2zid: false, zid2odoo: true },
           category_create: { odoo2zid: false, zid2odoo: true },
           category_update: { odoo2zid: false, zid2odoo: true },
+          category_delete: { odoo2zid: false, zid2odoo: true },
         },
       }
 
       let existingToken: any = null
-      
+
       const { data: byMerchant, error: findErrorMerchant } = await supabase
         .from('merchant_tokens')
         .select('merchant_id,workspace_id,sync_settings')
@@ -291,23 +307,6 @@ export async function GET(request: NextRequest) {
       }
 
       existingToken = byMerchant
-
-      if (!existingToken && workspaceId) {
-        const { data: byWorkspace, error: findErrorWorkspace } = await supabase
-          .from('merchant_tokens')
-          .select('merchant_id,workspace_id,sync_settings')
-          .eq('workspace_id', workspaceId)
-          .maybeSingle()
-
-        if (findErrorWorkspace) {
-          throw new ZidOAuthError({
-            code: 'token_storage_failed',
-            message: 'Could not check existing Zid merchant token by workspace_id in Supabase.',
-            details: findErrorWorkspace,
-          })
-        }
-        existingToken = byWorkspace
-      }
 
       if (existingToken) {
         // If workspace_id was not resolved in this flow but exists in the DB, preserve it
@@ -331,51 +330,11 @@ export async function GET(request: NextRequest) {
               details: updateError,
             })
           }
-        } else {
-          // Different merchant ID for the same workspace/store: migrate mappings & settings
-          // Migrate field mappings
-          if (tokenData.workspace_id) {
-            const { error: migrationError } = await supabase
-              .from('field_mappings')
-              .update({ merchant_id: merchantId })
-              .eq('workspace_id', tokenData.workspace_id)
-              .eq('merchant_id', existingToken.merchant_id)
-            if (migrationError) {
-              console.error('[Zid OAuth] Mappings migration failed:', migrationError)
-            }
-          }
-
-          // Preserve existing sync settings (or keep the new-connection
-          // defaults when the old row has none).
-          tokenData.sync_settings = existingToken.sync_settings ?? tokenData.sync_settings
-
-          // Delete old token
-          const { error: deleteError } = await supabase
-            .from('merchant_tokens')
-            .delete()
-            .eq('merchant_id', existingToken.merchant_id)
-          if (deleteError) {
-            throw new ZidOAuthError({
-              code: 'token_storage_failed',
-              message: 'Could not delete old Zid merchant token in Supabase.',
-              details: deleteError,
-            })
-          }
-
-          // Insert new token
-          const { error: insertError } = await supabase
-            .from('merchant_tokens')
-            .insert([tokenData])
-          if (insertError) {
-            throw new ZidOAuthError({
-              code: 'token_storage_failed',
-              message: 'Could not insert new Zid merchant token in Supabase.',
-              details: insertError,
-            })
-          }
         }
       } else {
-        // Create new connection
+        // New store (first or additional for this workspace): insert a new
+        // row and KEEP any other rows — a workspace may link several stores
+        // of the same platform. Never migrate or delete sibling rows here.
         const { error: insertError } = await supabase
           .from('merchant_tokens')
           .insert([tokenData])
@@ -400,7 +359,7 @@ export async function GET(request: NextRequest) {
 
     // Auto-register the core webhooks in the background (non-blocking).
     // Tokens are saved by now, so registerZidWebhook can resolve auth headers.
-    // Only ZID_CORE_EVENTS (≈7) with ?event=&store_id= URLs — the rest is
+    // Only ZID_CORE_EVENTS with ?event=&store_id= URLs — the rest is
     // opt-in from Advanced settings (syncWebhooksWithSettings).
     if (merchantId) {
       import('@/lib/zid/webhooks').then(({ ZID_CORE_EVENTS, registerZidWebhook }) => {

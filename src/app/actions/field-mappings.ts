@@ -51,6 +51,8 @@ export async function saveFieldMapping(data: {
   odooFallbackPolicy?: 'none' | 'create' | 'block'
   mappings: any
   platform?: 'zid' | 'salla' | 'shopify'
+  /** Multi-store: merchant_id (zid/salla) or shop_domain (shopify). Defaults to the newest store. */
+  storeKey?: string
   syncDirection?: string
   variantSyncMode?: string
   variantOdooMatchField?: string
@@ -95,36 +97,45 @@ export async function saveFieldMapping(data: {
 
     let merchantId: string
     let storeId: string | null = null
+    // Multi-store: explicit storeKey wins, otherwise the newest store.
+    const pickByKey = <T,>(rows: T[] | null, match: (r: T) => string): T | null => {
+      if (!rows || rows.length === 0) return null
+      if (data.storeKey) return rows.find(r => match(r) === String(data.storeKey)) ?? null
+      return rows[0]
+    }
 
     if (isShopify) {
-      const { data: shopifyTok } = await supabase
+      const { data: shopifyToks } = await supabase
         .from('shopify_tokens')
         .select('shop_domain')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
 
+      const shopifyTok: any = pickByKey(shopifyToks, r => String((r as any).shop_domain))
       if (!shopifyTok) {
         throw new Error('متجرك في شوبيفاي غير متصل - يرجى ربط شوبيفاي أولاً (Shopify store not connected)')
       }
       merchantId = shopifyTok.shop_domain
     } else if (isSalla) {
-      const { data: sallaTok } = await supabase
+      const { data: sallaToks } = await supabase
         .from('salla_tokens')
         .select('merchant_id')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
 
+      const sallaTok: any = pickByKey(sallaToks, r => String((r as any).merchant_id))
       if (!sallaTok) {
         throw new Error('متجرك في سلة غير متصل - يرجى ربط سلة أولاً (Salla store not connected)')
       }
       merchantId = sallaTok.merchant_id
     } else {
-      const { data: merchantTok } = await supabase
+      const { data: merchantToks } = await supabase
         .from('merchant_tokens')
         .select('merchant_id, store_id')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
 
+      const merchantTok: any = pickByKey(merchantToks, r => String((r as any).merchant_id))
       if (!merchantTok) {
         throw new Error('متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
       }
@@ -195,6 +206,21 @@ export async function saveFieldMapping(data: {
       } catch (err: any) {
         console.error('[saveFieldMapping] Failed to register webhook in Odoo:', err)
         throw new Error(`فشل ربط وتفعيل المزامنة التلقائية في أودو: ${err.message}`)
+      }
+    }
+
+    // Multi-store: editing a mapping without an explicit storeKey must NOT
+    // reassign it to the newest store — preserve the row's own store.
+    if (data.id && !data.storeKey) {
+      const { data: existing } = await supabase
+        .from('field_mappings')
+        .select('merchant_id, store_id')
+        .eq('id', data.id)
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+      if (existing?.merchant_id) {
+        merchantId = existing.merchant_id
+        storeId = (existing as { store_id?: string | null }).store_id || null
       }
     }
 

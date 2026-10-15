@@ -16,9 +16,11 @@ interface CategoryMappingDialogProps {
   isOpen: boolean
   onClose: () => void
   platform?: string
+  /** Multi-store: merchant_id / shop_domain of the active store tab. */
+  storeKey?: string
 }
 
-export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid' }: CategoryMappingDialogProps) {
+export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid', storeKey = '' }: CategoryMappingDialogProps) {
   const { lang, dir } = useLanguage()
   const { toast } = useToast()
   
@@ -42,14 +44,14 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
 
   const loadMappings = useCallback(async () => {
     setIsLoading(true)
-    const res = await getCategoryMappings(platform)
+    const res = await getCategoryMappings(platform, storeKey)
     if (res.success) {
       setMappings(res.mappings)
     } else {
       toast({ title: lang === 'ar' ? 'خطأ' : 'Error', description: res.error, variant: 'destructive' })
     }
     setIsLoading(false)
-  }, [platform, lang, toast])
+  }, [platform, storeKey, lang, toast])
 
   const loadOdooCategories = async () => {
     setIsLoadingAccounts(true)
@@ -62,7 +64,7 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
 
   const loadStoreCategories = async () => {
     setIsLoadingStore(true)
-    const res = await fetchStoreCategories(platform)
+    const res = await fetchStoreCategories(platform, storeKey || undefined)
     if (res.success) {
       setStoreCategories(res.categories || [])
     }
@@ -146,6 +148,7 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
 
     const payload: any = {
       platform,
+      storeId: storeKey || undefined,
       source_category_name: form.source_category_name.trim(),
       source_category_id: sourceCategoryId,
       odoo_category_id: form.odoo_category_id ? Number(form.odoo_category_id) : null,
@@ -190,7 +193,7 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
 
   const handleBatchImport = async () => {
     setIsBatchImporting(true)
-    const res = await fetchStoreCategories(platform)
+    const res = await fetchStoreCategories(platform, storeKey || undefined)
     if (!res.success || !res.categories?.length) {
       toast({
         title: lang === 'ar' ? 'خطأ' : 'Error',
@@ -201,7 +204,7 @@ export default function CategoryMappingDialog({ isOpen, onClose, platform = 'zid
       return
     }
     const names = res.categories.map((cat: any) => ({ name: getCategoryName(cat) })).filter((c: any) => c.name)
-    const result = await batchImportCategoryMappings(platform, names)
+    const result = await batchImportCategoryMappings(platform, names, storeKey)
     if (result.success) {
       toast({
         title: lang === 'ar' ? 'تم الاستيراد' : 'Imported',

@@ -388,12 +388,14 @@ export async function getCustomOdooFields() {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) return { success: true, fields: [] }
 
-    // Try Supabase first
+    // Try Supabase first (lean columns: the list only renders these;
+    // select('*') pulls encrypted/large payloads over the wire per row).
     const { data: localFields, error } = await supabase
       .from('custom_odoo_fields')
-      .select('*')
+      .select('id,odoo_field_id,field_name,field_label,odoo_model,field_type,views,created_at,properties')
       .eq('workspace_id', user.active_workspace_id)
       .order('created_at', { ascending: false })
+      .limit(200)
 
     if (!error && localFields) {
       return { success: true, fields: localFields, source: 'supabase' }

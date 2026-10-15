@@ -890,8 +890,40 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
 }
 
 /**
- * Fetch all security groups (res.groups) from Odoo
+ * Fetch all security groups (res.groups) from Odoo.
+ * Cached 30 min per connection (in-process single-flight + Next data cache):
+ * the old version hit Odoo XML-RPC on every add-field mount, which is why the
+ * page felt slow even when Supabase was fast.
  */
+const TTL_GROUPS_MS = 30 * 60 * 1000 // 30 min — groups rarely change
+
+async function fetchOdooGroupsRaw(connection: any) {
+  const client = createOdooClient(connection)
+
+  const groups = await client.execute<Array<{ id: number; full_name: string; name: string }>>(
+    'res.groups',
+    'search_read',
+    [[['share', '=', false]]], // Filter out portal/share groups
+    { fields: ['id', 'full_name', 'name'], order: 'full_name asc, name asc', limit: 500 }
+  )
+
+  return groups.map(g => ({
+    id: g.id,
+    name: g.full_name || g.name || `Group #${g.id}`,
+  }))
+}
+
+const getCachedOdooGroups = unstable_cache(
+  async (connectionId: string, connection: any) => {
+    return fetchOdooGroupsRaw(connection)
+  },
+  ['odoo-groups'],
+  {
+    revalidate: 1800, // 30 minutes
+    tags: ['odoo-groups']
+  }
+)
+
 export async function getOdooGroups() {
   try {
     const user = await getOrCreateDbUser()
@@ -899,7 +931,7 @@ export async function getOdooGroups() {
 
     const { data: conn } = await supabase
       .from('erp_connections')
-      .select('*')
+      .select('id,url,db_name,username,password,erp_type')
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
 
@@ -909,22 +941,13 @@ export async function getOdooGroups() {
       return { success: true, groups: [] }
     }
 
-    const client = createOdooClient(conn)
-
-    const groups = await client.execute<Array<{ id: number; full_name: string; name: string }>>(
-      'res.groups',
-      'search_read',
-      [[['share', '=', false]]], // Filter out portal/share groups
-      { fields: ['id', 'full_name', 'name'], order: 'full_name asc, name asc' }
+    const groups = await ttlCache.get(
+      `odoo:groups:${conn.id}`,
+      TTL_GROUPS_MS,
+      () => getCachedOdooGroups(conn.id, conn)
     )
 
-    return {
-      success: true,
-      groups: groups.map(g => ({
-        id: g.id,
-        name: g.full_name || g.name || `Group #${g.id}`,
-      }))
-    }
+    return { success: true, groups }
   } catch (error: any) {
     console.error('[Odoo Action] getOdooGroups failed:', error)
     return { success: false, error: error.message || 'Failed to fetch Odoo groups', groups: [] }

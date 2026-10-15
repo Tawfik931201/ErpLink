@@ -27,7 +27,7 @@ export interface ProductMappingRow {
   updated_at: string
 }
 
-export async function getProductMappings(platform: string = 'zid') {
+export async function getProductMappings(platform: string = 'zid', storeId = '') {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -35,11 +35,13 @@ export async function getProductMappings(platform: string = 'zid') {
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) return { success: true, mappings: [] as ProductMappingRow[] }
 
+    // Per-store rows plus legacy platform-wide ('') rows.
     const { data, error } = await supabase
       .from('product_mappings')
       .select('*')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .in('store_id', storeId ? [storeId, ''] : [''])
       .order('source_product_name', { ascending: true })
 
     if (error) throw error
@@ -53,6 +55,8 @@ export async function getProductMappings(platform: string = 'zid') {
 
 export async function saveProductMapping(data: {
   platform: string
+  /** Multi-store: merchant_id / shop_domain. Defaults to '' (platform-wide legacy). */
+  storeId?: string
   source_product_id?: string | number | null
   source_product_name: string
   source_sku?: string | null
@@ -74,13 +78,14 @@ export async function saveProductMapping(data: {
       .upsert({
         workspace_id: user.active_workspace_id,
         platform: data.platform,
+        store_id: data.storeId || '',
         source_product_id: sourceProductId,
         source_product_name: data.source_product_name,
         source_sku: data.source_sku || null,
         odoo_product_id: data.odoo_product_id ?? null,
         updated_at: new Date().toISOString(),
       }, {
-        onConflict: 'workspace_id, platform, source_product_id',
+        onConflict: 'workspace_id, platform, store_id, source_product_id',
       })
 
     if (error) throw error
@@ -98,15 +103,17 @@ export async function saveProductMapping(data: {
             apiKey: decrypt(conn.connection.password),
           })
 
-          const { data: settingsRow } = await supabase
+          const { data: settingsRows } = await supabase
             .from('standard_mapping_settings')
-            .select('settings')
+            .select('store_id, settings')
             .eq('workspace_id', user.active_workspace_id)
             .eq('store_type', data.platform)
             .eq('entity_type', 'products')
-            .maybeSingle()
+            .in('store_id', data.storeId ? [data.storeId, ''] : [''])
 
-          const settings = (settingsRow as any)?.settings || {}
+          const settingsHit = ((settingsRows ?? []) as Array<{ store_id: string; settings: unknown }>)
+            .find(r => r.store_id === (data.storeId || '')) ?? (settingsRows ?? []).find((r: any) => r.store_id === '')
+          const settings = ((settingsHit as any)?.settings || {}) as Record<string, any>
           const productCfg = settings.product || {}
           const odooField = productCfg.odoo_match_field || settings.match_odoo_field
             || platformIdField(toPlatformKey(data.platform))
@@ -141,7 +148,7 @@ export async function saveProductMapping(data: {
   }
 }
 
-export async function batchImportProductMappings(platform: string, products: { id: string; name: string; sku?: string }[]) {
+export async function batchImportProductMappings(platform: string, products: { id: string; name: string; sku?: string }[], storeId = '') {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -154,6 +161,7 @@ export async function batchImportProductMappings(platform: string, products: { i
       .select('source_product_id')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .eq('store_id', storeId)
 
     const existingIds = new Set((existing || [])
       .map(m => m.source_product_id)
@@ -169,6 +177,7 @@ export async function batchImportProductMappings(platform: string, products: { i
     const rows = newProducts.map(p => ({
       workspace_id: user.active_workspace_id,
       platform,
+      store_id: storeId,
       source_product_id: String(p.id),
       source_product_name: p.name,
       source_sku: p.sku || null,
@@ -177,7 +186,7 @@ export async function batchImportProductMappings(platform: string, products: { i
 
     const { error } = await supabase
       .from('product_mappings')
-      .upsert(rows, { onConflict: 'workspace_id, platform, source_product_id' })
+      .upsert(rows, { onConflict: 'workspace_id, platform, store_id, source_product_id' })
 
     if (error) throw error
 
@@ -213,7 +222,7 @@ export async function deleteProductMapping(id: string) {
   }
 }
 
-export async function fetchStoreProducts(platform: string = 'zid'): Promise<{
+export async function fetchStoreProducts(platform: string = 'zid', storeKey?: string): Promise<{
   success: boolean
   error?: string
   products: { id: string; name: string; sku: string; barcode?: string }[]
@@ -226,13 +235,20 @@ export async function fetchStoreProducts(platform: string = 'zid'): Promise<{
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
     const products: { id: string; name: string; sku: string; barcode?: string }[] = []
+    // Multi-store: explicit storeKey (merchant_id / shop_domain) wins, else newest store.
+    const pickByKey = <T,>(rows: T[] | null, match: (r: T) => string): T | null => {
+      if (!rows || rows.length === 0) return null
+      if (storeKey) return rows.find(r => match(r) === String(storeKey)) ?? null
+      return rows[0]
+    }
 
     if (platform === 'salla') {
-      const { data: sallaTok } = await supabase
+      const { data: sallaToks } = await supabase
         .from('salla_tokens')
         .select('merchant_id')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const sallaTok: any = pickByKey(sallaToks, r => String((r as any).merchant_id))
       if (!sallaTok) throw new Error('Salla store not connected')
 
       let page = 1
@@ -252,11 +268,12 @@ export async function fetchStoreProducts(platform: string = 'zid'): Promise<{
         page++
       }
     } else if (platform === 'shopify') {
-      const { data: shopifyTok } = await supabase
+      const { data: shopifyToks } = await supabase
         .from('shopify_tokens')
         .select('shop_domain')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const shopifyTok: any = pickByKey(shopifyToks, r => String((r as any).shop_domain))
       if (!shopifyTok) throw new Error('Shopify store not connected')
 
       let pageInfo: string | undefined
@@ -279,11 +296,12 @@ export async function fetchStoreProducts(platform: string = 'zid'): Promise<{
       } while (pageInfo && pages < 20)
     } else {
       // Zid (default)
-      const { data: merchantTok } = await supabase
+      const { data: merchantToks } = await supabase
         .from('merchant_tokens')
         .select('*')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const merchantTok: any = pickByKey(merchantToks, r => String((r as any).merchant_id))
       if (!merchantTok) throw new Error('Zid store not connected')
 
       const tokenData = await getAccessToken(merchantTok.merchant_id)
@@ -321,6 +339,8 @@ export async function fetchStoreProducts(platform: string = 'zid'): Promise<{
 
 export async function autoMatchAndLinkProducts(params: {
   platform?: string
+  /** Multi-store: merchant_id / shop_domain. Defaults to the newest store. */
+  storeId?: string
   storeField: string
   odooField: string
   skipAlreadyMapped?: boolean
@@ -333,6 +353,7 @@ export async function autoMatchAndLinkProducts(params: {
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
     const platform = params.platform || 'zid'
+    const storeId = params.storeId || ''
     const storeField = params.storeField || 'sku'
     const odooField = params.odooField || 'default_code'
     const skipAlreadyMapped = params.skipAlreadyMapped !== false
@@ -355,19 +376,20 @@ export async function autoMatchAndLinkProducts(params: {
       apiKey: decryptedPassword,
     })
 
-    // 2. Fetch Store Products
-    const storeRes = await fetchStoreProducts(platform)
+    // 2. Fetch Store Products (this store)
+    const storeRes = await fetchStoreProducts(platform, storeId || undefined)
     if (!storeRes.success || !storeRes.products?.length) {
       return { success: false, error: storeRes.error || 'لم يتم العثور على منتجات في المتجر' }
     }
     const storeProducts = storeRes.products
 
-    // 3. Fetch Existing Mappings
+    // 3. Fetch Existing Mappings (this store)
     const { data: existingRows } = await supabase
       .from('product_mappings')
       .select('source_product_id, odoo_product_id')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .eq('store_id', storeId)
 
     const existingMappedSet = new Set<string>()
     if (existingRows) {
@@ -455,6 +477,7 @@ export async function autoMatchAndLinkProducts(params: {
         upsertRows.push({
           workspace_id: user.active_workspace_id,
           platform,
+          store_id: storeId,
           source_product_id: spId,
           source_product_name: sp.name,
           source_sku: sp.sku || null,
@@ -475,7 +498,7 @@ export async function autoMatchAndLinkProducts(params: {
         const { error: upsertErr } = await supabase
           .from('product_mappings')
           .upsert(chunk, {
-            onConflict: 'workspace_id,platform,source_product_id',
+            onConflict: 'workspace_id, platform, store_id, source_product_id',
           })
         if (upsertErr) {
           console.error('[ProductMappings] Auto-match upsert chunk error:', upsertErr)
@@ -483,18 +506,20 @@ export async function autoMatchAndLinkProducts(params: {
       }
     }
 
-    // 8. Update Match Field in Odoo according to standard_mapping_settings
+    // 8. Update Match Field in Odoo according to this store's standard settings
     let odooUpdatedCount = 0
     try {
-      const { data: settingsRow } = await supabase
+      const { data: settingsRows } = await supabase
         .from('standard_mapping_settings')
-        .select('settings')
+        .select('store_id, settings')
         .eq('workspace_id', user.active_workspace_id)
         .eq('store_type', platform)
         .eq('entity_type', 'products')
-        .maybeSingle()
+        .in('store_id', storeId ? [storeId, ''] : [''])
 
-      const settings = (settingsRow as any)?.settings || {}
+      const settingsHit = ((settingsRows ?? []) as Array<{ store_id: string; settings: unknown }>)
+        .find(r => r.store_id === storeId) ?? (settingsRows ?? []).find((r: any) => r.store_id === '')
+      const settings = ((settingsHit as any)?.settings || {}) as Record<string, any>
       const productCfg = settings.product || {}
       const targetOdooField = productCfg.odoo_match_field || settings.match_odoo_field
       const targetStoreField = productCfg.zid_match_field || settings.match_zid_field || 'sku'

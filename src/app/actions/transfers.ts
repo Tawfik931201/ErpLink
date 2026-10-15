@@ -40,6 +40,7 @@ export async function getTransfers() {
       .select('*')
       .eq('workspace_id', user.active_workspace_id)
       .order('created_at', { ascending: false })
+      .limit(100)
 
     if (error) throw new Error('Failed to query transfers: ' + error.message)
 
@@ -81,6 +82,8 @@ export async function startInitialTransfer(data: {
   platform?: 'zid' | 'salla' | 'shopify'
   odooModel: string
   mappings: any
+  /** Multi-store: merchant_id (zid/salla) or shop_domain (shopify). Defaults to the newest store. */
+  storeKey?: string
 }) {
   // Normalize direction values for backward compatibility
   const direction = data.direction === 'zid_to_odoo' ? 'store_to_odoo'
@@ -113,36 +116,45 @@ export async function startInitialTransfer(data: {
       throw new Error('نقل البيانات الكلية غير مدعوم حالياً إلا لنظام أودو (Bulk transfer is currently only supported for Odoo)')
     }
 
-    // Retrieve platform-specific store token
+    // Retrieve platform-specific store token (multi-store: all rows, newest
+    // first; explicit storeKey wins, otherwise the newest store).
     let storeToken: any = null
     let storeIdentifier = ''
+    const pickToken = <T,>(rows: T[] | null, match: (r: T) => string): T | null => {
+      if (!rows || rows.length === 0) return null
+      if (data.storeKey) return rows.find(r => match(r) === String(data.storeKey)) ?? null
+      return rows[0]
+    }
 
     if (platform === 'shopify') {
-      const { data: tok } = await supabase
+      const { data: toks } = await supabase
         .from('shopify_tokens')
         .select('*')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
-      if (!tok) throw new Error('متجر Shopify غير متصل (Shopify store not connected)')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const tok: any = pickToken(toks, r => String((r as any).shop_domain))
+      if (!tok) throw new Error(data.storeKey ? 'متجر Shopify المحدد غير متصل (Selected Shopify store not connected)' : 'متجر Shopify غير متصل (Shopify store not connected)')
       storeToken = tok
       storeIdentifier = tok.shop_domain
     } else if (platform === 'salla') {
-      const { data: tok } = await supabase
+      const { data: toks } = await supabase
         .from('salla_tokens')
         .select('*')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
-      if (!tok) throw new Error('متجر Salla غير متصل (Salla store not connected)')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const tok: any = pickToken(toks, r => String((r as any).merchant_id))
+      if (!tok) throw new Error(data.storeKey ? 'متجر Salla المحدد غير متصل (Selected Salla store not connected)' : 'متجر Salla غير متصل (Salla store not connected)')
       storeToken = tok
       storeIdentifier = tok.merchant_id
     } else {
       // Zid (default)
-      const { data: tok } = await supabase
+      const { data: toks } = await supabase
         .from('merchant_tokens')
         .select('*')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
-      if (!tok) throw new Error('متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const tok: any = pickToken(toks, r => String((r as any).merchant_id))
+      if (!tok) throw new Error(data.storeKey ? 'متجر زد المحدد غير متصل (Selected Zid store not connected)' : 'متجرك في زد غير متصل - يرجى ربط زد أولاً (Zid store not connected)')
       storeToken = tok
       storeIdentifier = tok.merchant_id
     }

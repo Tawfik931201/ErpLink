@@ -34,7 +34,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Cron secret not configured on server' }, { status: 500 })
   }
 
-  const batchSize = Number(req.nextUrl.searchParams.get('batch')) || SYNC_QUEUE_DEFAULT_BATCH
+  // Cap: an unbounded `?batch=` is a one-request DoS (memory + Odoo/Zid
+  // request storm on shared hosting). Clamp to 1..100 regardless of input.
+  const rawBatch = Number(req.nextUrl.searchParams.get('batch'))
+  const batchSize = Number.isFinite(rawBatch)
+    ? Math.min(100, Math.max(1, Math.trunc(rawBatch)))
+    : SYNC_QUEUE_DEFAULT_BATCH
+
+  // Rate limit cron invocations per caller (60/min) — a retry loop must not
+  // become a tight hammer.
+  const { checkRateLimit: checkCronRl } = await import('@/lib/rate-limit')
+  const cronIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'anonymous'
+  const cronRl = checkCronRl(`cron-sync-queue:${cronIp}`, 60, 60_000)
+  if (!cronRl.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
 
   try {
     // 1) الشفاء أولاً: أضيق نافذة زمنية يوجد فيها احتمال فقدان حدث.
@@ -88,6 +102,8 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
-  return GET(req)
+// POST is intentionally NOT supported here: cron/scheduler pings are GET,
+// and accepting state-changing POSTs widens CSRF-driven invocation surface.
+export async function POST() {
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
 }

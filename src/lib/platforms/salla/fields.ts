@@ -398,6 +398,11 @@ export const SALLA_FIELDS: Record<string, { value: string; label: string; type: 
     { value: 'created_at', label: 'Created At (created_at)', type: 'string' }
   ],
   'sale.order': [
+    // Reserved: NOT a real webhook field. When picked as the match field, the
+    // engine resolves it from odoo_entity_links (the Odoo id saved at create
+    // time, scoped per store). Must stay identical to STORED_ODOO_ID_FIELD in
+    // src/lib/entity-links.ts — pinned by tests/unit/entity-links.test.ts.
+    { value: '__odoo_record_id', label: 'Saved Odoo ID — auto (__odoo_record_id)', type: 'number' },
     { value: 'id', label: 'Order ID (id)', type: 'number' },
     { value: 'reference_id', label: 'Reference ID (reference_id)', type: 'number' },
     { value: 'payment_method', label: 'Payment Method (payment_method)', type: 'string' },
@@ -417,6 +422,7 @@ export const SALLA_FIELDS: Record<string, { value: string; label: string; type: 
     { value: 'created_at', label: 'Created At (created_at)', type: 'string' }
   ],
   'sale.order.line': [
+    { value: 'id', label: 'Line Item ID (id)', type: 'number' },
     { value: 'product_id', label: 'Product ID', type: 'string' },
     { value: 'name', label: 'Product Name', type: 'string' },
     { value: 'sku', label: 'Product SKU', type: 'string' },

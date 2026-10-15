@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase'
 import { forceRefreshTelegramPoller } from '@/lib/telegram-long-poller'
 import {
   clearTelegramCache,
+  parseArrivalFilter,
   parseEventsFilter,
   parseMappingsFilter,
 } from '@/lib/telegram-notifier'
@@ -170,6 +171,7 @@ export async function getSubscriptions(botId?: string) {
       bot: Array.isArray(r.bot) ? r.bot[0] ?? null : r.bot,
       events_filter: parseEventsFilter(r.mapping_filter),
       mapping_filter: parseMappingsFilter(r.mapping_filter),
+      notify_on_arrival: parseArrivalFilter(r.mapping_filter),
     }))
 
     return { success: true, subscriptions }
@@ -232,6 +234,7 @@ export async function updateSubscription(
     workspace_filter?: string[]
     mapping_filter?: string[]
     events_filter?: string[]
+    notify_on_arrival?: boolean
   }
 ) {
   try {
@@ -244,7 +247,11 @@ export async function updateSubscription(
     if (typeof prefs.enabled === 'boolean') payload.enabled = prefs.enabled
     if (prefs.workspace_filter) payload.workspace_filter = prefs.workspace_filter
 
-    if (prefs.mapping_filter !== undefined || prefs.events_filter !== undefined) {
+    if (
+      prefs.mapping_filter !== undefined ||
+      prefs.events_filter !== undefined ||
+      prefs.notify_on_arrival !== undefined
+    ) {
       const { data: current } = await supabase
         .from('telegram_bot_chats')
         .select('mapping_filter')
@@ -254,10 +261,22 @@ export async function updateSubscription(
 
       const existingEvents = parseEventsFilter(current?.mapping_filter)
       const existingMappings = parseMappingsFilter(current?.mapping_filter)
+      // Preserve any other keys already stored in the JSON (e.g.
+      // notify_on_arrival) — rebuild must not drop them.
+      const currentObj =
+        current?.mapping_filter &&
+        typeof current.mapping_filter === 'object' &&
+        !Array.isArray(current.mapping_filter)
+          ? { ...(current.mapping_filter as Record<string, unknown>) }
+          : {}
 
       payload.mapping_filter = {
+        ...currentObj,
         mappings: prefs.mapping_filter !== undefined ? prefs.mapping_filter : existingMappings,
         events: prefs.events_filter !== undefined ? prefs.events_filter : existingEvents,
+        ...(prefs.notify_on_arrival !== undefined
+          ? { notify_on_arrival: prefs.notify_on_arrival }
+          : {}),
       }
     }
 

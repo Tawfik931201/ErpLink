@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/ui/logo'
 import { type Language } from '@/lib/translations'
 
-export function PublicSiteHeader({ lang }: { lang: Language }) {
-  const { userId } = auth()
+export async function PublicSiteHeader({ lang }: { lang: Language }) {
+  const { userId } = await auth()
   const isSignedIn = !!userId
 
   return (

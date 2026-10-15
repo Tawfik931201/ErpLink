@@ -62,6 +62,36 @@ describe('resolveZidShippingCost', () => {
     })
     expect(cost).toBe(0)
   })
+
+  it('sums Shopify shipping_lines[] rows', () => {
+    const cost = resolveZidShippingCost({
+      shipping_lines: [
+        { title: 'Standard', price: '15.00' },
+        { title: 'Extra', price: 5 },
+      ],
+    })
+    expect(cost).toBe(20)
+  })
+
+  it('reads Shopify total_shipping_price_set when no lines exist', () => {
+    const cost = resolveZidShippingCost({
+      total_shipping_price_set: { shop_money: { amount: '22.50', currency_code: 'SAR' } },
+    })
+    expect(cost).toBe(22.5)
+  })
+
+  it('prefers the Zid invoice row over Shopify keys when both are present', () => {
+    const cost = resolveZidShippingCost({
+      payment: { invoice: [{ code: 'shipping', title: 'Shipping', value: 7 }] },
+      shipping_lines: [{ title: 'Standard', price: '99.00' }],
+    })
+    expect(cost).toBe(7)
+  })
+
+  it('returns 0 for a Shopify payload with free shipping', () => {
+    expect(resolveZidShippingCost({ shipping_lines: [{ title: 'Free', price: '0.00' }] })).toBe(0)
+    expect(resolveZidShippingCost({ total_shipping_price: '0.00' })).toBe(0)
+  })
 })
 
 describe('resolveZidCodAmount', () => {
@@ -132,6 +162,50 @@ describe('isSaudiShippingAddress', () => {
     // Intentional: missing data must not silently flip the tax path.
     expect(isSaudiShippingAddress({})).toBe(true)
   })
+
+  it('reads the Salla order shape (shipping.address + customer)', () => {
+    // Verified against Salla's published order payload (docs.salla.dev/doc-433804).
+    expect(
+      isSaudiShippingAddress({
+        shipping: { address: { country: 'SA', country_code: 'SA', city: 'جدة' } },
+        customer: { mobile: '999123456789', country: 'السعودية', city: 'جدة' },
+      })
+    ).toBe(true)
+    expect(
+      isSaudiShippingAddress({
+        shipping: { address: { country: 'AE', country_code: 'AE', city: 'أبو ظبي' } },
+        customer: { mobile: '+971555555555', country: 'الامارات', city: 'أبو ظبي' },
+      })
+    ).toBe(false)
+  })
+
+  it('reads the Salla shipment destination (shipments[0].ship_to)', () => {
+    expect(
+      isSaudiShippingAddress({
+        shipments: [{ ship_to: { country: 'الامارات', city: 'أبو ظبي', phone: '971501960991' } }],
+      })
+    ).toBe(false)
+    expect(
+      isSaudiShippingAddress({
+        shipments: [{ ship_to: { country: 'SA', city: 'الرياض' } }],
+      })
+    ).toBe(true)
+  })
+
+  it('reads structured country/city objects with name_en (Salla branch style)', () => {
+    expect(
+      isSaudiShippingAddress({ shipping: { address: { country: { code: 'SA', name_en: 'Saudi Arabia' } } } })
+    ).toBe(true)
+    expect(
+      isSaudiShippingAddress({ customer: { city: { name: 'الرياض', name_en: 'Riyadh' } } })
+    ).toBe(true)
+  })
+
+  it('composes the Salla bare mobile with mobile_code', () => {
+    expect(
+      isSaudiShippingAddress({ customer: { mobile: 501806978, mobile_code: '+966' } })
+    ).toBe(true)
+  })
 })
 
 describe('resolveZidStatus', () => {
@@ -167,5 +241,22 @@ describe('resolveZidStatus', () => {
 
   it('returns an empty string when no status is present', () => {
     expect(resolveZidStatus({})).toBe('')
+
+    expect(resolveZidStatus({ status: {} })).toBe('')
+  })
+
+  it('resolves Salla status objects via slug (not the numeric id)', () => {
+    // Salla sends {id, name, slug}; the id is a row id, useless for matching.
+    expect(
+      resolveZidStatus({ status: { id: 566146469, name: 'بإنتظار المراجعة', slug: 'under_review' } })
+    ).toBe('under_review')
+    expect(
+      resolveZidStatus({ order: { status: { id: 1, name: 'Shipped', slug: 'shipped' } } })
+    ).toBe('shipped')
+  })
+
+  it('maps Salla Arabic display names to canonical slugs', () => {
+    expect(resolveZidStatus({ status: 'بإنتظار المراجعة' })).toBe('under_review')
+    expect(resolveZidStatus({ status: 'تم التنفيذ' })).toBe('completed')
   })
 })

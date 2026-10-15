@@ -5,7 +5,7 @@ import {
   Plus, Trash2, Check, Loader2, AlertTriangle, ChevronDown,
   Info, Wand2, X, RefreshCw, Database, ArrowRight, Calendar, Edit
 } from 'lucide-react'
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 
 import {
   createCustomOdooField,
@@ -22,7 +22,7 @@ import {
   deleteCustomErpNextField,
   updateCustomErpNextField,
 } from '@/app/actions/custom-fields-erpnext'
-import { getOdooGroups } from '@/app/actions/odoo'
+import { getOdooGroups, getOdooModels } from '@/app/actions/odoo'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { sanitizeTechnicalName, sanitizeTechnicalNameErpNext } from '@/lib/field-utils'
@@ -118,6 +118,12 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
   const [technicalName, setTechnicalName] = useState('')
   const [techNameManual, setTechNameManual] = useState(false)
   const [fieldType, setFieldType] = useState('char')
+  // Models load lazily (only when the form view opens): the page no longer
+  // blocks its server render on the Odoo ir.model round-trip, and the default
+  // "list" view never needs them at all.
+  const [models, setModels] = useState<Array<{ model: string; name: string }>>(initialModels || [])
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState(initialModels[0]?.model || '')
   const [selectedView, setSelectedView] = useState<CustomFieldView>('form')
   const [isReadonly, setIsReadonly] = useState(false)
@@ -153,34 +159,91 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
     }
   }, [fieldLabel, techNameManual, erpType])
 
-  // Load fields
+  // Load fields (network-hardened: a rejected server-action fetch used to
+  // leave the spinner stuck forever plus an unhandled "Failed to fetch").
+  const [fieldsError, setFieldsError] = useState<string | null>(null)
   const loadFields = useCallback(async () => {
     setIsLoadingFields(true)
-    const res = erpType === 'erpnext'
-      ? await getCustomErpNextFields()
-      : await getCustomOdooFields()
-    if (res.success) setCreatedFields((res.fields || []) as CreatedField[])
-    setIsLoadingFields(false)
+    setFieldsError(null)
+    try {
+      const res = erpType === 'erpnext'
+        ? await getCustomErpNextFields()
+        : await getCustomOdooFields()
+      if (res.success) {
+        setCreatedFields((res.fields || []) as CreatedField[])
+      } else {
+        setFieldsError(res.error || 'Failed to load fields')
+      }
+    } catch (err) {
+      console.error('loadFields failed:', err)
+      setFieldsError(err instanceof Error ? err.message : 'Failed to load fields')
+    } finally {
+      setIsLoadingFields(false)
+    }
   }, [erpType])
 
   useEffect(() => { loadFields() }, [loadFields])
 
-  // Load groups
+  // Models fetch, StrictMode-safe and manual-first.
+  // The old effect used a `cancelled` boolean: in dev (reactStrictMode) the
+  // effect mounts, unmounts and remounts — run #1 set isLoadingModels(true)
+  // then got cancelled, run #2 bailed out early on isLoadingModels, and run
+  // #1's `finally` skipped setIsLoadingModels(false) because it was
+  // cancelled. Result: the select sat on "loading" forever. The request id
+  // below means only the LATEST request may write state, so a stale
+  // cancellation can never freeze the spinner.
+  // No auto-retry loop: one automatic attempt per form visit; a failure sets
+  // a stable modelsError, and further refreshes are manual via the
+  // circular-arrow button (or the retry link under the error).
+  const modelsReqId = useRef(0)
+  const loadModels = useCallback(async () => {
+    if (!hasOdooConnection) return
+    const reqId = ++modelsReqId.current
+    setIsLoadingModels(true)
+    setModelsError(null)
+    try {
+      const res = await getOdooModels()
+      if (modelsReqId.current !== reqId) return
+      if (res.success && res.models) {
+        setModels(res.models)
+        setSelectedModel(prev => prev || res.models[0]?.model || '')
+      } else {
+        setModelsError(res.error || 'Failed to load models')
+      }
+    } catch (err) {
+      if (modelsReqId.current !== reqId) return
+      setModelsError(err instanceof Error ? err.message : 'Failed to load models')
+    } finally {
+      if (modelsReqId.current === reqId) setIsLoadingModels(false)
+    }
+  }, [hasOdooConnection])
+
+  // One automatic attempt when the form view opens (skipped when models are
+  // already loaded). Afterwards the user refreshes manually.
+  const modelsAutoTried = useRef(false)
   useEffect(() => {
+    if (view !== 'form' || !hasOdooConnection || models.length > 0 || modelsAutoTried.current) return
+    modelsAutoTried.current = true
+    loadModels()
+  }, [view, hasOdooConnection, models.length, loadModels])
+
+  // Load groups lazily too — only for the form view, never for the list.
+  useEffect(() => {
+    if (view !== 'form' || !hasOdooConnection || erpType === 'erpnext' || odooGroups.length > 0) return
+    let cancelled = false
     const loadGroups = async () => {
       try {
         const res = await getOdooGroups()
-        if (res.success && res.groups) {
+        if (!cancelled && res.success && res.groups) {
           setOdooGroups(res.groups)
         }
       } catch (err) {
         console.error('Failed to load Odoo groups:', err)
       }
     }
-    if (hasOdooConnection) {
-      loadGroups()
-    }
-  }, [hasOdooConnection])
+    loadGroups()
+    return () => { cancelled = true }
+  }, [view, hasOdooConnection, erpType, odooGroups.length])
 
   // Reset form
   const resetForm = () => {
@@ -194,7 +257,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
   }
 
   const goToList = () => { resetForm(); setView('list') }
-  const goToForm = () => { resetForm(); setView('form') }
+  const goToForm = () => { resetForm(); modelsAutoTried.current = false; setView('form') }
 
   const startEditField = (field: CreatedField) => {
     setEditingField(field)
@@ -213,6 +276,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
     setSelectionOpts(props.selection_options && props.selection_options.length > 0 ? props.selection_options : [{ key: '', label: '' }])
     setSelectedGroups((props.group_ids || []).map(String))
     setSaveError(null)
+    modelsAutoTried.current = false
     setView('form')
   }
 
@@ -568,26 +632,50 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
 
               {/* ERP Model */}
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-muted-foreground">
-                  {lang === 'ar' ? (erpType === 'erpnext' ? 'نوع المستند (DocType)' : 'موديول أودو') : (erpType === 'erpnext' ? 'ERPNext DocType' : 'Odoo Model')}
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-[11px] font-bold text-muted-foreground">
+                    {lang === 'ar' ? (erpType === 'erpnext' ? 'نوع المستند (DocType)' : 'موديول أودو') : (erpType === 'erpnext' ? 'ERPNext DocType' : 'Odoo Model')}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={loadModels}
+                    disabled={isLoadingModels || !hasOdooConnection}
+                    title={lang === 'ar' ? 'تحديث قائمة الموديلات' : 'Refresh model list'}
+                    className="flex items-center justify-center h-6 w-6 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={cn('h-3.5 w-3.5', isLoadingModels && 'animate-spin')} />
+                  </button>
+                </div>
                 <div className={cn(
                   "rounded-xl border border-border bg-muted p-0.5",
                   editingField && 'opacity-65 cursor-not-allowed'
                 )}>
                   <SearchableSelect
-                    options={initialModels.map(m => ({
+                    options={models.map(m => ({
                       value: m.model,
                       label: m.name || m.model,
                       desc: m.model,
                     }))}
                     value={selectedModel}
                     onChange={(val: string) => setSelectedModel(val)}
-                    placeholder={lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...')}
-                    disabled={!!editingField}
+                    placeholder={isLoadingModels
+                      ? (lang === 'ar' ? 'جاري تحميل الموديلات...' : 'Loading models...')
+                      : (lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...'))}
+                    disabled={!!editingField || isLoadingModels}
                   />
                 </div>
-                {selectedModel ? (
+                {modelsError ? (
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] text-destructive font-medium flex-1">{modelsError}</p>
+                    <button
+                      type="button"
+                      onClick={loadModels}
+                      className="shrink-0 text-[10px] font-bold text-foreground hover:underline"
+                    >
+                      {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                    </button>
+                  </div>
+                ) : selectedModel ? (
                   <p className="text-[10px] font-mono text-muted-foreground font-medium">{selectedModel}</p>
                 ) : (
                   <p className="text-[10px] text-muted-foreground font-medium">
@@ -627,15 +715,17 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     editingField && 'opacity-65 cursor-not-allowed'
                   )}>
                     <SearchableSelect
-                      options={initialModels.map(m => ({
+                      options={models.map(m => ({
                         value: m.model,
                         label: m.name || m.model,
                         desc: m.model,
                       }))}
                       value={relationModel}
                       onChange={(val: string) => setRelationModel(val)}
-                      placeholder={lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...')}
-                      disabled={!!editingField}
+                      placeholder={isLoadingModels
+                        ? (lang === 'ar' ? 'جاري تحميل الموديلات...' : 'Loading models...')
+                        : (lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...'))}
+                      disabled={!!editingField || isLoadingModels}
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground font-medium">
@@ -810,6 +900,27 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
         {isLoadingFields ? (
           <div className="flex items-center justify-center h-44">
             <Loader2 className="h-6 w-6 text-foreground animate-spin" />
+          </div>
+        ) : fieldsError ? (
+          <div className="flex flex-col items-center justify-center h-52 text-center p-6">
+            <div className="h-14 w-14 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <AlertTriangle className="h-7 w-7 text-destructive/60" />
+            </div>
+            <p className="text-sm font-bold text-foreground mb-1">
+              {lang === 'ar' ? 'تعذّر تحميل الحقول' : 'Failed to load fields'}
+            </p>
+            <p className="text-[11px] text-muted-foreground max-w-xs mb-1" dir="ltr">
+              {fieldsError}
+            </p>
+            <p className="text-[11px] text-muted-foreground max-w-xs mb-4">
+              {lang === 'ar'
+                ? 'تحقق من اتصال السيرفر ثم أعد المحاولة'
+                : 'Check the server connection and try again'}
+            </p>
+            <Button onClick={loadFields} className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-8 text-xs transition-transform">
+              <RefreshCw className="h-3.5 w-3.5" />
+              {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+            </Button>
           </div>
         ) : createdFields.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-52 text-center p-6">

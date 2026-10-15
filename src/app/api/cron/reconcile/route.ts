@@ -30,7 +30,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Cron secret not configured on server' }, { status: 500 })
   }
 
-  const windowMinutes = Number(req.nextUrl.searchParams.get('window')) || undefined
+  // Cap `?window=` (1..1440 min) — an unbounded window turns one cron ping
+  // into a full-history sweep (Zid 60 req/min budget + memory on shared host).
+  const rawWindow = Number(req.nextUrl.searchParams.get('window'))
+  const windowMinutes = Number.isFinite(rawWindow)
+    ? Math.min(1440, Math.max(1, Math.trunc(rawWindow)))
+    : undefined
+
+  const { checkRateLimit: checkReconcileRl } = await import('@/lib/rate-limit')
+  const reconcileIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'anonymous'
+  const reconcileRl = checkReconcileRl(`cron-reconcile:${reconcileIp}`, 20, 60_000)
+  if (!reconcileRl.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
 
   try {
     const result = await reconcileZidOrders({ windowMinutes })
@@ -51,6 +63,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
-  return GET(req)
+// POST is intentionally NOT supported here (see sync-queue route).
+export async function POST() {
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
 }

@@ -30,7 +30,6 @@ const AR = {
   unauthorized: 'سجّل الدخول إلى حسابك ثم أعد ربط المتجر.',
   save_failed: 'تعذر حفظ بيانات الربط. حاول مجدداً، وإن تكررت المشكلة تواصل مع الدعم.',
 } as const
-
 /** Map Salla OAuth error codes to the codes store-selector.tsx understands. */
 function mapSallaError(error: string): string {
   const e = error.toLowerCase()
@@ -41,7 +40,47 @@ function mapSallaError(error: string): string {
   return error
 }
 
+/**
+ * Core preset saved for NEW Salla connections (store → ERP, all order events
+ * + products + customers + categories). Must mirror CORE_SALLA_EVENTS in
+ * `src/app/(app)/app/connect-store/salla-sync-settings.tsx` — the UI falls
+ * back to that list only when the DB row has no settings, so saving it here
+ * is what makes a fresh store sync out of the box with zero manual toggles.
+ * (`category.deleted` does not exist in Salla's catalogue — created/updated
+ * only — so it is deliberately absent.)
+ */
+const SALLA_CONNECT_SYNC_DEFAULTS: Record<string, { odoo2salla: boolean; salla2odoo: boolean }> =
+  Object.fromEntries(
+    [
+      'order.created',
+      'order.updated',
+      'order.status.updated',
+      'order.cancelled',
+      'order.refunded',
+      'order.deleted',
+      'order.payment.updated',
+      'product.created',
+      'product.updated',
+      'product.deleted',
+      'product.publish',
+      'customer.created',
+      'customer.updated',
+      'category.created',
+      'category.updated',
+    ].map((key) => [key, { odoo2salla: false, salla2odoo: true }])
+  )
+
 export async function GET(request: NextRequest) {
+  const { checkRateLimit, rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
+  const cbRl = checkRateLimit(
+    rateLimitKeyFromHeaders((n) => request.headers.get(n), 'oauth-salla-callback'),
+    30,
+    60_000
+  )
+  if (!cbRl.allowed) {
+    return redirectToConnectStore(request, { error: 'rate_limited' })
+  }
+
   const code = request.nextUrl.searchParams.get('code')
   const error = request.nextUrl.searchParams.get('error')
   const state = request.nextUrl.searchParams.get('state')
@@ -184,6 +223,8 @@ export async function GET(request: NextRequest) {
       .maybeSingle()
 
     if (existingToken) {
+      // Reconnect: preserve the merchant's existing sync toggles (tokenData
+      // carries no sync_settings, so the column is left untouched).
       const { error: updateError } = await supabase
         .from('salla_tokens')
         .update(tokenData)
@@ -191,19 +232,41 @@ export async function GET(request: NextRequest) {
 
       if (updateError) throw updateError
     } else {
+      // New connection: persist the core preset (all order events + products +
+      // customers + categories, store → ERP) so the merchant never has to open
+      // Advanced settings and save by hand. Mirrors CORE_SALLA_EVENTS in
+      // salla-sync-settings.tsx — keep the two lists in sync.
+      //
+      // Multi-store: a workspace may link several Salla stores, so a new
+      // merchant is always INSERTED and sibling rows are never touched here.
       const { error: insertError } = await supabase
         .from('salla_tokens')
-        .insert([tokenData])
+        .insert([{ ...tokenData, sync_settings: SALLA_CONNECT_SYNC_DEFAULTS }])
 
       if (insertError) throw insertError
     }
 
     // 5. Register webhooks automatically so event sync works out of the box
     // (capped parallelism inside registerSallaWebhooks; best-effort).
+    //
+    // `undefined` — NOT `process.env.SALLA_WEBHOOK_SECRET` — so the registration
+    // falls back to the credential derived from `ENCRYPTION_KEY`. Passing an
+    // empty string used to mean "no auth header at all", which is precisely why
+    // every delivery arrived unauthenticated. An explicit value is still honoured
+    // for operators who want the header to mirror the env secret.
     try {
       const { registerSallaWebhooks } = await import('@/lib/salla-client')
-      const webhookSecret = process.env.SALLA_WEBHOOK_SECRET || undefined
-      await registerSallaWebhooks(merchantId, webhookSecret)
+      const result = await registerSallaWebhooks(merchantId, undefined)
+      if (result.failed > 0) {
+        console.error(
+          `[SallaCallback] ${result.failed}/${result.registered + result.failed} Salla webhook subscriptions failed for merchant ${merchantId} — repair with POST /api/admin/salla-webhooks/refresh`
+        )
+      }
+      if (!result.credentialAttached) {
+        console.error(
+          `[SallaCallback] Subscriptions registered without an ingress credential for merchant ${merchantId} (no ENCRYPTION_KEY) — deliveries will be treated as legacy.`
+        )
+      }
     } catch {
       // Webhook registration is best-effort — the store is connected even if
       // some events failed to register; they can be repaired later.

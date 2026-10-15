@@ -273,6 +273,11 @@ export const ZID_FIELDS: Record<string, { value: string; label: string; type: st
     { value: 'updated_at', label: 'Updated At (updated_at)', type: 'string' },
   ],
   'sale.order': [
+    // Reserved: NOT a real webhook field. When picked as the match field, the
+    // engine resolves it from odoo_entity_links (the Odoo id saved at create
+    // time, scoped per store). Must stay identical to STORED_ODOO_ID_FIELD in
+    // src/lib/entity-links.ts — pinned by tests/unit/entity-links.test.ts.
+    { value: '__odoo_record_id', label: 'Saved Odoo ID — auto (__odoo_record_id)', type: 'number' },
     // 1. Basic details
     { value: 'id', label: 'Order ID (id)', type: 'number' },
     { value: 'code', label: 'Order Code (code)', type: 'string' },
@@ -341,6 +346,7 @@ export const ZID_FIELDS: Record<string, { value: string; label: string; type: st
     { value: 'coupon', label: 'Coupon Details (coupon)', type: 'object' },
   ],
   'sale.order.line': [
+    { value: 'id', label: 'Line Item ID (id)', type: 'number' },
     { value: 'product_id', label: 'Product ID', type: 'string' },
     { value: 'name', label: 'Product Name', type: 'string' },
     { value: 'sku', label: 'Product SKU', type: 'string' },

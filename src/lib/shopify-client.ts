@@ -549,29 +549,50 @@ export async function listShopifyCustomers(
 }
 
 /**
- * Lists collections (categories) from Shopify with cursor-based pagination.
- * تبقى REST لحين نقلها لـ GraphQL (custom/smart collections) — حقول مُقلَّصة.
+ * Lists collections (categories) from Shopify.
+ *
+ * Shopify has NO unified collections listing endpoint — only
+ * `custom_collections.json` and `smart_collections.json` (same pattern as
+ * category-mappings.ts). The previous single-endpoint call 404'd, which broke
+ * Data Transfer category pulls from Shopify.
+ *
+ * Both endpoints are drained internally and merged, so the full list is
+ * returned in one shot with `nextPageInfo: null`. `limit` bounds the
+ * per-endpoint page size; `pageInfo` is accepted for signature compatibility
+ * but unused — callers always start with `undefined` and stop on `null`.
  */
 export async function listShopifyCollections(
   shopDomain: string,
   limit: number = 250,
-  pageInfo?: string
+  _pageInfo?: string
 ): Promise<{ collections: any[]; nextPageInfo: string | null }> {
   const safeLimit = Math.min(Math.max(limit || 50, 1), 250)
-  let endpoint = `/collections.json?limit=${safeLimit}&fields=id,title,handle,body_html,published_at`
-  if (pageInfo) endpoint += `&page_info=${encodeURIComponent(pageInfo)}`
-
-  const { data: body, headers } = await shopifyRestGetWithHeaders(shopDomain, endpoint)
-  const nextPageInfo = extractNextPageInfo(headers?.link || '')
-
-  const collections = ((body as any)?.collections || []).map((c: any) => ({
+  const toRow = (c: any) => ({
     id: c.id,
     title: c.title || '',
     handle: c.handle || '',
     body_html: c.body_html || '',
     published_at: c.published_at || '',
-  }))
-  return { collections, nextPageInfo }
+  })
+
+  async function drain(endpoint: string, key: string): Promise<any[]> {
+    const rows: any[] = []
+    let pageInfo: string | null = null
+    do {
+      let url = `/${endpoint}.json?limit=${safeLimit}&fields=id,title,handle,body_html,published_at`
+      if (pageInfo) url += `&page_info=${encodeURIComponent(pageInfo)}`
+      const { data: body, headers } = await shopifyRestGetWithHeaders(shopDomain, url)
+      for (const c of ((body as any)?.[key] || [])) rows.push(toRow(c))
+      pageInfo = extractNextPageInfo(headers?.link || '')
+    } while (pageInfo)
+    return rows
+  }
+
+  const [custom, smart] = await Promise.all([
+    drain('custom_collections', 'custom_collections'),
+    drain('smart_collections', 'smart_collections'),
+  ])
+  return { collections: [...custom, ...smart], nextPageInfo: null }
 }
 
 /**

@@ -126,6 +126,12 @@ export async function POST(request: NextRequest) {
     return new NextResponse('Bad Request - userId is not a valid user id', { status: 400 })
   }
 
+  const { checkRateLimit: checkImpersonateRl } = await import('@/lib/rate-limit')
+  const impersonateRl = checkImpersonateRl(`impersonate:${realUserId}`, 10, 60_000)
+  if (!impersonateRl.allowed) {
+    return new NextResponse('Too many requests', { status: 429 })
+  }
+
   const cookieStore = await cookies()
   cookieStore.set({
     name: 'impersonated_user_id',
@@ -133,7 +139,9 @@ export async function POST(request: NextRequest) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 3600, // 1 hour
+    // 15 minutes (was 60): impersonation grants another tenant's data, so a
+    // stolen admin session gets a short window, not an hour.
+    maxAge: 900,
     path: '/',
   })
 

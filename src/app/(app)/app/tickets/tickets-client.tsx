@@ -32,6 +32,58 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
+/**
+ * Minimal HTML sanitizer for Odoo chatter bodies (XSS fix).
+ *
+ * Odoo stores rich text, so we keep basic formatting tags but strip
+ * everything executable: <script>/<iframe>/<object>/<embed>/<form>,
+ * event-handler attributes (on*), javascript:/data: URLs, and <style>.
+ * No dependency — allowlist based, runs in the browser.
+ */
+function sanitizeOdooHtml(dirty: string): string {
+  if (!dirty || typeof window === 'undefined') return dirty || ''
+  try {
+    const doc = new DOMParser().parseFromString(dirty, 'text/html')
+    const ALLOWED = new Set(['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'span', 'div', 'blockquote', 'code', 'pre'])
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+    const toRemove: Element[] = []
+    while (walker.nextNode()) {
+      const el = walker.currentNode as Element
+      const tag = el.tagName.toLowerCase()
+      if (!ALLOWED.has(tag)) {
+        // Unwrap unknown tags (keep text), drop dangerous ones entirely.
+        if (['script', 'iframe', 'object', 'embed', 'form', 'style', 'link', 'meta', 'img', 'video', 'audio'].includes(tag)) {
+          toRemove.push(el)
+        } else {
+          const parent = el.parentNode
+          while (el.firstChild) parent?.insertBefore(el.firstChild, el)
+          toRemove.push(el)
+        }
+        continue
+      }
+      for (const attr of [...el.attributes]) {
+        const name = attr.name.toLowerCase()
+        if (name.startsWith('on') || name === 'style') {
+          el.removeAttribute(attr.name)
+          continue
+        }
+        if ((name === 'href' || name === 'src') && /^\s*(javascript|data|vbscript):/i.test(attr.value)) {
+          el.removeAttribute(attr.name)
+        }
+      }
+      if (tag === 'a') {
+        const href = el.getAttribute('href') || ''
+        if (href && !/^(https?:|mailto:|\/|#)/i.test(href)) el.removeAttribute('href')
+        el.setAttribute('rel', 'noopener noreferrer')
+        el.setAttribute('target', '_blank')
+      }
+    }
+    for (const el of toRemove) el.remove()
+    return doc.body.innerHTML
+  } catch {
+    return ''
+  }
+}
 interface TicketsClientProps {
   initialTickets: Ticket[]
   success: boolean
@@ -411,9 +463,9 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             </span>
                           </div>
                           
-                          <div 
+                          <div
                             className="text-xs text-foreground/85 leading-relaxed break-words odoo-chatter-html pt-1 prose prose-sm dark:prose-invert"
-                            dangerouslySetInnerHTML={{ __html: msg.body }} 
+                            dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
                           />
 
                           {/* Render message attachments */}

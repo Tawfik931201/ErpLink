@@ -23,24 +23,28 @@ const LOCATIONS_TTL_MS = 5 * 60 * 1000 // 5 minutes
  *
  * Pass `force = true` to bypass the 5-minute TTL memo (manual refresh button).
  */
-export async function getZidLocations(force = false): Promise<{ success: boolean; locations?: ZidLocation[]; error?: string }> {
+export async function getZidLocations(force = false, merchantId?: string): Promise<{ success: boolean; locations?: ZidLocation[]; error?: string }> {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
-    const cacheKey = `zid:locations:${user.active_workspace_id}`
+    const cacheKey = `zid:locations:${user.active_workspace_id}:${merchantId || 'newest'}`
     if (force) ttlCache.delete(cacheKey)
     const locations = await ttlCache.get<ZidLocation[] | null>(
       cacheKey,
       LOCATIONS_TTL_MS,
       async () => {
-        const { data: merchantTok } = await supabase
+        const { data: merchantToks } = await supabase
           .from('merchant_tokens')
           .select('*')
           .eq('workspace_id', user.active_workspace_id)
-          .maybeSingle()
+          .order('updated_at', { ascending: false, nullsFirst: false })
+        // Multi-store: explicit merchant wins, else newest store.
+        const merchantTok: any = merchantId
+          ? (merchantToks ?? []).find(t => String((t as any).merchant_id) === String(merchantId)) ?? null
+          : (merchantToks ?? [])[0] ?? null
         if (!merchantTok) throw new Error('Zid not connected')
 
         const tokenData = await getAccessToken(merchantTok.merchant_id)

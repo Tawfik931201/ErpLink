@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import { Check, ChevronsUpDown, Search, X } from 'lucide-react'
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 
 import { useLanguage } from '@/components/language-provider'
@@ -114,23 +114,39 @@ export default function SearchableSelect({
   }, [isOpen])
 
   // Find currently selected option (only for single select)
-  const selectedOption = !multiple && typeof value === 'string' 
-    ? options.find((opt) => opt.value === value) 
-    : null
+  const selectedOption = useMemo(() => (
+    !multiple && typeof value === 'string'
+      ? options.find((opt) => opt.value === value)
+      : null
+  ), [multiple, value, options])
 
-  // Filter options based on search query
-  const filteredOptions = options.filter((opt) => {
+  // Filter options based on search query. Memoized (was recomputed on every
+  // render) and capped: with 1000+ Odoo models an empty query rendered 1000+
+  // DOM rows on every keystroke/open, which froze the dropdown.
+  const MAX_VISIBLE_OPTIONS = 200
+  const { visibleOptions: filteredOptions, totalMatches } = useMemo(() => {
     const query = searchQuery.toLowerCase().trim()
-    if (!query) return true
-    const cleanLabelStr = formatFieldLabel(opt.label, lang).toLowerCase()
-    const cleanGroupStr = opt.group ? formatFieldLabel(opt.group, lang).toLowerCase() : ''
-    return (
-      cleanLabelStr.includes(query) ||
-      opt.value.toLowerCase().includes(query) ||
-      (opt.desc && opt.desc.toLowerCase().includes(query)) ||
-      cleanGroupStr.includes(query)
-    )
-  })
+    if (!query) {
+      return {
+        visibleOptions: options.slice(0, MAX_VISIBLE_OPTIONS),
+        totalMatches: options.length,
+      }
+    }
+    const matches = options.filter((opt) => {
+      const cleanLabelStr = formatFieldLabel(opt.label, lang).toLowerCase()
+      const cleanGroupStr = opt.group ? formatFieldLabel(opt.group, lang).toLowerCase() : ''
+      return (
+        cleanLabelStr.includes(query) ||
+        opt.value.toLowerCase().includes(query) ||
+        (opt.desc && opt.desc.toLowerCase().includes(query)) ||
+        cleanGroupStr.includes(query)
+      )
+    })
+    return {
+      visibleOptions: matches.slice(0, MAX_VISIBLE_OPTIONS),
+      totalMatches: matches.length,
+    }
+  }, [options, searchQuery, lang])
 
   // Close dropdown on click outside (checks both trigger and portal list)
   useEffect(() => {
@@ -472,6 +488,13 @@ export default function SearchableSelect({
                 ) : (
                   <div className="py-6 text-center text-sm text-muted-foreground italic">
                     {lang === 'ar' ? 'لم يتم العثور على نتائج' : 'No matches found'}
+                  </div>
+                )}
+                {totalMatches > filteredOptions.length && (
+                  <div className="py-2 text-center text-[11px] text-muted-foreground font-medium border-t border-border/50">
+                    {lang === 'ar'
+                      ? `عرض ${filteredOptions.length} من ${totalMatches} — اكتب للبحث وتضييق النتائج`
+                      : `Showing ${filteredOptions.length} of ${totalMatches} — type to narrow down`}
                   </div>
                 )}
               </div>

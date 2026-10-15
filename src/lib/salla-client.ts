@@ -1,5 +1,6 @@
 import axios from 'axios'
 
+import { getSallaWebhookCredential } from '@/lib/salla/webhook-auth'
 import { supabase } from '@/lib/supabase'
 
 export interface SallaTokenRow {
@@ -17,13 +18,13 @@ export interface SallaTokenRow {
  * engine needs, plus offline_access (refresh) and webhooks.
  * MUST match the App Scopes in the Salla Partners Portal, otherwise
  * API calls fail with 401 missing scope.
- * NOTE: expanded scopes (orders.read_write, shipments.read, payments.read,
+ * NOTE: expanded scopes (orders.read_write, shippings.read_write, payments.read,
  * settings.read, customers.read_write) require RE-APPROVAL — existing
  * merchants must reconnect, otherwise new API calls fail with 401/403
  * missing scope until they re-authorize.
  */
 export const SALLA_OAUTH_SCOPES =
-  'offline_access products.read_write orders.read_write customers.read_write categories.read settings.read shipments.read payments.read webhooks.read_write'
+  'offline_access products.read_write orders.read_write customers.read_write categories.read_write settings.read payments.read webhooks.read_write shippings.read_write'
 
 /** Max parallel Salla API calls when (un)registering webhooks (bulk safety). */
 export const SALLA_WEBHOOK_CONCURRENCY = 3
@@ -222,6 +223,95 @@ export async function findSallaProductByMatchField(
 }
 
 /**
+ * A Salla stock location — a real branch (from `GET /branches`) or the
+ * synthetic default fallback used when the `branches.read` scope is missing.
+ */
+export interface SallaBranch {
+  id: string
+  name: string
+  is_default: boolean
+  /** true for the synthetic default branch used when the scope is missing */
+  fallback: boolean
+}
+
+/**
+ * Sentinel id for the synthetic default branch. When a warehouse mapping's
+ * source_location_id is this value, the engine omits `branch` from the bulk
+ * quantity call and Salla applies the change to its default branch.
+ */
+export const SALLA_DEFAULT_BRANCH_ID = 'default'
+
+const FALLBACK_DEFAULT_BRANCH: SallaBranch = {
+  id: SALLA_DEFAULT_BRANCH_ID,
+  name: 'الفرع الافتراضي / Default branch',
+  is_default: true,
+  fallback: true,
+}
+
+function sallaBranchName(b: any): string {
+  if (typeof b?.name === 'string' && b.name) return b.name
+  if (b?.name && typeof b.name === 'object') {
+    return b.name.ar || b.name.en || b.name['en-EN'] || String(b.name.id ?? '')
+  }
+  return String(b.id ?? '')
+}
+
+/**
+ * Lists the merchant's stock locations (branches).
+ *
+ * Salla's native webhook-strategy app does NOT request the `branches.read`
+ * scope on connect, so `GET /branches` answers 401/403 for every real store.
+ * Those are caught here and the store falls back to a single synthetic
+ * "default branch" rather than failing the whole inventory-sync setup — the
+ * engine then omits `branch` on bulk quantity updates, which Salla applies to
+ * its default branch. Any other error (network, 5xx) still throws so the UI
+ * surfaces it as a real failure instead of silently pretending.
+ */
+export async function listSallaBranches(merchantId: string): Promise<SallaBranch[]> {
+  try {
+    const res = await callSallaApi(merchantId, 'GET', '/branches')
+    const rows = Array.isArray(res?.data) ? res.data : []
+    const branches = rows
+      .filter((b: any) => b?.status !== 'inactive')
+      .map((b: any) => ({
+        id: String(b.id),
+        name: sallaBranchName(b),
+        is_default: b.is_default === true,
+        fallback: false,
+      }))
+    return branches.length > 0 ? branches : [FALLBACK_DEFAULT_BRANCH]
+  } catch (err: any) {
+    const status = err?.response?.status
+    if (status === 401 || status === 403) {
+      return [FALLBACK_DEFAULT_BRANCH]
+    }
+    throw err
+  }
+}
+
+/**
+ * Bulk-updates product quantities on Salla.
+ *
+ * `POST /products/quantities/bulk` — one HTTP call for many products.
+ * Field names follow Salla's OpenAPI DTO exactly, including the single-'f'
+ * spelling of `identifer_type` / `identifer` (the docs' own DTO). `branch` is
+ * per-item; omit it to target Salla's default branch.
+ */
+export async function updateSallaStockBulk(
+  merchantId: string,
+  items: Array<{
+    identifer_type: 'id' | 'sku'
+    identifer: string
+    quantity: number
+    mode: 'overwrite' | 'increment' | 'decrement'
+    branch?: string
+    reason_id?: number
+  }>
+) {
+  return callSallaApi(merchantId, 'POST', '/products/quantities/bulk', { products: items })
+}
+
+/**
  * Updates a product in Salla.
  */
 export async function updateSallaProduct(merchantId: string, sallaProductId: string, data: any) {
@@ -370,8 +460,21 @@ export function extractSallaMerchantIdFromProfile(profilePayload: any): string {
  * UI switch points at an event that was never registered, plus
  * `category.deleted` (needed for delete sync though the UI only exposes
  * created/updated).
+ *
+ * `order.shipment.*` are included because `normalizeOdooOperation` maps any
+ * event containing `deliver` to the `deliver` operation, and the `salla_order_deliver`
+ * preset (20260802) maps that to Odoo's delivered state. Without these events
+ * the preset could never fire: Salla does not expose order status changes under
+ * `order.*` once the parcel moves, only under `order.shipment.*`. A missing
+ * shipment event is therefore not a cosmetic gap — it means a shipped order is
+ * never marked delivered in Odoo.
  */
 export const SALLA_DEFAULT_WEBHOOK_EVENTS = [
+  // Orders. The `order.shipment.*` family is deliberate: it maps to the `orders`
+  // entity (the name contains "order"), so a shipment status change arrives as an
+  // order status change, which is what the deliver preset needs. Salla also offers
+  // bare `shipment.*` events, but those map to no entity at all — they would be
+  // enqueued and then have nothing to sync against.
   'order.created',
   'order.updated',
   'order.status.updated',
@@ -379,24 +482,42 @@ export const SALLA_DEFAULT_WEBHOOK_EVENTS = [
   'order.refunded',
   'order.deleted',
   'order.payment.updated',
+  'order.products.updated',
+  'order.total.price.updated',
+  'order.shipping.address.updated',
+  'order.shipment.creating',
+  'order.shipment.created',
+  'order.shipment.cancelled',
+  'order.shipment.return.creating',
+  'order.shipment.return.created',
+  'order.shipment.return.cancelled',
+  // Products. `product.available` is deliberately absent: Salla's own event list
+  // strikes it through as deprecated, and `product.quantity.low` is the live one.
   'product.created',
   'product.updated',
   'product.deleted',
-  'product.publish',
-  'product.available',
+  'product.price.updated',
+  'product.status.updated',
   'product.quantity.low',
-  'store.branch.created',
-  'store.branch.updated',
-  'store.branch.deleted',
-  'abandoned.cart',
-  'abandoned.cart.update',
-  'abandoned.cart.purchased',
+  'product.image.updated',
+  'product.category.updated',
   'customer.created',
   'customer.updated',
   'customer.login',
   'category.created',
   'category.updated',
-  'category.deleted',
+  // ⚠️ `abandoned.cart` is deliberately NOT subscribed. The slug is real and it
+  // maps to `orders`/`create`, but the app's `carts` scope is deselected in the
+  // Partners Portal, so Salla has no scope to deliver it — subscribing it buys a
+  // permanent entry that can never fire. If the carts scope is ever enabled,
+  // add it back here (it is already in the test's published-event allowlist).
+  //
+  // ⚠️ No `category.deleted`. Salla publishes no category-deletion event — the
+  // documented category catalogue is created/updated only — so it used to be
+  // subscribed here and could only ever fail, burning one API call per refresh
+  // and inflating `failed` for a delivery that would never arrive. The category
+  // *delete* path still exists in sync-engine.ts, but it cannot be driven by a
+  // webhook; removing a category in Salla needs a manual/reconciliation pass.
 ]
 
 /**
@@ -415,15 +536,33 @@ async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, cap: number
   return results
 }
 
+export interface SallaWebhookRegistrationResult {
+  registered: number
+  failed: number
+  /** False when no credential could be attached (no `ENCRYPTION_KEY`). */
+  credentialAttached: boolean
+}
+
 /**
  * Registers (or updates) Salla webhooks pointing to our receive endpoint.
- * Salla's /webhooks/subscribe upserts by URL: re-subscribing with the same URL
- * replaces the old subscription and restores outdated webhooks.
+ *
+ * Salla's `/webhooks/subscribe` upserts by URL: re-subscribing with the same URL
+ * replaces the old subscription and restores outdated webhooks — so this is
+ * **create-before-delete** by construction and needs no teardown window.
+ *
+ * Each subscription carries the ingress credential in its `headers` array.
+ * That is what makes ingress work with **no host configuration**: the value is
+ * derived from `ENCRYPTION_KEY` (see src/lib/salla/webhook-auth.ts), because
+ * `SALLA_WEBHOOK_SECRET` was never set on the host and that alone used to 500
+ * every delivery. Pass `webhookSecret` to override it with an explicit value.
  */
-export async function registerSallaWebhooks(merchantId: string, webhookSecret?: string): Promise<number> {
+export async function registerSallaWebhooks(merchantId: string, webhookSecret?: string): Promise<SallaWebhookRegistrationResult> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
   const url = `${appUrl}/api/webhooks/salla`
   let registered = 0
+  let failed = 0
+
+  const credential = getSallaWebhookCredential(webhookSecret)
 
   const tasks = SALLA_DEFAULT_WEBHOOK_EVENTS.map((event) => async () => {
     try {
@@ -433,12 +572,15 @@ export async function registerSallaWebhooks(merchantId: string, webhookSecret?: 
         url,
         version: 2,
       }
-      if (webhookSecret) {
-        body.headers = [{ key: 'x-erplink-webhook-secret', value: webhookSecret }]
+      if (credential) {
+        body.headers = [{ key: credential.headerKey, value: credential.headerValue }]
       }
       await callSallaApi(merchantId, 'POST', '/webhooks/subscribe', body)
       registered++
     } catch (err: any) {
+      // Counted, not just logged: a silent partial registration is what leaves a
+      // store "connected but not syncing" with no error anywhere.
+      failed++
       console.warn(`[SallaClient] Failed to register webhook "${event}" for merchant "${merchantId}":`, err.response?.data || err.message)
     }
   })
@@ -446,7 +588,13 @@ export async function registerSallaWebhooks(merchantId: string, webhookSecret?: 
   // time out; unbounded parallelism trips Salla rate limits.
   await runWithConcurrency(tasks, SALLA_WEBHOOK_CONCURRENCY)
 
-  return registered
+  if (!credential) {
+    console.error(
+      '[SallaClient] No ingress credential derivable (ENCRYPTION_KEY unset) — subscriptions registered without an auth header, so deliveries will be treated as legacy.'
+    )
+  }
+
+  return { registered, failed, credentialAttached: Boolean(credential) }
 }
 
 /**

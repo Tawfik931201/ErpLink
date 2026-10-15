@@ -76,21 +76,30 @@ const SHOPIFY_SYNC_GROUPS = [
   }
 ]
 
-// P0 core preset: orders + products + customers (store → ERP) ON by default.
+// P0 core preset: full catalog + all order topics + customers (store → ERP)
+// ON by default. Must mirror SHOPIFY_CORE_TOPICS in src/lib/shopify-topics.ts
+// (what a new connection auto-registers) — keep the two lists in sync.
 // NOTE (direction unification): the reverse column (`odoo2shopify`, ERP → store)
 // is tracked in state and saved with the settings, but kept hidden in this table —
 // reverse sync is managed from Mapping Center / Data Transfer (see note below).
 const CORE_SHOPIFY_EVENTS = [
+  'products/create',
+  'products/update',
+  'products/delete',
+  'collections/create',
+  'collections/update',
+  'collections/delete',
   'orders/create',
   'orders/updated',
   'orders/cancelled',
   'orders/fulfilled',
   'orders/paid',
-  'products/create',
-  'products/update',
-  'products/delete',
+  'orders/partially_fulfilled',
+  'orders/edited',
+  'orders/delete',
   'customers/create',
   'customers/update',
+  'customers/delete',
 ]
 
 function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {

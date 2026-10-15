@@ -57,6 +57,7 @@ interface ChatSub {
   workspace_filter: unknown
   mapping_filter: unknown
   events_filter?: string[]
+  notify_on_arrival?: boolean
   created_at: string
   linked_at: string
   bot: { bot_username: string | null; label: string | null } | null
@@ -68,8 +69,8 @@ interface FieldMapping {
 }
 
 const MODE_OPTIONS = [
+  { id: 'failure' as const, ar: 'الفاشلة فقط (موصى به)', en: 'Failed only (recommended)' },
   { id: 'success' as const, ar: 'الناجحة فقط', en: 'Successful only' },
-  { id: 'failure' as const, ar: 'الفاشلة فقط', en: 'Failed only' },
   { id: 'both' as const, ar: 'كلا الحالتين', en: 'Both outcomes' },
 ]
 
@@ -272,6 +273,7 @@ export default function NotificationsSettingsPage() {
     enabled?: boolean
     mapping_filter?: string[]
     events_filter?: string[]
+    notify_on_arrival?: boolean
   }
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const setDraftField = (id: string, patch: Draft) =>
@@ -676,7 +678,49 @@ export default function NotificationsSettingsPage() {
                             label: lang === 'ar' ? o.ar : o.en,
                           }))}
                         />
+                        <p className="text-[10px] text-muted-foreground">
+                          {lang === 'ar'
+                            ? 'الافتراضي: تصلك رسالة عند فشل التسجيل في أودوو فقط — الطلبات الناجحة لا تزعجك.'
+                            : 'Default: you are notified only when Odoo registration fails — successes stay silent.'}
+                        </p>
                       </div>
+
+                      {/* Advanced options — collapsed by default */}
+                      <details className="rounded-lg border border-border/50 bg-background/50 px-3 py-2">
+                        <summary className="cursor-pointer text-[11px] font-bold text-foreground flex items-center justify-between">
+                          <span>
+                            {lang === 'ar' ? 'خيارات متقدمة' : 'Advanced options'}
+                          </span>
+                          <span className="text-[10px] font-normal text-muted-foreground">
+                            {lang === 'ar' ? 'تنبيه الوصول والنجاح' : 'Arrival & success alerts'}
+                          </span>
+                        </summary>
+                        <div className="pt-2 space-y-2">
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!getDraftValue(sub.id, 'notify_on_arrival', sub.notify_on_arrival ?? false)}
+                              onChange={(e) => setDraftField(sub.id, { notify_on_arrival: e.target.checked })}
+                              className="mt-0.5 h-4 w-4 rounded border-border text-foreground accent-foreground focus:ring-foreground"
+                            />
+                            <span>
+                              <span className="block text-[11px] font-bold text-foreground">
+                                {lang === 'ar' ? 'تنبيه عند وصول طلب جديد من المتجر' : 'Alert on new store order arrival'}
+                              </span>
+                              <span className="block text-[10px] text-muted-foreground">
+                                {lang === 'ar'
+                                  ? 'رسالة فورية "طلب جديد — جاري الإرسال إلى أودوو" قبل اكتمال التسجيل، لتجهز الطلب مبكراً في المواسم.'
+                                  : 'Instant "new order — sending to Odoo" message before registration completes, so you can prepare early in peak season.'}
+                              </span>
+                            </span>
+                          </label>
+                          <p className="text-[10px] text-muted-foreground">
+                            {lang === 'ar'
+                              ? 'لتنبيه النجاح أيضاً: اختر "الناجحة فقط" أو "كلا الحالتين" من نوع الإشعارات أعلاه.'
+                              : 'For success alerts too: pick "Successful only" or "Both outcomes" in Notify on above.'}
+                          </p>
+                        </div>
+                      </details>
 
                       {/* Enabled toggle */}
                       <label className="flex items-center gap-2 cursor-pointer">

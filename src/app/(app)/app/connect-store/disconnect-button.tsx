@@ -4,6 +4,7 @@ import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import { disconnectSallaStore, disconnectShopifyStore, disconnectZidStore } from '@/app/actions/workspaces'
+import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
@@ -11,11 +12,14 @@ interface DisconnectButtonProps {
   merchantId: string
   confirmText: string
   buttonText: string
+  titleText?: string
   platform?: 'zid' | 'salla' | 'shopify'
+  onDone?: () => void
 }
 
-export default function DisconnectButton({ merchantId, confirmText, buttonText, platform = 'zid' }: DisconnectButtonProps) {
+export default function DisconnectButton({ merchantId, confirmText, buttonText, titleText, platform = 'zid', onDone }: DisconnectButtonProps) {
   const [showConfirm, setShowConfirm] = useState(false)
+  const { lang } = useLanguage()
 
   const handleDisconnect = async () => {
     if (platform === 'salla') {
@@ -25,6 +29,7 @@ export default function DisconnectButton({ merchantId, confirmText, buttonText, 
     } else {
       await disconnectZidStore(merchantId)
     }
+    onDone?.()
   }
 
   return (
@@ -43,7 +48,7 @@ export default function DisconnectButton({ merchantId, confirmText, buttonText, 
       <ConfirmDialog
         open={showConfirm}
         onOpenChange={setShowConfirm}
-        title=""
+        title={titleText ?? (lang === 'ar' ? 'قطع الاتصال' : 'Disconnect')}
         description={confirmText}
         onConfirm={handleDisconnect}
       />

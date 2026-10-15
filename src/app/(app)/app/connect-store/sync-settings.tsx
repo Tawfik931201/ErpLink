@@ -75,6 +75,9 @@ const CORE_ZID_EVENTS = [
   'product_publish',
   'customer_create',
   'customer_update',
+  'category_create',
+  'category_update',
+  'category_delete',
 ]
 
 function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) {

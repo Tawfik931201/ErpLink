@@ -28,13 +28,29 @@
  *   write_customers — تُطلب كـ optional_scopes فقط عند تفعيل المزامنة العكسية.
  */
 
-/** المواضيع الأساسية المسجلة تلقائياً عند الربط (كتالوج + مبيعات). */
+/** المواضيع الأساسية المسجلة تلقائياً عند الربط (كتالوج كامل + كل الطلبات + العملاء). */
 export const SHOPIFY_CORE_TOPICS = [
+  // Products (إنشاء/تحديث/حذف)
   'products/create',
   'products/update',
+  'products/delete',
+  // Collections = الكاتيجوري (إنشاء/تحديث/حذف)
+  'collections/create',
+  'collections/update',
+  'collections/delete',
+  // Orders — كل شيء يخص الطلبات
   'orders/create',
-  'orders/paid',
+  'orders/updated',
+  'orders/cancelled',
   'orders/fulfilled',
+  'orders/paid',
+  'orders/partially_fulfilled',
+  'orders/edited',
+  'orders/delete',
+  // Customers (تتطلب read_customers — بدون موافقة Shopify تفشل بصمت 403)
+  'customers/create',
+  'customers/update',
+  'customers/delete',
 ] as const
 
 /** موضوع تنظيف التوكن — يُسجل دائماً ولا يظهر كمفتاح مزامنة. */

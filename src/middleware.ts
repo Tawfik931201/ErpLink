@@ -113,7 +113,7 @@ export default clerkMiddleware(async (auth, req) => {
 
   // --- CLERK: Protect routes ---
   if (isProtectedRoute(req) || isAdminRoute(req) || isOnboardingRoute(req)) {
-    await auth().protect()
+    await auth.protect()
   }
 
   // --- HEADERS ---

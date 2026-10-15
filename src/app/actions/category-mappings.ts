@@ -33,7 +33,7 @@ export interface CategoryMappingRow {
   updated_at: string
 }
 
-export async function getCategoryMappings(platform: string = 'zid') {
+export async function getCategoryMappings(platform: string = 'zid', storeId = '') {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -41,11 +41,13 @@ export async function getCategoryMappings(platform: string = 'zid') {
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) return { success: true, mappings: [] as CategoryMappingRow[] }
 
+    // Per-store rows plus legacy platform-wide ('') rows.
     const { data, error } = await supabase
       .from('category_mappings')
       .select('*')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .in('store_id', storeId ? [storeId, ''] : [''])
       .order('source_category_name', { ascending: true })
 
     if (error) throw error
@@ -59,6 +61,8 @@ export async function getCategoryMappings(platform: string = 'zid') {
 
 export async function saveCategoryMapping(data: {
   platform: string
+  /** Multi-store: merchant_id / shop_domain. Defaults to '' (platform-wide legacy). */
+  storeId?: string
   source_category_name: string
   source_category_id?: string | number | null
   odoo_category_id?: number | null
@@ -84,6 +88,7 @@ export async function saveCategoryMapping(data: {
       .upsert({
         workspace_id: user.active_workspace_id,
         platform: data.platform,
+        store_id: data.storeId || '',
         source_category_name: data.source_category_name,
         odoo_category_id: data.odoo_category_id ?? null,
         parent_id: data.parent_id ?? null,
@@ -97,7 +102,7 @@ export async function saveCategoryMapping(data: {
         stock_output_account_id: data.stock_output_account_id ?? null,
         updated_at: new Date().toISOString(),
       }, {
-        onConflict: 'workspace_id, platform, source_category_name',
+        onConflict: 'workspace_id, platform, store_id, source_category_name',
       })
 
     if (error) throw error
@@ -114,15 +119,17 @@ export async function saveCategoryMapping(data: {
             apiKey: decrypt(conn.connection.password),
           })
 
-          const { data: settingsRow } = await supabase
+          const { data: settingsRows } = await supabase
             .from('standard_mapping_settings')
-            .select('settings')
+            .select('store_id, settings')
             .eq('workspace_id', user.active_workspace_id)
             .eq('store_type', data.platform)
             .eq('entity_type', 'categories')
-            .maybeSingle()
+            .in('store_id', data.storeId ? [data.storeId, ''] : [''])
 
-          const settings = (settingsRow as any)?.settings || {}
+          const settingsHit = ((settingsRows ?? []) as Array<{ store_id: string; settings: unknown }>)
+            .find(r => r.store_id === (data.storeId || '')) ?? (settingsRows ?? []).find((r: any) => r.store_id === '')
+          const settings = ((settingsHit as any)?.settings || {}) as Record<string, any>
           const odooField = settings.category?.odoo_match_field || settings.match_odoo_field || 'x_zid_id_categ'
 
           if (odooField) {
@@ -147,7 +154,7 @@ export async function saveCategoryMapping(data: {
   }
 }
 
-export async function batchImportCategoryMappings(platform: string, categories: { name: string }[]) {
+export async function batchImportCategoryMappings(platform: string, categories: { name: string }[], storeId = '') {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -160,6 +167,7 @@ export async function batchImportCategoryMappings(platform: string, categories: 
       .select('source_category_name')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .eq('store_id', storeId)
 
     const existingNames = new Set((existing || []).map(m => m.source_category_name))
     const newCategories = categories.filter(c => !existingNames.has(c.name))
@@ -171,13 +179,14 @@ export async function batchImportCategoryMappings(platform: string, categories: 
     const rows = newCategories.map(c => ({
       workspace_id: user.active_workspace_id,
       platform,
+      store_id: storeId,
       source_category_name: c.name,
       updated_at: new Date().toISOString(),
     }))
 
     const { error } = await supabase
       .from('category_mappings')
-      .upsert(rows, { onConflict: 'workspace_id, platform, source_category_name' })
+      .upsert(rows, { onConflict: 'workspace_id, platform, store_id, source_category_name' })
 
     if (error) throw error
 
@@ -239,7 +248,7 @@ function flattenCategoryTree(cats: any[]): any[] {
   return flatList
 }
 
-export async function fetchStoreCategories(platform: string = 'zid') {
+export async function fetchStoreCategories(platform: string = 'zid', storeKey?: string) {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -248,13 +257,20 @@ export async function fetchStoreCategories(platform: string = 'zid') {
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
     let categories: any[] = []
+    // Multi-store: explicit storeKey (merchant_id / shop_domain) wins, else newest store.
+    const pickByKey = <T,>(rows: T[] | null, match: (r: T) => string): T | null => {
+      if (!rows || rows.length === 0) return null
+      if (storeKey) return rows.find(r => match(r) === String(storeKey)) ?? null
+      return rows[0]
+    }
 
     if (platform === 'salla') {
-      const { data: sallaTok } = await supabase
+      const { data: sallaToks } = await supabase
         .from('salla_tokens')
         .select('merchant_id')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const sallaTok: any = pickByKey(sallaToks, r => String((r as any).merchant_id))
       if (!sallaTok) throw new Error('Salla store not connected')
 
       const token = await getSallaAccessToken(sallaTok.merchant_id)
@@ -263,11 +279,12 @@ export async function fetchStoreCategories(platform: string = 'zid') {
       })
       categories = res.data?.data || []
     } else if (platform === 'shopify') {
-      const { data: shopifyTok } = await supabase
+      const { data: shopifyToks } = await supabase
         .from('shopify_tokens')
         .select('shop_domain')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const shopifyTok: any = pickByKey(shopifyToks, r => String((r as any).shop_domain))
       if (!shopifyTok) throw new Error('Shopify store not connected')
 
       const token = await getShopifyAccessToken(shopifyTok.shop_domain)
@@ -299,11 +316,12 @@ export async function fetchStoreCategories(platform: string = 'zid') {
       categories = [...custom, ...smart]
     } else {
       // Zid (default)
-      const { data: merchantTok } = await supabase
+      const { data: merchantToks } = await supabase
         .from('merchant_tokens')
         .select('*')
         .eq('workspace_id', user.active_workspace_id)
-        .maybeSingle()
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      const merchantTok: any = pickByKey(merchantToks, r => String((r as any).merchant_id))
       if (!merchantTok) throw new Error('Zid store not connected')
 
       const tokenData = await getAccessToken(merchantTok.merchant_id)

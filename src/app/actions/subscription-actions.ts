@@ -926,29 +926,51 @@ export interface AdminClientRow {
   active_sub: AdminClientActiveSub | null
 }
 
+/**
+ * Lean subscription row for the admin client list: exactly the columns the
+ * merge below reads (see the scoped select in `getAllClients`). Separate from
+ * `RawSubscription` (the full `select('*')` shape) on purpose.
+ */
+interface RawClientSub {
+  id: string
+  workspace_id: string
+  amount_paid: number | string
+  status: string
+  archived_at: string | null
+  start_date: string
+  end_date: string
+  months_paid: number
+}
+
 /** Admin: list all clients (users with workspaces) with their subscription state. */
-export async function getAllClients() {
-  try {
+export async function getAllClients(params?: { limit?: number; offset?: number }) {  try {
     await requireAdmin()
 
-    const { data: users, error: uErr } = await supabase
-      .from('users')
-      .select('id, email, name, phone, created_at')
-      .order('created_at', { ascending: false })
-      .limit(2000)
+    // Optional server-side pagination for the admin table. When omitted the
+    // legacy full-list behaviour is kept so existing callers don't break.
+    const limit = params?.limit ? Math.min(500, Math.max(1, params.limit)) : 2000
+    const offset = params?.offset ? Math.max(0, params.offset) : 0
 
-    if (uErr) return { success: false as const, error: uErr.message, rows: [] }
+    // NOTE: no `phone` here — see src/lib/users.ts. The column exists only
+    // in migration 20260805 (never applied in some environments); selecting
+    // it fails the whole query. `phone: null` below is restored to the real
+    // value by applying that migration and re-adding the column here.
+    const { data: users, error: uErr, count: totalCount } = await supabase
+      .from('users')
+      .select('id, email, name, created_at', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (uErr) return { success: false as const, error: uErr.message, rows: [], totalCount: 0 }
+
+    const userIds = (users ?? []).map((u) => u.id)
 
     const { data: workspaces } = await supabase
       .from('workspaces')
       .select('id, name, subscription_number, user_id, created_at')
+      .in('user_id', userIds.length ? userIds : ['__none__'])
       .order('created_at', { ascending: false })
-      .limit(1000)
-
-    const { data: subs } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .limit(10000)
+      .limit(2000)
 
     const wsByUser = new Map<string, AdminClientWorkspace[]>()
     for (const ws of workspaces ?? []) {
@@ -963,7 +985,17 @@ export async function getAllClients() {
       wsByUser.set(ws.user_id, list)
     }
 
-    const subsByWs = new Map<string, RawSubscription[]>()
+    // Scoped + lean: only subscriptions of THIS page's workspaces, and only
+    // the columns the merge below reads (was: global select('*') limit 10000,
+    // which shipped every subscription row on every admin page view).
+    const wsIds = (workspaces ?? []).map((w) => w.id)
+    const { data: subs } = await supabase
+      .from('subscriptions')
+      .select('id,workspace_id,amount_paid,status,archived_at,start_date,end_date,months_paid')
+      .in('workspace_id', wsIds.length ? wsIds : ['__none__'])
+      .limit(2000)
+
+    const subsByWs = new Map<string, RawClientSub[]>()
     for (const s of subs ?? []) {
       const list = subsByWs.get(s.workspace_id) ?? []
       list.push(s)
@@ -1007,7 +1039,8 @@ export async function getAllClients() {
         user_id: u.id,
         name: u.name,
         email: u.email,
-        phone: u.phone ?? null,
+        // Null until migration 20260805 (users.phone) is applied — see above.
+        phone: null,
         created_at: u.created_at,
         workspaces: wsList,
         has_paid: hasPaid,
@@ -1016,9 +1049,9 @@ export async function getAllClients() {
       }
     })
 
-    return { success: true as const, rows: rows.filter((r) => r.workspaces.length > 0) }
+    return { success: true as const, rows: rows.filter((r) => r.workspaces.length > 0), totalCount: totalCount ?? 0 }
   } catch (err) {
-    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', rows: [] }
+    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', rows: [], totalCount: 0 }
   }
 }
 

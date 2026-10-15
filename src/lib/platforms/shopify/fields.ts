@@ -25,6 +25,7 @@ export const SHOPIFY_EVENTS = [
   // Customers
   { id: 'customers/create', name: 'Customer Registered (تسجيل عميل جديد)', targetModel: 'res.partner', group: 'Customers (العملاء)' },
   { id: 'customers/update', name: 'Customer Profile Updated (تحديث بيانات عميل)', targetModel: 'res.partner', group: 'Customers (العملاء)' },
+  { id: 'customers/delete', name: 'Customer Deleted (حذف عميل)', targetModel: 'res.partner', group: 'Customers (العملاء)' },
   // Collections/Categories
   { id: 'collections/create', name: 'Collection Created (إنشاء تصنيف)', targetModel: 'product.category', group: 'Categories (التصنيفات)' },
   { id: 'collections/update', name: 'Collection Updated (تحديث تصنيف)', targetModel: 'product.category', group: 'Categories (التصنيفات)' },
@@ -94,14 +95,32 @@ export const SHOPIFY_FIELDS: Record<string, { value: string; label: string; type
     { value: 'addresses.0.zip', label: 'Address Zip Code (addresses.0.zip)', type: 'string' },
     { value: 'addresses.0.address1', label: 'Address Line 1 (addresses.0.address1)', type: 'string' },
   ],
+  // Mirrors customers/create: an update payload carries the full customer object,
+  // so the same address fields must be mappable here.
   'customers/update': [
     { value: 'id', label: 'Customer ID (id)', type: 'string' },
     { value: 'email', label: 'Email (email)', type: 'string' },
     { value: 'first_name', label: 'First Name (first_name)', type: 'string' },
     { value: 'last_name', label: 'Last Name (last_name)', type: 'string' },
     { value: 'phone', label: 'Phone Number (phone)', type: 'string' },
+    { value: 'state', label: 'State (state)', type: 'string' },
+    { value: 'currency', label: 'Currency (currency)', type: 'string' },
+    { value: 'verified_email', label: 'Verified Email (verified_email)', type: 'boolean' },
+    { value: 'addresses.0.city', label: 'Address City (addresses.0.city)', type: 'string' },
+    { value: 'addresses.0.country', label: 'Address Country (addresses.0.country)', type: 'string' },
+    { value: 'addresses.0.zip', label: 'Address Zip Code (addresses.0.zip)', type: 'string' },
+    { value: 'addresses.0.address1', label: 'Address Line 1 (addresses.0.address1)', type: 'string' },
+  ],
+  // Delete payload is id-only ({id, tax_exemptions, admin_graphql_api_id}).
+  'customers/delete': [
+    { value: 'id', label: 'Customer ID (id)', type: 'string' }
   ],
   'orders/create': [
+    // Reserved: NOT a real webhook field. When picked as the match field, the
+    // engine resolves it from odoo_entity_links (the Odoo id saved at create
+    // time, scoped per store). Must stay identical to STORED_ODOO_ID_FIELD in
+    // src/lib/entity-links.ts — pinned by tests/unit/entity-links.test.ts.
+    { value: '__odoo_record_id', label: 'Saved Odoo ID — auto (__odoo_record_id)', type: 'number' },
     { value: 'id', label: 'Order ID (id)', type: 'string' },
     { value: 'name', label: 'Order Name / Number (name)', type: 'string' },
     { value: 'email', label: 'Customer Email (email)', type: 'string' },
@@ -121,6 +140,8 @@ export const SHOPIFY_FIELDS: Record<string, { value: string; label: string; type
     { value: 'created_at', label: 'Created At (created_at)', type: 'string' },
   ],
   'orders/updated': [
+    // Same reserved field as orders/create (see above).
+    { value: '__odoo_record_id', label: 'Saved Odoo ID — auto (__odoo_record_id)', type: 'number' },
     { value: 'id', label: 'Order ID (id)', type: 'string' },
     { value: 'name', label: 'Order Name / Number (name)', type: 'string' },
     { value: 'total_price', label: 'Total Price (total_price)', type: 'number' },
@@ -147,6 +168,26 @@ export const SHOPIFY_FIELDS: Record<string, { value: string; label: string; type
   ],
   'collections/delete': [
     { value: 'id', label: 'Collection ID (id)', type: 'number' },
-  ]
+  ],
+  // Order line items (webhook `line_items` array). The engine reads any mapped
+  // path from each item generically (resolvePath over the products / items /
+  // line_items candidates), so the line `id` works here exactly like the
+  // header `id` does on the order tab — for every order topic/operation.
+  'sale.order.line': [
+    { value: 'id', label: 'Line Item ID (id)', type: 'string' },
+    { value: 'variant_id', label: 'Variant ID (variant_id)', type: 'string' },
+    { value: 'product_id', label: 'Product ID (product_id)', type: 'string' },
+    { value: 'title', label: 'Line Title (title)', type: 'string' },
+    { value: 'variant_title', label: 'Variant Title (variant_title)', type: 'string' },
+    { value: 'name', label: 'Line Name (name)', type: 'string' },
+    { value: 'sku', label: 'Line SKU (sku)', type: 'string' },
+    { value: 'vendor', label: 'Vendor (vendor)', type: 'string' },
+    { value: 'quantity', label: 'Quantity (quantity)', type: 'number' },
+    { value: 'price', label: 'Unit Price (price)', type: 'number' },
+    { value: 'line_price', label: 'Line Price (line_price)', type: 'number' },
+    { value: 'total_discount', label: 'Total Discount (total_discount)', type: 'number' },
+    { value: 'grams', label: 'Weight Grams (grams)', type: 'number' },
+    { value: 'fulfillment_status', label: 'Fulfillment Status (fulfillment_status)', type: 'string' },
+  ],
 }
 

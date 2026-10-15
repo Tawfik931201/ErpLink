@@ -165,6 +165,17 @@ export async function deleteWorkspace(id: string) {
       throw new Error('Workspace not found or unauthorized (Only owners can delete)')
     }
 
+    // حذف شامل أولاً: كل سجل/طابور/توكن/إعداد يخص المساحة (سجلات المزامنة،
+    // الطوابير، الأرشيف، التوكنات، القواعد، اشتراكات تليجرام…) + إلغاء
+    // webhooks المنصات best-effort. بلا هذا تبقى بيانات المساحة يتيمة للأبد
+    // (جداول بلا FK، وwebhook_inbox بـ SET NULL). انظر src/lib/workspace-purge.
+    const { purgeWorkspaceData } = await import('@/lib/workspace-purge')
+    const purge = await purgeWorkspaceData(id)
+    const purgeErrors = Object.keys(purge.errors)
+    if (purgeErrors.length > 0) {
+      console.warn('[deleteWorkspace] partial purge failures:', purge.errors)
+    }
+
     const { error } = await supabase
       .from('workspaces')
       .delete()
@@ -173,6 +184,7 @@ export async function deleteWorkspace(id: string) {
     if (error) throw new Error('Failed to delete workspace from database')
 
     // If deleted workspace was the active one, clear active workspace ID or pick another one
+    // (purgeWorkspaceData already nulled it for every user pointing at it).
     if (user.active_workspace_id === id) {
       const { workspaces } = await getWorkspaces() as any
       const remaining = workspaces?.[0]
@@ -184,7 +196,11 @@ export async function deleteWorkspace(id: string) {
     }
 
     revalidatePath('/app/settings/workspace')
-    return { success: true }
+    return {
+      success: true,
+      purged: purge.counts,
+      ...(purgeErrors.length > 0 ? { purgeWarnings: purge.errors } : {}),
+    }
   } catch (error: any) {
     console.error('Failed to delete workspace:', error)
     return { success: false, error: error.message || 'Failed to delete workspace' }
@@ -224,32 +240,35 @@ export async function setActiveWorkspace(id: string) {
   }
 }
 
-const getCachedZidToken = unstable_cache(
+const getCachedZidTokens = unstable_cache(
   async (workspaceId: string) => {
-    const { data: token, error } = await supabase
+    // Multi-store: a workspace may link several stores per platform — return
+    // ALL rows, newest first. Callers pick per store (never maybeSingle on a
+    // workspace filter: that throws once a second store connects).
+    const { data: tokens, error } = await supabase
       .from('merchant_tokens')
       .select('*')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (error) throw new Error('Failed to query merchant token: ' + error.message)
-    return token
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    if (error) throw new Error('Failed to query merchant tokens: ' + error.message)
+    return tokens ?? []
   },
   ['zid-token'],
   { revalidate: 30, tags: ['zid-token'] }
 )
 
-export async function getActiveWorkspaceZidToken() {
+export async function getActiveWorkspaceZidTokens(): Promise<{ success: true; tokens: any[] } | { success: false; error: string }> {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
-      return { success: true, token: null }
+      return { success: true, tokens: [] }
     }
 
-    const token = await getCachedZidToken(user.active_workspace_id)
-    return { success: true, token }
+    const tokens = await getCachedZidTokens(user.active_workspace_id)
+    return { success: true, tokens }
   } catch (error: any) {
-    console.error('Failed to get Zid token:', error)
-    return { success: false, error: error.message || 'Failed to fetch Zid token' }
+    console.error('Failed to get Zid tokens:', error)
+    return { success: false, error: error.message || 'Failed to fetch Zid tokens' }
   }
 }
 
@@ -315,32 +334,33 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
   }
 }
 
-const getCachedSallaToken = unstable_cache(
+const getCachedSallaTokens = unstable_cache(
   async (workspaceId: string) => {
-    const { data: token, error } = await supabase
+    // Multi-store — see getCachedZidTokens (all rows, newest first).
+    const { data: tokens, error } = await supabase
       .from('salla_tokens')
       .select('*')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (error) throw new Error('Failed to query Salla token: ' + error.message)
-    return token
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    if (error) throw new Error('Failed to query Salla tokens: ' + error.message)
+    return tokens ?? []
   },
   ['salla-token'],
   { revalidate: 30, tags: ['salla-token'] }
 )
 
-export async function getActiveWorkspaceSallaToken() {
+export async function getActiveWorkspaceSallaTokens(): Promise<{ success: true; tokens: any[] } | { success: false; error: string }> {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
-      return { success: true, token: null }
+      return { success: true, tokens: [] }
     }
 
-    const token = await getCachedSallaToken(user.active_workspace_id)
-    return { success: true, token }
+    const tokens = await getCachedSallaTokens(user.active_workspace_id)
+    return { success: true, tokens }
   } catch (error: any) {
-    console.error('Failed to get Salla token:', error)
-    return { success: false, error: error.message || 'Failed to fetch Salla token' }
+    console.error('Failed to get Salla tokens:', error)
+    return { success: false, error: error.message || 'Failed to fetch Salla tokens' }
   }
 }
 
@@ -398,32 +418,33 @@ export async function updateSallaSyncSettings(merchantId: string, settings: any)
   }
 }
 
-const getCachedShopifyToken = unstable_cache(
+const getCachedShopifyTokens = unstable_cache(
   async (workspaceId: string) => {
-    const { data: token, error } = await supabase
+    // Multi-store — see getCachedZidTokens (all rows, newest first).
+    const { data: tokens, error } = await supabase
       .from('shopify_tokens')
       .select('*')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (error) throw new Error('Failed to query Shopify token: ' + error.message)
-    return token
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    if (error) throw new Error('Failed to query Shopify tokens: ' + error.message)
+    return tokens ?? []
   },
   ['shopify-token'],
   { revalidate: 30, tags: ['shopify-token'] }
 )
 
-export async function getActiveWorkspaceShopifyToken() {
+export async function getActiveWorkspaceShopifyTokens(): Promise<{ success: true; tokens: any[] } | { success: false; error: string }> {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
-      return { success: true, token: null }
+      return { success: true, tokens: [] }
     }
 
-    const token = await getCachedShopifyToken(user.active_workspace_id)
-    return { success: true, token }
+    const tokens = await getCachedShopifyTokens(user.active_workspace_id)
+    return { success: true, tokens }
   } catch (error: any) {
-    console.error('Failed to get Shopify token:', error)
-    return { success: false, error: error.message || 'Failed to fetch Shopify token' }
+    console.error('Failed to get Shopify tokens:', error)
+    return { success: false, error: error.message || 'Failed to fetch Shopify tokens' }
   }
 }
 

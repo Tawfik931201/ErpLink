@@ -197,6 +197,22 @@ export function decideOdooWebhookAuth(
     }
   }
 
+  // STRICT_WEBHOOK_AUTH=true closes the migration window: a `legacy`
+  // delivery (Automated Action registered before the secret existed) is
+  // rejected instead of accepted+counted. Flip it only after re-registering
+  // every action (POST /api/admin/odoo-webhooks/refresh) and seeing the
+  // unauthenticated-delivery counter reach zero.
+  if (result.status === 'legacy') {
+    const strict = (process.env.STRICT_WEBHOOK_AUTH ?? '').trim().toLowerCase()
+    if (strict === 'true' || strict === '1' || strict === 'yes') {
+      return {
+        action: 'reject',
+        status: 401,
+        error: 'Unauthorized: webhook not re-registered (legacy delivery rejected)',
+      }
+    }
+  }
+
   if (result.status === 'unconfigured') {
     if (process.env.NODE_ENV !== 'production') return { action: 'allow' }
     console.error(

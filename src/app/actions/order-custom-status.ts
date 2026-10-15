@@ -5,7 +5,12 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
 import { OdooClient } from '@/lib/odoo-client'
-import { DEFAULT_ZID_ORDER_STATUSES, type ZidStatusOption } from '@/lib/order-custom-status-constants'
+import {
+  DEFAULT_SALLA_ORDER_STATUSES,
+  DEFAULT_ZID_ORDER_STATUSES,
+  defaultOrderStatusFieldLabel,
+  type ZidStatusOption,
+} from '@/lib/order-custom-status-constants'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
@@ -16,7 +21,7 @@ import { ZidAPI } from '@/lib/zid-client'
  * Fetch Zid order statuses — queries the Zid custom-statuses API if connected,
  * otherwise returns the standard predefined list.
  */
-export async function getZidOrderStatuses(force = false): Promise<{
+export async function getZidOrderStatuses(force = false, merchantId?: string): Promise<{
   success: boolean
   statuses: ZidStatusOption[]
   source: 'zid_api' | 'default'
@@ -28,19 +33,23 @@ export async function getZidOrderStatuses(force = false): Promise<{
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
-    const cacheKey = `zid:order-statuses:${user.active_workspace_id}`
+    const cacheKey = `zid:order-statuses:${user.active_workspace_id}:${merchantId || 'newest'}`
     if (force) ttlCache.delete(cacheKey)
 
     const cached = await ttlCache.get<{ statuses: ZidStatusOption[]; source: 'zid_api' | 'default' } | null>(
       cacheKey,
       5 * 60 * 1000,
       async () => {
-        // Try fetching live from Zid API
-        const { data: merchantTok } = await supabase
+        // Try fetching live from Zid API (multi-store: explicit merchant wins, else newest)
+        const { data: merchantToks } = await supabase
           .from('merchant_tokens')
           .select('*')
           .eq('workspace_id', user.active_workspace_id)
-          .maybeSingle()
+          .order('updated_at', { ascending: false, nullsFirst: false })
+
+        const merchantTok: any = merchantId
+          ? (merchantToks ?? []).find(t => String((t as any).merchant_id) === String(merchantId)) ?? null
+          : (merchantToks ?? [])[0] ?? null
 
         if (!merchantTok) {
           return { statuses: DEFAULT_ZID_ORDER_STATUSES, source: 'default' }
@@ -141,11 +150,17 @@ async function getOdooClientForWorkspace() {
 }
 
 /**
- * Creates or updates the Selection field `x_zid_order_status` on `sale.order` in Odoo.
- * Injects it into the sale.order form view, saves settings in standard_mapping_settings,
- * and clears cache so it reflects immediately in UI dropdowns.
+ * Creates or updates the Selection field for the platform order status on
+ * `sale.order` in Odoo (default `x_zid_order_status` / `x_salla_order_status`).
+ * Injects it into the sale.order form view, saves settings in
+ * standard_mapping_settings, and clears cache so it reflects immediately in
+ * UI dropdowns. `platform` selects the status catalogue (Zid merges live API
+ * statuses; Salla uses its fixed published list) and the settings row.
  */
-export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_order_status'): Promise<{
+export async function createZidOrderStatusFieldInOdoo(
+  customFieldName = 'x_zid_order_status',
+  platform: 'zid' | 'salla' = 'zid'
+): Promise<{
   success: boolean
   fieldName?: string
   fieldLabel?: string
@@ -157,13 +172,17 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
     const { client, workspaceId, connectionId } = await getOdooClientForWorkspace()
 
     // 1. Get the list of statuses
-    const statusesRes = await getZidOrderStatuses(true)
+    const statusesRes = platform === 'salla'
+      ? { statuses: DEFAULT_SALLA_ORDER_STATUSES }
+      : await getZidOrderStatuses(true)
     const options = statusesRes.statuses
+    console.info(`[order-custom-status] (1/6) ${platform} statuses resolved: ${options.length} options`)
 
-    const fieldLabel = 'حالة الطلب في زد'
+    const fieldLabel = defaultOrderStatusFieldLabel(platform)
     const fieldName = customFieldName.startsWith('x_') ? customFieldName : `x_${customFieldName}`
 
     // 2. Find model_id for sale.order
+    console.info('[order-custom-status] (2/6) looking up sale.order model...')
     const modelRecords = await client.execute<Array<{ id: number; model: string; name: string }>>(
       'ir.model',
       'search_read',
@@ -183,6 +202,7 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
     const selectionVal = `[${selStr}]`
 
     // 3. Check if field already exists in ir.model.fields
+    console.info(`[order-custom-status] (3/6) checking existing field "${fieldName}"...`)
     const existing = await client.execute<Array<{ id: number; name: string; ttype: string }>>(
       'ir.model.fields',
       'search_read',
@@ -215,12 +235,13 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
         readonly: false,
         required: false,
         copied: true,
-        help: 'حالة الطلب المستلمة من زد (Zid Order Status)',
+        help: platform === 'salla' ? 'حالة الطلب المستلمة من سلة (Salla Order Status)' : 'حالة الطلب المستلمة من زد (Zid Order Status)',
       })
       console.log(`[order-custom-status] Field created in Odoo (id=${odooFieldId})`)
     }
 
     // 4. Inject into sale.order form view
+    console.info('[order-custom-status] (4/6) injecting form view...')
     let viewWarning: string | null = null
     try {
       // Inject view using the established robust injector by attempting injection
@@ -273,6 +294,7 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
     }
 
     // 5. Store / update custom field record in Supabase custom_odoo_fields
+    console.info('[order-custom-status] (5/6) persisting Supabase records...')
     try {
       await supabase.from('custom_odoo_fields').upsert({
         workspace_id: workspaceId,
@@ -294,13 +316,18 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
       console.warn('[order-custom-status] Supabase custom_odoo_fields upsert non-critical error:', supaErr)
     }
 
-    // 6. Update standard_mapping_settings for orders to activate this field
+    // 6. Update standard_mapping_settings for orders to activate this field.
+    // Platform-default row (store_id = ''): the unique key since migration
+    // 20261013 is (workspace_id, store_type, store_id, entity_type).
+    // Per-store toggles ride on the tab Save button; this only plants the
+    // platform default the stores inherit until their own row is saved.
     try {
       const { data: existingRow } = await supabase
         .from('standard_mapping_settings')
         .select('settings')
         .eq('workspace_id', workspaceId)
-        .eq('store_type', 'zid')
+        .eq('store_type', platform)
+        .eq('store_id', '')
         .eq('entity_type', 'orders')
         .maybeSingle()
 
@@ -312,18 +339,20 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
 
       await supabase.from('standard_mapping_settings').upsert({
         workspace_id: workspaceId,
-        store_type: 'zid',
+        store_type: platform,
+        store_id: '',
         entity_type: 'orders',
         settings: updatedSettings,
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'workspace_id, store_type, entity_type' })
+      }, { onConflict: 'workspace_id, store_type, store_id, entity_type' })
 
-      console.info(`[order-custom-status] Enabled custom status sync for Zid orders -> ${fieldName}`)
+      console.info(`[order-custom-status] Enabled custom status sync for ${platform} orders -> ${fieldName}`)
     } catch (setErr) {
       console.warn('[order-custom-status] Failed to update standard_mapping_settings:', setErr)
     }
 
     // 7. Clear caches so field immediately shows in dropdowns and settings reflect
+    console.info('[order-custom-status] (6/6) clearing caches...')
     ttlCache.clear(`odoo:fields:${connectionId}`)
     ttlCache.clear(`stdsets:${workspaceId}`)
     ttlCache.clear(`stdsets_all:${workspaceId}`)
@@ -353,8 +382,14 @@ export async function createZidOrderStatusFieldInOdoo(customFieldName = 'x_zid_o
 
 /**
  * Checks if the custom order status field exists on `sale.order` in Odoo.
+ * `fallbackPlatform` only decides which default catalogue is returned when
+ * the existing field's selection string cannot be parsed — a readable field
+ * always reports its own options regardless of platform.
  */
-export async function checkZidOrderStatusField(fieldName = 'x_zid_order_status'): Promise<{
+export async function checkZidOrderStatusField(
+  fieldName = 'x_zid_order_status',
+  fallbackPlatform: 'zid' | 'salla' = 'zid'
+): Promise<{
   exists: boolean
   fieldName: string
   fieldLabel?: string
@@ -401,7 +436,9 @@ export async function checkZidOrderStatusField(fieldName = 'x_zid_order_status')
         exists: true,
         fieldName: f.name,
         fieldLabel: f.field_description,
-        options: parsedOptions.length > 0 ? parsedOptions : DEFAULT_ZID_ORDER_STATUSES,
+        options: parsedOptions.length > 0
+          ? parsedOptions
+          : (fallbackPlatform === 'salla' ? DEFAULT_SALLA_ORDER_STATUSES : DEFAULT_ZID_ORDER_STATUSES),
       }
     }
 

@@ -165,9 +165,20 @@ export default function TransferClient({
 }: TransferClientProps) {
   const { t, lang, dir } = useLanguage()
 
-  // Platform state — auto-select if only one store connected
-  const defaultPlatform = connectedStores.length === 1 ? connectedStores[0].platform : (connectedStores.find(s => s.platform === 'zid')?.platform || 'zid')
-  const [platform, setPlatform] = useState<'zid' | 'salla' | 'shopify'>(defaultPlatform)
+  // Platform + store state — auto-select if only one store connected.
+  // Multi-store: the picker selects a STORE (identifier), not just a platform.
+  const defaultStore = connectedStores.length === 1
+    ? connectedStores[0]
+    : (connectedStores.find(s => s.platform === 'zid') || connectedStores[0])
+  const [platform, setPlatform] = useState<'zid' | 'salla' | 'shopify'>(defaultStore?.platform || 'zid')
+  const [selectedStoreId, setSelectedStoreId] = useState<string>(defaultStore?.identifier || '')
+  const handleStoreChange = (identifier: string) => {
+    const found = connectedStores.find(s => s.identifier === identifier)
+    if (found) {
+      setPlatform(found.platform)
+      setSelectedStoreId(found.identifier)
+    }
+  }
 
   // Basic Settings State
   const [transferName, setTransferName] = useState(lang === 'ar' ? 'عملية نقل أولية' : 'Initial Transfer')
@@ -569,6 +580,7 @@ export default function TransferClient({
         dataType: dataType as any,
         direction: directionState as any,
         platform,
+        storeKey: selectedStoreId || undefined,
         odooModel,
         mappings: payloadMappings
       })
@@ -663,16 +675,16 @@ export default function TransferClient({
           {connectedStores.length > 1 && (
             <div className="space-y-1.5">
               <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                {lang === 'ar' ? 'المنصة' : 'Platform'}
+                {lang === 'ar' ? 'المتجر' : 'Store'}
               </label>
               <SearchableSelect
-                value={platform}
-                onChange={(val) => setPlatform(val as any)}
+                value={selectedStoreId}
+                onChange={(val) => handleStoreChange(val as string)}
                 options={connectedStores.map(s => ({
-                  value: s.platform,
+                  value: s.identifier,
                   label: `${s.platform === 'zid' ? 'Zid' : s.platform === 'salla' ? 'Salla' : 'Shopify'} — ${s.label}`
                 }))}
-                placeholder={lang === 'ar' ? 'اختر المنصة...' : 'Select platform...'}
+                placeholder={lang === 'ar' ? 'اختر المتجر...' : 'Select store...'}
               />
             </div>
           )}

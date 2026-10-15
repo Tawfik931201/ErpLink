@@ -13,6 +13,13 @@ export const dynamic = 'force-dynamic'
  * Enforces ownership check: attachment must belong to a helpdesk ticket of the logged in user.
  */
 export async function GET(request: NextRequest) {
+  const { checkRateLimit, rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
+  const rlKey = rateLimitKeyFromHeaders((n) => request.headers.get(n), 'ticket-attachment')
+  const rl = checkRateLimit(rlKey, 60, 60_000)
+  if (!rl.allowed) {
+    return new NextResponse('Too many requests', { status: 429 })
+  }
+
   const { userId } = await auth()
   const user = await currentUser()
   if (!userId || !user) {
@@ -94,16 +101,27 @@ export async function GET(request: NextRequest) {
 
     const buffer = Buffer.from(base64Data, 'base64')
 
-    // Serve binary stream with correct mimetype
+    // DoS guard: refuse to pipe huge files through the Node process.
+    const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+    if (buffer.length > MAX_ATTACHMENT_BYTES) {
+      return new NextResponse('Attachment too large', { status: 413 })
+    }
+
+    // Serve binary stream. `nosniff` + `attachment` disposition stop the
+    // browser from executing a served file as HTML/JS even if Odoo stored
+    // a wrong mimetype.
+    const safeName = String(file.name || 'attachment').replace(/["\r\n]/g, '_')
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': file.mimetype || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(safeName)}"`,
         'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
       },
     })
   } catch (error: any) {
-    console.error('Error fetching attachment from Odoo:', error)
-    return new NextResponse(error.message || 'Internal Server Error', { status: 500 })
+    console.error('Error fetching attachment from Odoo:', error?.message || error)
+    // Generic message on purpose: the raw error can leak Odoo/stack details.
+    return new NextResponse('Failed to load attachment', { status: 500 })
   }
 }

@@ -19,9 +19,12 @@
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
+import { logWebhookSkip } from '@/lib/webhook-skip-log'
+import { isStrictWebhookAuth, isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
 import {
   verifyZidWebhookAuthorization,
   zidWebhookCredentialFingerprint,
@@ -61,6 +64,18 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text()
   const headersList = await headers()
+  const getHeader = (name: string) => headersList.get(name)
+
+  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'zid-webhook'), 120, 60_000)
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+  if (isWebhookBodyTooLarge(rawBody)) {
+    return NextResponse.json(
+      { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
+      { status: 413 }
+    )
+  }
 
   // ── Ingress auth ─────────────────────────────────────────────
   // Zid sends no signature; the only mechanism it supports is the Basic
@@ -92,6 +107,14 @@ export async function POST(req: NextRequest) {
   }
 
   if (isUnauthenticated) {
+    // STRICT_WEBHOOK_AUTH=true closes the migration window (see
+    // src/lib/webhook-strict.ts). Keep unset while testing over ngrok.
+    if (isStrictWebhookAuth()) {
+      return NextResponse.json(
+        { error: 'Unauthorized: webhook not re-registered' },
+        { status: 401 }
+      )
+    }
     reportLegacyDelivery(req.nextUrl.searchParams.get('store_id'))
   }
 
@@ -345,6 +368,18 @@ export async function POST(req: NextRequest) {
   // Zid sends event data nested inside a "data" field
   const data: Record<string, unknown> = (payload.data && typeof payload.data === 'object') ? payload.data : payload
 
+  // Upstream guard: broken order lines never reach the queue.
+  if (event.startsWith('order') && data && typeof data === 'object' && 'items' in data) {
+    const { validateOrderLines } = await import('@/lib/platform-validation')
+    const check = validateOrderLines((data as Record<string, unknown>).items)
+    if (!check.ok) {
+      return NextResponse.json(
+        { received: true, processed: false, reason: 'invalid_payload', detail: check.error },
+        { status: 400 }
+      )
+    }
+  }
+
   if (!store_id) {
     console.warn('[Zid Webhook] store_id missing — refusing to guess across tenants.')
     return NextResponse.json({ error: 'Missing store_id' }, { status: 400 })
@@ -444,6 +479,24 @@ export async function POST(req: NextRequest) {
         break
 
       default:
+        // حدث مجهول: الرد 200 يبقى كما هو (زد لا تعيد بعد 2xx)، لكن best-effort
+        // نحاول توثيقه في sync_logs إن عرفنا مساحة العمل — بلا أثر يضيع بصمت.
+        try {
+          const wsId =
+            typeof store_id === 'number' ? await findMerchantWorkspaceId(store_id) : null
+          if (wsId) {
+            await logWebhookSkip({
+              workspaceId: wsId,
+              platform: 'zid',
+              event,
+              storeId: String(store_id),
+              reason: 'unhandled_event',
+              payload: (data ?? {}) as Record<string, unknown>,
+            })
+          }
+        } catch {
+          // التوثيق best-effort فقط.
+        }
         return NextResponse.json({ received: true, processed: false, reason: 'unhandled_event' })
     }
   } catch (err) {
@@ -555,9 +608,18 @@ async function handleOrderEvent(
     return 'no_workspace'
   }
 
-  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event, String(storeId))
   if (!allowed) {
     console.info('[Zid Webhook] Order event disabled by settings', { storeId, event, reason })
+    await logWebhookSkip({
+      workspaceId,
+      platform: 'zid',
+      event,
+      storeId: String(storeId),
+      reason: 'disabled_in_settings',
+      detail: reason,
+      payload: data,
+    })
     return 'skipped'
   }
 
@@ -572,6 +634,21 @@ async function handleOrderEvent(
   if (queued.error) {
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
+  }
+  if (queued.id) {
+    // تنبيه الوصول نارٍ وانسى (P1-1): لا يُنتظر فلا يؤخر الرد، ويُرسل عند
+    // الإدراج الطازج فقط — الدمج/التكرار ليس طلباً جديداً.
+    import('@/lib/telegram-notifier')
+      .then(({ notifyOrderArrival }) =>
+        notifyOrderArrival({
+          workspaceId,
+          platform: 'zid',
+          event,
+          storeId: String(storeId),
+          payload: data,
+        })
+      )
+      .catch(() => {})
   }
   return 'enqueued'
 }
@@ -588,9 +665,18 @@ async function handleProductEvent(
     return 'no_workspace'
   }
 
-  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event, String(storeId))
   if (!allowed) {
     console.info('[Zid Webhook] Product event disabled by settings', { storeId, event, reason })
+    await logWebhookSkip({
+      workspaceId,
+      platform: 'zid',
+      event,
+      storeId: String(storeId),
+      reason: 'disabled_in_settings',
+      detail: reason,
+      payload: data,
+    })
     return 'skipped'
   }
 
@@ -605,6 +691,21 @@ async function handleProductEvent(
   if (queued.error) {
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
+  }
+  if (queued.id) {
+    // تنبيه الوصول نارٍ وانسى (P1-1): لا يُنتظر فلا يؤخر الرد، ويُرسل عند
+    // الإدراج الطازج فقط — الدمج/التكرار ليس طلباً جديداً.
+    import('@/lib/telegram-notifier')
+      .then(({ notifyOrderArrival }) =>
+        notifyOrderArrival({
+          workspaceId,
+          platform: 'zid',
+          event,
+          storeId: String(storeId),
+          payload: data,
+        })
+      )
+      .catch(() => {})
   }
   return 'enqueued'
 }
@@ -621,9 +722,18 @@ async function handleCustomerEvent(
     return 'no_workspace'
   }
 
-  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event, String(storeId))
   if (!allowed) {
     console.info('[Zid Webhook] Customer event disabled by settings', { storeId, event, reason })
+    await logWebhookSkip({
+      workspaceId,
+      platform: 'zid',
+      event,
+      storeId: String(storeId),
+      reason: 'disabled_in_settings',
+      detail: reason,
+      payload: data,
+    })
     return 'skipped'
   }
 
@@ -638,6 +748,21 @@ async function handleCustomerEvent(
   if (queued.error) {
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
+  }
+  if (queued.id) {
+    // تنبيه الوصول نارٍ وانسى (P1-1): لا يُنتظر فلا يؤخر الرد، ويُرسل عند
+    // الإدراج الطازج فقط — الدمج/التكرار ليس طلباً جديداً.
+    import('@/lib/telegram-notifier')
+      .then(({ notifyOrderArrival }) =>
+        notifyOrderArrival({
+          workspaceId,
+          platform: 'zid',
+          event,
+          storeId: String(storeId),
+          payload: data,
+        })
+      )
+      .catch(() => {})
   }
   return 'enqueued'
 }
@@ -654,9 +779,18 @@ async function handleCategoryEvent(
     return 'no_workspace'
   }
 
-  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event, String(storeId))
   if (!allowed) {
     console.info('[Zid Webhook] Category event disabled by settings', { storeId, event, reason })
+    await logWebhookSkip({
+      workspaceId,
+      platform: 'zid',
+      event,
+      storeId: String(storeId),
+      reason: 'disabled_in_settings',
+      detail: reason,
+      payload: data,
+    })
     return 'skipped'
   }
 
@@ -673,7 +807,22 @@ async function handleCategoryEvent(
       console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
       return 'error'
     }
-    return 'enqueued'
+    if (queued.id) {
+    // تنبيه الوصول نارٍ وانسى (P1-1): لا يُنتظر فلا يؤخر الرد، ويُرسل عند
+    // الإدراج الطازج فقط — الدمج/التكرار ليس طلباً جديداً.
+    import('@/lib/telegram-notifier')
+      .then(({ notifyOrderArrival }) =>
+        notifyOrderArrival({
+          workspaceId,
+          platform: 'zid',
+          event,
+          storeId: String(storeId),
+          payload: data,
+        })
+      )
+      .catch(() => {})
+  }
+  return 'enqueued'
   } catch (err) {
     console.error('[Zid Webhook] Failed to enqueue category event', err)
     return 'error'
@@ -697,9 +846,18 @@ async function handleAbandonedCartEvent(
     return 'no_workspace'
   }
 
-  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event)
+  const { allowed, reason } = await isWebhookEventEnabled(workspaceId, 'zid', event, String(storeId))
   if (!allowed) {
     console.info('[Zid Webhook] Abandoned cart event disabled by settings', { storeId, event, reason })
+    await logWebhookSkip({
+      workspaceId,
+      platform: 'zid',
+      event,
+      storeId: String(storeId),
+      reason: 'disabled_in_settings',
+      detail: reason,
+      payload: data,
+    })
     return 'skipped'
   }
 
@@ -714,6 +872,21 @@ async function handleAbandonedCartEvent(
   if (queued.error) {
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
     return 'error'
+  }
+  if (queued.id) {
+    // تنبيه الوصول نارٍ وانسى (P1-1): لا يُنتظر فلا يؤخر الرد، ويُرسل عند
+    // الإدراج الطازج فقط — الدمج/التكرار ليس طلباً جديداً.
+    import('@/lib/telegram-notifier')
+      .then(({ notifyOrderArrival }) =>
+        notifyOrderArrival({
+          workspaceId,
+          platform: 'zid',
+          event,
+          storeId: String(storeId),
+          payload: data,
+        })
+      )
+      .catch(() => {})
   }
   return 'enqueued'
 }

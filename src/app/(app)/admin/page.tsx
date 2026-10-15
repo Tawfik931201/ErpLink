@@ -5,6 +5,7 @@ import { getAdminStats } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 
 import { OdooWebhooksRefresh } from './OdooWebhooksRefresh'
+import { SallaWebhooksRefresh } from './SallaWebhooksRefresh'
 import { ZidWebhooksRefresh } from './ZidWebhooksRefresh'
 
 const fmtMoney = (n: number) =>
@@ -101,6 +102,7 @@ export default async function AdminStatsPage() {
       <div className="grid gap-3 md:grid-cols-2">
         <OdooWebhooksRefresh isAr={isAr} />
         <ZidWebhooksRefresh isAr={isAr} />
+        <SallaWebhooksRefresh isAr={isAr} />
       </div>
     </div>
   )

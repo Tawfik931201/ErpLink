@@ -52,13 +52,13 @@ export default async function InitialTransferPage() {
   const workspaceId = await getActiveWorkspaceId()
 
   if (workspaceId) {
-    // Check Zid
-    const { data: zidTok } = await supabase
+    // Multi-store: every linked store of every platform is transferable.
+    const { data: zidToks } = await supabase
       .from('merchant_tokens')
       .select('merchant_id, store_id, name')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (zidTok) {
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    for (const zidTok of zidToks ?? []) {
       connectedStores.push({
         platform: 'zid',
         label: zidTok.name || zidTok.merchant_id,
@@ -68,12 +68,12 @@ export default async function InitialTransferPage() {
     }
 
     // Check Salla
-    const { data: sallaTok } = await supabase
+    const { data: sallaToks } = await supabase
       .from('salla_tokens')
       .select('merchant_id, store_name, name')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (sallaTok) {
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    for (const sallaTok of sallaToks ?? []) {
       connectedStores.push({
         platform: 'salla',
         label: sallaTok.store_name || sallaTok.name || sallaTok.merchant_id,
@@ -82,12 +82,12 @@ export default async function InitialTransferPage() {
     }
 
     // Check Shopify
-    const { data: shopifyTok } = await supabase
+    const { data: shopifyToks } = await supabase
       .from('shopify_tokens')
       .select('shop_domain, name')
       .eq('workspace_id', workspaceId)
-      .maybeSingle()
-    if (shopifyTok) {
+      .order('updated_at', { ascending: false, nullsFirst: false })
+    for (const shopifyTok of shopifyToks ?? []) {
       connectedStores.push({
         platform: 'shopify',
         label: shopifyTok.name || shopifyTok.shop_domain,

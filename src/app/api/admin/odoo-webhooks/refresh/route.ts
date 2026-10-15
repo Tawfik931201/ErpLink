@@ -145,11 +145,16 @@ export async function POST() {
 
     // ── Stock: stock.quant → /api/webhooks/odoo/stock ─────────────────────
     try {
+      // Platform-default row (store_id = ''): the unique key since migration
+      // 20261013 is (workspace_id, store_type, store_id, entity_type) — the
+      // old 3-column ON CONFLICT spec matches no constraint and Postgres
+      // rejects it.
       const { data: settingsRow } = await supabase
         .from('standard_mapping_settings')
         .select('settings')
         .eq('workspace_id', workspaceId)
         .eq('store_type', 'zid')
+        .eq('store_id', '')
         .eq('entity_type', 'products')
         .maybeSingle()
 
@@ -172,11 +177,12 @@ export async function POST() {
           {
             workspace_id: workspaceId,
             store_type: 'zid',
+            store_id: '',
             entity_type: 'products',
             settings,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: 'workspace_id, store_type, entity_type' }
+          { onConflict: 'workspace_id, store_type, store_id, entity_type' }
         )
         if (upErr) throw upErr
         report.stock = { status: 'refreshed', automationId: created.baseAutomationId }

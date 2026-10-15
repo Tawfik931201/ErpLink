@@ -15,14 +15,16 @@ name = "ErpLink"
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
 api_version = "2025-07"
 
-# Core topics auto-registered on install (catalog + sales).
+# Core topics auto-registered on install (full catalog + all orders + customers).
 # The rest are registered on demand from Advanced settings (toggle ON = real
 # webhook registration, OFF = delete — see updateShopifySyncSettings).
+# NOTE: customers/* needs read_customers (protected scope, approval-gated) —
+# without it those three subscriptions fail silently (403).
 # GDPR webhooks (customers/data_request, customers/redact, shop/redact) +
 # app/scopes_update are handled in src/app/api/webhooks/shopify/route.ts
 # and must stay subscribed for App Store compliance (200 within 5s, audit only).
 [[webhooks.subscriptions]]
-topics = ["products/create", "products/update", "orders/create", "orders/paid", "orders/fulfilled"]
+topics = ["products/create", "products/update", "products/delete", "collections/create", "collections/update", "collections/delete", "orders/create", "orders/updated", "orders/cancelled", "orders/fulfilled", "orders/paid", "orders/partially_fulfilled", "orders/edited", "orders/delete", "customers/create", "customers/update", "customers/delete"]
 uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
 
 [[webhooks.subscriptions]]

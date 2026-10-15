@@ -14,7 +14,7 @@ import Link from 'next/link'
 
 import { getDashboardStats, getEventDistribution, getDailyActivity, getRecentLogs, getRecentTransfers } from '@/app/actions/dashboard'
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
-import { getActiveWorkspaceZidToken, getActiveWorkspaceSallaToken, getActiveWorkspaceShopifyToken } from '@/app/actions/workspaces'
+import { getActiveWorkspaceZidTokens, getActiveWorkspaceSallaTokens, getActiveWorkspaceShopifyTokens } from '@/app/actions/workspaces'
 import SubscriptionStatusCard from '@/components/subscription/SubscriptionStatusCard'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
@@ -74,9 +74,9 @@ export default async function DashboardPage() {
     getDailyActivity(7),
     getRecentLogs(10),
     getRecentTransfers(5),
-    getActiveWorkspaceZidToken(),
-    getActiveWorkspaceSallaToken(),
-    getActiveWorkspaceShopifyToken(),
+    getActiveWorkspaceZidTokens(),
+    getActiveWorkspaceSallaTokens(),
+    getActiveWorkspaceShopifyTokens(),
     getActiveWorkspaceErpConnection(),
   ])
 
@@ -86,9 +86,10 @@ export default async function DashboardPage() {
   const recentLogs = logsRes.success && logsRes.logs ? logsRes.logs : []
   const recentTransfers = transfersRes.success && transfersRes.transfers ? transfersRes.transfers : []
 
-  const isZidConnected = !!zidTokenRes.success && !!zidTokenRes.token
-  const isSallaConnected = !!sallaTokenRes.success && !!sallaTokenRes.token
-  const isShopifyConnected = !!shopifyTokenRes.success && !!shopifyTokenRes.token
+  // Multi-store: a platform counts as connected when ≥1 store is linked.
+  const isZidConnected = !!zidTokenRes.success && (zidTokenRes.tokens?.length ?? 0) > 0
+  const isSallaConnected = !!sallaTokenRes.success && (sallaTokenRes.tokens?.length ?? 0) > 0
+  const isShopifyConnected = !!shopifyTokenRes.success && (shopifyTokenRes.tokens?.length ?? 0) > 0
   const isOdooConnected = !!odooConnRes.success && !!odooConnRes.connection
   const storeConnected = isZidConnected || isSallaConnected || isShopifyConnected
 
@@ -158,7 +159,7 @@ export default async function DashboardPage() {
 
         {(!storeConnected || !isOdooConnected) && (
           <Link
-            href="/app/setup"
+            href="/app/connect-store"
             className="flex items-center gap-2 text-xs font-semibold bg-muted text-foreground border px-4 py-2.5 rounded-lg shrink-0 hover:bg-muted/70 transition-colors"
           >
             <AlertTriangle className="h-4 w-4 shrink-0" />

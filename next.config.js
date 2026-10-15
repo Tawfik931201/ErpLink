@@ -18,6 +18,33 @@ const securityHeaders = [
     key: 'Permissions-Policy',
     value: 'camera=(), microphone=(), geolocation=()',
   },
+  // Baseline XSS/clickjacking containment. `unsafe-inline`/`unsafe-eval` stay
+  // because Next.js + Tailwind need them; the tickets XSS fix (sanitizer) is
+  // the real control — this header is defence in depth so an injected
+  // <script src="https://evil…"> or <iframe> never runs.
+  //
+  // Clerk allowlist (2026-10-08, per
+  // https://clerk.com/docs/guides/secure/best-practices/csp-headers):
+  // without it the browser refuses to load clerk-js from the FAPI host and
+  // every page fails with `failed_to_load_clerk_js_timeout`. `connect-src`
+  // and `img-src` already use the `https:` scheme-source, which covers any
+  // host and any port, so they need no change.
+  {
+    key: 'Content-Security-Policy',
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com https://*.protect.clerk.com https://challenges.cloudflare.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "connect-src 'self' https:",
+      "frame-src 'self' https://challenges.cloudflare.com",
+      "worker-src 'self' blob:",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; '),
+  },
 ]
 
 // ─── CORS ──────────────────────────────────────────────────────────

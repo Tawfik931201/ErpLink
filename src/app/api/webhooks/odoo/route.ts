@@ -28,10 +28,24 @@ const FAIL = (message: string): SyncOutcome => ({ ok: false, message })
 const DONE = (message = 'done'): SyncOutcome => ({ ok: true, message })
 
 export async function POST(req: NextRequest) {
+  const getHeader = (name: string) => req.headers.get(name)
+  const { checkRateLimit: checkRl, rateLimitKeyFromHeaders: keyFromHeaders } = await import('@/lib/rate-limit')
+  const rl = checkRl(keyFromHeaders(getHeader, 'odoo-webhook'), 120, 60_000)
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
   let rawText = ''
   let payload: any = {}
   try {
     rawText = await req.text()
+    const { isWebhookBodyTooLarge: tooLarge, MAX_WEBHOOK_BODY_BYTES: maxBytes } = await import('@/lib/webhook-strict')
+    if (rawText && tooLarge(rawText)) {
+      return NextResponse.json(
+        { error: `Payload too large (max ${maxBytes} bytes)` },
+        { status: 413 }
+      )
+    }
     if (rawText) {
       payload = JSON.parse(rawText)
     }

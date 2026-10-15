@@ -8,7 +8,8 @@ import { getOrCreateDbUser } from '@/lib/users'
 
 export async function saveOrderStatusMappings(
   platform: string,
-  mappings: Record<string, { state: string; enabled: boolean }>
+  mappings: Record<string, { state: string; enabled: boolean }>,
+  storeId = ''
 ) {
   try {
     const { userId } = await auth()
@@ -19,12 +20,14 @@ export async function saveOrderStatusMappings(
 
     const workspaceId = user.active_workspace_id
 
-    // Get current mappings first (safe: no data loss if this fails)
+    // Get current mappings first (safe: no data loss if this fails) —
+    // scoped to this store so sibling stores' rows are never touched.
     const { data: existing } = await supabase
       .from('order_status_mappings')
       .select('zid_status')
       .eq('workspace_id', workspaceId)
       .eq('platform', platform)
+      .eq('store_id', storeId)
 
     // Upsert new/changed mappings (safe: old data preserved if this fails)
     // Accepts the object shape { state, enabled }; legacy plain-string values
@@ -41,13 +44,14 @@ export async function saveOrderStatusMappings(
         odoo_state: stateOf(v),
         enabled: typeof v === 'string' ? true : ((v as { enabled?: unknown } | null)?.enabled ?? true),
         platform,
+        store_id: storeId,
       }))
 
     if (rows.length > 0) {
       const { error: upsertError } = await supabase
         .from('order_status_mappings')
         .upsert(rows, {
-          onConflict: 'workspace_id, platform, zid_status',
+          onConflict: 'workspace_id, platform, store_id, zid_status',
         })
 
       if (upsertError) throw upsertError
@@ -69,6 +73,7 @@ export async function saveOrderStatusMappings(
         .delete()
         .eq('workspace_id', workspaceId)
         .eq('platform', platform)
+        .eq('store_id', storeId)
         .in('zid_status', toDelete)
 
       if (deleteError) throw deleteError
@@ -82,7 +87,7 @@ export async function saveOrderStatusMappings(
   }
 }
 
-export async function getOrderStatusMappings(platform: string) {
+export async function getOrderStatusMappings(platform: string, storeId = '') {
   try {
     const { userId } = await auth()
     if (!userId) throw new Error('Unauthorized')
@@ -90,18 +95,32 @@ export async function getOrderStatusMappings(platform: string) {
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) return { success: true, mappings: {} }
 
+    // Per-store rows overlay the platform defaults (''): a store inherits
+    // everything it has not overridden.
     const { data, error } = await supabase
       .from('order_status_mappings')
-      .select('zid_status, odoo_state, enabled')
+      .select('zid_status, odoo_state, enabled, store_id')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
+      .in('store_id', storeId ? [storeId, ''] : [''])
 
     if (error) throw error
 
-    const mappings: Record<string, { state: string; enabled: boolean }> = {}
+    const byStatus = new Map<string, { state: string; enabled: boolean; store: string }>()
     for (const row of data || []) {
-      if (row.odoo_state) mappings[row.zid_status] = { state: row.odoo_state, enabled: (row as { enabled?: unknown }).enabled !== false }
+      if (!row.zid_status || !row.odoo_state) continue
+      const prev = byStatus.get(row.zid_status)
+      // Store-specific row wins over the platform default.
+      if (!prev || (prev.store === '' && row.store_id !== '')) {
+        byStatus.set(row.zid_status, {
+          state: row.odoo_state,
+          enabled: (row as { enabled?: unknown }).enabled !== false,
+          store: row.store_id || '',
+        })
+      }
     }
+    const mappings: Record<string, { state: string; enabled: boolean }> = {}
+    for (const [k, v] of byStatus) mappings[k] = { state: v.state, enabled: v.enabled }
 
     return { success: true, mappings }
   } catch (error: any) {

@@ -1,19 +1,28 @@
 /**
  * Inventory Sync (Odoo → Store) — shared settings helpers.
  *
- * The Products standard mapping settings (store_type='zid', entity_type='products')
- * hold the user's inventory-sync choice under `.inventory`:
+ * Each enabled store tab's Products standard mapping settings
+ * (store_type='<store>', entity_type='products') hold that store's
+ * inventory-sync choice under `.inventory`:
  *   {
  *     sync_enabled: boolean      // checkbox "مزامنة المخزون (من أودو إلى زد)"
  *     sync_mode: 'actual'|'forecast'  // الرصيد الفعلي أو الفوركاست المتوقع
  *     odoo_stock_webhook: { base_automation_id, server_action_id } | null
  *   }
  *
+ * The webhook refs are deliberately shared across stores: there is ONE Odoo
+ * Automated Action per workspace (registered lazily), and saving it to a
+ * second store's settings reuses the same refs instead of registering a
+ * duplicate. `disableOdooStockWebhook` only unregisters it once no store holds
+ * a reference.
+ *
  * This module is used both by the webhook receiver (queue), the sync-engine
- * (to suppress the reverse Zid→Odoo stock write when enabled) and the bulk
- * stock-sync action. It never throws — returns boolean.
+ * (to suppress the reverse store→Odoo stock write when any store syncs from
+ * Odoo) and the bulk stock-sync action. It never throws — returns boolean.
  */
 import { supabase } from './supabase'
+
+export type InventorySyncStoreType = 'zid' | 'salla'
 
 export interface InventorySyncSettings {
   sync_enabled: boolean
@@ -21,22 +30,36 @@ export interface InventorySyncSettings {
   odoo_stock_webhook: { base_automation_id?: number; server_action_id?: number } | null
 }
 
-export async function getInventorySyncSettings(workspaceId: string): Promise<InventorySyncSettings> {
+const DISABLED: InventorySyncSettings = {
+  sync_enabled: false,
+  sync_mode: 'actual',
+  odoo_stock_webhook: null,
+}
+
+export async function getInventorySyncSettings(
+  workspaceId: string,
+  storeType: InventorySyncStoreType = 'zid',
+  storeId = ''
+): Promise<InventorySyncSettings> {
   if (!workspaceId) {
-    return { sync_enabled: false, sync_mode: 'actual', odoo_stock_webhook: null }
+    return { ...DISABLED }
   }
   try {
+    // Per-store row first, platform default ('') as fallback — each store
+    // carries its own Odoo→store stock toggle.
     const { data, error } = await supabase
       .from('standard_mapping_settings')
-      .select('settings')
+      .select('store_id, settings')
       .eq('workspace_id', workspaceId)
-      .eq('store_type', 'zid')
+      .eq('store_type', storeType)
       .eq('entity_type', 'products')
-      .maybeSingle()
-    if (error || !data?.settings) {
-      return { sync_enabled: false, sync_mode: 'actual', odoo_stock_webhook: null }
+      .in('store_id', storeId ? [storeId, ''] : [''])
+    if (error || !data?.length) {
+      return { ...DISABLED }
     }
-    const inv = (data.settings as Record<string, any>)?.inventory ?? {}
+    const rows = data as Array<{ store_id: string; settings: unknown }>
+    const hit = rows.find(r => r.store_id === storeId) ?? rows.find(r => r.store_id === '')
+    const inv = ((hit?.settings as Record<string, any> | null)?.inventory ?? {}) as Record<string, any>
     return {
       sync_enabled: inv.sync_enabled === true,
       sync_mode: inv.sync_mode === 'forecast' ? 'forecast' : 'actual',
@@ -44,15 +67,46 @@ export async function getInventorySyncSettings(workspaceId: string): Promise<Inv
     }
   } catch (err) {
     console.warn('[InventorySyncSettings] Failed to load settings:', err)
-    return { sync_enabled: false, sync_mode: 'actual', odoo_stock_webhook: null }
+    return { ...DISABLED }
   }
 }
 
 /**
- * True when Odoo→Store inventory sync is enabled for the workspace (Zid store).
- * When enabled the reverse Zid→Odoo stock write is suppressed.
+ * True when Odoo→Store inventory sync is effectively ON for the platform —
+ * either the platform default or ANY linked store enabled it. Used as the
+ * dispatch gate (a store row can turn its own push on while the platform
+ * default stays off).
+ */
+export async function isInventorySyncActive(
+  workspaceId: string,
+  storeType: InventorySyncStoreType = 'zid'
+): Promise<boolean> {
+  if (!workspaceId) return false
+  try {
+    const { data, error } = await supabase
+      .from('standard_mapping_settings')
+      .select('settings')
+      .eq('workspace_id', workspaceId)
+      .eq('store_type', storeType)
+      .eq('entity_type', 'products')
+    if (error || !data?.length) return false
+    return (data as Array<{ settings: unknown }>).some(
+      r => ((r.settings as Record<string, any> | null)?.inventory as Record<string, any> | undefined)?.sync_enabled === true
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * True when Odoo→Store inventory sync is enabled for the workspace on ANY
+ * store (Zid or Salla). When enabled the reverse store→Odoo stock write is
+ * suppressed.
  */
 export async function isInventorySyncErpToStoreEnabled(workspaceId: string): Promise<boolean> {
-  const settings = await getInventorySyncSettings(workspaceId)
-  return settings.sync_enabled
+  const [zidState, sallaState] = await Promise.all([
+    isInventorySyncActive(workspaceId, 'zid'),
+    isInventorySyncActive(workspaceId, 'salla'),
+  ])
+  return zidState || sallaState
 }
