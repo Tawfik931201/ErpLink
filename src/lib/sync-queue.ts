@@ -364,11 +364,16 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
   }
 
   // ── 1) منع تكرار ذرّي إضافي داخل الطابور نفسه ─────────────────────────────
+  // ⚠️ الفحص مقيّد بصفوف pending (next_retry_at ليس NULL): الصف المجمّد
+  // (next_retry_at = NULL — كل المحاولات استُنفدت) يجب ألا يمنع إدراج حدث
+  // جديد، وإلا عاد الفيتو الذي أزاله الفهرس الجزئي في 20260928 — الصف
+  // المجمّد يعني «انتهى حظّه» لا «قيد المعالجة».
   if (dedupKey) {
     const { data: dup } = await supabase
       .from('sync_queue')
       .select('id')
       .eq('dedup_key', dedupKey)
+      .not('next_retry_at', 'is', null)
       .limit(1)
       .maybeSingle()
     if (dup) {
@@ -384,7 +389,7 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     try {
       const { data: pending } = await supabase
         .from('sync_queue')
-        .select('id,payload,created_at')
+        .select('id,payload,created_at,updated_at')
         .eq('workspace_id', params.workspaceId)
         .eq('store_id', params.storeId)
         .eq('event', params.event)
@@ -393,19 +398,40 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
         .order('created_at', { ascending: false })
         .limit(5)
 
-      for (const row of (pending ?? []) as Array<{ id: string; payload: unknown; created_at: string }>) {
+      let coalesceTarget: string | null = null
+      for (const row of (pending ?? []) as Array<{
+        id: string
+        payload: unknown
+        created_at: string
+        updated_at: string | null
+      }>) {
         const rowPayload = (row.payload ?? {}) as Record<string, unknown>
         if (extractEntityId(rowPayload) !== entityId) continue
         const oldTs = extractPayloadUpdatedAt(rowPayload)
         const newTs = extractPayloadUpdatedAt(params.payload)
         const merged = newTs >= oldTs ? params.payload : rowPayload
-        await supabase
+        // ⚠️ CAS: التحديث أشترط `updated_at` كما رأيناه للتو. بلا هذا
+        // الشرط يُستبدل payload صف محجوز من عامل آخر بنسخة أقَدم إذا
+        // وصل مدمِجان متتاليان (الأحدث يوسّع السجل ثم الأقدم يحمله عبره)،
+        // وحتى لو حُذف الصف بين القراءة والتحديث عاد التحديث ليُنشئ
+        // تحديثاً ذرياً على صف غير موجود (عدد 0) وتردد `coalesced:true`
+        // بلا شيء محفوظ فعلاً. CAS يفشل في الحالتين ⇒ نجري للإدراج.
+        const { data: updatedRows } = await supabase
           .from('sync_queue')
           .update({ payload: merged, updated_at: new Date().toISOString() })
           .eq('id', row.id)
+          .eq('updated_at', row.updated_at ?? '')
+          .select('id')
+        if (updatedRows && updatedRows.length > 0) {
+          coalesceTarget = row.id
+          break
+        }
+        // CAS فشل (سباق) — جرب الصف التالي، وإلا الإدراج.
+      }
+      if (coalesceTarget) {
         metrics.coalesced += 1
         settleReceipt()
-        return { id: row.id, coalesced: true }
+        return { id: coalesceTarget, coalesced: true }
       }
     } catch {
       // فشل فحص الدمج غير قاتل — تابع إلى الإدراج.
@@ -480,6 +506,7 @@ interface QueueItem {
   max_retries: number
   next_retry_at: string
   created_at: string
+  updated_at: string | null
 }
 
 /**
@@ -495,7 +522,7 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   try {
     const { data, error } = await supabase
       .from('sync_queue')
-      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at')
+      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
       .not('next_retry_at', 'is', null)
       .lte('next_retry_at', nowIso)
       .order('next_retry_at', { ascending: true })
@@ -649,7 +676,7 @@ export async function processWorkspaceQueue(
   try {
     const { data, error } = await supabase
       .from('sync_queue')
-      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at')
+      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
       .eq('workspace_id', workspaceId)
       .not('next_retry_at', 'is', null)
       .lte('next_retry_at', nowIso)
@@ -752,6 +779,36 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
   })
 }
 
+/**
+ * تسوية صف ناجح بأمان — إغلاق سباق الدمج مع المعالجة:
+ * أثناء الحجز (lease) قد يُدمج payload أحدث في الصف ذاته عبر coalescing.
+ * الحذف غير المشروط كان يطمس ذلك payload الأحدث ويُرجع 2xx لمصدره — فقدان
+ * صامت. الحل: نَقرأ الصف ونقارن `updated_at` بما رأيناه عند الجلب:
+ *  - الصف حُذف (لا نتيجة) → لا شيء.
+ *  - `updated_at` كما كان → قيمة الحدث نُفّذت بنجاح الآن، يُحذف (لا تحديث أحدث
+ *    في الصف، فلا شيء يضيع).
+ *  - `updated_at` تغيّر أثناء معالجتنا (coalescing بقيمة أحدث) → لا حذف:
+ *    يُعاد الصف استحقاقاً فوراً ليعالَج بالقيمة الأحدث.
+ */
+async function settleSuccessfulItem(item: QueueItem): Promise<void> {
+  const { data: row } = await supabase
+    .from('sync_queue')
+    .select('id,updated_at')
+    .eq('id', item.id)
+    .maybeSingle()
+  if (!row) return
+  const rowUpdatedAt = (row as { updated_at?: string | null }).updated_at ?? null
+  if (rowUpdatedAt !== null && item.updated_at !== null && rowUpdatedAt !== item.updated_at) {
+    // دُمج payload أحدث أثناء المعالجة — نُعيد برمجته فوراً بدل الحذف.
+    await supabase
+      .from('sync_queue')
+      .update({ next_retry_at: new Date().toISOString() })
+      .eq('id', item.id)
+    return
+  }
+  await supabase.from('sync_queue').delete().eq('id', item.id)
+}
+
 async function processOneItem(item: QueueItem) {
   const metrics = getMetricsStore()
   metrics.processed += 1
@@ -769,7 +826,8 @@ async function processOneItem(item: QueueItem) {
           String(p.field_mapping_id || ''),
           String(p.model || ''),
           Number(p.odooRecordId || 0),
-          p.payloadData as Record<string, unknown> | undefined
+          p.payloadData as Record<string, unknown> | undefined,
+          typeof p.auth_status === 'string' ? p.auth_status : undefined
         )
       } else {
         result = await processOdooStockEvent(item.payload as Record<string, unknown>)
@@ -787,7 +845,7 @@ async function processOneItem(item: QueueItem) {
 
     if (result && typeof result === 'object' && 'ok' in result) {
       if (result.ok) {
-        await supabase.from('sync_queue').delete().eq('id', item.id)
+        await settleSuccessfulItem(item)
         metrics.succeeded += 1
         noteWorkspaceSuccess(item.workspace_id)
       } else {
@@ -795,7 +853,7 @@ async function processOneItem(item: QueueItem) {
         await incrementRetry(item, result.message || 'Sync failed')
       }
     } else if (result && 'failed' in result && result.failed === 0) {
-      await supabase.from('sync_queue').delete().eq('id', item.id)
+      await settleSuccessfulItem(item)
       metrics.succeeded += 1
     } else if (result && typeof result === 'object' && 'records' in result) {
       const errorRecord = result.records.find((r: { status: string }) => r.status === 'failed')
@@ -884,7 +942,11 @@ async function noteWorkspaceFailure(
   cbParkedUntil.set(workspaceId, until)
   cbFailures.set(workspaceId, 0)
   try {
-    // فقط الصفوف المستحقة قبل نهاية التهدئة — البعيدة تُترك لموعدها.
+    // فقط الصفوف المستحقة الآن (`next_retry_at <= الآن`) — الفصل حاسم:
+    // كان الشرط `.lte(next_retry_at, untilIso)` يمس أيضاً صفوفاً محجوزة من
+    // عامل آخر (lease = الآن + 15د) حين كانت التهدئة أقصر من مدة الحجز،
+    // فيُستبدل استحقاقُها الزمني بموعد التهدئة وتُعالج التسليم الواحد مرتين.
+    // الحجز يُثبته عمود `next_retry_at` المستقبلي، والركن يلمس المستحق فقط.
     await supabase
       .from('sync_queue')
       .update({
@@ -893,7 +955,7 @@ async function noteWorkspaceFailure(
       })
       .eq('workspace_id', workspaceId)
       .not('next_retry_at', 'is', null)
-      .lte('next_retry_at', untilIso)
+      .lte('next_retry_at', new Date(now).toISOString())
     getMetricsStore().lastError = `circuit-breaker parked workspace ${workspaceId.slice(0, 8)}… for ${Math.round(cbCooldownMs() / 60000)}min`
   } catch {
     // الركن best-effort — الفشل هنا لا يوقف المحاولات العادية.
@@ -912,7 +974,10 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
     // استُنفدت المحاولات — يُجمَّد الصف (next_retry_at = NULL) للمراجعة اليدوية.
     // نتحقق من نجاح التحديث: عمود NOT NULL كان يجعله يفشل بصمت فيبقى الصف
     // محبوساً في الطابور ويحرق فحصاً في كل دورة cron للأبد.
-    const { error: freezeErr } = await supabase
+    // CAS على retry_count: الصف المحمل تعتمد العملية على نسخته عند الجلب —
+    // حذف الصف (نجاح عنديما) أو تغيّر عدّاده (عاملان متداخلان) يجعل
+    // التحديث يطابق 0 صف ولا يخترق سباقاً بأثر رجعي على عدد قديم.
+    const { data: frozenRows, error: freezeErr } = await supabase
       .from('sync_queue')
       .update({
         retry_count: newCount,
@@ -921,9 +986,11 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
         error_message: (errorMessage || '').slice(0, 500),
       })
       .eq('id', item.id)
+      .eq('retry_count', item.retry_count || 0)
+      .select('id')
 
     if (freezeErr) {
-      // مخطط لم يُرحَّل بعد: نستخدم تاريخاً بعيداً вместо NULL حتى لا يُلتقط
+      // مخطط لم يُرحَّل بعد: نستخدم تاريخاً بعيداً بدَل null حتى لا يُلتقط
       // الصف مرة أخرى، مع تسجيل الفشل في المقاييس ليظهر التنبيه.
       metrics.lastError = `freeze failed (${freezeErr.code ?? ''}): run 20260922_sync_reliability.sql`
       await supabase
@@ -935,6 +1002,10 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
           error_message: (errorMessage || '').slice(0, 500),
         })
         .eq('id', item.id)
+        .eq('retry_count', item.retry_count || 0)
+    } else if (Array.isArray(frozenRows) && frozenRows.length === 0) {
+      // سباق: الصف حُذف/تغيّر تحتنا — لا تكرار العد ولا العد مرتين.
+      metrics.lastError = `freeze skipped (row changed): ${item.platform}:${item.event}`
     }
   } else {
     // Backoff أسّي مع jitter: يتعرّف على 429 و502/ECONNREFUSED فيمنح
@@ -948,6 +1019,8 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
       season: isSeasonMode(),
     })
     const jitterMs = Math.floor(Math.random() * 60_000)
+    // نفس CAS: الحذف/التغيّر السباقي يجعل المطابقة صفراً ولا تُكتب حالة
+    // «لإعادة محاولة» على صف لم نمنحها منا محاولتها.
     await supabase
       .from('sync_queue')
       .update({
@@ -957,6 +1030,7 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
         error_message: (errorMessage || '').slice(0, 500),
       })
       .eq('id', item.id)
+      .eq('retry_count', item.retry_count || 0)
   }
 }
 

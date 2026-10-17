@@ -7,6 +7,7 @@
  */
 
 import { resolveEventOperation, type SyncOperation } from '@/lib/event-operation'
+import { getEffectiveStandardMappingSettings, resolveSettingsStoreKey } from '@/lib/mapping-settings'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 
@@ -26,11 +27,11 @@ function getCacheKey(workspaceId: string, storeType: string, entityType: string,
 
 /**
  * Resolve a webhook's store key to the merchant key used by the settings
- * rows (merchant_id for zid/salla, shop_domain for shopify). Zid deliveries
- * carry the numeric store_id, which is mapped through the token row; the
- * other platforms already arrive keyed by merchant.
+ * rows (merchant_id for zid/salla, shop_domain for shopify). The translation
+ * itself lives in `@/lib/mapping-settings` so every reader agrees on it; this
+ * wrapper only caches it for the hot ingress path.
  */
-async function resolveSettingsStoreKey(
+async function resolveSettingsStoreKeyCached(
   workspaceId: string,
   storeType: string,
   storeKey: string
@@ -38,19 +39,11 @@ async function resolveSettingsStoreKey(
   if (!storeKey) return ''
   if (storeType !== 'zid') return storeKey
   if (!/^\d+$/.test(storeKey)) return storeKey
-  const merchant = await ttlCache.get<string | null>(
+  return ttlCache.get<string>(
     `webhook-gate:merchant:zid:${storeKey}`,
     TTL_MS,
-    async () => {
-      const { data } = await supabase
-        .from('merchant_tokens')
-        .select('merchant_id')
-        .or(`store_id.eq.${storeKey},merchant_id.eq.${storeKey}`)
-        .maybeSingle()
-      return ((data as { merchant_id?: unknown } | null)?.merchant_id ?? null) as string | null
-    }
+    async () => resolveSettingsStoreKey(supabase, storeType, storeKey)
   )
-  return merchant ? String(merchant) : storeKey
 }
 
 export async function isWebhookEventEnabled(
@@ -67,26 +60,22 @@ export async function isWebhookEventEnabled(
   }
 
   const { entityType, operation } = mapped
-  const merchant = await resolveSettingsStoreKey(workspaceId, storeType, storeKey)
+  const merchant = await resolveSettingsStoreKeyCached(workspaceId, storeType, storeKey)
   const cacheKey = getCacheKey(workspaceId, storeType, entityType, merchant)
 
   const settings = await ttlCache.get<StandardMappingSettings | null>(
     cacheKey,
     TTL_MS,
     async () => {
-      // Per-store row first, platform default ('') as fallback.
-      const { data, error } = await supabase
-        .from('standard_mapping_settings')
-        .select('store_id, settings')
-        .eq('workspace_id', workspaceId)
-        .eq('store_type', storeType)
-        .eq('entity_type', entityType)
-        .in('store_id', merchant ? [merchant, ''] : [''])
-
-      if (error) throw error
-      const rows = (data ?? []) as Array<{ store_id: string; settings: unknown }>
-      const hit = rows.find(r => r.store_id === merchant) ?? rows.find(r => r.store_id === '')
-      return (hit?.settings as StandardMappingSettings) || null
+      // Per-store row first, platform default ('') as fallback — the shared
+      // reader is what guarantees that; it must not be re-implemented here.
+      return (await getEffectiveStandardMappingSettings(
+        supabase,
+        workspaceId,
+        storeType,
+        entityType,
+        merchant
+      )) as StandardMappingSettings | null
     }
   )
 

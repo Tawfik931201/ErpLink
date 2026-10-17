@@ -86,8 +86,10 @@ describe('parent resolution is not Zid-only any more', () => {
 describe('a parentless category payload is completed before mapping', () => {
   it('forces enrichment when parent_id is absent, regardless of size', () => {
     expect(source).toMatch(/const missingParentId =/)
+    // legacyNeedsFetch prepends the legacy re-fresh (API wins for
+    // unauthenticated deliveries); the completeness gates stay.
     expect(source).toMatch(
-      /if \(missingOrderItems \|\| missingParentId \|\| isThin\) \{/
+      /if \(legacyNeedsFetch \|\| missingOrderItems \|\| missingParentId \|\| isThin\) \{/
     )
   })
 })

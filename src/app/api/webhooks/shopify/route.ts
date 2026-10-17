@@ -14,7 +14,7 @@ import {
   verifyShopifySignature,
 } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
-import { enqueueWebhookEvent } from '@/lib/sync-queue'
+import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { ttlCache } from '@/lib/ttl-cache'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
@@ -167,10 +167,14 @@ export async function POST(req: NextRequest) {
   // المكرّرة إلى صف واحد حتى مع تزامن عمليّن.
   const shopifyDedupKey = webhookId ? `shopify:${shopDomain}:${topic}:${webhookId}` : null
   if (shopifyDedupKey) {
+    // مقيّد بصفوف pending: الصف المجمّد (كل المحاولات استُنفدت) هو سجل تاريخي
+    // قابله بلا معالجة — الفيتو على إدراج حدث جديد بمفتاحه يعيد فقدان الأحداث
+    // الذي أزاله الفهرس الجزئي. (نفس إصلاح enqueueWebhookEvent.)
     const { data: dup } = await supabase
       .from('sync_queue')
       .select('id')
       .eq('dedup_key', shopifyDedupKey)
+      .not('next_retry_at', 'is', null)
       .limit(1)
       .maybeSingle()
     if (dup) {
@@ -182,6 +186,23 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(rawBody)
   } catch {
+    // وصلنا هنا بعد تحقق HMAC ناجح (في الإنتاج) — جسم صالح التوقيع ولا
+    // يمكنه الرد 400 صامتاً: يُحفظ كيتيم (workspace_id = null) بدل أن يضيع.
+    console.error('[Shopify Webhook] Invalid JSON body on signed delivery — saved as orphan receipt')
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const stored = await recordOrphanReceipt({
+      platform: 'shopify',
+      storeId: shopDomain,
+      event: topic,
+      dedupKey: `shopify:malformed:${shopDomain}:${topic}:${webhookId || rawBody.length}`,
+      payload: { raw: rawBody.slice(0, 8000) },
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
   if (!payload || typeof payload !== 'object') {
@@ -317,8 +338,9 @@ export async function POST(req: NextRequest) {
         // دمج products/update: أحدث payload يربح — نُحدّث الصف بدل صف جديد
         if (topic === 'products/update' && mergeRowId === null) mergeRowId = row.id
       }
-      // خارج الترتيب: الوارد أقدم من المعلَّق → تجاهل مع توثيق في sync_logs
-      // (بلا أثر كان هذا التجاهل غير قابل للتمييز عن حدث ضائع).
+      // outside order: الوارد أقدم من المعلَّق → تجاهل مع توثيق في sync_logs.
+      // «بلا أثر» لم يعد كذلك سالاً: يُحفظ كيتيم (workspace_id = null) —
+      // دائم وقابل للاسترداد اليدوي، لا يستطيع وحده أن يرجّع حالة أقدم.
       if (incomingTs > 0 && newestQueuedTs > 0 && incomingTs < newestQueuedTs) {
         await logWebhookSkip({
           workspaceId: shopifyToken.workspace_id as string,
@@ -328,12 +350,49 @@ export async function POST(req: NextRequest) {
           reason: 'stale_event',
           payload: (enrichedPayload ?? {}) as Record<string, unknown>,
         })
+        const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+        const stored = await recordOrphanReceipt({
+          platform: 'shopify',
+          storeId: shopDomain,
+          event: topic,
+          dedupKey: `shopify:stale:${shopDomain}:${topic}:${
+            webhookId || fingerprintPayload(payload as Record<string, unknown>)
+          }`,
+          payload: (enrichedPayload ?? {}) as Record<string, unknown>,
+        })
+        if (!stored.ok) {
+          return NextResponse.json(
+            { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+            { status: 503 }
+          )
+        }
         return NextResponse.json({ received: true, processed: false, reason: 'stale_event' })
       }
       // دمج: حدّث الصف المعلَّق بدل enqueue جديد (يضغط bursts)
       if (mergeRowId) {
-        await supabase.from('sync_queue').update({ payload: enrichedPayload }).eq('id', mergeRowId)
-        return NextResponse.json({ received: true, queued: true, merged: true })
+        const { data: mergedRows, error: mergeErr } = await supabase
+          .from('sync_queue')
+          .update({
+            payload: enrichedPayload,
+            // تحديث updated_at مقصود: حارس تسوية العامل (settleSuccessfulItem)
+            // يقارن updated_at — بلا هذا التحديث قد يقطع العامل الصف المدموج
+            // عند نجاحه ويضيع Payload الدمج.
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', mergeRowId)
+          .select('id')
+        if (mergeErr || (Array.isArray(mergedRows) && mergedRows.length === 0)) {
+          // فشل الدمج (حُذف الصف عبر سباق أو خطأ) → لا 200 صامت: enqueue عادي
+          // يضمن الحفظ الدائم. كان الرد `merged:true` يطمس الفشل نهائياً.
+          console.warn('[Shopify Webhook] merge update fell through to enqueue', {
+            topic,
+            shopDomain,
+            mergeRowId,
+            error: mergeErr?.message ?? 'no_rows',
+          })
+        } else {
+          return NextResponse.json({ received: true, queued: true, merged: true })
+        }
       }
     } catch {
       // best-effort — عند فشل الفحص نتابع للـ enqueue العادي

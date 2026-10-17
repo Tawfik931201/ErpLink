@@ -54,7 +54,7 @@ export function ZidWebhooksRefresh({ isAr }: { isAr: boolean }) {
         </p>
         <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
           {isAr
-            ? 'يعيد إنشاء 웹 هوك زد لكل المتاجر مع مصادقة Basic. نفّذها مرة واحدة بعد نشر تحديث المصادقة، ثم تابع عدّاد "Unauthenticated delivery" في سجل الخادم حتى يتوقف.'
+            ? 'يعيد إنشاء ويب هوك زد لكل المتاجر مع مصادقة Basic. نفّذها مرة واحدة بعد نشر تحديث المصادقة، ثم تابع عدّاد "Unauthenticated delivery" في سجل الخادم حتى يتوقف.'
             : 'Re-creates every linked store’s Zid webhooks with Basic Auth. Run once after deploying the auth change, then watch the "Unauthenticated delivery" counter in the server log until it stops.'}
         </p>
       </div>

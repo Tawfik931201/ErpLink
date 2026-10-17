@@ -199,3 +199,23 @@ export function sallaWebhookCredentialFingerprint(): string {
   if (!credential) return 'none'
   return crypto.createHash('sha256').update(credential.headerValue).digest('hex').slice(0, 12)
 }
+
+/**
+ * تحليل طوابع وقت التسليم من سالا — أرقام epoch بالثواني (الشكل الأكثر
+ * شيوعاً في حقول `created_at`/`timestamp` الرقمية)، أو أرقام بالميلي ثانية،
+ * أو نصوص ISO. سابقاً كانت `new Date(String(raw))` تُرجع NaN للرقم 1737000000
+ * لأن String() من رقم ثوانٍ ليس صيغة تاريخ صالحة، فالمقارنة القديمة كانت
+ * تُسقط فحص staleness للأشكال الرقمية. تُرجع NaN عندما لا يمكن التحليل.
+ */
+export function parseSallaTimestampMs(raw: unknown): number {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return raw < 1e12 ? raw * 1000 : raw
+  }
+  const s = String(raw ?? '').trim()
+  if (/^\d+$/.test(s)) {
+    const n = Number(s)
+    return n < 1e12 ? n * 1000 : n
+  }
+  const t = new Date(s).getTime()
+  return Number.isFinite(t) ? t : NaN
+}

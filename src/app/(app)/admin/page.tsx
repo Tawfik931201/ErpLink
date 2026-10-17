@@ -6,6 +6,7 @@ import { getActiveUserId, isAdmin } from '@/lib/auth'
 
 import { OdooWebhooksRefresh } from './OdooWebhooksRefresh'
 import { SallaWebhooksRefresh } from './SallaWebhooksRefresh'
+import { WebhookOps } from './WebhookOps'
 import { ZidWebhooksRefresh } from './ZidWebhooksRefresh'
 
 const fmtMoney = (n: number) =>
@@ -103,6 +104,7 @@ export default async function AdminStatsPage() {
         <OdooWebhooksRefresh isAr={isAr} />
         <ZidWebhooksRefresh isAr={isAr} />
         <SallaWebhooksRefresh isAr={isAr} />
+        <WebhookOps isAr={isAr} />
       </div>
     </div>
   )

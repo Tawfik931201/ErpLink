@@ -25,6 +25,7 @@ import { createClient } from '@supabase/supabase-js'
 
 import { decrypt } from './crypto'
 import { getInventorySyncSettings, isInventorySyncActive, type InventorySyncSettings } from './inventory-sync-settings'
+import { getEffectiveStandardMappingSettings } from './mapping-settings'
 import { OdooClient } from './odoo-client'
 import { findSallaProductByMatchField, SALLA_DEFAULT_BRANCH_ID, updateSallaStockBulk } from './salla-client'
 import { getAccessToken } from './zid/token'
@@ -281,6 +282,7 @@ async function runZidArm(args: {
         odooProductId: Number(pid),
         odooConnection: erpConn,
         quantity: qty,
+        storeId: String(zidTok.merchant_id ?? ''),
       })
       if (outcome === 'pushed') transferred++
       else if (outcome === 'skipped') skipped++
@@ -801,10 +803,11 @@ async function pushStockToZid(params: {
   odooProductId: number
   odooConnection: any
   quantity: number
+  storeId?: string
 }): Promise<PushOutcome> {
-  const { client, creds, zidLocationId, odooProductId, odooConnection, quantity } = params
+  const { client, creds, zidLocationId, odooProductId, odooConnection, quantity, storeId = '' } = params
 
-  const std = await loadZidProductMatchField(odooConnection.workspace_id)
+  const std = await loadZidProductMatchField(odooConnection.workspace_id, storeId)
   const matchZidField = std.match_zid_field || 'sku'
   const matchOdooField = std.match_odoo_field || (matchZidField === 'id' ? 'x_zid_id' : 'default_code')
 
@@ -840,16 +843,14 @@ async function pushStockToZid(params: {
   return 'pushed'
 }
 
-async function loadZidProductMatchField(workspaceId: string): Promise<{ match_odoo_field: string; match_zid_field: string }> {
+async function loadZidProductMatchField(workspaceId: string, storeId = ''): Promise<{ match_odoo_field: string; match_zid_field: string }> {
   try {
-    const { data } = await supabaseAdmin
-      .from('standard_mapping_settings')
-      .select('settings')
-      .eq('workspace_id', workspaceId)
-      .eq('store_type', 'zid')
-      .eq('entity_type', 'products')
-      .maybeSingle()
-    const s = (data?.settings as any) || {}
+    // Delegated to the shared reader: per-store row first, platform default
+    // ('') as fallback, store key resolved and compared as TEXT. The bare
+    // maybeSingle() this replaces threw (PostgREST PGRST116) the moment a
+    // per-store row existed, so the catch returned sku/default_code and the
+    // configured match field was silently ignored.
+    const s = (await getEffectiveStandardMappingSettings(supabaseAdmin, workspaceId, 'zid', 'products', storeId)) || {}
     return {
       match_odoo_field: String(s.match_odoo_field || ''),
       match_zid_field: String(s.match_zid_field || 'sku'),
@@ -975,19 +976,9 @@ async function pushStockToSalla(params: {
 
 async function loadSallaProductMatchField(workspaceId: string, storeId = ''): Promise<{ match_odoo_field: string; match_salla_field: string }> {
   try {
-    // Per-store row first, platform default ('') as fallback — a bare
-    // maybeSingle() breaks (PostgREST 406) once both rows exist, which
-    // silently dropped the configured match down to sku/default_code.
-    const { data } = await supabaseAdmin
-      .from('standard_mapping_settings')
-      .select('store_id, settings')
-      .eq('workspace_id', workspaceId)
-      .eq('store_type', 'salla')
-      .eq('entity_type', 'products')
-      .in('store_id', storeId ? [storeId, ''] : [''])
-    const rows = (data ?? []) as Array<{ store_id: string; settings: unknown }>
-    const hit = rows.find(r => r.store_id === storeId) ?? rows.find(r => r.store_id === '')
-    const s = (hit?.settings as any) || {}
+    // Same shared reader as the Zid loader — one implementation of
+    // per-store-first / default-fallback with a TEXT-compared store key.
+    const s = (await getEffectiveStandardMappingSettings(supabaseAdmin, workspaceId, 'salla', 'products', storeId)) || {}
     return {
       match_odoo_field: String(s.match_odoo_field || ''),
       // Salla reuses the same generic settings key as Zid (the Odoo→Salla

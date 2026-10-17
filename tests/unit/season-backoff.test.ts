@@ -56,7 +56,11 @@ describe('circuit breaker wiring (source pins)', () => {
   })
 
   it('parking only touches rows due before the cooldown ends (far backoff untouched)', () => {
-    expect(queue).toContain(".lte('next_retry_at', untilIso)")
+    // Due-only: the parking predicate compares rows due NOW, never relative
+    // to the cooldown time — the old `untilIso` form also matched rows leased
+    // by another worker (future next_retry_at) and overwrote their lease,
+    // delivering the same webhook twice.
+    expect(queue).toContain(".lte('next_retry_at', new Date(now).toISOString())")
   })
 
   it('threshold and cooldown are tunable without code changes', () => {

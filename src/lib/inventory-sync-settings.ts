@@ -47,18 +47,24 @@ export async function getInventorySyncSettings(
   try {
     // Per-store row first, platform default ('') as fallback — each store
     // carries its own Odoo→store stock toggle.
+    const key = String(storeId ?? '').trim()
     const { data, error } = await supabase
       .from('standard_mapping_settings')
       .select('store_id, settings')
       .eq('workspace_id', workspaceId)
       .eq('store_type', storeType)
       .eq('entity_type', 'products')
-      .in('store_id', storeId ? [storeId, ''] : [''])
+      .in('store_id', key ? [key, ''] : [''])
     if (error || !data?.length) {
       return { ...DISABLED }
     }
     const rows = data as Array<{ store_id: string; settings: unknown }>
-    const hit = rows.find(r => r.store_id === storeId) ?? rows.find(r => r.store_id === '')
+    // Compare as TEXT on both sides: store_id round-trips as a string, so a
+    // numeric caller would never match `r.store_id === storeId` and would
+    // silently fall back to the platform default.
+    const hit =
+      rows.find(r => (r.store_id || '') === key) ??
+      rows.find(r => (r.store_id || '') === '')
     const inv = ((hit?.settings as Record<string, any> | null)?.inventory ?? {}) as Record<string, any>
     return {
       sync_enabled: inv.sync_enabled === true,

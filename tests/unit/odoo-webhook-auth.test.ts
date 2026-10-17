@@ -263,8 +263,12 @@ describe('the ingress policy both routes share', () => {
   it('allows `unconfigured` outside production — the only place skipping is safe', () => {
     const { mod, restore } = loadModule({ ENCRYPTION_KEY: KEY, NODE_ENV: 'development' })
     try {
+      // The classification travels with an allow decision: the receiver's
+      // record-gone branch must be able to distinguish authenticated
+      // deletions from legacy ones (deletion-only for `ok`).
       expect(mod.decideOdooWebhookAuth({ status: 'unconfigured' }, 'stock:x')).toEqual({
         action: 'allow',
+        status: 'unconfigured',
       })
     } finally {
       restore()
@@ -275,7 +279,10 @@ describe('the ingress policy both routes share', () => {
     const { mod, restore } = loadModule({ ENCRYPTION_KEY: KEY, NODE_ENV: 'production' })
     try {
       const scope = mod.odooStockSecretScope('44444444-4444-4444-4444-444444444444')
-      expect(mod.decideOdooWebhookAuth({ status: 'legacy' }, scope)).toEqual({ action: 'allow' })
+      expect(mod.decideOdooWebhookAuth({ status: 'legacy' }, scope)).toEqual({
+        action: 'allow',
+        status: 'legacy',
+      })
       expect(mod.legacyOdooDeliveryCounts()[scope]).toBeGreaterThanOrEqual(1)
     } finally {
       restore()
@@ -304,7 +311,10 @@ describe('the caller secret is read from the places Odoo can put it', () => {
     try {
       const scope = mod.odooStockSecretScope(WORKSPACE)
       const secret = mod.deriveOdooWebhookSecret(scope)!
-      expect(mod.authorizeOdooWebhook({ scope, querySecret: secret })).toEqual({ action: 'allow' })
+      expect(mod.authorizeOdooWebhook({ scope, querySecret: secret })).toEqual({
+        action: 'allow',
+        status: 'ok',
+      })
       expect(mod.authorizeOdooWebhook({ scope, querySecret: 'nope' }).action).toBe('reject')
     } finally {
       restore()

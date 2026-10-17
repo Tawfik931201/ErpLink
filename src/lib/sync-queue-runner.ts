@@ -73,10 +73,18 @@ async function runDrainCycle(): Promise<void> {
   try {
     g.__syncQueueRunnerProcessing = true
     const { drainWebhookInbox } = await import('./webhook-inbox')
-    await drainWebhookInbox(WEBHOOK_INBOX_DRAIN_BATCH)
+    const drained = await drainWebhookInbox(WEBHOOK_INBOX_DRAIN_BATCH)
+    // كان الصمت الكامل هنا يجعل خطأ drain (تعطل inbox / رسالة تخزين) غير
+    // مرئي — يظهر لاحقاً فقط كتراكم مخزن. تُسجل الدورات الفاشلة فقط،
+    // لا كل دورة سليمة.
+    if (drained.failed > 0 || drained.inboxMissing) {
+      console.warn(
+        `[sync-queue] inbox drain had issues: failed=${drained.failed} inboxMissing=${drained.inboxMissing}`
+      )
+    }
     await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
   } catch {
-    // الأخطاء مسجلة في عدّادات الطابور — لا console لكل دورة.
+    // الأخطاء مسجلة في عدادات الطابور — لا console لكل دورة.
   } finally {
     g.__syncQueueRunnerProcessing = false
   }

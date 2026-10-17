@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { decrypt } from '@/lib/crypto'
+import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { authorizeOdooWebhook, odooRecordSecretScope } from '@/lib/odoo/webhook-secret'
 import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
@@ -120,6 +121,9 @@ export async function POST(req: NextRequest) {
     odooRecordId: Number(odooRecordId),
     payloadData: actualPayload,
   }
+  // تصنيف المصادقة يمر مع الصف: مطلوب لفرع "السجل غير موجود" في الخلفية
+  // (الحذف المبني على قيمة من جسم غير مصادق مرفوض — انظر runBackgroundSync).
+  enqueuePayload.auth_status = auth.status
   const writeDate = actualPayload.write_date ?? actualPayload.__last_update ?? null
   if (writeDate) enqueuePayload.updated_at = String(writeDate)
 
@@ -160,7 +164,7 @@ export async function POST(req: NextRequest) {
  * Accepts the payload received from Odoo directly so we can skip a redundant Odoo read()
  * when the webhook body already contains the updated field values.
  */
-export async function runBackgroundSync(field_mapping_id: string, model: string, odooRecordId: number, payloadData?: Record<string, any>): Promise<SyncOutcome> {
+export async function runBackgroundSync(field_mapping_id: string, model: string, odooRecordId: number, payloadData?: Record<string, any>, authStatus?: string): Promise<SyncOutcome> {
   console.info(`[Odoo Webhook Bg] Starting sync for mapping=${field_mapping_id}, model=${model}, recordId=${odooRecordId}`)
 
   // 1. Fetch FieldMapping
@@ -208,7 +212,14 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   }
 
   let matchField = mapping.odoo_match_field
-  let odooRecord: Record<string, any>
+  // التهيئة {} مقصودة: التخصيص الفعلي يحدث في كل مسار قبل أي استخدام
+  // (سجل أودو، أو سجل مصغّر في وضع removalOnly، أو SKIP مبكر). TS لا يرى
+  // التخصيص داخل `if (removalOnly)` المتأخر تحليل تعيينٍ مؤكد.
+  let odooRecord: Record<string, any> = {}
+  // وضع "حذف فقط": السجل لم يعد موجوداً في أودو (قراءة ناجحة قادمة فارغة).
+  // يُبنى سجل مصغّر يحتوي قيمة حقل المطابقة فقط من الجسم — لا قيم أخرى
+  // من الجسم تُعتمد أبداً في هذا الوضع. انظر فرع "record is gone" أدناه.
+  let removalOnly = false
   // True only when `odooRecord` came back from Odoo itself. Everything else
   // about the body's trustworthiness hangs off this flag — see step 3 and
   // hasRemovalSignal.
@@ -227,8 +238,10 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   //     knows the shared secret could archive a product in some *other*
   //     tenant's store at will.
   //   - read returned empty   → the record really is gone, which is the
-  //     deletion flow this endpoint has to support, and the body is all that
-  //     is left.
+  //     deletion flow this endpoint has to support. The body contributes only
+  //     the match field's value, and only when the delivery authenticated with
+  //     the per-scope secret (auth_status = ok from the queue payload);
+  //     unauthenticated (legacy) deliveries claiming a deletion are refused.
   //   - read threw            → we could not verify anything, so we do not
   //     guess. The job fails and retries (5 attempts, then the dead-letter
   //     table). Falling back to the body here would hand anyone who knows the
@@ -267,8 +280,23 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
     recordFromOdoo = true
   } else if (hasActualFields) {
     // The read succeeded and the record is gone → this is the deletion flow.
-    console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo — using webhook body`)
-    odooRecord = payloadData as Record<string, any>
+    //
+    // ⚠️ حذف فقط، ولا قيمة من الجسم تُعتمد أبداً. سابقاً كان هنا
+    // `odooRecord = payloadData` — أي اعتماد الجسم كاملاً كصف أودو — وهو ما
+    // كان يسمح لمتصل غير مصادق (فترة legacy) أن يدفع أي قيمة (سعر/اسم/SKU)
+    // إلى المتجر. الآن: ننتقل بوضع "حذف فقط" — يُبنى سجل مصغّر يحتوي قيمة
+    // حقل المطابقة فقط (اللازمة لتحديد المنتج في المتجر)، وبالنسبة
+    // للتسليمات غير المصادقة (legacy / بلا ختم auth) نتجاهل الحدث كلياً —
+    // الحذف الذي يحتاج قيمة من جسم غير موقّع لا يجب أن ينفّذ.
+    const deliveryAuth = String(authStatus || '').toLowerCase()
+    if (deliveryAuth !== 'ok') {
+      console.warn(
+        `[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo and delivery is unauthenticated (${deliveryAuth || 'unclassified'}) — refusing to act on the body; re-register the Automated Action to enable deletions`
+      )
+      return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists (unauthenticated delivery)`)
+    }
+    console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo — honoring deletion flow (match-field value only, body values are never trusted)`)
+    removalOnly = true
   } else {
     console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo and body carried no field values`)
     return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
@@ -303,15 +331,37 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   // to the ERP → store direction just like sync-engine applies it for store → ERP.
   let stdProductSettings: Record<string, any> | null = null
   if (platform === 'zid' && (model === 'product.template' || model === 'product.product')) {
-    const { data: stdRow } = await supabaseAdmin
-      .from('standard_mapping_settings')
-      .select('settings')
-      .eq('workspace_id', mapping.workspace_id)
-      .eq('store_type', 'zid')
-      .eq('entity_type', 'products')
-      .maybeSingle()
-    if (stdRow?.settings) stdProductSettings = stdRow.settings as Record<string, any>
+    // Per-store row first, platform default ('') as fallback — this was a bare
+    // `.maybeSingle()` with no `store_id` filter, so it returned PGRST116
+    // ("contains 2 rows") the moment a store row existed alongside the default.
+    // The error was discarded (only `data` was destructured), so the configured
+    // match field was silently dropped and ERP→Zid fell back to
+    // `mapping.odoo_match_field`. Scoped to the merchant this mapping pushes to.
+    try {
+      stdProductSettings = (await getEffectiveStandardMappingSettings(
+        supabaseAdmin,
+        mapping.workspace_id,
+        'zid',
+        'products',
+        String(mapping.merchant_id || '')
+      )) as Record<string, any> | null
+    } catch (stdErr) {
+      console.warn('[Odoo Webhook Bg] Failed to read product standard mapping settings:', stdErr)
+    }
     if (stdProductSettings?.match_odoo_field) matchField = stdProductSettings.match_odoo_field
+  }
+
+  // بناء سجل الحذف المصغّر بعد استقرار حقل المطابقة النهائي (قد يكون
+  // standard_mapping_settings قد غيّره أعلاه). قيمة المطابقة تأتي من جسم
+  // الحدث لأن هذا الفرع لا بديل عنها — السجل غير موجود في أودو أصلاً —
+  // لكن هذا كل ما يُؤخذ من الجسم.
+  if (removalOnly) {
+    const removalMatchValue = String(payloadData?.[matchField] ?? '').trim()
+    if (!removalMatchValue) {
+      console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found and body carries no ${matchField} — cannot resolve deletion target`)
+      return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
+    }
+    odooRecord = { [matchField]: removalMatchValue }
   }
 
   // Match reference value

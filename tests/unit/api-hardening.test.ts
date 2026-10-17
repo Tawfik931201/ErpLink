@@ -1,10 +1,10 @@
-import { checkRateLimit, resetRateLimits } from '../../src/lib/rate-limit'
 import {
   validateOrderLines,
   validatePrice,
   validateQuantity,
   validateStatus,
 } from '../../src/lib/platform-validation'
+import { checkRateLimit, resetRateLimits } from '../../src/lib/rate-limit'
 import { isStrictWebhookAuth, isWebhookBodyTooLarge } from '../../src/lib/webhook-strict'
 
 describe('api hardening (OWASP review 2026-10-08)', () => {

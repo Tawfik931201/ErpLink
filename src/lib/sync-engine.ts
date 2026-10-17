@@ -20,6 +20,7 @@ import {
 } from '@/lib/erpnext-engine'
 import { resolveOperationForEvent } from '@/lib/event-operation'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
+import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import {
   allPlatformIdFieldNames,
@@ -454,6 +455,7 @@ export async function resolveSingleRelationId(
   _operation?: any,
   _item?: any,
   workspaceId?: any,
+  storeId = '',
   _payload?: any,
   _extra?: Record<string, unknown>,
   _dryRun?: boolean
@@ -549,15 +551,17 @@ export async function resolveSingleRelationId(
             : platform === 'salla' ? 'salla'
             : 'zid'
           try {
-            const { data: stdRow } = await supabaseAdmin
-              .from('standard_mapping_settings')
-              .select('settings')
-              .eq('workspace_id', workspaceId)
-              .eq('store_type', storeType)
-              .eq('entity_type', entityType)
-              .maybeSingle()
-            if (stdRow?.settings) {
-              const stdSettings = stdRow.settings as Record<string, any>
+            // Must be store-scoped: an unscoped/`maybeSingle()` read returns the
+            // platform default (or throws PGRST116) once a per-store row exists,
+            // so this store's configured match field was silently ignored.
+            const stdSettings = await getEffectiveStandardMappingSettings(
+              supabaseAdmin,
+              workspaceId,
+              storeType,
+              entityType,
+              storeId
+            )
+            if (stdSettings) {
               const odooMatchField = stdSettings.match_odoo_field
               if (odooMatchField && (odooMatchField === 'id' || relationFields.has(odooMatchField))) {
                 const mfIds = await client.search(relation, [[odooMatchField, '=', platformId]])
@@ -723,16 +727,19 @@ export async function resolveSingleRelationId(
 
         if (workspaceId) {
           try {
-            const { data: stdRow } = await supabaseAdmin
-              .from('standard_mapping_settings')
-              .select('settings')
-              .eq('workspace_id', workspaceId)
-              .eq('store_type', platform)
-              .eq('entity_type', 'customers')
-              .maybeSingle()
+            // Store-scoped: the receivable/payable accounts are per-store page
+            // settings. Unscoped, this read the platform default (or threw
+            // PGRST116 with a per-store row present) and applied store #1's
+            // accounts to every store's new partners.
+            const stdSettings = await getEffectiveStandardMappingSettings(
+              supabaseAdmin,
+              workspaceId,
+              platform,
+              'customers',
+              storeId
+            )
 
-            if (stdRow?.settings) {
-              const stdSettings = stdRow.settings as Record<string, any>
+            if (stdSettings) {
               if (stdSettings.receivable_account_id && Number(stdSettings.receivable_account_id) > 0) {
                 createData.property_account_receivable_id = Number(stdSettings.receivable_account_id)
               }
@@ -1097,6 +1104,7 @@ async function buildOrderLineItems(
   parentOdooValues: Record<string, unknown>,
   platform?: 'zid' | 'salla' | 'shopify',
   orderStdSettings?: Record<string, any> | null,
+  storeId = '',
 ): Promise<Record<string, unknown>[]> {
   const lines: Record<string, unknown>[] = []
 
@@ -1461,7 +1469,7 @@ async function buildOrderLineItems(
           let prodStd: Record<string, any> | null = null
           if (mapping.workspace_id && platform) {
             try {
-              prodStd = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'products', mapping.merchant_id || '')
+              prodStd = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'products', storeId || mapping.merchant_id || '')
             } catch (stdErr) {
               console.warn('[SyncEngine] Failed to load product standard mapping:', stdErr)
             }
@@ -2986,7 +2994,8 @@ export async function buildOdooValues(
   zidData: Record<string, unknown>,
   fieldMeta: Map<string, OdooFieldMeta>,
   platform: 'zid' | 'salla' | 'shopify' = 'zid',
-  workspaceId?: string
+  workspaceId?: string,
+  storeId = ''
 ): Promise<Record<string, unknown>> {
   const values: Record<string, unknown> = {}
 
@@ -3054,7 +3063,7 @@ export async function buildOdooValues(
         continue
       }
 
-      const resolvedId = await resolveSingleRelationId(client, relation, singleValue, platform, undefined, undefined, workspaceId)
+      const resolvedId = await resolveSingleRelationId(client, relation, singleValue, platform, undefined, undefined, workspaceId, storeId)
       if (resolvedId !== null) {
         values[item.erpField] = resolvedId
       } else {
@@ -3077,7 +3086,7 @@ export async function buildOdooValues(
           }
         }
 
-        const resolvedId = await resolveSingleRelationId(client, relation, v, platform, undefined, undefined, workspaceId)
+        const resolvedId = await resolveSingleRelationId(client, relation, v, platform, undefined, undefined, workspaceId, storeId)
         if (resolvedId !== null) ids.push(resolvedId)
       }
       if (ids.length > 0) {
@@ -3294,22 +3303,22 @@ async function getCachedStandardMappingSettings(
   entityType: string,
   storeId = ''
 ): Promise<Record<string, any> | null> {
+  const key = String(storeId ?? '').trim()
   return ttlCache.get(
-    `eng:stdsets:${workspaceId}:${storeType}:${storeId}:${entityType}`,
+    `eng:stdsets:${workspaceId}:${storeType}:${key}:${entityType}`,
     30_000,
-    async () => {
-      // Per-store row first, platform default ('') as fallback.
-      const { data } = await supabaseAdmin
-        .from('standard_mapping_settings')
-        .select('store_id, settings')
-        .eq('workspace_id', workspaceId)
-        .eq('store_type', storeType)
-        .eq('entity_type', entityType)
-        .in('store_id', storeId ? [storeId, ''] : [''])
-      const rows = (data ?? []) as Array<{ store_id: string; settings: unknown }>
-      const hit = rows.find(r => r.store_id === storeId) ?? rows.find(r => r.store_id === '')
-      return (hit?.settings || null) as Record<string, any> | null
-    }
+    // Delegated to the shared reader: per-store row first, platform default
+    // ('') as fallback, with store_id compared as TEXT on both sides. The
+    // previous inline copy did `r.store_id === storeId`, which never matched a
+    // numeric caller and quietly fell back to store #1's row.
+    () =>
+      getEffectiveStandardMappingSettings(
+        supabaseAdmin,
+        workspaceId,
+        storeType,
+        entityType,
+        key
+      )
   )
 }
 
@@ -3362,6 +3371,15 @@ export async function processWebhookEvent(
   const storeIdNum = Number(storeId)
   const storeIdStr = Number.isNaN(storeIdNum) ? String(storeId) : String(storeIdNum)
   const normalizedEvent = normalizeEvent(event)
+  // ختم تصنيف المصادقة الذي يرفقه مسار الدخول (zid_auth / salla_auth) على
+  // التسليمات غير المصادقة فقط. يُقرأ هنا ثم يُحذف فوراً حتى لا يدخل في أي
+  // تحويل أو كتابة لاحقة. للتسليمات غير المصادقة تُعاد القراءة القيمية من
+  // API المنصة (API يفوز في الدمج) — المتصل غير المصادق يبقى محفزاً فقط،
+  // لا مصدراً للقيم. التسليمات المصادقة: سلوك الدمج كما هو تماماً.
+  const deliveryAuth = String((data as any)?.zid_auth ?? (data as any)?.salla_auth ?? '').toLowerCase()
+  if ((data as any)?.zid_auth !== undefined) delete (data as any).zid_auth
+  if ((data as any)?.salla_auth !== undefined) delete (data as any).salla_auth
+  const isLegacyDelivery = deliveryAuth === 'legacy' || deliveryAuth === 'unconfigured'
   const result: SyncEngineResult = {
     processed: 0,
     success: 0,
@@ -3438,10 +3456,13 @@ export async function processWebhookEvent(
           const response = await ZidAPI.customers.get(creds, String(customerId))
           if (response.data?.customer) {
             console.info(`[SyncEngine] Full Zid customer data fetched. Type: ${response.data.customer.type}`)
-            data = {
-              ...response.data.customer,
-              ...data,
-            }
+            //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
+            data = isLegacyDelivery
+              ? { ...data, ...response.data.customer }
+              : {
+                  ...response.data.customer,
+                  ...data,
+                }
           }
         }
       } catch (err: any) {
@@ -3482,10 +3503,13 @@ export async function processWebhookEvent(
           const productData = response.data?.product || response.data
           if (productData && (productData.id || productData.name)) {
             console.info(`[SyncEngine] Full Zid product data fetched for ID ${productId}. Class: ${productData.product_class}`)
-            data = {
-              ...productData,
-              ...data,
-            }
+            //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
+            data = isLegacyDelivery
+              ? { ...data, ...productData }
+              : {
+                  ...productData,
+                  ...data,
+                }
           }
         }
       } catch (err: any) {
@@ -3528,10 +3552,13 @@ export async function processWebhookEvent(
           const orderData = response.data?.order || response.data?.data || response.data
           if (orderData && (orderData.id || orderData.order_number || orderData.code)) {
             console.info(`[SyncEngine] Full Zid order data fetched for ID ${orderId}. Status: ${orderData.order_status || orderData.status || 'n/a'}`)
-            data = {
-              ...orderData,
-              ...data,
-            }
+            //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
+            data = isLegacyDelivery
+              ? { ...data, ...orderData }
+              : {
+                  ...orderData,
+                  ...data,
+                }
           }
         }
       } catch (err: any) {
@@ -3585,23 +3612,33 @@ export async function processWebhookEvent(
     const missingParentId =
       hasEntity && normalizedEvent.startsWith('category.') && (data as any)?.parent_id === undefined
     const isThin = hasEntity && keys.length <= 4
-    if (missingOrderItems || missingParentId || isThin) {
+    // legacy delivery: تُعاد القراءة من API سالا **دائماً** حتى لو كان payload
+    // كثيفاً — للمتصل غير المصادق صحة الحدث ليست مضمونة، فالجسم محفز فقط
+    // و API هي مصدر القيم (نفس قاعدة ثقة مسار أودو → المتجر).
+    const legacyNeedsFetch = isLegacyDelivery && hasEntity
+    if (legacyNeedsFetch || missingOrderItems || missingParentId || isThin) {
       try {
-        const { getSallaOrder, getSallaCustomer, getSallaCategory } = await import('./salla-client')
+        const { getSallaOrder, getSallaCustomer, getSallaCategory, getSallaProduct } = await import('./salla-client')
         if (normalizedEvent.startsWith('order.')) {
           const full = await getSallaOrder(storeIdStr, String(entityId))
           // `full` first, then the event's own order object: when both describe
           // the same order the event wins (it is fresher than our GET), and the
           // thin envelope can no longer overwrite the correct id with a wrong one.
-          if (full) data = { ...full, ...orderSource }
+          // legacy delivery: يُعكس الاتجاه — API يفوز وتُتجاهل قيم الجسم المتعارضة.
+          if (full) data = isLegacyDelivery ? { ...orderSource, ...full } : { ...full, ...orderSource }
         } else if (normalizedEvent.startsWith('customer.')) {
           const full = await getSallaCustomer(storeIdStr, String(entityId))
-          if (full) data = { ...full, ...data }
+          if (full) data = isLegacyDelivery ? { ...data, ...full } : { ...full, ...data }
         } else if (normalizedEvent.startsWith('category.')) {
           const full = await getSallaCategory(storeIdStr, String(entityId))
-          if (full) data = { ...full, ...data }
+          if (full) data = isLegacyDelivery ? { ...data, ...full } : { ...full, ...data }
+        } else if (normalizedEvent.startsWith('product.') && legacyNeedsFetch) {
+          // For authenticated deliveries product.* payloads are already full —
+          // no fetch needed. Legacy ones are re-read from Salla before anything
+          // reaches Odoo.
+          const full = await getSallaProduct(storeIdStr, String(entityId))
+          if (full) data = { ...data, ...full }
         }
-        // product.* payloads are already full — no fetch needed.
       } catch {
         // Enrichment is best-effort — fall back to the raw payload.
       }
@@ -4128,7 +4165,7 @@ async function processFixedMappingFallback(
   // Build Odoo values
   // Preserve Shopify as 'shopify' so relation lookups search x_shopify_id correctly.
   const syncPlatform: 'zid' | 'salla' | 'shopify' = platform
-  const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, syncPlatform, workspaceId)
+  const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, syncPlatform, workspaceId, storeIdStr)
 
   if (Object.keys(odooValues).length === 0 && odooOperation !== 'delete' && odooOperation !== 'cancel' && odooOperation !== 'deliver') {
     console.warn(`[FixedMapping] No values extracted for preset="${presetKey}"`)
@@ -4270,7 +4307,9 @@ export async function processSingleMapping(
       : ev.includes('salla') ? 'salla'
       : 'zid'
     )
-    const check = await isEntityOperationAllowed(mapping.workspace_id, storeType, odooOperation, entityType, mapping.merchant_id || '')
+    // Gate against the store this event is for, not the mapping's own merchant
+    // (which is empty for preset mappings and wrong across multi-store setups).
+    const check = await isEntityOperationAllowed(mapping.workspace_id, storeType, odooOperation, entityType, storeId || mapping.merchant_id || '')
     if (!check.allowed) {
       console.info(`[SyncEngine] Skipping mapping "${mapping.name}" — ${check.reason}`)
       return {
@@ -4494,7 +4533,7 @@ export async function processSingleMapping(
 
   // ——— 5. Build Odoo values (resolves Many2one/Many2many to IDs) ————————————
   platform = (platformHint || getPlatformFromEvent(event)) as 'zid' | 'salla' | 'shopify'
-  const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, platform, mapping.workspace_id)
+  const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, platform, mapping.workspace_id, storeId)
 
   // ——— 5a. If this is sale.order, build order_line items with discount/shipping —
   if (odooModel === 'sale.order') {
@@ -4502,7 +4541,7 @@ export async function processSingleMapping(
     let orderStdSettings: Record<string, any> | null = null
     if (mapping.workspace_id && platform) {
       try {
-        orderStdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'orders', mapping.merchant_id || '')
+        orderStdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'orders', storeId || mapping.merchant_id || '')
       } catch (err) {
         console.warn('[SyncEngine] Failed to load standard mapping settings for order line fallbacks:', err)
       }
@@ -4515,7 +4554,8 @@ export async function processSingleMapping(
         fieldMeta,
         odooValues,
         platform,
-        orderStdSettings
+        orderStdSettings,
+        storeId
       )
       if (orderLines.length > 0) {
         odooValues['order_line'] = orderLines.map(item => [0, 0, item])
@@ -5638,7 +5678,10 @@ async function executeOdooOperation(params: {
       : odooModel === 'sale.order' ? 'orders'
       : null
     if (entityType) {
-      const stdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, storeType, entityType, mapping.merchant_id || '')
+      // Prefer the store this operation was dispatched for over the mapping's
+      // own merchant: a preset mapping built without merchant_id (or a
+      // multi-store workspace) must not fall back to store #1's settings.
+      const stdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, storeType, entityType, storeId || mapping.merchant_id || '')
       if (stdSettings) {
         const override: Record<string, any> = { ...stdSettings }
         if (stdSettings.costing_method !== undefined || stdSettings.inventory_valuation !== undefined) {
@@ -5769,7 +5812,7 @@ async function executeOdooOperation(params: {
               }
             } else {
               // 'auto' — resolve and create in Odoo if not found
-              const _resolved = await resolveSingleRelationId(client, 'product.category', _catSingle, platform, undefined, undefined, mapping.workspace_id)
+              const _resolved = await resolveSingleRelationId(client, 'product.category', _catSingle, platform, undefined, undefined, mapping.workspace_id, storeId)
               if (_resolved) {
                 effectiveOdooValues.categ_id = _resolved
               }
@@ -6043,7 +6086,7 @@ async function executeOdooOperation(params: {
           let custStd: Record<string, any> | null = null
           if (mapping.workspace_id && platform) {
             try {
-              custStd = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'customers', mapping.merchant_id || '')
+              custStd = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'customers', storeId || mapping.merchant_id || '')
             } catch (custStdErr) {
               console.warn('[SyncEngine] Failed to load customer standard mapping:', custStdErr)
             }
@@ -6543,7 +6586,7 @@ async function executeOdooOperation(params: {
       let orderStdSettings: Record<string, any> | null = null
       if (mapping.workspace_id && platform) {
         try {
-          orderStdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'orders', mapping.merchant_id || '')
+          orderStdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, platform, 'orders', storeId || mapping.merchant_id || '')
         } catch (err) {
           console.warn('[SyncEngine] Failed to load standard mapping settings for order lines:', err)
         }
@@ -6556,7 +6599,8 @@ async function executeOdooOperation(params: {
           new Map<string, OdooFieldMeta>(),
           effectiveOdooValues,
           platform,
-          orderStdSettings
+          orderStdSettings,
+          storeId
         )
         if (orderLines.length > 0) {
           effectiveOdooValues.order_line = orderLines.map(item => [0, 0, item])

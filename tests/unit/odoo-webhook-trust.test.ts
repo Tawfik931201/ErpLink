@@ -46,8 +46,28 @@ describe('the Odoo webhook body is a trigger, never a source of values', () => {
     expect(source).toMatch(/odooRecord = odooRecords\[0\]\s*\n\s*recordFromOdoo = true/)
   })
 
-  it('uses the body only on the "record is gone" branch', () => {
-    expect(source).toMatch(/else if \(hasActualFields\) \{\s*\n(?:[^\n]*\n)*?\s*odooRecord = payloadData as Record<string, any>/)
+  it('the record-gone branch is deletion-only and needs an authenticated delivery', () => {
+    // The body no longer becomes the record at all. It contributes exactly one
+    // thing on this branch — the match-field value — and only when the delivery
+    // carried the per-scope secret (auth_status = 'ok' stamped at enqueue).
+    // A legacy/unclassified delivery claiming a deletion is refused outright.
+    // Anchored to line start so the explanatory comment that names the old
+    // phrasing does not satisfy the assertion — the assignment itself must go.
+    expect(source).not.toMatch(/^\s*odooRecord = payloadData/m)
+    expect(source).toMatch(/removalOnly = true/)
+    expect(source).toMatch(/deliveryAuth !== 'ok'/)
+    expect(source).toMatch(
+      /refusing to act on the body/)
+    // The minimal record is built only AFTER the match field is settled
+    // (standard_mapping_settings may have changed it).
+    expect(source).toMatch(/odooRecord = \{ \[matchField\]: removalMatchValue \}/)
+  })
+
+  it('the deletion target value comes from the body via the settled match field', () => {
+    expect(source).toMatch(/const removalMatchValue = String\(payloadData\?\.\[matchField\] \?\? ''\)\.trim\(\)/)
+    // No match value in the body → nothing to delete → SKIP, never guess.
+    expect(source).toMatch(/cannot resolve deletion target/)
+    expect(source).toMatch(/return SKIP\(`Odoo record \$\{model\}#\$\{odooRecordId\} no longer exists`\)/)
   })
 })
 
@@ -70,6 +90,28 @@ describe('the removal signal cannot be forged by the body', () => {
     expect(source).toMatch(
       /hasRemovalSignal\(payloadData, odooRecord, model, recordFromOdoo\)/
     )
+  })
+})
+
+describe('the delivery classification travels with the queued row', () => {
+  const route = fs.readFileSync(ROUTE_PATH, 'utf8')
+  const queue = fs.readFileSync(
+    path.join(process.cwd(), 'src/lib/sync-queue.ts'),
+    'utf8'
+  )
+
+  it('stamps auth_status on the queued payload at ingress', () => {
+    // Without the stamp the background job cannot distinguish an
+    // authenticated deletion from a legacy one; the stamp must exist.
+    expect(route).toMatch(/enqueuePayload\.auth_status = auth\.status/)
+  })
+
+  it('passes the stamp through to runBackgroundSync', () => {
+    expect(queue).toMatch(/typeof p\.auth_status === 'string' \? p\.auth_status : undefined/)
+  })
+
+  it('runBackgroundSync accepts the classification parameter', () => {
+    expect(route).toMatch(/authStatus\?: string/)
   })
 })
 

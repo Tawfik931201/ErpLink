@@ -106,10 +106,16 @@ export type OdooWebhookAuthResult =
   /** No secret derivable (no `ENCRYPTION_KEY`) — development only. */
   | { status: 'unconfigured' }
 
-/** Total deliveries accepted without a secret, per process. */
+/** Total deliveries accepted without a secret, per process (log-throttle only). */
 const legacyCounts = new Map<string, number>()
 
-/** Logs the first three unauthenticated deliveries per scope, then every 50th. */
+/**
+ * Logs the first three unauthenticated deliveries per scope, then every 50th.
+ * Also bumps the durable DB counter — the in-process copy resets on every
+ * restart, so the "counter reached zero" signal that decides when the legacy
+ * window closes must come from `webhook_legacy_counters`, never from here.
+ * Fire-and-forget: a counter failure never affects the delivery.
+ */
 export function noteLegacyOdooDelivery(scope: string): number {
   const next = (legacyCounts.get(scope) ?? 0) + 1
   legacyCounts.set(scope, next)
@@ -117,9 +123,12 @@ export function noteLegacyOdooDelivery(scope: string): number {
     console.warn(
       `[Odoo Webhook] Unauthenticated delivery #${next} for scope ${scope}. ` +
         'Its Automated Action was registered without a secret — re-register it ' +
-        '(POST /api/admin/odoo-webhooks/refresh) and this counter should reach zero.'
+        '(POST /api/admin/odoo-webhooks/refresh) and the durable counter should reach zero.'
     )
   }
+  void import('@/lib/legacy-delivery-counter')
+    .then(({ incrementLegacyDelivery }) => incrementLegacyDelivery('odoo', scope))
+    .catch(() => {})
   return next
 }
 
@@ -171,7 +180,7 @@ export function extractOdooProvidedSecret(input: {
 }
 
 export type OdooWebhookAuthDecision =
-  | { action: 'allow' }
+  | { action: 'allow'; status: OdooWebhookAuthResult['status'] }
   | { action: 'reject'; status: 401 | 500; error: string }
 
 /**
@@ -214,7 +223,7 @@ export function decideOdooWebhookAuth(
   }
 
   if (result.status === 'unconfigured') {
-    if (process.env.NODE_ENV !== 'production') return { action: 'allow' }
+    if (process.env.NODE_ENV !== 'production') return { action: 'allow', status: result.status }
     console.error(
       '[Odoo Webhook] Security Alert: no ingress secret is derivable because ENCRYPTION_KEY is unset.'
     )
@@ -222,7 +231,9 @@ export function decideOdooWebhookAuth(
   }
 
   if (result.status === 'legacy') noteLegacyOdooDelivery(scope)
-  return { action: 'allow' }
+  // التصنيف يصعد مع القرار: فرع "السجل غير موجود" في مسار الاستقبال يمنع
+  // الحذف المبني على قيمة من جسم غير مصادق (انظر route.ts runBackgroundSync).
+  return { action: 'allow', status: result.status }
 }
 
 /** Convenience: pull the caller's secret and apply the policy in one call. */

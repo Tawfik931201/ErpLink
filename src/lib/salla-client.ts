@@ -432,6 +432,21 @@ export async function getSallaCategory(merchantId: string, categoryId: string | 
 }
 
 /**
+ * Fetch a single product with full details. Used by the sync engine for
+ * unauthenticated (legacy) deliveries: an unauthenticated `product.*` payload
+ * is a trigger only — values are re-read from Salla's own API before anything
+ * is written to Odoo (same trust rule as the Odoo → store direction).
+ */
+export async function getSallaProduct(merchantId: string, productId: string | number): Promise<any | null> {
+  try {
+    const res = await callSallaApi(merchantId, 'GET', `/products/${productId}`)
+    return res.data ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Extract the Salla merchant id from the `oauth2/user/info` response.
  * Salla sends `merchant` as an object `{ id }` in most cases, but the shape
  * has varied (number/string/object) — accept all three, never invent one.

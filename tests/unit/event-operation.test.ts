@@ -273,10 +273,19 @@ describe('source pins', () => {
     // The order branch merges the nested order LAST so the event's fresher
     // values win over our GET — and the thin envelope can no longer overwrite
     // the correct id with the status-record id.
-    expect(engine).toContain('data = { ...full, ...orderSource }')
+    expect(engine).toContain('{ ...full, ...orderSource }')
     // Customer and category have no nested form, so they keep `...data` — which
     // is exactly why a third `...data` merge (the old order branch) must not be
     // there. Counted rather than matched on formatting.
-    expect(engine.match(/data = \{ \.\.\.full, \.\.\.data \}/g) ?? []).toHaveLength(2)
+    // Both directions exist now: the legacy delivery inverts the merge
+    // (API wins over the untrusted body), the authenticated one keeps the
+    // event-wins order. Each entity must keep both forms.
+    expect(engine.match(/\{ \.\.\.full, \.\.\.orderSource \}/g) ?? []).toHaveLength(1)
+    expect(engine.match(/\{ \.\.\.orderSource, \.\.\.full \}/g) ?? []).toHaveLength(1)
+    expect(engine.match(/\{ \.\.\.full, \.\.\.data \}/g) ?? []).toHaveLength(2)
+    // Three legacy-inverted merges: customer, category — and the legacy-only
+    // product re-fetch branch (`product.*` payloads are otherwise full, no
+    // fetch, no merge for authenticated deliveries).
+    expect(engine.match(/\{ \.\.\.data, \.\.\.full \}/g) ?? []).toHaveLength(3)
   })
 })

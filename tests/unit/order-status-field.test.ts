@@ -53,7 +53,6 @@ describe('status catalogues stay platform-true', () => {
 })
 
 describe('status field UI follows the store tab', () => {
-  const ROOT = process.cwd()
   const client = readStripped(
     'src/app/(app)/app/mapping-center/standard-mapping-client.tsx'
   )

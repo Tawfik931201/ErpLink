@@ -504,7 +504,7 @@ async function runTransferInBackground(
 
         try {
           // Build Odoo values using mapping rules
-          const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, data.platform)
+          const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, data.platform, workspaceId, data.storeIdentifier)
 
           if (Object.keys(odooValues).length === 0) {
             logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)

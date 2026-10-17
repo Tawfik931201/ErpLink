@@ -1160,7 +1160,8 @@ export async function dryRunMatch(args: {
       const itemCopy = { ...args.item } // shallow clone is fine
       const matchedId = await resolveSingleRelationId(
         client, args.relation, args.sampleData, platform as any,
-        'create' as any, itemCopy, user.active_workspace_id, args.sampleData, {},
+        'create' as any, itemCopy, user.active_workspace_id, '',
+        args.sampleData, {},
         true // dryRun = true
       )
       if (matchedId && matchedId > 0) {

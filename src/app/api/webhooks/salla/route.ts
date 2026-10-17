@@ -64,6 +64,11 @@ function reportLegacyDelivery(storeIdHint: string | null) {
       { storeIdHint }
     )
   }
+  // العدّاد الدائم: نسخة الذاكرة تُصفَّر عند إعادة التشغيل، فإشارة "صفر ⇒ أغلق
+  // النافذة" يجب أن تأتي من webhook_legacy_counters لا من هنا.
+  void import('@/lib/legacy-delivery-counter')
+    .then(({ incrementLegacyDelivery }) => incrementLegacyDelivery('salla', storeIdHint ?? undefined))
+    .catch(() => {})
 }
 
 /**
@@ -216,6 +221,25 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(rawBody)
   } catch {
+    // جسم غير قابل للتحليل: لا merchant ولا event لاستنتاجهما، لكن التسليم
+    // يُحفظ كيتيم (workspace_id = null) بدل أن يضيع بصمت. الرد يبقى 400، فلا
+    // تعيد سالا الإرسال — الصناديق اليتيمة للقراءة اليدوية/الإعادة الإدارية.
+    console.error('[Salla Webhook] Invalid JSON body — saved as orphan receipt')
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'salla',
+      storeId: '',
+      event: 'invalid_json',
+      dedupKey: `salla:malformed:${fingerprintPayload({ raw: rawBody })}`,
+      payload: { raw: rawBody.slice(0, 8000) },
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: 'Invalid JSON', message_ar: 'بيانات الويب هوك غير صالحة.' },
       { status: 400 }
@@ -232,6 +256,26 @@ export async function POST(req: NextRequest) {
     const { validateOrderLines } = await import('@/lib/platform-validation')
     const check = validateOrderLines((data as Record<string, unknown>).items)
     if (!check.ok) {
+      // الحدث يُحفظ كيتيم (بلا workspace) بدل أن يضيع — استثناء صلاحية
+      // القائمة يعود للإدارة بطابعه، والرد يبقى 400 حتى لا تعيد سالا الإرسال.
+      console.error('[Salla Webhook] invalid order lines — saved as orphan receipt', { event, merchantId, detail: check.error })
+      const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+      const { fingerprintPayload } = await import('@/lib/sync-queue')
+      const stored = await recordOrphanReceipt({
+        platform: 'salla',
+        storeId: merchantId,
+        event,
+        dedupKey: `salla:invalid-lines:${merchantId}:${event}:${
+          webhookId || fingerprintPayload(data as Record<string, unknown>)
+        }`,
+        payload: data as Record<string, unknown>,
+      })
+      if (!stored.ok) {
+        return NextResponse.json(
+          { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+          { status: 503 }
+        )
+      }
       return NextResponse.json(
         { received: true, processed: false, reason: 'invalid_payload', detail: check.error },
         { status: 400 }
@@ -241,6 +285,24 @@ export async function POST(req: NextRequest) {
 
   // ── 2. Missing merchant early-return ──────────────────────────────────────
   if (!merchantId) {
+    // بلا merchant لا يوجد مستأجر لحفظ يسند إليه، لكن التسليم يحفظ كيتيم
+    // (workspace_id = null) — لا 400 نهائي على حدث قد يكون حقيقياً.
+    console.error('[Salla Webhook] missing merchant id — saved as orphan receipt', { event })
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'salla',
+      storeId: '',
+      event: event || 'missing_event',
+      dedupKey: `salla:no-merchant:${event}:${webhookId || fingerprintPayload(data as Record<string, unknown>)}`,
+      payload: data as Record<string, unknown>,
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json(
       { error: 'Merchant ID not found in payload', message_ar: 'تعذر التعرف على المتجر في بيانات الويب هوك.' },
       { status: 400 }
@@ -292,7 +354,8 @@ export async function POST(req: NextRequest) {
   // durable and recoverable by hand, yet unable to regress the store on its own.
   const createdAtRaw = payload.created_at ?? payload.timestamp
   if (createdAtRaw) {
-    const createdMs = new Date(String(createdAtRaw)).getTime()
+    const { parseSallaTimestampMs } = await import('@/lib/salla/webhook-auth')
+    const createdMs = parseSallaTimestampMs(createdAtRaw)
     if (Number.isFinite(createdMs) && Date.now() - createdMs > STALE_EVENT_MAX_AGE_MS) {
       const ageMinutes = Math.round((Date.now() - createdMs) / 60000)
       staleSkippedDeliveries += 1
@@ -403,6 +466,17 @@ export async function POST(req: NextRequest) {
   // والتحديث الحقيقي يحمل `updated_at` مختلفاً ⇒ بصمة مختلفة ⇒ يُعالَج.
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
 
+  // ختم تصنيف المصادقة على payload للتسليمات غير المصادقة فقط (legacy).
+  // محرك المزامنة يقرأه ليُجبر إعادة القراءة من API سالا (API يفوز) لهذه
+  // التسليمات بدل الدمج الحالي التي يفوز فيه جسم الحدث — فيصبح المتصل غير
+  // المصادق محفزاً فقط، لا مصدراً للقيم. التسليمات المصادقة سلوكها كما هو.
+  // يُحذف الختم قبل وصول البيانات لمحرك الكتابة حتى لا يدخل في أي تحويل.
+  const sallaPayload: Record<string, unknown> = {
+    ...(data as Record<string, unknown>),
+    ...(webhookId ? { salla_webhook_id: webhookId } : {}),
+    ...(isUnauthenticated ? { salla_auth: authResult.status } : {}),
+  }
+
   const enqueued = await enqueueWebhookEvent({
     workspaceId: sallaToken.workspace_id,
     storeId: merchantId,
@@ -411,9 +485,7 @@ export async function POST(req: NextRequest) {
     // NO Salla API enrichment here — thin payloads are completed inside the
     // background worker (see processWebhookEvent in sync-engine.ts). Salla
     // retries on timeout, so any enrichment in this request duplicates work.
-    payload: (webhookId
-      ? { ...(data as Record<string, any>), salla_webhook_id: webhookId }
-      : data) as Record<string, unknown>,
+    payload: sallaPayload,
   })
 
   // تخزين دائم غير مكتمل ⇒ 503 لتعيد سالا الإرسال. الحدث محفوظ في

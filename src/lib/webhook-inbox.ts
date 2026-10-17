@@ -202,11 +202,28 @@ async function markInboxProcessed(id: string): Promise<void> {
     .eq('id', id)
 }
 
+/**
+ * سقف المحاولات: كان `markInboxFailed` يعيد الحالة `pending` للأبد — رسالة
+ * تفشل دائماً تُعاد في كل دورة drain وتُحرق الفهارس دون نتيجة. بعد
+ * INBOX_DRAIN_MAX_ATTEMPTS تُعلَّم `failed` فتخرج من دورة الصريف
+ * (الاستعلام يقرأ `pending` فقط)، وتبقى للمراجعة اليدوية.
+ */
+const INBOX_DRAIN_MAX_ATTEMPTS = 10
+
 async function markInboxFailed(id: string, message: string, attempts: number): Promise<void> {
+  const nextAttempts = (attempts ?? 0) + 1
+  const status = nextAttempts >= INBOX_DRAIN_MAX_ATTEMPTS ? 'failed' : 'pending'
   await supabase
     .from('webhook_inbox')
-    .update({ last_error: message?.slice(0, 300) ?? 'enqueue failed', attempts: (attempts ?? 0) + 1 })
+    .update({
+      last_error: message?.slice(0, 300) ?? 'enqueue failed',
+      attempts: nextAttempts,
+      ...(status === 'failed' ? { status: 'failed' as const } : {}),
+    })
     .eq('id', id)
+  if (status === 'failed') {
+    console.error(`[Webhook Inbox] receipt ${id} marked failed after ${nextAttempts} drain attempts: ${message}`)
+  }
 }
 
 /**

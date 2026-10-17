@@ -47,6 +47,11 @@ function reportLegacyDelivery(storeIdHint: string | null) {
       { storeIdHint }
     )
   }
+  // العدّاد الدائم: نسخة الذاكرة تُصفَّر عند إعادة التشغيل، فإشارة "صفر ⇒ أغلق
+  // النافذة" يجب أن تأتي من webhook_legacy_counters لا من هنا.
+  void import('@/lib/legacy-delivery-counter')
+    .then(({ incrementLegacyDelivery }) => incrementLegacyDelivery('zid', storeIdHint ?? undefined))
+    .catch(() => {})
 }
 
 function isUninstallEvent(event: string): boolean {
@@ -122,6 +127,25 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(rawBody)
   } catch {
+    // جسم غير قابل للتحليل: لا store_id ولا event لاستنتاجهما، لكن التسليم
+    // يُحفظ كيتيم (workspace_id = null) بدل أن يضيع بصمت. الرد يبقى 400، فلا
+    // تعيد زد الإرسال — الصناديق اليتيمة للقراءة اليدوية/الإعادة الإدارية.
+    console.error('[Zid Webhook] Invalid JSON body — saved as orphan receipt')
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'zid',
+      storeId: '',
+      event: 'invalid_json',
+      dedupKey: `zid:malformed:${fingerprintPayload({ raw: rawBody })}`,
+      payload: { raw: rawBody.slice(0, 8000) },
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
@@ -304,21 +328,29 @@ export async function POST(req: NextRequest) {
   let store_id = extractStoreId(payload)
 
   if (store_id === 0) {
-    try {
-      const { data: tokens } = await supabase
-        .from('merchant_tokens')
-        .select('store_id')
-      if (tokens && tokens.length === 1) {
-        store_id = Number((tokens[0] as { store_id: unknown }).store_id) || 0
-      } else if (tokens && tokens.length > 1) {
-        // SECURITY: never guess the store from the "latest" token when multiple
-        // stores exist — that could sync one tenant's data into another tenant's ERP.
-        console.warn(
-          `[Zid Webhook] store_id missing and ${tokens.length} merchant tokens exist — refusing to guess.`
-        )
+    // التخمين من الصف الوحيد في merchant_tokens يُقبل فقط للتسليمات **المصادقة**
+    // (Basic Auth). للمتصل غير المصادق، تحويل جسمه بلا store_id إلى مساحة عمل
+    // عبر صف الـtoken الوحيد يعزّز عملياً استغلالاً بلا مصادقة — بعد التسجيل
+    // الجديد يمرّ التخمين للتسليمات المصادقة كما كان.
+    if (!isUnauthenticated) {
+      try {
+        const { data: tokens } = await supabase
+          .from('merchant_tokens')
+          .select('store_id')
+        if (tokens && tokens.length === 1) {
+          store_id = Number((tokens[0] as { store_id: unknown }).store_id) || 0
+        } else if (tokens && tokens.length > 1) {
+          // SECURITY: never guess the store from the "latest" token when multiple
+          // stores exist — that could sync one tenant's data into another tenant's ERP.
+          console.warn(
+            `[Zid Webhook] store_id missing and ${tokens.length} merchant tokens exist — refusing to guess.`
+          )
+        }
+      } catch {
+        // غير قاتل — يُرد 400 أدناه عند غياب store_id (عدا uninstall).
       }
-    } catch {
-      // غير قاتل — يُرد 400 أدناه عند غياب store_id (عدا uninstall).
+    } else {
+      console.warn('[Zid Webhook] store_id missing on unauthenticated delivery — guess refused.')
     }
   }
 
@@ -339,17 +371,18 @@ export async function POST(req: NextRequest) {
     const storeStr = store_id ? String(store_id) : ''
     if (storeStr) {
       try {
-        const { data: tokenRow } = await supabase
-          .from('merchant_tokens')
-          .select('merchant_id')
-          .or(`store_id.eq.${storeStr},merchant_id.eq.${storeStr}`)
-          .maybeSingle()
+        // نفس قاعدة resolveZidTokenRow: store_id أولاً ثم merchant_id.
+        // الـOR الواحد قد يطابق صفين مختلفتين ويفشل `maybeSingle` — وفي
+        // الحذف هذه ليست مسألة أمان فقط بل صوابية (حذف المتجر الصحيح).
+        const tokenRow = await resolveZidTokenRow(storeStr, 'merchant_id,store_id')
         const merchantId = (tokenRow as { merchant_id?: string } | null)?.merchant_id
         if (merchantId) {
           const { unregisterAllZidWebhooks } = await import('@/lib/zid/webhooks')
           await unregisterAllZidWebhooks(merchantId).catch(() => {})
+          await supabase.from('merchant_tokens').delete().eq('merchant_id', merchantId)
+        } else {
+          await supabase.from('merchant_tokens').delete().eq('store_id', storeStr)
         }
-        await supabase.from('merchant_tokens').delete().or(`store_id.eq.${storeStr},merchant_id.eq.${storeStr}`)
         const { recordAudit } = await import('@/lib/audit-logs')
         await recordAudit({
           actorId: storeStr,
@@ -368,11 +401,38 @@ export async function POST(req: NextRequest) {
   // Zid sends event data nested inside a "data" field
   const data: Record<string, unknown> = (payload.data && typeof payload.data === 'object') ? payload.data : payload
 
+  // ختم تصنيف المصادقة على payload للتسليمات غير المصادقة فقط (legacy).
+  // محرك المزامنة يقرأه ويحذفه فيقلب اتجاه الدمج إلى "API يفوز" لهذه
+  // التسليمات — المتصل غير المصادق يبقى محفزاً فقط، لا مصدراً للقيم.
+  if (isUnauthenticated) {
+    Object.assign(data, { zid_auth: authResult.status })
+  }
+
   // Upstream guard: broken order lines never reach the queue.
   if (event.startsWith('order') && data && typeof data === 'object' && 'items' in data) {
     const { validateOrderLines } = await import('@/lib/platform-validation')
     const check = validateOrderLines((data as Record<string, unknown>).items)
     if (!check.ok) {
+      // الحدث يُحفظ كيتيم (بلا workspace) بدل أن يضيع — استثناء صلاحية
+      // القائمة يعود للإدارة بطابعه، والرد يبقى 400 حتى لا تعيد زد الإرسال.
+      console.error('[Zid Webhook] invalid order lines — saved as orphan receipt', { event, store_id, detail: check.error })
+      const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+      const { extractDeliveryId, fingerprintPayload } = await import('@/lib/sync-queue')
+      const stored = await recordOrphanReceipt({
+        platform: 'zid',
+        storeId: String(store_id),
+        event,
+        dedupKey: `zid:invalid-lines:${store_id}:${event}:${
+          extractDeliveryId(data) || fingerprintPayload(data as Record<string, unknown>)
+        }`,
+        payload: data as Record<string, unknown>,
+      })
+      if (!stored.ok) {
+        return NextResponse.json(
+          { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+          { status: 503 }
+        )
+      }
       return NextResponse.json(
         { received: true, processed: false, reason: 'invalid_payload', detail: check.error },
         { status: 400 }
@@ -381,11 +441,45 @@ export async function POST(req: NextRequest) {
   }
 
   if (!store_id) {
-    console.warn('[Zid Webhook] store_id missing — refusing to guess across tenants.')
+    // بلا store_id لا يوجد مستأجر لحفظ يسند إليه، لكن التسليم يحفظ كيتيم
+    // (workspace_id = null) — لا 400 نهائي على حدث قد يكون حقيقياً.
+    console.warn('[Zid Webhook] store_id missing — refusing to guess across tenants; saved as orphan receipt.')
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { extractDeliveryId, fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'zid',
+      storeId: '',
+      event: event || 'unknown_event',
+      dedupKey: `zid:no-store:${event}:${extractDeliveryId(data) || fingerprintPayload(data)}`,
+      payload: data,
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json({ error: 'Missing store_id' }, { status: 400 })
   }
   if (event === 'unknown') {
-    console.warn('[Zid Webhook] Could not determine event type — register webhook URL with ?event=<name>.')
+    // الرد 200 يبقى كما هو (زد لا تعيد بعد 2xx)، لكن الحدث لم يكن بلا أثر:
+    // يُحفظ كيتيم فضلاً عن توثيق القرار في sync_logs إن عرفنا مساحة العمل.
+    console.warn('[Zid Webhook] Could not determine event type — register webhook URL with ?event=<name>. Saved as orphan receipt.')
+    const { recordOrphanReceipt } = await import('@/lib/webhook-inbox')
+    const { extractDeliveryId, fingerprintPayload } = await import('@/lib/sync-queue')
+    const stored = await recordOrphanReceipt({
+      platform: 'zid',
+      storeId: String(store_id),
+      event: 'unknown_event',
+      dedupKey: `zid:unknown:${store_id}:${extractDeliveryId(data) || fingerprintPayload(data)}`,
+      payload: data,
+    })
+    if (!stored.ok) {
+      return NextResponse.json(
+        { received: false, processed: false, error: stored.error ?? 'orphan_store_failed' },
+        { status: 503 }
+      )
+    }
     return NextResponse.json({ received: true, processed: false, reason: 'unknown_event' })
   }
 
@@ -586,14 +680,38 @@ async function findMerchantWorkspaceId(storeId: number): Promise<string | null> 
     `zid:workspace:${storeStr}`,
     60_000,
     async () => {
-      const { data } = await supabase
-        .from('merchant_tokens')
-        .select('workspace_id')
-        .or(`store_id.eq.${storeStr},merchant_id.eq.${storeStr}`)
-        .maybeSingle()
-      return data?.workspace_id ?? null
+      const row = await resolveZidTokenRow(storeStr, 'workspace_id')
+      return (row as { workspace_id?: string } | null)?.workspace_id ?? null
     }
   )
+}
+
+/**
+ * مطابقة صف الربط في زد: store_id أولاً ثم merchant_id كخيار ثانٍ.
+ * كان يُستخدم `.or(store_id.eq.X,merchant_id.eq.X)` في شرط واحد: لو كان أحد
+ * المستاجرين يحمل رقماً يساوي store_id متاجر أخرى، تطابق الصفان في OR واحدة
+ * و `maybeSingle` يُرفض أو يعيّن الأول عشوائياً. التسلسل يلغي الغموض:
+ * هوية الكيان أولاً (store_id)، وهوية المالك (merchant_id) احتياط فقط
+ * للتسليمات القديمة التي تحمل المعرّف المالك. تُرمى أخطاء الاستعلام للمُنادي.
+ */
+async function resolveZidTokenRow(
+  storeStr: string,
+  columns: string
+): Promise<Record<string, unknown> | null> {
+  const byStore = await supabase
+    .from('merchant_tokens')
+    .select(columns)
+    .eq('store_id', storeStr)
+    .maybeSingle()
+  if (byStore.error) throw byStore.error
+  if (byStore.data) return byStore.data as unknown as Record<string, unknown>
+  const byMerchant = await supabase
+    .from('merchant_tokens')
+    .select(columns)
+    .eq('merchant_id', storeStr)
+    .maybeSingle()
+  if (byMerchant.error) throw byMerchant.error
+  return (byMerchant.data as unknown as Record<string, unknown>) ?? null
 }
 
 async function handleOrderEvent(
