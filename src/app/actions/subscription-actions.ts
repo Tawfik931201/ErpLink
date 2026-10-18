@@ -8,12 +8,18 @@ import { getActiveUserId, getActiveWorkspaceId, isAdmin } from '@/lib/auth'
 import { sendEmail } from '@/lib/email'
 import { subscriptionRegisteredEmail } from '@/lib/email-templates'
 import {
+  addDaysToDate,
   addMonthsToDate,
   computeSubscriptionEndDate,
   isValidIsoDate,
 } from '@/lib/subscription-dates'
 import { daysUntilExpiry, isSubscriptionExpired } from '@/lib/subscription-utils'
 import { supabase } from '@/lib/supabase'
+import {
+  archiveWorkspace,
+  isWorkspaceArchived,
+  unarchiveWorkspace,
+} from '@/lib/workspace-archive'
 
 /** Shape of a row fetched from the `subscriptions` table (via `select('*')`). */
 interface RawSubscription {
@@ -42,11 +48,6 @@ async function requireAdmin() {
     throw new Error('Unauthorized: admin only')
   }
   return adminId
-}
-
-/** Add `months` calendar months to a YYYY-MM-DD date, return YYYY-MM-DD. */
-function addMonths(dateStr: string, months: number): string {
-  return addMonthsToDate(dateStr, months)
 }
 
 /** end_date = start_date + months - 1 day (inclusive period). */
@@ -82,14 +83,19 @@ export interface MySubscription {
 /**
  * The active subscription of the current user's active workspace (if any).
  * Used by the client dashboard card and the expiry banner.
+ *
+ * Side effect: if the subscription is expired and the workspace is not yet
+ * archived, it is archived immediately (lazy trigger) so the UI reflects the
+ * correct state without waiting for the periodic `archiveExpiredWorkspaces`
+ * pass in the sync-queue runner.
  */
 export async function getMyActiveSubscription() {
   try {
     const userId = await getActiveUserId()
-    if (!userId) return { success: false as const, subscription: null }
+    if (!userId) return { success: false as const, subscription: null, workspaceArchived: false }
 
     const workspaceId = await getActiveWorkspaceId()
-    if (!workspaceId) return { success: true as const, subscription: null }
+    if (!workspaceId) return { success: true as const, subscription: null, workspaceArchived: false }
 
     const { data, error } = await supabase
       .from('subscriptions')
@@ -100,11 +106,21 @@ export async function getMyActiveSubscription() {
       .limit(1)
 
     if (error) {
-      return { success: false as const, error: error.message, subscription: null }
+      return { success: false as const, error: error.message, subscription: null, workspaceArchived: false }
     }
 
     const sub = data?.[0]
-    if (!sub) return { success: true as const, subscription: null }
+    if (!sub) return { success: true as const, subscription: null, workspaceArchived: false }
+
+    // Lazy archive: if the subscription is expired, archive the workspace now.
+    // Fire-and-forget — the banner should not wait for this write to complete.
+    if (isSubscriptionExpired(sub)) {
+      archiveWorkspace(workspaceId).catch(() => {
+        /* best-effort; the periodic pass will retry */
+      })
+    }
+
+    const archived = await isWorkspaceArchived(workspaceId)
 
     return {
       success: true as const,
@@ -113,9 +129,10 @@ export async function getMyActiveSubscription() {
         isExpired: isSubscriptionExpired(sub),
         daysRemaining: daysUntilExpiry(sub.end_date),
       } satisfies MySubscription,
+      workspaceArchived: archived,
     }
   } catch (err) {
-    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', subscription: null }
+    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', subscription: null, workspaceArchived: false }
   }
 }
 
@@ -277,6 +294,12 @@ export async function registerSubscription(input: {
 
     if (subErr) return { success: false, error: subErr.message }
 
+    // 5a. Unarchive the workspace — a valid subscription now exists on it.
+    // (Best-effort: failure here does not fail the registration; the periodic
+    // archive pass or the next extension will reconcile the state.)
+    // `workspaceId` is set by both branches above (existing lookup or insert).
+    await unarchiveWorkspace(workspaceId!)
+
     // 5b. Record the payment for this subscription
     if (parsed.amountPaid > 0) {
       const { error: payErr } = await supabase.from('subscription_payments').insert([
@@ -341,17 +364,36 @@ export async function registerSubscription(input: {
 
 // ──────────────────────── Admin: extend / cancel ────────────────────────
 
-const ExtendSchema = z.object({
-  subscriptionId: z.string().uuid(),
-  months: z.coerce.number().int().min(1).max(120),
-  amountPaid: z.coerce.number().min(0).max(99_999_999),
-  notes: z.string().trim().max(1000).optional().nullable(),
-})
+const ExtendSchema = z
+  .object({
+    subscriptionId: z.string().uuid(),
+    months: z.coerce.number().int().min(0).max(120).optional(),
+    days: z.coerce.number().int().min(0).max(3650).optional(),
+    amountPaid: z.coerce.number().min(0).max(99_999_999),
+    notes: z.string().trim().max(1000).optional().nullable(),
+  })
+  .refine((d) => (d.months ?? 0) > 0 || (d.days ?? 0) > 0, {
+    message: 'months_or_days_required',
+  })
 
-/** Extend an active subscription from its current end_date. */
+/**
+ * Extend an active subscription.
+ *
+ * Two modes (can be combined):
+ * - `months`: calendar months added to the current `end_date`. Only allowed on
+ *   a non-expired subscription — extending an expired one by months requires a
+ *   fresh registration instead (unchanged behaviour).
+ * - `days`: whole days added. Allowed on an expired subscription too, in which
+ *   case the new `end_date` is `today + days` (grace / manual-renewal flow).
+ *   Days do NOT change `months_paid` (it is the MRR divisor).
+ *
+ * When the new `end_date` is valid (>= today), the workspace is unarchived if
+ * it was archived due to expiry.
+ */
 export async function extendSubscription(input: {
   subscriptionId: string
-  months: number
+  months?: number
+  days?: number
   amountPaid: number
   notes?: string | null
 }) {
@@ -371,21 +413,32 @@ export async function extendSubscription(input: {
     if (existing.status !== 'active') {
       return { success: false, error: 'subscription_not_active' }
     }
-    if (isSubscriptionExpired(existing)) {
+
+    const months = parsed.months ?? 0
+    const days = parsed.days ?? 0
+    const expired = isSubscriptionExpired(existing)
+
+    if (expired && months > 0) {
+      // Unchanged behaviour for the months path — extending an expired
+      // subscription by months needs a fresh registration (billing decision).
+      // The days path below is the manual-renewal / grace-period flow.
       return {
         success: false,
         error: 'subscription_expired',
-        message: 'لا يمكن تمديد اشتراك منتهٍ. سجّل اشتراكاً جديداً للتجديد.',
+        message: 'لا يمكن تمديد اشتراك منتهٍ بالأشهر. سجّل اشتراكاً جديداً، أو استخدم تمديد بالأيام.',
       }
     }
 
-    const newEndDate = addMonths(existing.end_date, parsed.months)
+    // Base date: normal case = current end_date; expired + days = today
+    // (so the days actually extend from now, not from the past end_date).
+    const baseDate = expired ? new Date().toISOString().slice(0, 10) : existing.end_date
+    const newEndDate = addDaysToDate(addMonthsToDate(baseDate, months), days)
 
     const { data: updated, error: upErr } = await supabase
       .from('subscriptions')
       .update({
         end_date: newEndDate,
-        months_paid: Number(existing.months_paid) + parsed.months,
+        months_paid: Number(existing.months_paid) + months,
         amount_paid: Number(existing.amount_paid) + parsed.amountPaid,
         notes: parsed.notes ?? existing.notes,
         updated_at: new Date().toISOString(),
@@ -395,6 +448,11 @@ export async function extendSubscription(input: {
       .single()
 
     if (upErr) return { success: false, error: upErr.message }
+
+    // If the subscription is now valid again, unarchive the workspace.
+    if (!isSubscriptionExpired({ end_date: newEndDate })) {
+      await unarchiveWorkspace(existing.workspace_id)
+    }
 
     // Record the extension payment
     if (parsed.amountPaid > 0) {
@@ -420,7 +478,7 @@ export async function extendSubscription(input: {
       action: 'subscription.extend',
       entityType: 'Subscription',
       entityId: parsed.subscriptionId,
-      metadata: { months: parsed.months, new_end_date: newEndDate, amount: parsed.amountPaid },
+      metadata: { months, days, new_end_date: newEndDate, amount: parsed.amountPaid },
     })
 
     revalidatePath('/admin/subscriptions')

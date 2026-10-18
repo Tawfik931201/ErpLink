@@ -85,6 +85,7 @@ export default function ClientStatementClient({
 
   // Extend form
   const [extMonths, setExtMonths] = useState(1)
+  const [extDays, setExtDays] = useState(0)
   const [extAmount, setExtAmount] = useState('')
   const [extNotes, setExtNotes] = useState('')
 
@@ -139,11 +140,16 @@ export default function ClientStatementClient({
   async function handleExtend(e: React.FormEvent) {
     e.preventDefault()
     if (!modal || modal.type !== 'extend') return
+    if (extMonths <= 0 && extDays <= 0) {
+      setModalError(isAr ? 'أدخل عدد الشهور أو الأيام' : 'Enter months or days')
+      return
+    }
     setBusy(true)
     setModalError(null)
     const res = await extendSubscription({
       subscriptionId: modal.sub.id,
-      months: extMonths,
+      months: extMonths > 0 ? extMonths : undefined,
+      days: extDays > 0 ? extDays : undefined,
       amountPaid: Number(extAmount) || 0,
       notes: extNotes || null,
     })
@@ -434,11 +440,17 @@ export default function ClientStatementClient({
                                 {isAr ? 'استعادة' : 'Restore'}
                               </button>
                             )}
-                            {isActionable(sub) && (
+                            {/* Extend is available for any active subscription,
+                                including expired ones — the backend allows a
+                                days-only extension from today for those. */}
+                            {sub.status === 'active' && (
                               <>
                                 <button
                                   onClick={() => {
-                                    setExtMonths(1)
+                                    // Expired subscriptions can only be extended
+                                    // by days, so default months to 0 there.
+                                    setExtMonths(sub.isExpired ? 0 : 1)
+                                    setExtDays(0)
                                     setExtAmount('')
                                     setExtNotes('')
                                     setModalError(null)
@@ -449,16 +461,18 @@ export default function ClientStatementClient({
                                   <CalendarPlus className="h-3 w-3" />
                                   {isAr ? 'تمديد' : 'Extend'}
                                 </button>
-                                <button
-                                  onClick={() => {
-                                    setModalError(null)
-                                    setModal({ type: 'cancel', sub })
-                                  }}
-                                  className={actionBtn}
-                                >
-                                  <XCircle className="h-3 w-3" />
-                                  {isAr ? 'إلغاء' : 'Cancel'}
-                                </button>
+                                {isActionable(sub) && (
+                                  <button
+                                    onClick={() => {
+                                      setModalError(null)
+                                      setModal({ type: 'cancel', sub })
+                                    }}
+                                    className={actionBtn}
+                                  >
+                                    <XCircle className="h-3 w-3" />
+                                    {isAr ? 'إلغاء' : 'Cancel'}
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -693,11 +707,31 @@ export default function ClientStatementClient({
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'عدد الشهور' : 'Months'}</label>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   value={extMonths}
-                  onChange={(e) => setExtMonths(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => setExtMonths(Math.max(0, Number(e.target.value) || 0))}
                   className={inputCls}
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'أيام إضافية (اختياري)' : 'Extra days (optional)'}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  value={extDays}
+                  onChange={(e) => setExtDays(Math.max(0, Math.min(3650, Number(e.target.value) || 0)))}
+                  className={inputCls}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {modal.sub.isExpired
+                    ? isAr
+                      ? 'الاشتراك منتهٍ — التمديد بالأيام يبدأ من اليوم، والأيام فقط هنا (الأشهر تتطلب تسجيل اشتراك جديد).'
+                      : 'Subscription is expired — days extend from today; only days apply here (months require a new registration).'
+                    : isAr
+                      ? 'تُضاف الأيام على نهاية المدة الحالية.'
+                      : 'Days are added on top of the current end date.'}
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'المبلغ المدفوع (USD)' : 'Amount paid (USD)'}</label>
@@ -892,11 +926,13 @@ export default function ClientStatementClient({
                 <Printer className="h-3.5 w-3.5" />
                 {isAr ? 'الفاتورة' : 'Invoice'}
               </Link>
-              {isActionable(detailSub) && (
+              {detailSub.status === 'active' && (
                 <>
                   <button
                     onClick={() => {
-                      setExtMonths(1)
+                      // Expired subscriptions can only be extended by days.
+                      setExtMonths(detailSub.isExpired ? 0 : 1)
+                      setExtDays(0)
                       setExtAmount('')
                       setExtNotes('')
                       setModalError(null)
@@ -907,16 +943,18 @@ export default function ClientStatementClient({
                     <CalendarPlus className="h-3.5 w-3.5" />
                     {isAr ? 'تمديد' : 'Extend'}
                   </button>
-                  <button
-                    onClick={() => {
-                      setModalError(null)
-                      setModal({ type: 'cancel', sub: detailSub })
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded border border-foreground/20 bg-background px-3 h-7 text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
-                  >
-                    <XCircle className="h-3.5 w-3.5" />
-                    {isAr ? 'إلغاء' : 'Cancel'}
-                  </button>
+                  {isActionable(detailSub) && (
+                    <button
+                      onClick={() => {
+                        setModalError(null)
+                        setModal({ type: 'cancel', sub: detailSub })
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded border border-foreground/20 bg-background px-3 h-7 text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      {isAr ? 'إلغاء' : 'Cancel'}
+                    </button>
+                  )}
                 </>
               )}
               <button

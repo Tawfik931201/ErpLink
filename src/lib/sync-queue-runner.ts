@@ -28,6 +28,8 @@ const g = global as unknown as {
   __syncQueueReconcileInterval?: NodeJS.Timeout
   __syncQueueReconcileProcessing?: boolean
   __syncQueueCronWarned?: boolean
+  __workspaceArchiveInterval?: NodeJS.Timeout
+  __workspaceArchiveProcessing?: boolean
 }
 
 /**
@@ -44,6 +46,15 @@ const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 30_000, 5_00
 
 /** تسوية زد كل 10 دقائق افتراضياً (نفس-periodic كـ cron التسوية). */
 const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000, 60_000)
+
+/**
+ * أرشفة المساحات المنتهية كل 6 ساعات افتراضياً. هذه المهمة الخفيفة تضبط
+ * `workspaces.archived_at` لكل مساحة عمل كان آخر اشتراك نشط فيها منتهيًا
+ * ولم يعد هناك اشتراك سارٍ آخر — أي "أرشفة" المساحة غير المدفوعة.
+ * الاسترجاع يحدث تلقائياً عند تسجيل أو تمديد اشتراك جديد (انظر
+ * `src/lib/workspace-archive.ts`).
+ */
+const WORKSPACE_ARCHIVE_INTERVAL_MS = envInterval('WORKSPACE_ARCHIVE_INTERVAL_MS', 21_600_000, 300_000)
 
 /**
  * عدد سجلات صندوق الاستلام المُعاد دفعها في الدورة الواحدة. صغير عمداً:
@@ -115,6 +126,32 @@ async function runReconcileCycle(): Promise<void> {
 }
 
 /**
+ * دورة أرشفة واحدة: تحوّل المساحات التي انتهى اشتراكها إلى حالة "مؤرشفة".
+ * خفيفة جداً (3 استعلامات + 1 تحديث على الأكثر)، ومحسورة داخلياً بـ
+ * MAX 2000 صف في كل مرور. حارس التداخل يمنع تراكم الدورات.
+ */
+async function runWorkspaceArchiveCycle(): Promise<void> {
+  if (g.__workspaceArchiveProcessing) return
+  try {
+    g.__workspaceArchiveProcessing = true
+    const { archiveExpiredWorkspaces } = await import('./workspace-archive')
+    const result = await archiveExpiredWorkspaces()
+    if (result.error) {
+      console.error('[sync-queue] workspace archive cycle failed:', result.error)
+    } else if (result.archived > 0) {
+      console.warn(`[sync-queue] archived ${result.archived} expired workspace(s)`)
+    }
+  } catch (error: unknown) {
+    console.error(
+      '[sync-queue] workspace archive cycle threw:',
+      error instanceof Error ? error.message : String(error)
+    )
+  } finally {
+    g.__workspaceArchiveProcessing = false
+  }
+}
+
+/**
  * ابدأ الحلقة الخلفية — للسيرفر طويل العمر فقط. آمنة ضد التكرار والتداخل.
  * يتطلب متغير البيئة SYNC_QUEUE_SELF_RUNNER=true
  */
@@ -157,16 +194,28 @@ export function startSyncQueueRunner(): void {
   }, RECONCILE_INTERVAL_MS)
   unref(g.__syncQueueReconcileInterval)
 
+  g.__workspaceArchiveInterval = setInterval(() => {
+    void runWorkspaceArchiveCycle()
+  }, WORKSPACE_ARCHIVE_INTERVAL_MS)
+  unref(g.__workspaceArchiveInterval)
+
   // Fix-up drain shortly after boot: anything that arrived while the process
   // was down is picked up immediately instead of waiting for the first tick.
   setTimeout(() => {
     void runDrainCycle()
   }, 5_000).unref?.()
 
+  // First archive pass shortly after boot so workspaces that expired while
+  // the process was down are archived promptly instead of waiting a full
+  // WORKSPACE_ARCHIVE_INTERVAL_MS.
+  setTimeout(() => {
+    void runWorkspaceArchiveCycle()
+  }, 30_000).unref?.()
+
   console.warn(
     `[sync-queue] background runner started — drain every ${POLL_INTERVAL_MS / 1000}s, reconcile every ${
       RECONCILE_INTERVAL_MS / 60_000
-    }min`
+    }min, archive every ${WORKSPACE_ARCHIVE_INTERVAL_MS / 3_600_000}h`
   )
 }
 
@@ -187,7 +236,12 @@ export function stopSyncQueueRunner(): void {
     clearInterval(g.__syncQueueReconcileInterval)
     g.__syncQueueReconcileInterval = undefined
   }
+  if (g.__workspaceArchiveInterval) {
+    clearInterval(g.__workspaceArchiveInterval)
+    g.__workspaceArchiveInterval = undefined
+  }
   g.__syncQueueRunnerStarted = false
   g.__syncQueueRunnerProcessing = false
   g.__syncQueueReconcileProcessing = false
+  g.__workspaceArchiveProcessing = false
 }

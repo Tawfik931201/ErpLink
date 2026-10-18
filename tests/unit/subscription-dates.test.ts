@@ -1,4 +1,5 @@
 import {
+  addDaysToDate,
   addMonthsToDate,
   computeSubscriptionEndDate,
   isValidIsoDate,
@@ -72,6 +73,31 @@ describe('addMonthsToDate', () => {
     // 2028-02-29 + 12 months overflows into March instead of clamping to
     // 2029-02-28. Pinned for the same reason as computeSubscriptionEndDate above.
     expect(addMonthsToDate('2028-02-29', 12)).toBe('2029-03-01')
+  })
+})
+
+describe('addDaysToDate', () => {
+  it('adds whole days', () => {
+    expect(addDaysToDate('2026-01-15', 1)).toBe('2026-01-16')
+    expect(addDaysToDate('2026-01-15', 7)).toBe('2026-01-22')
+    expect(addDaysToDate('2026-01-15', 30)).toBe('2026-02-14')
+  })
+
+  it('is what the days-extension path chains on top of a date', () => {
+    // extendSubscription: base = today (expired) or current end_date, then
+    // addDaysToDate(addMonthsToDate(base, months), days).
+    const base = '2026-03-01'
+    expect(addDaysToDate(addMonthsToDate(base, 1), 15)).toBe('2026-04-16')
+  })
+
+  it('crosses month and year boundaries', () => {
+    expect(addDaysToDate('2026-01-31', 1)).toBe('2026-02-01')
+    expect(addDaysToDate('2026-12-31', 1)).toBe('2027-01-01')
+    expect(addDaysToDate('2024-02-28', 1)).toBe('2024-02-29') // leap year
+  })
+
+  it('is a no-op for zero days', () => {
+    expect(addDaysToDate('2026-05-10', 0)).toBe('2026-05-10')
   })
 })
 

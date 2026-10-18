@@ -31,6 +31,13 @@ export function computeSubscriptionEndDate(startDate: string, months: number): s
   return d.toISOString().slice(0, 10)
 }
 
+/** Add `days` whole days to a YYYY-MM-DD date, return YYYY-MM-DD. */
+export function addDaysToDate(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
 /** True only for a real, exactly-formatted YYYY-MM-DD calendar date. */
 export function isValidIsoDate(dateStr: string): boolean {
   const d = new Date(`${dateStr}T00:00:00Z`)

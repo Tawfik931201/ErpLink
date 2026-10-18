@@ -168,9 +168,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground font-sans" dir={dir}>
+    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground font-sans" dir={dir}>
+      {/* Fixed top alert strip — sits above the sidebar and the page content.
+          The page (main) scrolls underneath it. Hidden for admins: the strip
+          is a client-billing reminder, not an internal-tool warning. */}
+      {!layoutInfo.isAdmin && <SubscriptionBanner />}
       <div className="flex flex-1 min-h-0 relative">
-        <aside className={`w-[200px] shrink-0 ${dir === 'rtl' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none sticky top-0 h-screen overflow-visible z-40`}>
+        <aside className={`w-[200px] shrink-0 ${dir === 'rtl' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none h-full overflow-visible z-40`}>
           <div className="p-4 pb-2 pt-5 flex items-center">
             <Link href="/app/dashboard" className="flex items-center" aria-label="ErpLink Dashboard">
               <Logo variant="horizontal" size="md" priority />
@@ -186,7 +190,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <main className="flex-1 overflow-y-auto">
           <MobileNav sections={navSections} dir={dir} />
           <div className="p-6 md:p-8 max-w-7xl mx-auto">
-            <SubscriptionBanner />
             {isPageRestricted ? (
               <div className="flex items-center justify-center h-full min-h-[60vh]">
                 <div className="text-center max-w-md">

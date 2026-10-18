@@ -70,6 +70,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
 
   // Extend form state
   const [extMonths, setExtMonths] = useState(1)
+  const [extDays, setExtDays] = useState(0)
   const [extAmount, setExtAmount] = useState('')
   const [extNotes, setExtNotes] = useState('')
 
@@ -144,11 +145,16 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
   async function handleExtend(e: React.FormEvent) {
     e.preventDefault()
     if (!modal || modal.type !== 'extend') return
+    if (extMonths <= 0 && extDays <= 0) {
+      setModalError(isAr ? 'أدخل عدد الشهور أو الأيام' : 'Enter months or days')
+      return
+    }
     setBusy(true)
     setModalError(null)
     const res = await extendSubscription({
       subscriptionId: modal.row.id,
-      months: extMonths,
+      months: extMonths > 0 ? extMonths : undefined,
+      days: extDays > 0 ? extDays : undefined,
       amountPaid: Number(extAmount) || 0,
       notes: extNotes || null,
     })
@@ -382,13 +388,17 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
                             <>
                               <button
                                 onClick={() => {
-                                  setExtMonths(1)
+                                  // Expired subscriptions can only be extended by
+                                  // days (the backend refuses months on an expired
+                                  // sub), so default to 0 months in that case.
+                                  setExtMonths(row.isExpired ? 0 : 1)
+                                  setExtDays(0)
                                   setExtAmount('')
                                   setExtNotes('')
                                   setModalError(null)
                                   setModal({ type: 'extend', row })
                                 }}
-                                disabled={row.status !== 'active' || row.isExpired}
+                                disabled={row.status !== 'active'}
                                 title={isAr ? 'تمديد الاشتراك' : 'Extend'}
                                 className={actionBtn}
                               >
@@ -679,11 +689,31 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'عدد الشهور' : 'Months'}</label>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   value={extMonths}
-                  onChange={(e) => setExtMonths(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => setExtMonths(Math.max(0, Number(e.target.value) || 0))}
                   className={inputCls}
                 />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'أيام إضافية (اختياري)' : 'Extra days (optional)'}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={3650}
+                  value={extDays}
+                  onChange={(e) => setExtDays(Math.max(0, Math.min(3650, Number(e.target.value) || 0)))}
+                  className={inputCls}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {modal.row.isExpired
+                    ? isAr
+                      ? 'الاشتراك منتهٍ — التمديد بالأيام يبدأ من اليوم، والأيام فقط هنا (الأشهر تتطلب تسجيل اشتراك جديد).'
+                      : 'Subscription is expired — days extend from today; only days apply here (months require a new registration).'
+                    : isAr
+                      ? 'تُضاف الأيام على نهاية المدة الحالية.'
+                      : 'Days are added on top of the current end date.'}
+                </p>
               </div>
               <div className="space-y-2">
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'المبلغ المدفوع (USD)' : 'Amount paid (USD)'}</label>
