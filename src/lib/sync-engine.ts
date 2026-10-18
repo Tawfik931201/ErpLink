@@ -3653,10 +3653,17 @@ export async function processWebhookEvent(
   if (!isProduct) {
     console.info(`[SyncEngine] Querying field_mappings...`)
   }
-  const { data: mappingRows, error: mappingErr } = await supabaseAdmin
+  let mappingQuery = supabaseAdmin
     .from('field_mappings')
     .select('*')
     .or('store_id.eq.' + storeIdStr + ',merchant_id.eq.' + storeIdStr)
+  // حصر الصفوف بمساحة التسليم نفسها. بدون هذا السطر تكفي صفوفة field_mappings
+  // قديمة في مساحة أخرى تحمل نفس merchant id أن تخطف المزامنة كاملة: المسار
+  // المضبوط يستعير من `existingMappings[0]` إعداداتها واتصال Odoo الخاص بها
+  // (2026-10-18: تصنيفات متجر Salla تابعت إعدادات مساحة أخرى القديمة بينما
+  // إعدادات صاحب المتجر لا تُقرأ أصلاً — والزد لا يظهر لأن لا صفوفة تطابقه).
+  if (resolvedWorkspaceId) mappingQuery = mappingQuery.eq('workspace_id', resolvedWorkspaceId)
+  const { data: mappingRows, error: mappingErr } = await mappingQuery
 
   if (!isProduct) {
     console.info(`[SyncEngine] field_mappings query: rows=${mappingRows?.length ?? 0} error=${mappingErr?.message ?? 'none'}`)
@@ -3692,7 +3699,8 @@ export async function processWebhookEvent(
 
   if (presetKey) {
     const presetRecord = await processFixedMappingFallback(
-      presetKey, event, storeIdStr, data, platform, mappingRows as FieldMappingRow[] | null
+      presetKey, event, storeIdStr, data, platform, mappingRows as FieldMappingRow[] | null,
+      resolvedWorkspaceId
     )
     if (presetRecord) {
       result.records.push(presetRecord)
@@ -3784,13 +3792,22 @@ async function processFixedMappingFallback(
   storeIdStr: string,
   zidData: Record<string, unknown>,
   platform: 'zid' | 'salla' | 'shopify',
-  existingMappings: FieldMappingRow[] | null
+  existingMappings: FieldMappingRow[] | null,
+  deliveryWorkspaceId?: string | null
 ): Promise<SyncEngineResult['records'][number] | null> {
   // Borrow workspace + connection from an existing field_mapping if available
   let workspaceId: string | undefined
   let erpConnectionId: string | null = null
 
-  if (existingMappings && existingMappings.length > 0) {
+  if (deliveryWorkspaceId) {
+    // مساحة التسليم تفوز دائماً: صفوفة field_mappings قد تعود لمساحة لم تعد
+    // تملك المتجر، والاستعير منها يطبّق إعداداتها واتصال Odoo الخاص بها.
+    // الاتصال يُستعار فقط من صفوفة بنفس المساحة، وإلا يُترك null فيلتقطه
+    // البحث بـ workspace_id تحت (erp_connections الخاص بالمساحة الصحيحة).
+    workspaceId = deliveryWorkspaceId
+    const sameWsMapping = existingMappings?.find((m) => m.workspace_id === deliveryWorkspaceId)
+    erpConnectionId = sameWsMapping?.erp_connection_id ?? null
+  } else if (existingMappings && existingMappings.length > 0) {
     const anyMapping = existingMappings[0]
     workspaceId = anyMapping.workspace_id
     erpConnectionId = anyMapping.erp_connection_id
@@ -7472,7 +7489,8 @@ async function syncProductBom(
                   storeIdStr,
                   productData as any,
                   platform,
-                  compMappingRows as FieldMappingRow[] | null
+                  compMappingRows as FieldMappingRow[] | null,
+                  workspaceId
                 )
               }
             }
