@@ -85,7 +85,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 301 tests over 18 suites (added 2026-09-29, grown 2026-10-05)
+# Unit tests — 636 tests over 41 suites (added 2026-09-29, grown 2026-10-18)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -127,13 +127,18 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 301 tests over 18 suites:
+- 636 tests over 41 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
     `extractEntityId` (the anti-data-loss rules)
+  - `tests/unit/sync-workspace-scoping.test.ts` — source pins proving the
+    `field_mappings` query is scoped by `resolvedWorkspaceId` and the preset
+    path prefers `deliveryWorkspaceId` over a borrowed mapping's workspace
+    (see Cross-tenant safety); each pin has a self-check that fails on the
+    old shape
   - `tests/unit/subscription-dates.test.ts` — `computeSubscriptionEndDate`,
-    `addMonthsToDate`, `isValidIsoDate`
+    `addMonthsToDate`, `addDaysToDate`, `isValidIsoDate`
   - `tests/unit/odoo-operation-routing.test.ts` — `normalizeOdooOperation`,
     `presetEntityType`
   - `tests/unit/clerk-authz-guard.test.ts` — scans `src/**` to prove the
@@ -565,7 +570,10 @@ against** — see below, do not start it.
   `affiliate_id` is a **legacy read-only column** (old rows may have values via
   `SELECT *`; new rows are always `NULL` — never write it, never display it).
 - `subscription_payments`: per-payment rows (subscription_id, amount, paid_at, notes, created_by)
-- `workspaces`: id, user_id, name, subscription_number (no affiliate linkage)
+- `workspaces`: id, user_id, name, subscription_number, `archived_at`
+  (added 2026-10-18, migration `20261018_workspace_archive.sql` — set
+  automatically when the last active subscription expires; cleared when a new
+  subscription is registered or extended). No affiliate linkage.
 - `users`: id, email, name, active_workspace_id (+ `created_at`).
   ⚠️ **`phone` is NOT reliably there.** It exists only in migration
   `20260805_client_phone_and_archive.sql`, which was never applied in some
@@ -587,15 +595,36 @@ against** — see below, do not start it.
 1. `registerSubscription` (admin): validates client user + workspace, computes
    `end_date = start_date + months − 1 day`, inserts subscription with
    `affiliate_id = NULL`, records a `subscription_payments` row when amount > 0.
-   **No commission is created.**
+   **No commission is created.** Unarchives the workspace afterwards.
 2. `extendSubscription` (admin): extends `end_date`, adds months, bumps
-   `amount_paid` total, records a payment row. **No commission.**
+   `amount_paid` total, records a payment row. **No commission.** Two modes
+   (added 2026-10-18):
+   - `months`: calendar months on top of `end_date` — **only on a
+     non-expired subscription** (extending an expired one by months still
+     refuses with `subscription_expired`; register a new one instead).
+   - `days`: whole days — **allowed on an expired subscription too**, in which
+     case the base is `today` (manual-renewal / grace flow). Days do NOT change
+     `months_paid` (it is the MRR divisor). When the new `end_date` is valid,
+     the workspace is unarchived.
 3. `cancelSubscription` (admin): sets status `cancelled` (no auto-expiry — `end_date` is source of truth)
 4. `archiveSubscription` / `restoreSubscription`: soft-hide old rows from the statement (audit + payments intact)
 5. `addSubscriptionPayment`: extra payment against a subscription, bumps `amount_paid` total
-- Client sees: status card + expiry banner (amber ≤7 days, red when expired);
-  both say "تواصل مع الدعم / Contact support". Banner dismissible via X
-  (sessionStorage) and never auto-dismisses.
+- Client sees a **fixed top alert strip** (`SubscriptionBanner.tsx`) rendered
+  above the entire app shell on every page (layout is `h-screen overflow-hidden`,
+  banner is a sibling of the scrolling main area — the page scrolls underneath
+  it). States: red when no subscription or expired ("المساحة مؤرشفة"), amber
+  with a live day/hour countdown when ≤7 days remain, nothing otherwise.
+  Hidden for admins. Dismissible via X for the current session only
+  (sessionStorage `subscription_banner_dismissed`); returns next visit.
+- Workspace auto-archive (added 2026-10-18): `src/lib/workspace-archive.ts`
+  sets `workspaces.archived_at` when a workspace's latest active subscription
+  expired and no non-expired active subscription remains. Triggered three ways:
+  the 6h runner ticker (`WORKSPACE_ARCHIVE_INTERVAL_MS`), lazily inside
+  `getMyActiveSubscription` (fire-and-forget), and on-demand by the admin UI.
+  Workspaces with **no subscription at all are NOT archived** (might be
+  mid-signup). Unarchive happens automatically on `registerSubscription` /
+  `extendSubscription`. Until migration `20261018` is applied all helpers
+  no-op softly.
 
 ### Removed flows (do not reintroduce)
 - Affiliate → client attribution, `registerClientWorkspace`, affiliate auto-detect
@@ -756,6 +785,13 @@ In order:
      selects instead of `select('*')` on counts and admin lists, hard `limit`
      caps on unbounded list queries, and `getAllClients` scoped to the page's
      workspaces with optional `{ limit, offset }` pagination
+5. `supabase/migrations/20261018_workspace_archive.sql`
+   - `workspaces.archived_at` TIMESTAMPTZ + partial index on non-NULL
+   - **required by `src/lib/workspace-archive.ts`** — until it is applied the
+     archive helpers fail softly (`isWorkspaceArchived` → false,
+     `archiveExpiredWorkspaces` → `{ archived: 0 }`), so nothing breaks, but
+     the auto-archive feature is inert
+   - idempotent (`to_regclass` guard + `IF NOT EXISTS`, BEGIN/COMMIT)
 
 If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.
@@ -798,6 +834,7 @@ If `20260922` is not applied, every webhook route returns 503
 |---|---|---|
 | `startSyncQueueRunner()` in `src/lib/sync-queue-runner.ts` | every **30s** (`SYNC_QUEUE_POLL_INTERVAL_MS`) | `drainWebhookInbox(25)` → `processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)` |
 | same runner, reconcile ticker | every **10 min** (`SYNC_RECONCILE_INTERVAL_MS`) | `reconcileZidOrders()` — heals dropped webhooks |
+| same runner, archive ticker | every **6 h** (`WORKSPACE_ARCHIVE_INTERVAL_MS`, min 5 min) | `archiveExpiredWorkspaces()` — sets `workspaces.archived_at` on expired-subscription workspaces |
 | `GET /api/cron/sync-queue` | on demand only | `drainWebhookInbox` → drain loop (≤40s) → metrics + orphan count |
 | `GET /api/cron/reconcile` | on demand only | single reconciliation cycle |
 
@@ -847,9 +884,27 @@ missing. The old `|| ANON_KEY` fallback made every write fail silently under
 RLS while appearing healthy. Dev-only fallback logs a warning.
 
 ### Cross-tenant safety
-`findExistingOdooRecord` in `src/lib/sync-engine.ts` scopes the `sync_logs`
-lookup by `workspace_id` **and** `platform` — `zid_entity_id` alone is not
-unique across merchants. Keep the filter when touching that function.
+- `findExistingOdooRecord` in `src/lib/sync-engine.ts` scopes the `sync_logs`
+  lookup by `workspace_id` **and** `platform` — `zid_entity_id` alone is not
+  unique across merchants. Keep the filter when touching that function.
+- **`processWebhookEvent` must scope its `field_mappings` query by
+  `resolvedWorkspaceId`** (added 2026-10-18). It used to match on
+  `store_id`/`merchant_id` alone, so a **stale row in another workspace**
+  carrying the same merchant id hijacked the whole sync: `processFixedMappingFallback`
+  borrowed `existingMappings[0].workspace_id` + `erp_connection_id`, i.e. the
+  other workspace's `standard_mapping_settings`, ERP connection and custom
+  mappings ran against this store while the owner's saved settings were never
+  read. This was the live "Salla categories ignore my settings and follow old
+  ones" report — Zid looked fine only because no stale row matched its store.
+  The preset function now takes `deliveryWorkspaceId` and prefers it, borrowing
+  the connection only from a same-workspace mapping (else `null`, which falls
+  back to the workspace's own `erp_connections`). Keep the `.eq('workspace_id',
+  resolvedWorkspaceId)` guard and the `deliveryWorkspaceId` parameter when
+  touching either site — `tests/unit/sync-workspace-scoping.test.ts` pins both
+  (with self-checks that fail on the old shape). Known stale row at the time of
+  the fix: `field_mappings.id = 1ebeec88-…` ("test 1", workspace `703f0dae-…`,
+  `merchant_id = 2147022192`) — harmless after the fix (no scoping means it can
+  never match again) but orphaned data awaiting cleanup.
 
 ### Odoo → store: the webhook body is a trigger, never a source (2026-10-01)
 
