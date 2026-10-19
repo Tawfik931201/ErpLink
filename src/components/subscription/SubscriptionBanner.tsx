@@ -5,6 +5,12 @@ import { useEffect, useState } from 'react'
 
 import { getMyActiveSubscription, type MySubscription } from '@/app/actions/subscription-actions'
 import { useLanguage } from '@/components/language-provider'
+import {
+  countdownParts,
+  formatCountdownAr,
+  formatCountdownEn,
+  subscriptionRemainingMs,
+} from '@/lib/subscription-countdown'
 
 type BannerState =
   | { kind: 'none' }
@@ -18,11 +24,15 @@ type BannerState =
  * underneath it — it behaves like a thin header that cannot be navigated away
  * from.
  *
- * States:
- * - No active subscription at all → red strip.
+ * States (all rendered RED since 2026-10-19 — the near-expiry strip used to
+ * be amber; it was made red on request so every warning reads the same):
+ * - No active subscription at all → red strip, no countdown (there is no
+ *   deadline to count down to: a no-subscription workspace has no end_date).
  * - Subscription expired → red strip (workspace is archived by the backend).
- * - Subscription ends within 7 days → amber strip with a live countdown
- *   (days + hours, refreshed every minute).
+ * - Subscription ends within 7 days → red strip with a live day/hour/minute/
+ *   SECOND countdown ticking every second down to the end of the last valid
+ *   day (UTC, end_date inclusive); the message says when the workspace will
+ *   close. At zero the strip flips to the expired message without a reload.
  * - Active with >7 days remaining → nothing is rendered.
  *
  * Not dismissible — the strip has no X and no sessionStorage memory, so it
@@ -33,8 +43,8 @@ export default function SubscriptionBanner() {
   const { lang } = useLanguage()
   const isAr = lang === 'ar'
   const [state, setState] = useState<BannerState>(null)
-  // Ticks every minute while the "soon" state is active so the countdown
-  // (days/hours) stays fresh without a page reload.
+  // Ticks every second while the "soon" state is active so the countdown
+  // (days/hours/minutes/seconds) stays fresh without a page reload.
   const [, setTick] = useState(0)
 
   useEffect(() => {
@@ -58,19 +68,23 @@ export default function SubscriptionBanner() {
     })
   }, [])
 
-  // Live countdown ticker — only runs while the "soon" strip is visible.
+  // Per-second countdown ticker — only runs while the "soon" strip is
+  // visible. The moment the countdown reaches zero the subscription has just
+  // expired, so flip to the expired message immediately; that state change
+  // tears this interval down through the dependency below.
   useEffect(() => {
     if (state?.kind !== 'soon') return
-    const id = setInterval(() => setTick((t) => t + 1), 60_000)
+    const id = setInterval(() => {
+      if (subscriptionRemainingMs(state.sub.end_date) <= 0) {
+        setState({ kind: 'expired', sub: state.sub })
+      } else {
+        setTick((t) => t + 1)
+      }
+    }, 1000)
     return () => clearInterval(id)
-  }, [state?.kind])
+  }, [state])
 
   if (!state) return null
-
-  const isExpired = state.kind === 'expired' || state.kind === 'none'
-  const bg = isExpired ? 'bg-red-600' : 'bg-amber-500'
-  const fg = isExpired ? 'text-white' : 'text-amber-950'
-  const iconColor = isExpired ? 'text-white' : 'text-amber-950'
 
   let message: string
   if (state.kind === 'none') {
@@ -82,47 +96,22 @@ export default function SubscriptionBanner() {
       ? `انتهى اشتراكك في ${formatDate(state.sub.end_date, isAr)} — مساحة العمل مؤرشفة. تواصل مع الدعم لتجديد الاشتراك.`
       : `Your subscription expired on ${formatDate(state.sub.end_date, isAr)} — the workspace is archived. Contact support to renew.`
   } else {
-    const { days, hours } = remainingParts(state.sub.end_date)
+    const parts = countdownParts(state.sub.end_date)
+    const fmt = isAr ? formatCountdownAr(parts) : formatCountdownEn(parts)
     message = isAr
-      ? `ينتهي اشتراكك بعد ${formatRemainingAr(days, hours)} — جدد الاشتراك قبل الانتهاء.`
-      : `Your subscription ends in ${formatRemainingEn(days, hours)} — renew before it expires.`
+      ? `ينتهي اشتراكك بعد ${fmt} — سيتم إغلاق مساحة العمل عند الانتهاء. تواصل مع الدعم للتجديد.`
+      : `Your subscription ends in ${fmt} — the workspace will be closed when it ends. Contact support to renew.`
   }
 
   return (
     <div
       role="alert"
-      className={`${bg} ${fg} w-full shrink-0 sticky top-0 z-50 flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium shadow-sm`}
+      className="bg-red-600 text-white w-full shrink-0 sticky top-0 z-50 flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium shadow-sm"
     >
-      <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} aria-hidden="true" />
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-white" aria-hidden="true" />
       <p className="flex-1 text-center leading-snug">{message}</p>
     </div>
   )
-}
-
-/**
- * Remaining time until the end of the subscription's last valid day.
- * `end_date` is inclusive — the subscription stays valid through the entire
- * day (UTC), so the countdown target is the start of the NEXT day.
- */
-function remainingParts(endDate: string): { days: number; hours: number } {
-  const end = new Date(`${endDate}T00:00:00Z`).getTime() + 86_400_000
-  const rem = Math.max(0, end - Date.now())
-  return {
-    days: Math.floor(rem / 86_400_000),
-    hours: Math.floor((rem % 86_400_000) / 3_600_000),
-  }
-}
-
-function formatRemainingAr(days: number, hours: number): string {
-  if (days > 0) return `${days} ${days === 1 ? 'يوم' : 'أيام'} و ${hours} ساعة`
-  if (hours > 0) return `${hours} ساعة`
-  return 'أقل من ساعة'
-}
-
-function formatRemainingEn(days: number, hours: number): string {
-  if (days > 0) return `${days} day${days === 1 ? '' : 's'} and ${hours} hour${hours === 1 ? '' : 's'}`
-  if (hours > 0) return `${hours} hour${hours === 1 ? '' : 's'}`
-  return 'less than an hour'
 }
 
 function formatDate(d: string, isAr: boolean): string {

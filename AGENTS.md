@@ -85,7 +85,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 636 tests over 41 suites (added 2026-09-29, grown 2026-10-18)
+# Unit tests — 652 tests over 42 suites (added 2026-09-29, grown 2026-10-19)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -127,7 +127,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 636 tests over 41 suites:
+- 652 tests over 42 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -139,6 +139,10 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     old shape
   - `tests/unit/subscription-dates.test.ts` — `computeSubscriptionEndDate`,
     `addMonthsToDate`, `addDaysToDate`, `isValidIsoDate`
+  - `tests/unit/subscription-countdown.test.ts` — the banner's per-second
+    expiry countdown (`subscriptionRemainingMs` clamped ≥0 with an injectable
+    `now`, `countdownParts`, both language formatters' skip-zero/singular rules,
+    and the pinned loose Arabic plural rule, see Status Lifecycle)
   - `tests/unit/odoo-operation-routing.test.ts` — `normalizeOdooOperation`,
     `presetEntityType`
   - `tests/unit/clerk-authz-guard.test.ts` — scans `src/**` to prove the
@@ -612,8 +616,14 @@ against** — see below, do not start it.
 - Client sees a **fixed top alert strip** (`SubscriptionBanner.tsx`) rendered
   above the entire app shell on every page (layout is `h-screen overflow-hidden`,
   banner is a sibling of the scrolling main area — the page scrolls underneath
-  it). States: red when no subscription or expired ("المساحة مؤرشفة"), amber
-  with a live day/hour countdown when ≤7 days remain, nothing otherwise.
+  it). States: **all red since 2026-10-19** (the near-expiry strip was amber
+  before and was made red on request) — no subscription or expired
+  ("المساحة مؤرشفة") carry no countdown because they have no deadline; when
+  ≤7 days remain the strip shows a live **day/hour/minute/second countdown
+  ticking every second** (`src/lib/subscription-countdown.ts`, tests in
+  `tests/unit/subscription-countdown.test.ts`) and states when the workspace
+  will close, flipping to the expired message at zero without a reload;
+  nothing otherwise (>7 days).
   Shown to admins too, and **not dismissible** — the X and the sessionStorage
   memory (`subscription_banner_dismissed`) were removed 2026-10-19 on request:
   the strip must stay on every page view for as long as the state warrants.
@@ -793,6 +803,12 @@ In order:
      `archiveExpiredWorkspaces` → `{ archived: 0 }`), so nothing breaks, but
      the auto-archive feature is inert
    - idempotent (`to_regclass` guard + `IF NOT EXISTS`, BEGIN/COMMIT)
+   - **the file itself is already paste-ready** — `public.`-qualified, guarded
+     and BEGIN/COMMIT-wrapped, so unlike `20260922` it needs no
+     `_paste_ready` variant: paste it directly into the Supabase SQL Editor.
+     Probed live 2026-10-19: the column did **not** exist yet (feature inert);
+     handed to the user to apply that day so the expiry countdown's "workspace
+     will close" message stays truthful.
 
 If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.
