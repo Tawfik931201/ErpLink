@@ -2,6 +2,7 @@ import {
   countdownParts,
   formatCountdownAr,
   formatCountdownEn,
+  msToCountdownParts,
   subscriptionRemainingMs,
 } from '@/lib/subscription-countdown'
 
@@ -70,6 +71,33 @@ describe('countdownParts', () => {
       minutes: 0,
       seconds: 0,
     })
+  })
+})
+
+describe('msToCountdownParts', () => {
+  // The trial countdown targets an exact created_at + 7d timestamp (not a
+  // date-only end_date), so it computes its own remaining ms and feeds them
+  // in here — the same chunks the subscription path produces.
+  it('splits a raw duration into day/hour/minute/second', () => {
+    const rem = 6 * 86_400_000 + 5 * 3_600_000 + 12 * 60_000 + 30 * 1_000
+    expect(msToCountdownParts(rem)).toEqual({ days: 6, hours: 5, minutes: 12, seconds: 30 })
+  })
+
+  it('a whole 7-day duration is 7 days flat (fresh trial)', () => {
+    expect(msToCountdownParts(7 * 86_400_000)).toEqual({
+      days: 7,
+      hours: 0,
+      minutes: 0,
+      seconds: 0,
+    })
+  })
+
+  it('clamps a negative duration to all zeros', () => {
+    expect(msToCountdownParts(-1)).toEqual({ days: 0, hours: 0, minutes: 0, seconds: 0 })
+  })
+
+  it('zero stays zero', () => {
+    expect(msToCountdownParts(0)).toEqual({ days: 0, hours: 0, minutes: 0, seconds: 0 })
   })
 })
 

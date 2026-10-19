@@ -3,7 +3,11 @@
 import { CalendarClock, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
-import { getMyActiveSubscription, type MySubscription } from '@/app/actions/subscription-actions'
+import {
+  getMyActiveSubscription,
+  type MySubscription,
+  type WorkspaceTrial,
+} from '@/app/actions/subscription-actions'
 import { useLanguage } from '@/components/language-provider'
 import { cn } from '@/lib/utils'
 
@@ -12,6 +16,7 @@ export default function SubscriptionStatusCard() {
   const { lang } = useLanguage()
   const isAr = lang === 'ar'
   const [sub, setSub] = useState<MySubscription | null>(null)
+  const [trial, setTrial] = useState<WorkspaceTrial | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,6 +25,7 @@ export default function SubscriptionStatusCard() {
     const res = await getMyActiveSubscription()
     if (res.success) {
       setSub(res.subscription)
+      setTrial(res.trial)
       setError(null)
     } else {
       setError(res.error ?? 'error')
@@ -55,6 +61,51 @@ export default function SubscriptionStatusCard() {
   }
 
   if (!sub) {
+    // No subscription row. Inside the 7-day free trial show the trial card;
+    // once the trial has run out the workspace is closed (archived).
+    if (trial && !trial.isExpired) {
+      const days = trial.daysRemaining
+      return (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50/50 p-5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+            <h3 className="text-sm font-bold text-amber-900">
+              {isAr ? 'تجربة مجانية' : 'Free trial'}
+            </h3>
+          </div>
+          <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
+            {isAr
+              ? `أنت في فترة التجربة المجانية (7 أيام). ${days > 0 ? `يتبقى ${days} يوم.` : 'تنتهي خلال أقل من يوم.'} سيتم إغلاق مساحة العمل عند انتهاء التجربة إلا إذا تم تسجيل اشتراك. تواصل مع الدعم للاشتراك.`
+              : `You are in the 7-day free trial. ${days > 0 ? `${days} day${days === 1 ? '' : 's'} remaining.` : 'Less than a day left.'} The workspace will be closed when the trial ends unless a subscription is registered. Contact support to subscribe.`}
+          </p>
+          {trial.endsAt && (
+            <p className="text-[11px] text-amber-800/70 mt-2">
+              {isAr ? 'تنتهي في: ' : 'Ends on: '}
+              {formatDate(trial.endsAt)}
+            </p>
+          )}
+        </div>
+      )
+    }
+
+    if (trial?.isExpired) {
+      return (
+        <div className="rounded-2xl border border-red-200 bg-red-50/60 p-5">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+            <h3 className="text-sm font-bold text-red-900">
+              {isAr ? 'انتهت التجربة المجانية' : 'Free trial ended'}
+            </h3>
+          </div>
+          <p className="text-xs text-red-800/80 mt-1.5 leading-relaxed">
+            {isAr
+              ? 'انتهت فترة التجربة المجانية وتم إغلاق مساحة العمل. تواصل مع الدعم للاشتراك وإعادة التفعيل.'
+              : 'The free trial has ended and the workspace is closed. Contact support to subscribe and reactivate.'}
+          </p>
+        </div>
+      )
+    }
+
     return (
       <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-5">
         <div className="flex items-center gap-2">

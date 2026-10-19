@@ -15,11 +15,13 @@ import {
 } from '@/lib/subscription-dates'
 import { daysUntilExpiry, isSubscriptionExpired } from '@/lib/subscription-utils'
 import { supabase } from '@/lib/supabase'
+import { archiveWorkspace, unarchiveWorkspace } from '@/lib/workspace-archive'
 import {
-  archiveWorkspace,
-  isWorkspaceArchived,
-  unarchiveWorkspace,
-} from '@/lib/workspace-archive'
+  isTrialExpired,
+  trialDaysRemaining,
+  trialEndDate,
+  trialEndMs,
+} from '@/lib/workspace-trial'
 
 /** Shape of a row fetched from the `subscriptions` table (via `select('*')`). */
 interface RawSubscription {
@@ -81,21 +83,69 @@ export interface MySubscription {
 }
 
 /**
+ * Free-trial state of the active workspace, returned by
+ * `getMyActiveSubscription` ONLY when the workspace has no active-status
+ * subscription row (a paid subscription always takes precedence — trial is
+ * then null). Derived from `workspaces.created_at` + 7 days; see
+ * `src/lib/workspace-trial.ts` for the policy.
+ */
+export interface WorkspaceTrial {
+  /** Trial end as epoch ms — the banner counts down to this exact instant. */
+  endsAtMs: number
+  /** Trial end as YYYY-MM-DD (UTC) for display, or null if uncomputable. */
+  endsAt: string | null
+  daysRemaining: number
+  isExpired: boolean
+}
+
+/** Build the trial payload from a workspace's `created_at`, or null if unknown. */
+function buildWorkspaceTrial(createdAt: string | null): WorkspaceTrial | null {
+  const endsAtMs = trialEndMs(createdAt)
+  if (endsAtMs == null) return null
+  return {
+    endsAtMs,
+    endsAt: trialEndDate(createdAt),
+    daysRemaining: trialDaysRemaining(createdAt),
+    isExpired: isTrialExpired(createdAt),
+  }
+}
+
+/**
  * The active subscription of the current user's active workspace (if any).
  * Used by the client dashboard card and the expiry banner.
  *
- * Side effect: if the subscription is expired and the workspace is not yet
- * archived, it is archived immediately (lazy trigger) so the UI reflects the
- * correct state without waiting for the periodic `archiveExpiredWorkspaces`
- * pass in the sync-queue runner.
+ * Side effect: if the subscription is expired — or the workspace has no
+ * subscription and its 7-day free trial has run out — the workspace is
+ * archived immediately (lazy trigger) so the UI reflects the correct state
+ * without waiting for the periodic `archiveExpiredWorkspaces` pass in the
+ * sync-queue runner.
+ *
+ * `trial` is non-null only when there is no active-status subscription row;
+ * a paid subscription supersedes the trial entirely.
  */
 export async function getMyActiveSubscription() {
   try {
     const userId = await getActiveUserId()
-    if (!userId) return { success: false as const, subscription: null, workspaceArchived: false }
+    if (!userId) {
+      return { success: false as const, subscription: null, trial: null, workspaceArchived: false }
+    }
 
     const workspaceId = await getActiveWorkspaceId()
-    if (!workspaceId) return { success: true as const, subscription: null, workspaceArchived: false }
+    if (!workspaceId) {
+      return { success: true as const, subscription: null, trial: null, workspaceArchived: false }
+    }
+
+    // One row read gives both the archive flag and the trial clock's origin.
+    // On error wsRow is null → no trial info → the plain no-subscription state
+    // (fail-open, exactly like the old `isWorkspaceArchived` behaviour).
+    const { data: wsRow } = await supabase
+      .from('workspaces')
+      .select('created_at, archived_at')
+      .eq('id', workspaceId)
+      .maybeSingle()
+
+    const createdAt = (wsRow?.created_at as string | null) ?? null
+    const archived = wsRow?.archived_at != null
 
     const { data, error } = await supabase
       .from('subscriptions')
@@ -106,11 +156,28 @@ export async function getMyActiveSubscription() {
       .limit(1)
 
     if (error) {
-      return { success: false as const, error: error.message, subscription: null, workspaceArchived: false }
+      return {
+        success: false as const,
+        error: error.message,
+        subscription: null,
+        trial: null,
+        workspaceArchived: false,
+      }
     }
 
     const sub = data?.[0]
-    if (!sub) return { success: true as const, subscription: null, workspaceArchived: false }
+    if (!sub) {
+      // No subscription → the workspace is either inside its free trial or
+      // past it. If past, archive it now (fire-and-forget) and report the
+      // expired trial so the banner can show the closed state.
+      const trial = buildWorkspaceTrial(createdAt)
+      if (trial?.isExpired) {
+        archiveWorkspace(workspaceId).catch(() => {
+          /* best-effort; the periodic pass will retry */
+        })
+      }
+      return { success: true as const, subscription: null, trial, workspaceArchived: archived }
+    }
 
     // Lazy archive: if the subscription is expired, archive the workspace now.
     // Fire-and-forget — the banner should not wait for this write to complete.
@@ -120,8 +187,6 @@ export async function getMyActiveSubscription() {
       })
     }
 
-    const archived = await isWorkspaceArchived(workspaceId)
-
     return {
       success: true as const,
       subscription: {
@@ -129,10 +194,18 @@ export async function getMyActiveSubscription() {
         isExpired: isSubscriptionExpired(sub),
         daysRemaining: daysUntilExpiry(sub.end_date),
       } satisfies MySubscription,
+      // A paid subscription supersedes the trial entirely.
+      trial: null,
       workspaceArchived: archived,
     }
   } catch (err) {
-    return { success: false as const, error: err instanceof Error ? err.message : 'unexpected', subscription: null, workspaceArchived: false }
+    return {
+      success: false as const,
+      error: err instanceof Error ? err.message : 'unexpected',
+      subscription: null,
+      trial: null,
+      workspaceArchived: false,
+    }
   }
 }
 

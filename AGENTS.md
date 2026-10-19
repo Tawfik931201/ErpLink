@@ -65,6 +65,14 @@
 | `supabase/migrations/20260922_sync_reliability.sql` | The canonical sync-reliability migration |
 | `supabase/migrations/20260922_sync_reliability_paste_ready.sql` | Statement-for-statement variant of the above for the Supabase SQL Editor (`public.`-qualified, `to_regclass` guard, wrapped in BEGIN/COMMIT). **Not** the source of truth |
 
+### Billing helpers
+| File | Purpose |
+|------|---------|
+| `src/lib/workspace-trial.ts` | Pure 7-day free-trial math from `workspaces.created_at` (`TRIAL_DAYS`, `trialEndMs`, `trialRemainingMs`, `isTrialExpired`, `trialDaysRemaining`, `trialEndDate`); NULL/unparseable `created_at` is unknown, not expired (added 2026-10-19) |
+| `src/lib/workspace-archive.ts` | Sets/clears `workspaces.archived_at`; `archiveExpiredWorkspaces` has an expired-subscription pass **and** a trial-expired pass (bounded, silent no-op while migration `20261018` is unapplied) |
+| `src/lib/subscription-countdown.ts` | Pure d/h/m/s countdown helpers shared by the subscription strip and the trial strip (`msToCountdownParts` for raw durations) |
+| `src/app/(app)/app/layout.tsx` | `workspaceClosed` gate: archived or trial-expired workspaces get a "closed" notice instead of the client app; admins and `/app/settings/workspace` are exempt |
+
 ### Security helpers (added 2026-10-01)
 | File | Purpose |
 |------|---------|
@@ -85,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 652 tests over 42 suites (added 2026-09-29, grown 2026-10-19)
+# Unit tests — 675 tests over 43 suites (added 2026-09-29, grown 2026-10-19)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -127,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 652 tests over 42 suites:
+- 675 tests over 43 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -141,8 +149,14 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     `addMonthsToDate`, `addDaysToDate`, `isValidIsoDate`
   - `tests/unit/subscription-countdown.test.ts` — the banner's per-second
     expiry countdown (`subscriptionRemainingMs` clamped ≥0 with an injectable
-    `now`, `countdownParts`, both language formatters' skip-zero/singular rules,
-    and the pinned loose Arabic plural rule, see Status Lifecycle)
+    `now`, `msToCountdownParts`, `countdownParts`, both language formatters'
+    skip-zero/singular rules, and the pinned loose Arabic plural rule, see
+    Status Lifecycle)
+  - `tests/unit/workspace-trial.test.ts` — the 7-day free-trial clock derived
+    from `workspaces.created_at` (`trialEndMs`/`trialRemainingMs`/
+    `isTrialExpired`/`trialDaysRemaining`, injectable `now`): the clamp rules,
+    and the pinned policy that a NULL/unparseable `created_at` is **unknown,
+    not expired** (fail-open), see Status Lifecycle
   - `tests/unit/odoo-operation-routing.test.ts` — `normalizeOdooOperation`,
     `presetEntityType`
   - `tests/unit/clerk-authz-guard.test.ts` — scans `src/**` to prove the
@@ -613,29 +627,55 @@ against** — see below, do not start it.
 3. `cancelSubscription` (admin): sets status `cancelled` (no auto-expiry — `end_date` is source of truth)
 4. `archiveSubscription` / `restoreSubscription`: soft-hide old rows from the statement (audit + payments intact)
 5. `addSubscriptionPayment`: extra payment against a subscription, bumps `amount_paid` total
+- **Free trial (added 2026-10-19):** every workspace gets an automatic
+  **7-day free trial** derived from `workspaces.created_at` — no column, no
+  migration, pure math in `src/lib/workspace-trial.ts` (`TRIAL_DAYS = 7`).
+  The trial exists **only while the workspace has no non-expired active
+  subscription**; registering a paid subscription supersedes it entirely
+  (`getMyActiveSubscription` then returns `trial: null`). When the trial runs
+  out with no subscription the workspace **closes**: `archived_at` is set
+  (lazy + the 6h pass) and the client app is replaced by a "closed" notice
+  (`workspaceClosed` gate in `src/app/(app)/app/layout.tsx`). The gate exempts
+  admins and keeps `/app/settings/workspace` reachable so a user with another
+  active workspace can still switch. A NULL/unparseable `created_at` is
+  **unknown, not expired** — no trial countdown, no auto-archive (fail-open).
 - Client sees a **fixed top alert strip** (`SubscriptionBanner.tsx`) rendered
   above the entire app shell on every page (layout is `h-screen overflow-hidden`,
   banner is a sibling of the scrolling main area — the page scrolls underneath
   it). States: **all red since 2026-10-19** (the near-expiry strip was amber
-  before and was made red on request) — no subscription or expired
-  ("المساحة مؤرشفة") carry no countdown because they have no deadline; when
-  ≤7 days remain the strip shows a live **day/hour/minute/second countdown
-  ticking every second** (`src/lib/subscription-countdown.ts`, tests in
+  before and was made red on request) — no subscription with no trial clock
+  ("غير مفعلة") and expired ("المساحة مؤرشفة") carry no countdown because
+  they have no deadline; the **free trial** shows a live d/h/m/s countdown to
+  the trial end (then flips to "انتهت التجربة … مساحة العمل مغلقة"), and when
+  ≤7 days remain on a subscription the strip shows a live
+  **day/hour/minute/second countdown ticking every second**
+  (`src/lib/subscription-countdown.ts`, tests in
   `tests/unit/subscription-countdown.test.ts`) and states when the workspace
   will close, flipping to the expired message at zero without a reload;
-  nothing otherwise (>7 days).
+  nothing otherwise (>7 days). The trial countdown targets the exact
+  `created_at + 7d` instant via `msToCountdownParts`, unlike the subscription
+  countdown which targets the end of the inclusive `end_date` day.
   Shown to admins too, and **not dismissible** — the X and the sessionStorage
   memory (`subscription_banner_dismissed`) were removed 2026-10-19 on request:
   the strip must stay on every page view for as long as the state warrants.
-- Workspace auto-archive (added 2026-10-18): `src/lib/workspace-archive.ts`
-  sets `workspaces.archived_at` when a workspace's latest active subscription
-  expired and no non-expired active subscription remains. Triggered three ways:
-  the 6h runner ticker (`WORKSPACE_ARCHIVE_INTERVAL_MS`), lazily inside
-  `getMyActiveSubscription` (fire-and-forget), and on-demand by the admin UI.
-  Workspaces with **no subscription at all are NOT archived** (might be
-  mid-signup). Unarchive happens automatically on `registerSubscription` /
-  `extendSubscription`. Until migration `20261018` is applied all helpers
-  no-op softly.
+- Workspace auto-archive (added 2026-10-18, trial pass added 2026-10-19):
+  `src/lib/workspace-archive.ts` sets `workspaces.archived_at` in two cases:
+  (1) a workspace's latest active subscription expired and no non-expired
+  active subscription remains, and (2) a workspace has **no live subscription
+  and its 7-day trial has run out** (`created_at` older than `TRIAL_DAYS`).
+  Triggered three ways: the 6h runner ticker (`WORKSPACE_ARCHIVE_INTERVAL_MS`),
+  lazily inside `getMyActiveSubscription` (fire-and-forget), and on-demand by
+  the admin UI. The old carve-out "workspaces with no subscription at all are
+  NOT archived (might be mid-signup)" is **superseded** — the trial window IS
+  the mid-signup grace period; older unsubscribed workspaces close as of
+  2026-10-19 (the pre-existing workspace `703f0dae` created 2026-10-08
+  qualifies). A live subscription always wins: the pass excludes any workspace
+  with a non-expired active subscription. Unarchive happens automatically on
+  `registerSubscription` / `extendSubscription`. Until migration `20261018` is
+  applied all `archived_at` helpers no-op softly (now including a silent
+  missing-column check in `archiveExpiredWorkspaces`) — but the trial
+  **countdown and the layout gate still work before that migration**, because
+  they only need `workspaces.created_at`.
 
 ### Removed flows (do not reintroduce)
 - Affiliate → client attribution, `registerClientWorkspace`, affiliate auto-detect

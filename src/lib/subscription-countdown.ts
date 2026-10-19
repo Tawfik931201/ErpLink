@@ -25,15 +25,25 @@ export function subscriptionRemainingMs(endDate: string, now: number = Date.now(
   return Math.max(0, end - now)
 }
 
-/** Break the remaining time into day/hour/minute/second chunks. */
-export function countdownParts(endDate: string, now: number = Date.now()): CountdownParts {
-  const rem = subscriptionRemainingMs(endDate, now)
+/**
+ * Break a raw millisecond duration into day/hour/minute/second chunks.
+ * Shared by the subscription countdown and the free-trial countdown (the
+ * trial clock targets an exact `created_at + 7d` timestamp, not a date-only
+ * end_date, so it computes its own remaining ms and feeds it in here).
+ */
+export function msToCountdownParts(remainingMs: number): CountdownParts {
+  const rem = Math.max(0, remainingMs)
   return {
     days: Math.floor(rem / 86_400_000),
     hours: Math.floor((rem % 86_400_000) / 3_600_000),
     minutes: Math.floor((rem % 3_600_000) / 60_000),
     seconds: Math.floor((rem % 60_000) / 1_000),
   }
+}
+
+/** Break the remaining time into day/hour/minute/second chunks. */
+export function countdownParts(endDate: string, now: number = Date.now()): CountdownParts {
+  return msToCountdownParts(subscriptionRemainingMs(endDate, now))
 }
 
 /**
