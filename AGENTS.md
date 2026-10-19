@@ -671,11 +671,13 @@ against** — see below, do not start it.
   2026-10-19 (the pre-existing workspace `703f0dae` created 2026-10-08
   qualifies). A live subscription always wins: the pass excludes any workspace
   with a non-expired active subscription. Unarchive happens automatically on
-  `registerSubscription` / `extendSubscription`. Until migration `20261018` is
-  applied all `archived_at` helpers no-op softly (now including a silent
-  missing-column check in `archiveExpiredWorkspaces`) — but the trial
-  **countdown and the layout gate still work before that migration**, because
-  they only need `workspaces.created_at`.
+  `registerSubscription` / `extendSubscription`. Migration `20261018` is
+  **applied as of 2026-10-19** (verified live), so the trial pass is active;
+  the missing-column guards in `archiveExpiredWorkspaces` / `archiveWorkspace`
+  remain as graceful degradation for any other environment that has not pasted
+  it — and the trial **countdown and layout gate** need only
+  `workspaces.created_at`, so they work either way (they do not depend on the
+  `archived_at` write succeeding).
 
 ### Removed flows (do not reintroduce)
 - Affiliate → client attribution, `registerClientWorkspace`, affiliate auto-detect
@@ -843,12 +845,12 @@ In order:
      `archiveExpiredWorkspaces` → `{ archived: 0 }`), so nothing breaks, but
      the auto-archive feature is inert
    - idempotent (`to_regclass` guard + `IF NOT EXISTS`, BEGIN/COMMIT)
-   - **the file itself is already paste-ready** — `public.`-qualified, guarded
-     and BEGIN/COMMIT-wrapped, so unlike `20260922` it needs no
-     `_paste_ready` variant: paste it directly into the Supabase SQL Editor.
-     Probed live 2026-10-19: the column did **not** exist yet (feature inert);
-     handed to the user to apply that day so the expiry countdown's "workspace
-     will close" message stays truthful.
+    - **the file itself is already paste-ready** — `public.`-qualified, guarded
+      and BEGIN/COMMIT-wrapped, so unlike `20260922` it needs no
+      `_paste_ready` variant: paste it directly into the Supabase SQL Editor.
+      **Applied 2026-10-19** and verified live the same day: the column exists,
+      and the trial pass archived the overdue workspace `703f0dae` (created
+      2026-10-08) ~24s after the deploy that shipped it.
 
 If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.

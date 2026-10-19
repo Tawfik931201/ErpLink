@@ -136,11 +136,15 @@ export async function getMyActiveSubscription() {
     }
 
     // One row read gives both the archive flag and the trial clock's origin.
+    // `select('*')` on purpose, not a lean column list: `archived_at` only
+    // exists once migration 20261018 is applied, and naming a missing column
+    // fails the whole request — which would take `created_at` (and with it the
+    // trial countdown) down in any environment that has not pasted it.
     // On error wsRow is null → no trial info → the plain no-subscription state
     // (fail-open, exactly like the old `isWorkspaceArchived` behaviour).
     const { data: wsRow } = await supabase
       .from('workspaces')
-      .select('created_at, archived_at')
+      .select('*')
       .eq('id', workspaceId)
       .maybeSingle()
 
