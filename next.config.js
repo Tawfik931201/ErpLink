@@ -29,11 +29,19 @@ const securityHeaders = [
   // every page fails with `failed_to_load_clerk_js_timeout`. `connect-src`
   // and `img-src` already use the `https:` scheme-source, which covers any
   // host and any port, so they need no change.
+  //
+  // `clerk.bizsahla.com` (2026-10-19) is the production instance's CUSTOM
+  // Clerk domain — the pk_live key decodes to it and the sign-in page loads
+  // clerk-js from there. CSP wildcards never cross a registrable-domain
+  // boundary, so `*.clerk.com` does NOT match it, and without this entry
+  // the browser blocks the script on every production page. The original
+  // allowlist only covered test-instance hosts and was never extended when
+  // production moved to the custom domain.
   {
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com https://*.protect.clerk.com https://challenges.cloudflare.com",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://*.clerk.com https://*.protect.clerk.com https://clerk.bizsahla.com https://challenges.cloudflare.com",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
