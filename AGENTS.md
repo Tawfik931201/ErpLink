@@ -93,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 675 tests over 43 suites (added 2026-09-29, grown 2026-10-19)
+# Unit tests — 681 tests over 43 suites (added 2026-09-29, grown 2026-10-19)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 675 tests over 43 suites:
+- 681 tests over 43 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -151,7 +151,9 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     expiry countdown (`subscriptionRemainingMs` clamped ≥0 with an injectable
     `now`, `msToCountdownParts`, `countdownParts`, both language formatters'
     skip-zero/singular rules, and the pinned loose Arabic plural rule, see
-    Status Lifecycle)
+    Status Lifecycle), plus the compact trial readout (`formatClock` →
+    "21:06:56" and `formatTrialRemainingAr`/`En` → "6 أيام و 21:06:56" /
+    "6 days and 21:06:56", day prefix dropped under one day)
   - `tests/unit/workspace-trial.test.ts` — the 7-day free-trial clock derived
     from `workspaces.created_at` (`trialEndMs`/`trialRemainingMs`/
     `isTrialExpired`/`trialDaysRemaining`, injectable `now`): the clamp rules,
@@ -645,8 +647,10 @@ against** — see below, do not start it.
   it). States: **all red since 2026-10-19** (the near-expiry strip was amber
   before and was made red on request) — no subscription with no trial clock
   ("غير مفعلة") and expired ("المساحة مؤرشفة") carry no countdown because
-  they have no deadline; the **free trial** shows a live d/h/m/s countdown to
-  the trial end (then flips to "انتهت التجربة … مساحة العمل مغلقة"), and when
+  they have no deadline; the **free trial** shows a live readout ticking every
+  second in the compact form "6 أيام و 21:06:56" / "6 days and 21:06:56" (day
+  count + fixed HH:MM:SS clock; the day prefix drops under one day) and flips
+  to "انتهت التجربة … مساحة العمل مغلقة" at zero, and when
   ≤7 days remain on a subscription the strip shows a live
   **day/hour/minute/second countdown ticking every second**
   (`src/lib/subscription-countdown.ts`, tests in

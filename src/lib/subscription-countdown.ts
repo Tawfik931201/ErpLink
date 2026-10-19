@@ -73,3 +73,28 @@ export function formatCountdownEn(p: CountdownParts): string {
   if (units.length === 1) return units[0]
   return `${units.slice(0, -1).join(', ')} and ${units[units.length - 1]}`
 }
+
+/** "21:06:56" — zero-padded clock used by the compact trial readout. */
+export function formatClock(p: CountdownParts): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(p.hours)}:${pad(p.minutes)}:${pad(p.seconds)}`
+}
+
+/**
+ * "6 أيام و 21:06:56" — the trial strip's compact readout: a day count plus a
+ * fixed HH:MM:SS clock (unlike `formatCountdownAr`, which spells out every
+ * unit). Under one day the day prefix is dropped and it is just the clock.
+ * Same loose plural rule as the rest of the codebase.
+ */
+export function formatTrialRemainingAr(p: CountdownParts): string {
+  const clock = formatClock(p)
+  if (p.days === 0) return clock
+  return `${p.days} ${p.days === 1 ? 'يوم' : 'أيام'} و ${clock}`
+}
+
+/** "6 days and 21:06:56" — English counterpart of `formatTrialRemainingAr`. */
+export function formatTrialRemainingEn(p: CountdownParts): string {
+  const clock = formatClock(p)
+  if (p.days === 0) return clock
+  return `${p.days} day${p.days === 1 ? '' : 's'} and ${clock}`
+}

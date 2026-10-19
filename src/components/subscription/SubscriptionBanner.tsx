@@ -13,6 +13,8 @@ import {
   countdownParts,
   formatCountdownAr,
   formatCountdownEn,
+  formatTrialRemainingAr,
+  formatTrialRemainingEn,
   msToCountdownParts,
   subscriptionRemainingMs,
 } from '@/lib/subscription-countdown'
@@ -36,10 +38,11 @@ type BannerState =
  * - No subscription at all and no usable trial clock → red strip, no countdown
  *   (a workspace with an unknown `created_at` has no deadline to count to).
  * - Free trial running (no subscription yet, `created_at` + 7 days in the
- *   future) → red strip with a live day/hour/minute/SECOND countdown ticking
- *   every second to the trial end; the message says when the workspace will
- *   close. At zero the strip flips to the trial-expired message without a
- *   reload.
+ *   future) → red strip with a live readout ticking every second in the
+ *   compact form "6 days and 21:06:56" / "6 أيام و 21:06:56" (day count plus a
+ *   fixed HH:MM:SS clock; the day prefix disappears under one day); the
+ *   message says when the workspace will close. At zero the strip flips to the
+ *   trial-expired message without a reload.
  * - Free trial over (no subscription, trial elapsed) → red strip: the
  *   workspace is closed; contact support to subscribe.
  * - Subscription expired → red strip (workspace archived by the backend).
@@ -124,10 +127,10 @@ export default function SubscriptionBanner() {
       : 'No active subscription — your workspace is not activated. Contact support to activate your subscription.'
   } else if (state.kind === 'trial') {
     const parts = msToCountdownParts(state.trial.endsAtMs - Date.now())
-    const fmt = isAr ? formatCountdownAr(parts) : formatCountdownEn(parts)
+    const fmt = isAr ? formatTrialRemainingAr(parts) : formatTrialRemainingEn(parts)
     message = isAr
-      ? `تجربة مجانية — تنتهي بعد ${fmt} — سيتم إغلاق مساحة العمل عند الانتهاء. تواصل مع الدعم للاشتراك.`
-      : `Free trial — ends in ${fmt} — the workspace will be closed when it ends. Contact support to subscribe.`
+      ? `تجربة مجانية — سيتم إغلاق مساحة العمل عند الانتهاء. تواصل مع الدعم للاشتراك. - ${fmt}`
+      : `Free trial — the workspace will be closed when it ends. Contact support to subscribe. - ${fmt}`
   } else if (state.kind === 'trialExpired') {
     const end = state.trial.endsAt ? formatDate(state.trial.endsAt, isAr) : null
     message = isAr

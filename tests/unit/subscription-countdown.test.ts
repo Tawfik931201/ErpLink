@@ -1,7 +1,10 @@
 import {
   countdownParts,
+  formatClock,
   formatCountdownAr,
   formatCountdownEn,
+  formatTrialRemainingAr,
+  formatTrialRemainingEn,
   msToCountdownParts,
   subscriptionRemainingMs,
 } from '@/lib/subscription-countdown'
@@ -149,5 +152,44 @@ describe('formatCountdownEn', () => {
     expect(formatCountdownEn({ days: 0, hours: 0, minutes: 0, seconds: 0 })).toBe(
       'less than a second',
     )
+  })
+})
+
+describe('formatClock + trial readout', () => {
+  // The trial strip uses the compact "6 days and 21:06:56" form (day count +
+  // a fixed HH:MM:SS clock) rather than spelling out every unit. Requested
+  // 2026-10-19; pinned so a future tidy-up does not silently restore the long
+  // form. Arabic keeps the codebase's loose plural rule.
+  it('zero-pads the clock to HH:MM:SS', () => {
+    expect(formatClock({ days: 0, hours: 9, minutes: 6, seconds: 5 })).toBe('09:06:05')
+  })
+
+  it('Arabic: day count then the clock, joined with و', () => {
+    expect(formatTrialRemainingAr({ days: 6, hours: 21, minutes: 6, seconds: 56 })).toBe(
+      '6 أيام و 21:06:56',
+    )
+  })
+
+  it('Arabic: singular day uses يوم', () => {
+    expect(formatTrialRemainingAr({ days: 1, hours: 0, minutes: 0, seconds: 5 })).toBe(
+      '1 يوم و 00:00:05',
+    )
+  })
+
+  it('Arabic: under one day drops the day prefix', () => {
+    expect(formatTrialRemainingAr({ days: 0, hours: 21, minutes: 6, seconds: 56 })).toBe('21:06:56')
+  })
+
+  it('English: day count and clock, joined with "and"', () => {
+    expect(formatTrialRemainingEn({ days: 6, hours: 21, minutes: 6, seconds: 56 })).toBe(
+      '6 days and 21:06:56',
+    )
+  })
+
+  it('English: singular day and sub-day forms', () => {
+    expect(formatTrialRemainingEn({ days: 1, hours: 0, minutes: 0, seconds: 5 })).toBe(
+      '1 day and 00:00:05',
+    )
+    expect(formatTrialRemainingEn({ days: 0, hours: 21, minutes: 6, seconds: 56 })).toBe('21:06:56')
   })
 })

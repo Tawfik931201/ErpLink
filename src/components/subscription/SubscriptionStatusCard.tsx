@@ -66,20 +66,20 @@ export default function SubscriptionStatusCard() {
     if (trial && !trial.isExpired) {
       const days = trial.daysRemaining
       return (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50/50 p-5">
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 dark:border-amber-700 dark:bg-amber-950/40">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-            <h3 className="text-sm font-bold text-amber-900">
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <h3 className="text-sm font-bold text-amber-900 dark:text-amber-100">
               {isAr ? 'تجربة مجانية' : 'Free trial'}
             </h3>
           </div>
-          <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
+          <p className="text-xs text-amber-900 dark:text-amber-100 mt-1.5 leading-relaxed">
             {isAr
               ? `أنت في فترة التجربة المجانية (7 أيام). ${days > 0 ? `يتبقى ${days} يوم.` : 'تنتهي خلال أقل من يوم.'} سيتم إغلاق مساحة العمل عند انتهاء التجربة إلا إذا تم تسجيل اشتراك. تواصل مع الدعم للاشتراك.`
               : `You are in the 7-day free trial. ${days > 0 ? `${days} day${days === 1 ? '' : 's'} remaining.` : 'Less than a day left.'} The workspace will be closed when the trial ends unless a subscription is registered. Contact support to subscribe.`}
           </p>
           {trial.endsAt && (
-            <p className="text-[11px] text-amber-800/70 mt-2">
+            <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-2">
               {isAr ? 'تنتهي في: ' : 'Ends on: '}
               {formatDate(trial.endsAt)}
             </p>
@@ -90,14 +90,14 @@ export default function SubscriptionStatusCard() {
 
     if (trial?.isExpired) {
       return (
-        <div className="rounded-2xl border border-red-200 bg-red-50/60 p-5">
+        <div className="rounded-2xl border border-red-300 bg-red-50 p-5 dark:border-red-800 dark:bg-red-950/40">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
-            <h3 className="text-sm font-bold text-red-900">
+            <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
+            <h3 className="text-sm font-bold text-red-900 dark:text-red-100">
               {isAr ? 'انتهت التجربة المجانية' : 'Free trial ended'}
             </h3>
           </div>
-          <p className="text-xs text-red-800/80 mt-1.5 leading-relaxed">
+          <p className="text-xs text-red-900 dark:text-red-100 mt-1.5 leading-relaxed">
             {isAr
               ? 'انتهت فترة التجربة المجانية وتم إغلاق مساحة العمل. تواصل مع الدعم للاشتراك وإعادة التفعيل.'
               : 'The free trial has ended and the workspace is closed. Contact support to subscribe and reactivate.'}
@@ -107,14 +107,14 @@ export default function SubscriptionStatusCard() {
     }
 
     return (
-      <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 p-5">
+      <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-5 dark:border-amber-700 dark:bg-amber-950/40">
         <div className="flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-          <h3 className="text-sm font-bold text-amber-900">
+          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          <h3 className="text-sm font-bold text-amber-900 dark:text-amber-100">
             {isAr ? 'لا يوجد اشتراك نشط' : 'No active subscription'}
           </h3>
         </div>
-        <p className="text-xs text-amber-800/80 mt-1.5 leading-relaxed">
+        <p className="text-xs text-amber-900 dark:text-amber-100 mt-1.5 leading-relaxed">
           {isAr
             ? 'لم يتم تسجيل اشتراك لمساحة العمل الخاصة بك بعد. تواصل مع الدعم لتفعيل اشتراكك.'
             : 'No subscription has been registered for your workspace yet. Contact support to activate your subscription.'}
