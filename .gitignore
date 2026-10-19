@@ -34,6 +34,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 logs/
+# The `logs/` pattern above matches ANY directory named logs — including the
+# Sync Logs route directory. Without this exception the page is silently
+# untracked and can never be committed or deployed (it was "missing in git
+# history" for exactly this reason). Negation must stay AFTER `logs/`.
+!src/app/(app)/app/logs/
 
 # ─── OS ──────────────────────────────────────────────────────────
 .DS_Store
