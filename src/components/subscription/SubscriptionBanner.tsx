@@ -1,12 +1,10 @@
 'use client'
 
-import { AlertTriangle, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { AlertTriangle } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { getMyActiveSubscription, type MySubscription } from '@/app/actions/subscription-actions'
 import { useLanguage } from '@/components/language-provider'
-
-const DISMISS_KEY = 'subscription_banner_dismissed'
 
 type BannerState =
   | { kind: 'none' }
@@ -27,24 +25,20 @@ type BannerState =
  *   (days + hours, refreshed every minute).
  * - Active with >7 days remaining → nothing is rendered.
  *
- * Dismissible with the X for the current session only (sessionStorage); it
- * returns on the next visit.
+ * Not dismissible — the strip has no X and no sessionStorage memory, so it
+ * is rendered on every page view for as long as the state warrants it
+ * (including for admins; requested 2026-10-19).
  */
 export default function SubscriptionBanner() {
   const { lang } = useLanguage()
   const isAr = lang === 'ar'
   const [state, setState] = useState<BannerState>(null)
-  const [dismissed, setDismissed] = useState(false)
   // Ticks every minute while the "soon" state is active so the countdown
   // (days/hours) stays fresh without a page reload.
   const [, setTick] = useState(0)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (sessionStorage.getItem(DISMISS_KEY)) {
-      setDismissed(true)
-      return
-    }
     getMyActiveSubscription().then((res) => {
       if (!res.success || !res.subscription) {
         // No subscription row on this workspace (or fetch failed) → red strip.
@@ -71,16 +65,7 @@ export default function SubscriptionBanner() {
     return () => clearInterval(id)
   }, [state?.kind])
 
-  const dismiss = useCallback(() => {
-    setDismissed(true)
-    try {
-      sessionStorage.setItem(DISMISS_KEY, '1')
-    } catch {
-      /* ignore quota errors */
-    }
-  }, [])
-
-  if (dismissed || !state) return null
+  if (!state) return null
 
   const isExpired = state.kind === 'expired' || state.kind === 'none'
   const bg = isExpired ? 'bg-red-600' : 'bg-amber-500'
@@ -110,13 +95,6 @@ export default function SubscriptionBanner() {
     >
       <AlertTriangle className={`h-3.5 w-3.5 shrink-0 ${iconColor}`} aria-hidden="true" />
       <p className="flex-1 text-center leading-snug">{message}</p>
-      <button
-        onClick={dismiss}
-        aria-label={isAr ? 'إغلاق التنبيه' : 'Dismiss notification'}
-        className={`shrink-0 rounded p-0.5 transition-colors hover:bg-black/10 ${fg}`}
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
     </div>
   )
 }

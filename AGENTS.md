@@ -39,7 +39,7 @@
 | File | Purpose |
 |------|---------|
 | `src/components/subscription/SubscriptionStatusCard.tsx` | Subscription status card on dashboard (contacts **support**, never affiliate) |
-| `src/components/subscription/SubscriptionBanner.tsx` | Expiry banner (X to dismiss, sessionStorage; contacts **support**) |
+| `src/components/subscription/SubscriptionBanner.tsx` | Expiry banner (always visible, not dismissible, shown to admins too since 2026-10-19; contacts **support**) |
 
 ### Admin Facing
 | File | Purpose |
@@ -614,8 +614,9 @@ against** — see below, do not start it.
   banner is a sibling of the scrolling main area — the page scrolls underneath
   it). States: red when no subscription or expired ("المساحة مؤرشفة"), amber
   with a live day/hour countdown when ≤7 days remain, nothing otherwise.
-  Hidden for admins. Dismissible via X for the current session only
-  (sessionStorage `subscription_banner_dismissed`); returns next visit.
+  Shown to admins too, and **not dismissible** — the X and the sessionStorage
+  memory (`subscription_banner_dismissed`) were removed 2026-10-19 on request:
+  the strip must stay on every page view for as long as the state warrants.
 - Workspace auto-archive (added 2026-10-18): `src/lib/workspace-archive.ts`
   sets `workspaces.archived_at` when a workspace's latest active subscription
   expired and no non-expired active subscription remains. Triggered three ways:

@@ -170,9 +170,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground font-sans" dir={dir}>
       {/* Fixed top alert strip — sits above the sidebar and the page content.
-          The page (main) scrolls underneath it. Hidden for admins: the strip
-          is a client-billing reminder, not an internal-tool warning. */}
-      {!layoutInfo.isAdmin && <SubscriptionBanner />}
+          The page (main) scrolls underneath it. Rendered for everyone,
+          including admins, and not dismissible (product decision 2026-10-19). */}
+      <SubscriptionBanner />
       <div className="flex flex-1 min-h-0 relative">
         <aside className={`w-[200px] shrink-0 ${dir === 'rtl' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none h-full overflow-visible z-40`}>
           <div className="p-4 pb-2 pt-5 flex items-center">
