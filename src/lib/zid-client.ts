@@ -660,6 +660,24 @@ export const ZidAPI = {
   // ── Store metadata (auto-fill mapping dropdowns) ─────────────────────────
   storeMeta: {
     /**
+     * GET payment methods — used to auto-fill the analytic-distribution payment
+     * rules in the Standard Mapping orders tab.
+     * Returns [] on failure (non-fatal).
+     */
+    paymentMethods: async (creds: ZidCredentials): Promise<any[]> => {
+      try {
+        const res = await zidClient.get('/v1/managers/store/payment-methods', {
+          headers: buildZidHeaders(creds),
+        })
+        const data = res.data?.data ?? res.data?.results ?? res.data ?? []
+        return Array.isArray(data) ? data : []
+      } catch (err: any) {
+        console.warn('[ZidAPI] payment-methods fetch failed (non-fatal):', err?.response?.data || err?.message)
+        return []
+      }
+    },
+
+    /**
      * GET order custom statuses — returns main statuses with optional sub-statuses.
      * Returns [] on failure (non-fatal).
      */

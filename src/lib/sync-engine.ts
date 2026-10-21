@@ -21,6 +21,11 @@ import {
 import { resolveOperationForEvent } from '@/lib/event-operation'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
+import {
+  paymentKeysFromOrder,
+  resolveAnalyticDistribution,
+  toOdooAnalyticFields,
+} from '@/lib/odoo/analytic-distribution'
 import { OdooClient } from '@/lib/odoo-client'
 import {
   allPlatformIdFieldNames,
@@ -1211,7 +1216,16 @@ async function buildOrderLineItems(
   console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount}`)
 
   // 3. Fetch line field meta (for many2one resolution and tax field detection)
-  const lineFieldNames = [...new Set([...effectiveLineMappings.map(m => m.erpField), 'tax_id', 'tax_ids'])]
+  // analytic_distribution (Odoo 17+) / analytic_account_id (<=16) are probed
+  // with the rest so the distribution can be attached without a second call,
+  // and so an explicit line mapping for them survives the allowlist below.
+  const lineFieldNames = [...new Set([
+    ...effectiveLineMappings.map(m => m.erpField),
+    'tax_id',
+    'tax_ids',
+    'analytic_distribution',
+    'analytic_account_id',
+  ])]
   const lineFieldMeta = lineFieldNames.length > 0
     ? await fetchFieldMeta(client, 'sale.order.line', lineFieldNames)
     : new Map<string, OdooFieldMeta>()
@@ -1725,6 +1739,56 @@ async function buildOrderLineItems(
       if (!ALLOWED_LINE_KEYS.has(key) && !lineFieldMeta.has(key) && !key.startsWith('x_')) {
         console.warn(`[SyncEngine] Dropping unsupported sale.order.line key "${key}" to avoid a failed order create`)
         delete built[key]
+      }
+    }
+  }
+
+  // Analytic distribution — Standard Mapping orders tab, Zid + Salla only.
+  // Runs AFTER the allowlist so the JSON is attached to every built line
+  // (products, shipping, discount, COD); a line that already carries an
+  // explicit mapping for either analytic field is left untouched.
+  if (platform === 'zid' || platform === 'salla') {
+    const analyticConfig =
+      (settings as any)?.analytic ??
+      (orderStdSettings as any)?.analytic ??
+      (orderStdSettings as any)?.order?.analytic
+
+    if (analyticConfig?.enabled) {
+      try {
+        const { locationId, locationName } = extractOrderLocationInfo(zidData, platform)
+        const distribution = resolveAnalyticDistribution({
+          config: analyticConfig,
+          locationId,
+          locationName,
+          paymentKeys: paymentKeysFromOrder(zidData, platform),
+        })
+
+        if (distribution.length > 0) {
+          const hasDistributionField = lineFieldMeta.has('analytic_distribution')
+          const hasAccountField = lineFieldMeta.has('analytic_account_id')
+
+          if (!hasDistributionField && !hasAccountField) {
+            console.warn('[SyncEngine] Analytic rules are enabled but sale.order.line has neither analytic_distribution nor analytic_account_id; skipped.')
+          } else {
+            if (!hasDistributionField && distribution.length > 1) {
+              const top = [...distribution].sort((a, b) => b.percentage - a.percentage)[0]
+              console.warn(`[SyncEngine] Odoo without analytic_distribution; using analytic_account_id=${top?.accountId} although ${distribution.length} accounts were configured.`)
+            }
+            const analyticFields = toOdooAnalyticFields(distribution, hasDistributionField, hasAccountField)
+            if (Object.keys(analyticFields).length > 0) {
+              let applied = 0
+              for (const line of lines) {
+                if ('analytic_distribution' in line || 'analytic_account_id' in line) continue
+                Object.assign(line, analyticFields)
+                applied += 1
+              }
+              console.info(`[SyncEngine] Applied analytic distribution to ${applied}/${lines.length} order line(s):`, analyticFields)
+            }
+          }
+        }
+      } catch (err: any) {
+        // Never fail the order because of analytics.
+        console.warn('[SyncEngine] Analytic distribution failed; continuing without it:', err?.message || err)
       }
     }
   }

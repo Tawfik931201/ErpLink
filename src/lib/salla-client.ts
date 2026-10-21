@@ -289,6 +289,43 @@ export async function listSallaBranches(merchantId: string): Promise<SallaBranch
   }
 }
 
+export interface SallaPaymentMethod {
+  value: string
+  label: string
+}
+
+/**
+ * Lists the store's enabled payment methods (`GET /payment/methods`, scope
+ * `payments.read`) for the Standard Mapping analytic rules.
+ *
+ * A token without that scope answers 401/403 — return [] so the rest of the
+ * mapping screen still works; any other failure is real and is rethrown.
+ */
+export async function listSallaPaymentMethods(merchantId: string): Promise<SallaPaymentMethod[]> {
+  const endpoints = ['/payment/methods?status=enabled', '/payment/methods']
+  for (let i = 0; i < endpoints.length; i++) {
+    try {
+      const res = await callSallaApi(merchantId, 'GET', endpoints[i])
+      const rows = Array.isArray(res?.data) ? res.data : []
+      const seen = new Set<string>()
+      const methods: SallaPaymentMethod[] = []
+      for (const row of rows) {
+        const value = String(row?.slug || row?.code || row?.id || '').trim()
+        if (!value || seen.has(value)) continue
+        seen.add(value)
+        const label = typeof row?.name === 'string' ? row.name : sallaBranchName({ name: row?.name, id: value })
+        methods.push({ value, label: label || value })
+      }
+      return methods
+    } catch (err: any) {
+      const status = err?.response?.status
+      if (status === 401 || status === 403) return []
+      if (i === endpoints.length - 1) throw err
+    }
+  }
+  return []
+}
+
 /**
  * Bulk-updates product quantities on Salla.
  *

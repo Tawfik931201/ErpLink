@@ -1348,6 +1348,72 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
   }
 }
 
+/**
+ * Lists analytic accounts so the Standard Mapping orders tab can attach one to
+ * a rule. `plan_id` only exists from Odoo 17, so the field list is probed with
+ * `fields_get` instead of assuming a version.
+ */
+export async function getOdooAnalyticAccounts(force = false, companyId?: number) {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found or inactive.', accounts: [] }
+    }
+
+    const { erp_type } = connRes.connection
+    if (erp_type && erp_type !== 'odoo') {
+      return { success: true, accounts: [] }
+    }
+
+    const cacheKey = `odoo:analytic-accounts:${connRes.connection.id}:${companyId || 'all'}`
+    if (force) ttlCache.delete(cacheKey)
+
+    const accounts = await ttlCache.get(
+      cacheKey,
+      TTL_OPTIONS_MS,
+      async () => {
+        const client = createOdooClient(connRes.connection)
+
+        const fieldsMeta = await client.execute<Record<string, any>>(
+          'account.analytic.account',
+          'fields_get',
+          [['name', 'code', 'active', 'company_id', 'plan_id']],
+          { attributes: ['type', 'relation'] }
+        )
+
+        const fields = ['id', 'name']
+        if (fieldsMeta?.code) fields.push('code')
+        if (fieldsMeta?.plan_id) fields.push('plan_id')
+        if (fieldsMeta?.company_id) fields.push('company_id')
+
+        const domain: any[] = [['active', '=', true]]
+        if (companyId && companyId > 0 && fieldsMeta?.company_id) {
+          domain.unshift('|', ['company_id', '=', false], ['company_id', '=', companyId])
+        }
+
+        const records = await client.execute<Array<Record<string, any>>>(
+          'account.analytic.account',
+          'search_read',
+          [domain],
+          { fields, order: 'code asc, name asc', limit: 500 }
+        )
+
+        return (Array.isArray(records) ? records : []).map(record => ({
+          id: Number(record.id),
+          name: String(record.name || ''),
+          code: record.code ? String(record.code) : '',
+          plan: Array.isArray(record.plan_id) ? String(record.plan_id[1] || '') : '',
+        })).filter(account => Number.isFinite(account.id) && account.id > 0)
+      }
+    )
+
+    return { success: true, accounts: accounts || [] }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooAnalyticAccounts failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch analytic accounts', accounts: [] }
+  }
+}
+
 export async function searchOdooCategories(searchTerm: string = '') {
   try {
     const connRes = await getActiveWorkspaceErpConnection()

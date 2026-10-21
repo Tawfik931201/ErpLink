@@ -24,6 +24,7 @@ import {
   Zap,
   Receipt,
   Wand2,
+  Calculator,
 } from 'lucide-react'
 import Link from 'next/link'
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
@@ -31,6 +32,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { getFieldMappings } from '@/app/actions/field-mappings'
 import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
 import {
+  getOdooAnalyticAccounts,
   getOdooFieldValueOptions,
   getOdooLocations,
   getOdooWarehouses,
@@ -43,10 +45,10 @@ import {
   checkZidOrderStatusField,
 } from '@/app/actions/order-custom-status'
 import { saveOrderStatusMappings, getOrderStatusMappings } from '@/app/actions/order-status-mappings'
-import { getSallaLocations, type SallaLocation } from '@/app/actions/salla'
+import { getSallaLocations, getSallaPaymentMethods, type SallaLocation } from '@/app/actions/salla'
 import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
 import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
-import { getZidLocations, type ZidLocation } from '@/app/actions/zid'
+import { getZidLocations, getZidPaymentMethods, type ZidLocation } from '@/app/actions/zid'
 import { useLanguage } from '@/components/language-provider'
 import CategoryMappingDialog from '@/components/mapping/category-mapping-dialog'
 import ProductMappingDialog from '@/components/mapping/product-mapping-dialog'
@@ -74,6 +76,19 @@ interface StandardMappingClientProps {
   sallaStores?: { id: string; name: string | null }[]
   shopifyStores?: { id: string; name: string | null }[]
   initialSubTab?: 'categories' | 'products' | 'customers' | 'orders'
+}
+
+/**
+ * One analytic-distribution rule row. Numeric fields are kept as strings so
+ * the inputs stay editable while typing (same pattern as the warehouse rules).
+ */
+type AnalyticRuleRow = {
+  rowKey: string
+  condition: 'all' | 'warehouse' | 'payment'
+  source_value: string
+  source_label: string
+  odoo_analytic_account_id: string
+  percentage: string
 }
 
 /**
@@ -256,6 +271,16 @@ export default function StandardMappingClient({
     odoo_warehouse_id: string
   }>>([])
   const [isRefreshingOrderWarehouses, setIsRefreshingOrderWarehouses] = useState(false)
+
+  // Analytic distribution (Zid + Salla): match by warehouse, by payment method,
+  // or fall back to a unified rule. Percentages are relative weights and are
+  // normalised to 100 before they reach Odoo.
+  const [orderAnalyticEnabled, setOrderAnalyticEnabled] = useState(false)
+  const [orderAnalyticRules, setOrderAnalyticRules] = useState<AnalyticRuleRow[]>([])
+  const [analyticAccountOptions, setAnalyticAccountOptions] = useState<{ value: string; label: string }[]>([])
+  const [paymentMethodOptions, setPaymentMethodOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingAnalyticOptions, setIsLoadingAnalyticOptions] = useState(false)
+  const [analyticOptionsError, setAnalyticOptionsError] = useState('')
 
   // Shipping & Discount Line items
   const [orderAddShipping, setOrderAddShipping] = useState(false)
@@ -806,6 +831,22 @@ export default function StandardMappingClient({
           )
         )
 
+        const analytic = (s.order?.analytic || s.analytic) as { enabled?: boolean; rules?: unknown[] } | undefined
+        setOrderAnalyticEnabled(analytic?.enabled === true)
+        setOrderAnalyticRules(
+          (Array.isArray(analytic?.rules) ? analytic!.rules : []).map((raw, i) => {
+            const row = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>
+            return {
+              rowKey: `analytic_${i}_${Math.random().toString(36).slice(2, 7)}`,
+              condition: row.condition === 'warehouse' || row.condition === 'payment' ? row.condition : 'all',
+              source_value: row.source_value ? String(row.source_value) : '',
+              source_label: row.source_label ? String(row.source_label) : '',
+              odoo_analytic_account_id: row.odoo_analytic_account_id ? String(row.odoo_analytic_account_id) : '',
+              percentage: row.percentage !== undefined && row.percentage !== null ? String(row.percentage) : '100',
+            } as AnalyticRuleRow
+          })
+        )
+
         setOrderAddShipping(s.add_shipping_as_line || false)
         setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
         setOrderShippingProductSku(s.shipping_product_sku || '')
@@ -1123,6 +1164,91 @@ export default function StandardMappingClient({
     setStoreWarehouseRules(prev => prev.filter(rule => rule.rowKey !== rowKey))
   }, [])
 
+  // ── Analytic distribution: option lists + row handlers ──
+
+  const loadAnalyticOptions = useCallback(async (force = false) => {
+    if (standardSubTab !== 'orders' || standardStoreTab === 'shopify') return
+    setIsLoadingAnalyticOptions(true)
+    setAnalyticOptionsError('')
+    try {
+      const [accountsRes, paymentsRes] = await Promise.all([
+        getOdooAnalyticAccounts(force, orderCompanyId ? Number(orderCompanyId) : undefined),
+        standardStoreTab === 'salla'
+          ? getSallaPaymentMethods(force, standardStoreId)
+          : getZidPaymentMethods(force, standardStoreId),
+      ])
+
+      if (accountsRes.success && accountsRes.accounts) {
+        setAnalyticAccountOptions(
+          accountsRes.accounts.map(account => ({
+            value: String(account.id),
+            label: [account.code, account.name, account.plan].filter(Boolean).join(' — '),
+          }))
+        )
+      } else {
+        setAnalyticOptionsError(
+          accountsRes.error || (lang === 'ar' ? 'تعذر تحميل الحسابات التحليلية' : 'Failed to load analytic accounts')
+        )
+      }
+
+      if (paymentsRes.success && paymentsRes.methods) {
+        setPaymentMethodOptions(
+          paymentsRes.methods.map(method => ({ value: method.value, label: method.label }))
+        )
+      } else {
+        const paymentsError =
+          paymentsRes.error || (lang === 'ar' ? 'تعذر تحميل طرق الدفع' : 'Failed to load payment methods')
+        setAnalyticOptionsError(prev => prev || paymentsError)
+      }
+    } catch (err: any) {
+      console.error('[AnalyticRules] Failed to load options:', err)
+      setAnalyticOptionsError(
+        lang === 'ar' ? 'تعذر تحميل خيارات الحسابات التحليلية' : 'Failed to load analytic options'
+      )
+    } finally {
+      setIsLoadingAnalyticOptions(false)
+    }
+  }, [standardSubTab, standardStoreTab, standardStoreId, orderCompanyId, lang])
+
+  // Only fetch while the section is actually enabled - the lists are useless
+  // otherwise, and this keeps the orders tab light for stores without rules.
+  useEffect(() => {
+    if (standardSubTab !== 'orders' || standardStoreTab === 'shopify' || !orderAnalyticEnabled) return
+    loadAnalyticOptions(false)
+  }, [standardSubTab, standardStoreTab, orderAnalyticEnabled, loadAnalyticOptions])
+
+  const handleRefreshAnalyticOptions = useCallback(async () => {
+    await loadAnalyticOptions(true)
+    toast({
+      title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+      description: lang === 'ar'
+        ? 'تم تحديث الحسابات التحليلية وطرق الدفع'
+        : 'Analytic accounts and payment methods reloaded',
+    })
+  }, [loadAnalyticOptions, lang, toast])
+
+  const handleAddAnalyticRule = useCallback(() => {
+    setOrderAnalyticRules(prev => [
+      ...prev,
+      {
+        rowKey: `analytic_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        condition: 'all',
+        source_value: '',
+        source_label: '',
+        odoo_analytic_account_id: '',
+        percentage: '100',
+      },
+    ])
+  }, [])
+
+  const handleAnalyticRuleChange = useCallback((rowKey: string, patch: Partial<AnalyticRuleRow>) => {
+    setOrderAnalyticRules(prev => prev.map(rule => (rule.rowKey === rowKey ? { ...rule, ...patch } : rule)))
+  }, [])
+
+  const handleRemoveAnalyticRule = useCallback((rowKey: string) => {
+    setOrderAnalyticRules(prev => prev.filter(rule => rule.rowKey !== rowKey))
+  }, [])
+
   // Re-pull store locations + Odoo warehouses with no cache, so a warehouse
   // created in Odoo after opening the tab is selectable. Locations are
   // per-platform (Zid locations / Salla branches).
@@ -1416,6 +1542,48 @@ export default function StandardMappingClient({
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد منتج افتراضي لكن لم يتم تحديد المنتج' : 'Default product policy is selected but no product selected')
     }
 
+    // Drop half-filled analytic rows instead of persisting them: an empty
+    // account or percentage would silently skew the distribution.
+    const analyticRules = orderAnalyticRules.reduce<Array<{
+      condition: 'all' | 'warehouse' | 'payment'
+      source_value: string
+      source_label: string
+      odoo_analytic_account_id: number
+      percentage: number
+    }>>((acc, rule) => {
+      const accountId = Number(rule.odoo_analytic_account_id)
+      const percentage = Number(rule.percentage)
+      if (!Number.isInteger(accountId) || accountId <= 0) return acc
+      if (!Number.isFinite(percentage) || percentage <= 0) return acc
+
+      const condition = rule.condition === 'warehouse' || rule.condition === 'payment' ? rule.condition : 'all'
+      const sourceValue = condition === 'all' ? '' : String(rule.source_value || '').trim()
+      if (condition !== 'all' && !sourceValue) return acc
+
+      acc.push({
+        condition,
+        source_value: sourceValue,
+        source_label: condition === 'all' ? '' : String(rule.source_label || '').trim() || sourceValue,
+        odoo_analytic_account_id: accountId,
+        percentage: Math.min(percentage, 100),
+      })
+      return acc
+    }, [])
+
+    if (orderAnalyticEnabled && analyticRules.length === 0) {
+      warnings.push(
+        lang === 'ar'
+          ? 'التوزيع التحليلي مفعّل بدون أي صف مكتمل - لن يُطبَّق أي حساب'
+          : 'Analytic distribution is enabled with no complete rule - no account will be applied'
+      )
+    } else if (orderAnalyticEnabled && analyticRules.length !== orderAnalyticRules.length) {
+      warnings.push(
+        lang === 'ar'
+          ? 'تم تجاهل صفوف التوزيع التحليلي الناقصة'
+          : 'Incomplete analytic-distribution rows were ignored'
+      )
+    }
+
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
       enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
@@ -1467,6 +1635,10 @@ export default function StandardMappingClient({
           if (src && wh) acc[src] = wh
           return acc
         }, {}),
+        analytic: {
+          enabled: orderAnalyticEnabled,
+          rules: analyticRules,
+        },
       }
     }
     // Save settings first, then mappings (if settings fails, stop early)
@@ -1502,6 +1674,7 @@ export default function StandardMappingClient({
     orderDisabled, orderEnabledActions, orderMatchZidField, orderMatchOdooField,
     orderCompanyId, orderLinkCompany, orderWarehouseId, orderPricelistId, orderPaymentTermId,
     orderAutoConfirm, orderAutoInvoice, orderPartialFulfillment, storeWarehouseRules,
+    orderAnalyticEnabled, orderAnalyticRules,
     orderCustomerFallbackPolicy, orderDefaultCustomerId, orderProductFallbackPolicy, orderDefaultProductId,
     orderAddShipping, orderShippingProductId, orderShippingProductSku,
     orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
@@ -4038,6 +4211,186 @@ export default function StandardMappingClient({
                                 </div>
 
                                 {/* ═══ ضريبة القيمة المضافة (VAT) ═══ */}
+                                {/* ─── Analytic Distribution ─── */}
+                                {standardStoreTab !== 'shopify' && (
+                                  <div className="border-t border-border/80 pt-5">
+                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                      <div>
+                                        <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                                          <Calculator className="h-4 w-4 text-emerald-500" />
+                                          {lang === 'ar' ? 'التوزيع التحليلي (الحسابات التحليلية)' : 'Analytic Distribution (Analytic Accounts)'}
+                                        </h3>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                          {lang === 'ar'
+                                            ? 'اربط طلبات المتجر بحسابات أودوو التحليلية حسب المخزن أو طريقة الدفع. النسب تُعتبر أوزاناً نسبية ويتم تطبيعها إجمالاً إلى 100%. صف "موحّد" يُستخدم فقط عندما لا يطابق أي شرط مخزن أو دفع.'
+                                            : 'Attach Odoo analytic accounts to orders by warehouse or payment method. Percentages are relative weights, normalised to 100%. A "unified" rule applies only when no warehouse/payment rule matches.'}
+                                        </p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        role="switch"
+                                        dir="ltr"
+                                        aria-checked={orderAnalyticEnabled}
+                                        onClick={() => setOrderAnalyticEnabled(!orderAnalyticEnabled)}
+                                        className={cn(
+                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                          orderAnalyticEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                        )}
+                                      >
+                                        <span className={cn(
+                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                          orderAnalyticEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                        )} />
+                                      </button>
+                                    </div>
+
+                                    {orderAnalyticEnabled && (
+                                      <div className="mt-3 space-y-2">
+                                        {orderAnalyticRules.map((rule) => {
+                                          const sourceOptions = rule.condition === 'warehouse'
+                                            ? (standardStoreTab === 'salla' ? sallaOrderLocationOptions : zidLocationOptions)
+                                            : paymentMethodOptions
+                                          return (
+                                            <div
+                                              key={rule.rowKey}
+                                              className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(0,1.6fr)_92px_28px] items-center gap-2"
+                                            >
+                                              <SearchableSelect
+                                                options={[
+                                                  { value: 'all', label: lang === 'ar' ? 'جميع الطلبات (موحّد)' : 'All orders (unified)' },
+                                                  { value: 'warehouse', label: lang === 'ar' ? 'حسب المخزن' : 'By warehouse' },
+                                                  { value: 'payment', label: lang === 'ar' ? 'حسب طريقة الدفع' : 'By payment method' },
+                                                ]}
+                                                value={rule.condition}
+                                                onChange={(v: string) => handleAnalyticRuleChange(rule.rowKey, {
+                                                  condition: v === 'warehouse' || v === 'payment' ? v : 'all',
+                                                  source_value: '',
+                                                  source_label: '',
+                                                })}
+                                              />
+
+                                              {rule.condition === 'all' ? (
+                                                <div className="flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-[11px] text-muted-foreground">
+                                                  {lang === 'ar' ? 'يُطبَّق على كل الطلبات' : 'Applies to every order'}
+                                                </div>
+                                              ) : (
+                                                <SearchableSelect
+                                                  options={sourceOptions}
+                                                  value={rule.source_value}
+                                                  onChange={(v: string) => {
+                                                    const selected = sourceOptions.find(option => option.value === String(v ?? ''))
+                                                    handleAnalyticRuleChange(rule.rowKey, {
+                                                      source_value: String(v ?? ''),
+                                                      source_label: selected?.label || String(v ?? ''),
+                                                    })
+                                                  }}
+                                                  placeholder={isLoadingAnalyticOptions
+                                                    ? (lang === 'ar' ? 'جارٍ التحميل…' : 'Loading…')
+                                                    : rule.condition === 'warehouse'
+                                                      ? (standardStoreTab === 'salla' ? (lang === 'ar' ? '- اختر الفرع -' : '- Salla branch -') : (lang === 'ar' ? '- اختر المخزن -' : '- Zid location -'))
+                                                      : (lang === 'ar' ? '- اختر طريقة الدفع -' : '- Payment method -')}
+                                                  disabled={isLoadingAnalyticOptions}
+                                                />
+                                              )}
+
+                                              <SearchableSelect
+                                                options={analyticAccountOptions}
+                                                value={rule.odoo_analytic_account_id}
+                                                onChange={(v: string) => handleAnalyticRuleChange(rule.rowKey, {
+                                                  odoo_analytic_account_id: String(v ?? ''),
+                                                })}
+                                                placeholder={isLoadingAnalyticOptions
+                                                  ? (lang === 'ar' ? 'جارٍ التحميل…' : 'Loading…')
+                                                  : (lang === 'ar' ? '- الحساب التحليلي -' : '- Analytic account -')}
+                                                disabled={isLoadingAnalyticOptions}
+                                              />
+
+                                              <div className="relative">
+                                                <input
+                                                  type="number"
+                                                  min="0.01"
+                                                  max="100"
+                                                  step="0.01"
+                                                  className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                  value={rule.percentage}
+                                                  onChange={e => handleAnalyticRuleChange(rule.rowKey, { percentage: e.target.value })}
+                                                  placeholder="100"
+                                                  aria-label={lang === 'ar' ? 'النسبة' : 'Percentage'}
+                                                />
+                                                <span className="pointer-events-none absolute inset-y-0 end-2 flex items-center text-[10px] text-muted-foreground">%</span>
+                                              </div>
+
+                                              <button
+                                                type="button"
+                                                onClick={() => handleRemoveAnalyticRule(rule.rowKey)}
+                                                title={lang === 'ar' ? 'حذف القاعدة' : 'Remove rule'}
+                                                className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                              >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              </button>
+                                            </div>
+                                          )
+                                        })}
+
+                                        {orderAnalyticRules.length === 0 && (
+                                          <p className="text-[11px] text-muted-foreground">
+                                            {lang === 'ar'
+                                              ? 'لا توجد قواعد بعد - أضف قاعدة لربط الطلبات بحساب تحليلي.'
+                                              : 'No rules yet - add one to attach orders to an analytic account.'}
+                                          </p>
+                                        )}
+
+                                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 w-7 shrink-0 p-0"
+                                            onClick={handleRefreshAnalyticOptions}
+                                            disabled={isLoadingAnalyticOptions}
+                                            title={lang === 'ar' ? 'تحديث الحسابات وطرق الدفع' : 'Refresh accounts & payment methods'}
+                                            aria-label={lang === 'ar' ? 'تحديث الخيارات' : 'Refresh options'}
+                                          >
+                                            <RefreshCw className={cn('h-3 w-3', isLoadingAnalyticOptions && 'animate-spin')} />
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleAddAnalyticRule}
+                                            className="h-7 text-[10px] gap-1"
+                                          >
+                                            <Plus className="h-3 w-3" />
+                                            {lang === 'ar' ? 'إضافة قاعدة' : 'Add Rule'}
+                                          </Button>
+                                        </div>
+
+                                        {!isLoadingAnalyticOptions && analyticAccountOptions.length === 0 && !analyticOptionsError && (
+                                          <p className="text-[11px] text-amber-600">
+                                            {lang === 'ar'
+                                              ? 'لم يتم العثور على حسابات تحليلية في أودوو. أنشئ حساباً تحليلياً أولاً ثم اضغط تحديث.'
+                                              : 'No analytic accounts were found in Odoo. Create one there, then press refresh.'}
+                                          </p>
+                                        )}
+                                        {analyticOptionsError && (
+                                          <p className="text-[11px] text-red-500">{analyticOptionsError}</p>
+                                        )}
+                                        {(() => {
+                                          const total = orderAnalyticRules.reduce((sum, rule) => sum + (Number(rule.percentage) || 0), 0)
+                                          if (orderAnalyticRules.length < 2 || Math.round(total * 100) / 100 === 100) return null
+                                          return (
+                                            <p className="text-[11px] text-muted-foreground">
+                                              {lang === 'ar'
+                                                ? `مجموع النسب ${Math.round(total * 100) / 100}% - سيتم تطبيعه إلى 100% عند المزامنة.`
+                                                : `Percentages total ${Math.round(total * 100) / 100}% - normalised to 100% on sync.`}
+                                            </p>
+                                          )
+                                        })()}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
                                 <div className="border-t border-border/80 pt-5">
                                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                     <div>

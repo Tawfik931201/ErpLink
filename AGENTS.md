@@ -93,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 692 tests over 44 suites (added 2026-09-29, grown 2026-10-21)
+# Unit tests — 722 tests over 46 suites (added 2026-09-29, grown 2026-10-21)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 692 tests over 44 suites:
+- 722 tests over 46 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -218,6 +218,19 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     is never *read* again (naming it in a comment is fine) and that verification
     precedes the first `.select()`. It also asserts the refresh route is
     admin-gated and refuses to run when nothing is derivable.
+  - `tests/unit/analytic-distribution.test.ts` (23 tests) — the Zid/Salla
+    analytic rules saved under `settings.order.analytic`: `all` is a fallback
+    only (any matching warehouse/payment rule suppresses it), matching specific
+    rules merge as relative weights, two rules on one account sum, payment keys
+    normalise (`zid_cod` → `cod`), and percentages reach Odoo as exactly 100
+    with two decimals (largest remainder: 3 equal shares → 33.34/33.33/33.33).
+    Also pins the Odoo <17 fallback to a single `analytic_account_id`
+  - `tests/unit/analytic-line-injection.test.ts` — source pins that both
+    `analytic_distribution` and `analytic_account_id` are probed with the line
+    meta, that injection happens **after** the unsupported-key allowlist (which
+    would otherwise strip it), that Zid/Salla are the only platforms, that an
+    explicitly mapped line is never overwritten, and that a failure never fails
+    the order
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
