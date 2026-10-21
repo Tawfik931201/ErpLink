@@ -1,6 +1,8 @@
 import { auth } from '@clerk/nextjs/server'
 import Link from 'next/link'
 
+import LanguageSwitcher from '@/components/language-switcher'
+import ThemeSwitcher from '@/components/theme-switcher'
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/ui/logo'
 import { type Language } from '@/lib/translations'
@@ -25,7 +27,10 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <LanguageSwitcher compact placement="down" />
+          <ThemeSwitcher compact placement="down" />
+          <span className="hidden sm:block mx-0.5 h-5 w-px bg-border" aria-hidden />
           {isSignedIn ? (
             <Button
               asChild

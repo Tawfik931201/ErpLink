@@ -42,7 +42,7 @@ export const translations = {
     'landing.heroTitle2': 'متجرك الإلكتروني',
     'landing.heroTitle3': 'بنظام',
     'landing.heroTitle4': 'الـ ERP',
-    'landing.heroSubtitle': 'مزامنة تلقائية وفورية للطلبات والمنتجات والمخزون والعملاء بين متجرك ونظام ERP (أودو، ERPNext، زوهو) — دون أي تدخل يدوي.',
+    'landing.heroSubtitle': 'مزامنة تلقائية وفورية للطلبات والمنتجات والمخزون والعملاء بين متجرك ونظام ERP (أودو، ERPNext) — دون أي تدخل يدوي.',
     'landing.bullet1': 'إعداد خلال دقائق بدون كود',
     'landing.bullet2': 'مزامنة حية 24/7 بشكل تلقائي',
     'landing.bullet3': 'دعم فني متخصص على مدار الساعة',
@@ -58,7 +58,7 @@ export const translations = {
     'landing.stats3': 'متجر مُربط',
     'landing.featuresBadge': 'مميزات النظام',
     'landing.featuresTitle': 'كل ما تحتاجه في مكان واحد',
-    'landing.featuresDesc': 'ربط شامل ومتكامل بين متجرك ونظام ERP (أودو، ERPNext، زوهو) يغطي كل جوانب عملك التجاري.',
+    'landing.featuresDesc': 'ربط شامل ومتكامل بين متجرك ونظام ERP (أودو، ERPNext) يغطي كل جوانب عملك التجاري.',
     
     // Feature list
     'feature.orders.title': 'الطلبات',
@@ -410,7 +410,7 @@ export const translations = {
     'landing.faqBadge': 'الأسئلة الشائعة',
     'landing.faqTitle': 'إجابات سريعة',
     'landing.faq1Q': 'هل أحتاج لخبرة تقنية لاستخدام ERP Link؟',
-    'landing.faq1A': 'لا أبداً. النظام مصمم للتجار. كل ما تحتاجه هو امتلاك متجر على إحدى المنصات المدعومة ونظام ERP (أودو، ERPNext، زوهو). الإعداد يتم في دقائق بدون أي كود.',
+    'landing.faq1A': 'لا أبداً. النظام مصمم للتجار. كل ما تحتاجه هو امتلاك متجر على إحدى المنصات المدعومة ونظام ERP (أودو، ERPNext). الإعداد يتم في دقائق بدون أي كود.',
     'landing.faq2Q': 'هل البيانات آمنة ومشفرة؟',
     'landing.faq2A': 'نعم. جميع البيانات مشفرة بـ SSL/TLS أثناء النقل والتخزين. نستخدم Clerk للمصادقة و Supabase للتخزين مع RLS. لا نخزّن أي بيانات دفع.',
     'landing.faq3Q': 'هل يمكنني استخدام النظام مع متاجر متعددة؟',
@@ -419,7 +419,7 @@ export const translations = {
     'landing.faq4A': 'النظام يخزّن البيانات مؤقتاً ويعيد المحاولة تلقائياً. بمجرد عودة الـ ERP، تتم المزامنة الفورية لجميع البيانات المعلقة. لن تفقد أي بيانات.',
 
     // Footer
-    'footer.rights': '© 2025 ERP Link. جميع الحقوق محفوظة.',
+    'footer.rights': '© 2026 ERP Link. جميع الحقوق محفوظة.',
     'footer.privacy': 'الخصوصية',
     'footer.terms': 'الشروط',
     'footer.contact': 'تواصل معنا',
@@ -513,6 +513,7 @@ export const translations = {
     'pricing.feature.detailedLogs': 'سجلات المزامنة المفصلة',
     'pricing.feature.dashboard': 'لوحة تحكم وتقارير',
     'pricing.feature.addCustomField': 'إضافة حقل مخصص إلى الـ ERP',
+    'pricing.feature.customMapping': 'ربط مخصص لأي موديول',
     'pricing.feature.ordersItems.desc': 'الطلبات وعناصرها وتفاصيلها تنتقل كاملة من المتجر إلى الـ ERP.',
     'pricing.feature.productsVariants.desc': 'المنتجات والمتغيرات والأسعار مزامنة تلقائياً في الاتجاهين.',
     'pricing.feature.customersCategories.desc': 'العملاء والتصنيفات تتزامن تلقائياً دون أي عمل يدوي.',
@@ -523,6 +524,7 @@ export const translations = {
     'pricing.feature.detailedLogs.desc': 'سجل مفصّل لكل محاولة مزامنة، مع إعادة المحاولة تلقائياً.',
     'pricing.feature.dashboard.desc': 'لوحة تحكم وتقارير لمتابعة حالة المزامنة يومياً.',
     'pricing.feature.addCustomField.desc': 'أضف حقولاً مخصصة إلى الـ ERP مباشرة من النظام.',
+    'pricing.feature.customMapping.desc': 'اختر أي موديول في Odoo — حتى موديولاتك المخصصة — واربطه بأحداث متجرك بدل الربط الافتراضي.',
     'pricing.feature.stores': 'المتاجر المتصلة',
     'pricing.feature.team': 'أعضاء الفريق',
     'pricing.feature.support': 'الدعم الفني',
@@ -570,7 +572,7 @@ export const translations = {
     'landing.heroTitle2': 'Your E-commerce Store',
     'landing.heroTitle3': 'to Your',
     'landing.heroTitle4': 'ERP System',
-    'landing.heroSubtitle': 'Automatic and instant synchronization of orders, products, inventory, and customers between your store and your ERP (Odoo, ERPNext, Zoho) — with no manual intervention.',
+    'landing.heroSubtitle': 'Automatic and instant synchronization of orders, products, inventory, and customers between your store and your ERP (Odoo, ERPNext) — with no manual intervention.',
     'landing.bullet1': 'Setup in minutes with zero code',
     'landing.bullet2': 'Live 24/7 automatic synchronization',
     'landing.bullet3': '24/7 dedicated customer support',
@@ -586,7 +588,7 @@ export const translations = {
     'landing.stats3': 'Connected Stores',
     'landing.featuresBadge': 'System Features',
     'landing.featuresTitle': 'Everything you need in one place',
-    'landing.featuresDesc': 'Comprehensive and integrated link between your store and your ERP (Odoo, ERPNext, Zoho) covering all aspects of your business.',
+    'landing.featuresDesc': 'Comprehensive and integrated link between your store and your ERP (Odoo, ERPNext) covering all aspects of your business.',
     
     // Feature list
     'feature.orders.title': 'Orders',
@@ -938,7 +940,7 @@ export const translations = {
     'landing.faqBadge': 'FAQ',
     'landing.faqTitle': 'Quick Answers',
     'landing.faq1Q': 'Do I need technical expertise to use ERP Link?',
-    'landing.faq1A': 'Not at all. The system is designed for merchants. All you need is a store on one of the supported platforms and an ERP (Odoo, ERPNext, Zoho). Setup takes minutes with zero code.',
+    'landing.faq1A': 'Not at all. The system is designed for merchants. All you need is a store on one of the supported platforms and an ERP (Odoo, ERPNext). Setup takes minutes with zero code.',
     'landing.faq2Q': 'Is my data secure and encrypted?',
     'landing.faq2A': 'Yes. All data is encrypted with SSL/TLS during transit and at rest. We use Clerk for authentication and Supabase for storage with RLS. We never store payment data.',
     'landing.faq3Q': 'Can I use the system with multiple stores?',
@@ -985,6 +987,7 @@ export const translations = {
     'pricing.feature.detailedLogs': 'Detailed sync logs',
     'pricing.feature.dashboard': 'Dashboard & reports',
     'pricing.feature.addCustomField': 'Add custom field to ERP',
+    'pricing.feature.customMapping': 'Custom mapping for any module',
     'pricing.feature.ordersItems.desc': 'Orders move to the ERP complete, with their line items and details.',
     'pricing.feature.productsVariants.desc': 'Products, variants and prices sync automatically in both directions.',
     'pricing.feature.customersCategories.desc': 'Customers and categories sync automatically, with no manual work.',
@@ -995,6 +998,7 @@ export const translations = {
     'pricing.feature.detailedLogs.desc': 'A detailed log for every sync attempt, with automatic retries.',
     'pricing.feature.dashboard.desc': 'A dashboard and reports to follow your sync status daily.',
     'pricing.feature.addCustomField.desc': 'Add custom fields to the ERP right from the app.',
+    'pricing.feature.customMapping.desc': 'Pick any Odoo module — including your own custom models — and bind it to store events instead of the default mapping.',
     'pricing.feature.stores': 'Connected stores',
     'pricing.feature.team': 'Team members',
     'pricing.feature.support': 'Support',
@@ -1018,7 +1022,7 @@ export const translations = {
     'pricing.cta.signIn': 'Sign In',
 
     // Footer
-    'footer.rights': '© 2025 ERP Link. All rights reserved.',
+    'footer.rights': '© 2026 ERP Link. All rights reserved.',
     'footer.privacy': 'Privacy Policy',
     'footer.terms': 'Terms of Service',
     'footer.contact': 'Contact Us',

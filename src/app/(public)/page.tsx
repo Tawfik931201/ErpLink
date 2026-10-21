@@ -1,28 +1,24 @@
 import {
-  ShoppingBag,
-  FileText,
-  Users,
-  Tag,
-  Box,
-  Link as LinkIcon,
-  Settings,
-  RefreshCw,
-  Layers,
-  ArrowLeft,
-  Check,
-  Zap,
-  BarChart3,
-
-  ChevronDown,
-  CreditCard,
-  ExternalLink,
   Activity,
-  Clock,
-  Database,
-  UserPlus,
-  Shield,
-  TrendingUp,
+  ArrowLeft,
   Bell,
+  Box,
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Gift,
+  Link as LinkIcon,
+  RefreshCw,
+  Settings,
+  Shield,
+  ShoppingBag,
+  SlidersHorizontal,
+  Sparkles,
+  Tag,
+  Users,
+  Workflow,
+  X,
+  Zap,
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
@@ -40,156 +36,56 @@ export default async function HomePage() {
   const t = (key: keyof typeof translations['ar']) =>
     translations[lang][key] || translations['ar'][key]
 
+  const isAr = lang === 'ar'
+
   const features = [
+    { icon: ShoppingBag, title: t('feature.orders.title'), desc: t('feature.orders.desc') },
+    { icon: Tag, title: t('feature.products.title'), desc: t('feature.products.desc') },
+    { icon: Box, title: t('feature.stock.title'), desc: t('feature.stock.desc') },
+    { icon: Users, title: t('feature.customers.title'), desc: t('feature.customers.desc') },
+    { icon: Activity, title: t('feature.accounting.title'), desc: t('feature.accounting.desc') },
+    { icon: RefreshCw, title: t('feature.multiStore.title'), desc: t('feature.multiStore.desc') },
+  ]
+
+  const liveRows = [
     {
       icon: ShoppingBag,
-      title: t('feature.multiStore.title'),
-      desc: t('feature.multiStore.desc'),
-      dot: 'bg-blue-500',
-    },
-    {
-      icon: FileText,
-      title: t('feature.orders.title'),
-      desc: t('feature.orders.desc'),
-      dot: 'bg-emerald-500',
-    },
-    {
-      icon: Tag,
-      title: t('feature.products.title'),
-      desc: t('feature.products.desc'),
-      dot: 'bg-violet-500',
+      title: isAr ? 'طلب جديد #1284' : 'New order #1284',
+      sub: isAr ? 'أُنشئ في Odoo' : 'Created in Odoo',
+      time: isAr ? 'قبل ثانيتين' : '2s ago',
     },
     {
       icon: Box,
-      title: t('feature.stock.title'),
-      desc: t('feature.stock.desc'),
-      dot: 'bg-amber-500',
+      title: isAr ? 'تحديث مخزون' : 'Stock update',
+      sub: isAr ? 'من Odoo إلى المتجر' : 'Odoo → store',
+      time: isAr ? 'قبل ٤ ثوانٍ' : '4s ago',
+    },
+    {
+      icon: Tag,
+      title: isAr ? 'منتج جديد' : 'New product',
+      sub: isAr ? 'تمت مزامنته بالكامل' : 'Fully synced',
+      time: isAr ? 'قبل ٩ ثوانٍ' : '9s ago',
     },
     {
       icon: Users,
-      title: t('feature.customers.title'),
-      desc: t('feature.customers.desc'),
-      dot: 'bg-cyan-500',
-    },
-    {
-      icon: CreditCard,
-      title: t('feature.accounting.title'),
-      desc: t('feature.accounting.desc'),
-      dot: 'bg-orange-500',
+      title: isAr ? 'عميل جديد' : 'New customer',
+      sub: isAr ? 'تمت مزامنته' : 'Synced',
+      time: isAr ? 'قبل ١٢ ثانية' : '12s ago',
     },
   ]
 
-  const stats = [
-    { value: '99.9%', label: t('landing.stats1') },
-    { value: '<2s', label: t('landing.stats2') },
+  const before = [
+    isAr ? 'إدخال كل طلب يدوياً في الـ ERP' : 'Every order typed into the ERP by hand',
+    isAr ? 'بيع منتجات غير متوفرة بسبب مخزون قديم' : 'Selling out-of-stock items from stale inventory',
+    isAr ? 'طلبات تفوت بصمت دون أي تنبيه' : 'Orders lost silently with no alert',
+    isAr ? 'لا تعرف أين توقفت المزامنة' : 'No idea where the sync stopped',
   ]
 
-  const problems = [
-    {
-      icon: FileText,
-      title: lang === 'ar' ? 'إدخال يدوي مكرر' : 'Duplicate Manual Entry',
-      desc: lang === 'ar'
-        ? 'الطلبات والعملاء والمنتجات تُدخل مرتين — مرة في المتجر ومرة في برنامج ERP. كل طلب جديد يعني نسخ ولصق.'
-        : 'Orders, customers and products typed twice — once in your store and once in your ERP. Every new order means copy-paste work.',
-      dot: 'bg-blue-500',
-    },
-    {
-      icon: Activity,
-      title: lang === 'ar' ? 'انحراف المخزون' : 'Inventory Drift',
-      desc: lang === 'ar'
-        ? 'البيع على المتجر والمخزون في برنامج ERP. بدون مزامنة لحظية، تبيع منتجات غير متوفرة ويخسر العملاء ثقتهم.'
-        : 'Selling on your store while inventory lives in your ERP. Without live sync, you sell out-of-stock items and lose customer trust.',
-      dot: 'bg-emerald-500',
-    },
-    {
-      icon: Database,
-      title: lang === 'ar' ? 'فوضى البيانات' : 'Data Chaos',
-      desc: lang === 'ar'
-        ? 'الفئات والعلامات والخصائص تضيع بين النظامين. المطابقة اليدوية للفواتير والعملاء تستهلك ساعات كل أسبوع.'
-        : 'Categories, tags and attributes get orphaned between systems. Manual invoice and customer matching eats hours each week.',
-      dot: 'bg-violet-500',
-    },
-    {
-      icon: Clock,
-      title: lang === 'ar' ? 'كسور صامتة' : 'Silent Failures',
-      desc: lang === 'ar'
-        ? 'الويبهوك يتعطل ولا تعرف. طلبات تفوت والمخزون يتجمد — تكتشف المشكلة بعد خسارة أيام من العمل.'
-        : 'A webhook breaks silently. Orders are missed, inventory freezes — you discover the issue after losing days of work.',
-      dot: 'bg-amber-500',
-    },
-    {
-      icon: UserPlus,
-      title: lang === 'ar' ? 'فوضى الفرق' : 'Team Chaos',
-      desc: lang === 'ar'
-        ? 'كل فرد في الفريق يحتاج صلاحيات مختلفة. بدون نظام RBAC، الموظف الجديد قد يخرب المزامنة كلها.'
-        : 'Each team member needs different permissions. Without RBAC, a new hire can break your entire sync setup.',
-      dot: 'bg-cyan-500',
-    },
-    {
-      icon: TrendingUp,
-      title: lang === 'ar' ? 'تشتت المتاجر' : 'Multi-Store Fragmentation',
-      desc: lang === 'ar'
-        ? 'وكالة تدير ٣٠ متجراً — كل واحد يحتاج توكناته وإعداداته المستقلة. بدون بيئات عمل منفصلة، فوضى عارمة.'
-        : 'An agency running 30 stores — each needs its own tokens and independent settings. Without isolated workspaces, it is chaos.',
-      dot: 'bg-orange-500',
-    },
-  ]
-
-  const solutions = [
-    {
-      icon: RefreshCw,
-      title: lang === 'ar' ? 'مزامنة فورية بالويبهوك' : 'Real-time Webhook Sync',
-      desc: lang === 'ar'
-        ? 'اربط متجرك بأي نظام ERP (أودو، ERPNext، زوهو). الطلبات والمنتجات والمخزون والعملاء يتدفقون تلقائياً — بدون تدخل يدوي. ندعم زد، سلة، وشوبيفاي.'
-        : 'Connect your store to any ERP (Odoo, ERPNext, Zoho). Orders, products, inventory and customers flow automatically — no manual work. Supports Zid, Salla & Shopify.',
-      detail: lang === 'ar' ? 'اتجاهين (متجر ← ERP ومتجر → ERP)' : 'Bidirectional (Store → ERP and ERP → Store)',
-      dot: 'bg-blue-500',
-    },
-    {
-      icon: Layers,
-      title: lang === 'ar' ? 'مركز ربط الحقول' : 'Field Mapping Center',
-      desc: lang === 'ar'
-        ? 'لكل متجر حقوله المختلفة. حدد بالضبط أي حقل في المتجر يقابل أي حقل في برنامج ERP — مع ١٢+ قالب جاهز.'
-        : 'Every store has different fields. Map exactly which store field goes to which ERP field — with 12+ pre-built templates.',
-      detail: lang === 'ar' ? 'حقول متداخلة، قوالب، مطابقة تلقائية' : 'Nested fields, templates, auto-matching',
-      dot: 'bg-emerald-500',
-    },
-    {
-      icon: Shield,
-      title: lang === 'ar' ? 'أمان وتشفير كامل' : 'Full Encryption & Security',
-      desc: lang === 'ar'
-        ? 'جميع البيانات مشفرة بـ SSL/TLS أثناء النقل والتخزين. مفاتيح API والتوكنات مشفرة بـ AES-256-CBC. صلاحيات دقيقة لكل عضو.'
-        : 'All data encrypted with SSL/TLS in transit and at rest. API keys and tokens encrypted with AES-256-CBC. Granular permissions per team member.',
-      detail: lang === 'ar' ? 'AES-256-CBC · RLS · صلاحيات صفحات' : 'AES-256-CBC · RLS · Page-level RBAC',
-      dot: 'bg-violet-500',
-    },
-    {
-      icon: Bell,
-      title: lang === 'ar' ? 'إشعارات تيليجرام فورية' : 'Instant Telegram Alerts',
-      desc: lang === 'ar'
-        ? 'كل عملية مزامنة — نجاح أو فشل — تنبيه فوري على تيليجرام. تعرف على أي مشكلة قبل أن يشتكي العميل.'
-        : 'Every sync — success or failure — instant Telegram alert. Know about any issue before your client complains.',
-      detail: lang === 'ar' ? 'بوتات متعددة · فلترة · عربي/إنجليزي' : 'Multi-bot · Filtering · AR/EN',
-      dot: 'bg-amber-500',
-    },
-    {
-      icon: Activity,
-      title: lang === 'ar' ? 'سجل مزامنة وتدقيق' : 'Sync Logs & Audit Trail',
-      desc: lang === 'ar'
-        ? 'كل عملية مزامنة مسجلة مع التفاصيل الكاملة. ارجع لأي عملية فاشلة، شاهد الـ Payload، وأعد الإرسال بنقرة.'
-        : 'Every sync logged with full details. Review any failed operation, inspect the payload, and resend with one click.',
-      detail: lang === 'ar' ? 'سجل 72 ساعة · فحص البيانات · إعادة إرسال' : '72h logs · Payload inspection · Resend',
-      dot: 'bg-cyan-500',
-    },
-    {
-      icon: Database,
-      title: lang === 'ar' ? 'نقل البيانات الأولي' : 'Bulk Historical Transfer',
-      desc: lang === 'ar'
-        ? 'عند الربط لأول مرة، انقل منتجاتك وعملاءك وفئاتك السابقة دفعة واحدة عبر API — بدون CSV ولا عناء.'
-        : 'When first connecting, transfer your existing products, customers and categories in one batch via API — no CSVs, no hassle.',
-      detail: lang === 'ar' ? 'API مباشر · شريط تقدم · سجل عمليات' : 'Direct API · Progress bar · Operation log',
-      dot: 'bg-orange-500',
-    },
+  const after = [
+    isAr ? 'الطلبات تصل تلقائياً خلال ثوانٍ' : 'Orders arrive automatically in seconds',
+    isAr ? 'المخزون محدّث لحظياً في الاتجاهين' : 'Stock updated live in both directions',
+    isAr ? 'إعادة محاولة تلقائية وسجل لكل عملية' : 'Automatic retries and a log for every operation',
+    isAr ? 'تنبيه فوري على تيليجرام عند أي مشكلة' : 'Instant Telegram alert on any issue',
   ]
 
   const faqs = [
@@ -199,14 +95,7 @@ export default async function HomePage() {
     { q: t('landing.faq4Q'), a: t('landing.faq4A') },
   ]
 
-  const platforms = [
-    { name: 'Zid', color: 'text-blue-500' },
-    { name: 'Salla', color: 'text-emerald-500' },
-    { name: 'Shopify', color: 'text-violet-500' },
-    { name: 'Odoo', color: 'text-amber-500' },
-    { name: 'ERPNext', color: 'text-rose-500' },
-    { name: 'Zoho', color: 'text-sky-500' },
-  ]
+  const platforms = ['Zid', 'Salla', 'Shopify', 'Odoo', 'ERPNext']
 
   return (
     <div
@@ -217,331 +106,474 @@ export default async function HomePage() {
 
       <main className="flex-1">
         {/* ── Hero ─────────────────────────────────────────────── */}
-        <section className="pt-20 pb-24 px-6 md:px-12 relative">
-          <div className="max-w-7xl mx-auto">
-            <div className="flex flex-col items-center text-center gap-6 max-w-3xl mx-auto">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border">
-                <Zap className="h-3 w-3 text-muted-foreground" />
-                <span className="text-[11px] font-semibold text-muted-foreground">
-                  {t('landing.badge')}
-                </span>
+        <section className="pt-20 pb-20 px-6 md:px-12 relative overflow-hidden">
+          <div className="absolute top-[-120px] right-[-120px] w-[420px] h-[420px] rounded-full bg-primary/[0.04] blur-3xl pointer-events-none" />
+          <div className="absolute bottom-[-140px] left-[-100px] w-[380px] h-[380px] rounded-full bg-foreground/[0.03] blur-3xl pointer-events-none" />
+
+          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-14 lg:gap-16 items-center relative">
+            {/* Copy */}
+            <div className="space-y-7">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Gift className="h-3 w-3" />
+                <span>{isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}</span>
               </div>
 
-              <h1 className="text-4xl md:text-5xl font-black text-foreground leading-[1.15] tracking-tight">
-                {lang === 'ar' ? (
-                  <>اربط <span className="text-foreground">متجرك</span> بنظام <span className="text-foreground">ERP</span></>
+              <h1 className="text-4xl md:text-5xl xl:text-6xl font-black leading-[1.12] tracking-tight">
+                {isAr ? (
+                  <>اربط متجرك بنظام ERP —<br className="hidden md:block" /> وانسَ الإدخال اليدوي</>
                 ) : (
-                  <>Connect Your Store to Your <span className="text-foreground">ERP System</span></>
+                  <>Connect your store to your ERP —<br className="hidden md:block" /> and forget manual entry</>
                 )}
               </h1>
 
-              <p className="text-sm text-muted-foreground leading-relaxed max-w-xl">
+              <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-xl">
                 {t('landing.heroSubtitle')}
               </p>
 
-              <ul className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-                {[t('landing.bullet1'), t('landing.bullet2'), t('landing.bullet3')].map(
-                  (item) => (
-                    <li key={item} className="flex items-center gap-2">
-                      <span className="h-1.5 w-1.5 rounded-full bg-foreground shrink-0" />
-                      {item}
-                    </li>
-                  )
-                )}
-              </ul>
-
-              <div className="flex flex-row items-center gap-3 pt-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                 <Button
                   asChild
-                  className="bg-foreground text-background hover:bg-foreground/90 h-10 text-xs font-bold px-5"
+                  size="lg"
+                  className="bg-foreground text-background hover:opacity-90 rounded-xl px-7 py-6 text-sm font-bold shadow-sm"
                 >
                   <Link href="/sign-up" className="flex items-center gap-1.5">
                     {t('landing.btnStart')}
-                    <ExternalLink className="h-3.5 w-3.5" />
+                    <ExternalLink className="h-4 w-4" />
                   </Link>
                 </Button>
                 <Button
                   asChild
                   variant="outline"
-                  className="border-border text-foreground hover:bg-muted h-10 text-xs font-semibold px-4"
+                  size="lg"
+                  className="rounded-xl px-6 py-6 text-sm font-semibold"
                 >
                   <Link href="#how-it-works" className="flex items-center gap-1.5">
                     {t('landing.btnHow')}
-                    <ArrowLeft
-                      className={cn(
-                        'h-3.5 w-3.5',
-                        lang === 'ar' ? '' : 'rotate-180'
-                      )}
-                    />
+                    <ArrowLeft className={cn('h-4 w-4', !isAr && 'rotate-180')} />
                   </Link>
                 </Button>
               </div>
-            </div>
 
-            {/* Stats bar - like dashboard KPI cards */}
-            <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mt-16">
-              {stats.map((s) => (
-                <div key={s.label} className="bg-card border border-border p-4 text-center">
-                  <div className="text-xl font-bold tracking-tight text-foreground">
-                    {s.value}
-                  </div>
-                  <div className="text-[10px] text-muted-foreground mt-1 font-semibold uppercase tracking-widest">
-                    {s.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── Trusted Platforms ───────────────────────────────── */}
-        <section className="py-10 px-6 md:px-12 border-y border-border bg-muted/30">
-          <div className="max-w-5xl mx-auto">
-            <p className="text-center text-[10px] text-muted-foreground font-semibold uppercase tracking-widest mb-6">
-              {t('landing.trustedBy')}
-            </p>
-            <div className="flex items-center justify-center flex-wrap gap-6 md:gap-10">
-              {platforms.map((p) => (
-                <div
-                  key={p.name}
-                  className="flex items-center gap-2 px-4 py-2 bg-card border border-border"
-                >
-                  <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', p.color.replace('text-', 'bg-'))} />
-                  <span className="text-xs font-semibold text-foreground">
-                    {p.name}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
+                {[
+                  isAr ? 'بدون بطاقة ائتمانية' : 'No credit card',
+                  isAr ? 'إعداد في دقائق' : 'Setup in minutes',
+                  isAr ? 'إلغاء في أي وقت' : 'Cancel anytime',
+                ].map((item) => (
+                  <span key={item} className="flex items-center gap-1.5">
+                    <Check className="h-3.5 w-3.5" />
+                    {item}
                   </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ── Problems ──────────────────────────────────────────── */}
-        <section className="py-16 px-6 md:px-12">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground mb-3">
-                <Activity className="h-3 w-3" />
-                {lang === 'ar' ? 'المشاكل اللي يحلها النظام' : 'Problems We Solve'}
-              </span>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground mt-2">
-                {lang === 'ar' ? 'تعبان من إدخال البيانات يدوياً؟' : 'Tired of manual data entry?'}
-              </h2>
-              <p className="text-sm text-muted-foreground max-w-xl mx-auto mt-2">
-                {lang === 'ar'
-                  ? 'هذه هي المشاكل اليومية اللي يواجهها كل تاجر يدير متجره مع نظام ERP — و ERP Link يحلها كلها.'
-                  : 'These are the daily problems every merchant faces running a store with an ERP — and ERP Link solves them all.'}
-              </p>
+                ))}
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {problems.map(({ icon: Icon, title, desc, dot }) => (
-                <div
-                  key={title}
-                  className="bg-card border border-border p-4 relative"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-7 w-7 items-center justify-center rounded bg-muted text-muted-foreground shrink-0 mt-0.5">
-                      <Icon className="h-3.5 w-3.5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />
-                        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        {desc}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
+            {/* Live sync visual */}
+            <div className="flex justify-center lg:justify-end">
+              <div className="relative w-full max-w-md rotate-[-2deg] transition-transform duration-300 hover:rotate-0">
+                <div className="absolute inset-0 translate-x-3 translate-y-3 rounded-3xl border border-border bg-secondary/60" />
 
-        {/* ── Solutions / How ERP Link Fixes Them ─────────────── */}
-        <section id="solutions" className="py-16 px-6 md:px-12 bg-muted/30">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground mb-3">
-                <Shield className="h-3 w-3" />
-                {lang === 'ar' ? 'الحلول' : 'Solutions'}
-              </span>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground mt-2">
-                {lang === 'ar' ? 'ERP Link يحلها كلها' : 'ERP Link Fixes Them All'}
-              </h2>
-              <p className="text-sm text-muted-foreground max-w-xl mx-auto mt-2">
-                {lang === 'ar'
-                  ? ' six حلول متكاملة جاهزة للتطبيق فور ربط حساباتك.'
-                  : 'Six integrated solutions ready the moment you connect your accounts.'}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {solutions.map(({ icon: Icon, title, desc, detail, dot }) => (
-                <div
-                  key={title}
-                  className="bg-card border border-border p-5 relative"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded bg-muted text-muted-foreground shrink-0">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />
-                        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-                      </div>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
-                        {desc}
-                      </p>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-foreground/60">
-                        <Check className="h-3 w-3" />
-                        {detail}
+                <div className="relative rounded-3xl border border-border bg-card p-6 shadow-xl">
+                  <div className="flex items-center justify-between mb-5">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      </span>
+                      <span className="text-xs font-bold">
+                        {isAr ? 'المزامنة المباشرة' : 'Live sync'}
                       </span>
                     </div>
+                    <span className="text-[10px] font-semibold text-muted-foreground">
+                      {isAr ? 'الآن' : 'Now'}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {liveRows.map(({ icon: Icon, title, sub, time }) => (
+                      <div
+                        key={title}
+                        className="flex items-center gap-3 rounded-xl border border-border/70 bg-secondary/30 px-3 py-2.5"
+                      >
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-card text-foreground/70 shrink-0">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold truncate">{title}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{sub}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-[9px] text-muted-foreground">{time}</span>
+                          <Check className="h-3.5 w-3.5 text-emerald-500" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="mt-5 pt-4 border-t border-border flex flex-wrap items-center justify-center gap-1.5">
+                    {platforms.map((p) => (
+                      <span
+                        key={p}
+                        className="px-2 py-0.5 rounded-md bg-muted text-foreground/70 text-[10px] font-bold"
+                      >
+                        {p}
+                      </span>
+                    ))}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="max-w-7xl mx-auto mt-16 grid grid-cols-3 gap-4 md:gap-6">
+            {[
+              { value: '99.9%', label: t('landing.stats1') },
+              { value: '<2s', label: t('landing.stats2') },
+              { value: '24/7', label: isAr ? 'دعم فني' : 'Support' },
+            ].map((s) => (
+              <div key={s.label} className="text-center">
+                <div className="text-2xl md:text-3xl font-black tracking-tight">{s.value}</div>
+                <div className="text-[11px] text-muted-foreground mt-1 font-semibold">
+                  {s.label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Platforms strip ─────────────────────────────────── */}
+        <section className="py-10 px-6 md:px-12 border-y border-border bg-muted/30">
+          <div className="max-w-5xl mx-auto">
+            <p className="text-center text-[10px] text-muted-foreground font-semibold uppercase tracking-widest mb-5">
+              {t('landing.trustedBy')}
+            </p>
+            <div className="flex items-center justify-center flex-wrap gap-x-8 gap-y-3 md:gap-x-12">
+              {platforms.map((p) => (
+                <span key={p} className="text-sm font-bold text-foreground/60">
+                  {p}
+                </span>
               ))}
             </div>
           </div>
         </section>
 
         {/* ── Features ─────────────────────────────────────────── */}
-        <section id="features" className="py-16 px-6 md:px-12">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground mb-3">
-                <BarChart3 className="h-3 w-3" />
+        <section id="features" className="py-20 md:py-28 px-6 md:px-12">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-14 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Sparkles className="h-3 w-3" />
                 <span>{t('landing.featuresBadge')}</span>
-              </span>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground mt-2">
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
                 {t('landing.featuresTitle')}
               </h2>
-              <p className="text-sm text-muted-foreground max-w-xl mx-auto mt-2">
+              <p className="text-muted-foreground max-w-xl mx-auto leading-relaxed">
                 {t('landing.featuresDesc')}
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {features.map(({ icon: Icon, title, desc, dot }) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {features.map(({ icon: Icon, title, desc }) => (
                 <div
                   key={title}
-                  className="bg-card border border-border p-4 relative"
+                  className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
                 >
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="flex h-8 w-8 items-center justify-center rounded bg-muted text-muted-foreground">
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />
-                      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    {desc}
-                  </p>
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-foreground/70 mb-4">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <h3 className="text-base font-bold mb-2">{title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Custom mapping ──────────────────────────────────── */}
+        <section id="custom-mapping" className="py-20 md:py-28 px-6 md:px-12 border-y border-border">
+          <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-14 items-center">
+            <div className="space-y-5">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Workflow className="h-3 w-3" />
+                <span>{isAr ? 'ميزة متقدمة' : 'Advanced feature'}</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
+                {isAr ? 'ربط مخصص… مش بس الافتراضي' : 'Custom mapping, not just the default'}
+              </h2>
+              <p className="text-muted-foreground leading-relaxed max-w-md">
+                {isAr
+                  ? 'لو احتياجك خارج الجاهز، ابنِ ربطك بنفسك: اختر أي موديول في Odoo — حتى الموديولات المخصصة التي أنشأتها — وحدّد الحدث في متجرك، والاتجاه، والعملية، والحقول. كله من داخل النظام بدون كود.'
+                  : 'If your case goes beyond the built-in presets, build the mapping yourself: pick any Odoo module — including your own custom models — then choose the store event, direction, operation, and fields. All in-app, no code.'}
+              </p>
+              <ul className="space-y-3">
+                {[
+                  isAr
+                    ? 'أي موديول في Odoo، حتى الموديولات المخصصة (x_)'
+                    : 'Any Odoo module, including custom (x_) models',
+                  isAr
+                    ? 'أي حدث من أحداث المتجر: إنشاء، تعديل، أو حذف'
+                    : 'Any store event: create, update, or delete',
+                  isAr
+                    ? 'اتجاه واحد أو مزدوج: من المتجر للـ ERP، أو العكس، أو كلاهما'
+                    : 'One-way or dual: store to ERP, ERP to store, or both',
+                  isAr
+                    ? 'تحكم كامل بالحقول، والموديلات المرتبطة، والحقول المخصصة'
+                    : 'Full control of fields, related models, and custom fields',
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2.5 text-sm">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shrink-0 mt-0.5">
+                      <Check className="h-3 w-3" />
+                    </span>
+                    <span className="text-foreground/80 leading-relaxed">{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                asChild
+                size="sm"
+                className="bg-foreground text-background hover:bg-foreground/90 h-9 text-xs font-bold px-4"
+              >
+                <Link href="/sign-up">
+                  {isAr ? 'جرّب الربط المخصص' : 'Try custom mapping'}
+                </Link>
+              </Button>
+            </div>
+
+            {/* Mapping visual */}
+            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground/70">
+                    <SlidersHorizontal className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-bold">
+                    {isAr ? 'مركز الربط — ربط مخصص' : 'Mapping Center — Custom'}
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">
+                  {isAr ? 'اتجاهان' : 'Dual'}
+                </span>
+              </div>
+              <div className="divide-y divide-border">
+                {[
+                  { event: 'order.created', model: 'sale.order', custom: false },
+                  { event: 'product.updated', model: 'product.template', custom: false },
+                  { event: 'customer.created', model: 'res.partner', custom: false },
+                  { event: 'x_custom.event', model: 'x_projects', custom: true },
+                ].map((row) => (
+                  <div key={row.event} className="flex items-center gap-3 px-5 py-3.5">
+                    <code className="text-[11px] text-muted-foreground font-mono truncate">
+                      {row.event}
+                    </code>
+                    <ArrowLeft className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground/50', !isAr && 'rotate-180')} />
+                    <code className="text-[11px] font-mono font-bold text-foreground truncate">
+                      {row.model}
+                    </code>
+                    {row.custom && (
+                      <span className="ms-auto shrink-0 px-2 py-0.5 rounded-md bg-foreground text-background text-[9px] font-bold">
+                        {isAr ? 'موديول مخصص' : 'Custom'}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 py-3.5 bg-muted/40 border-t border-border">
+                <p className="text-[11px] text-muted-foreground">
+                  {isAr
+                    ? 'أي موديول • أي حدث • تحكم كامل بالحقول'
+                    : 'Any module • any event • full field control'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Before / After ──────────────────────────────────── */}
+        <section className="py-20 md:py-28 px-6 md:px-12 bg-muted/30">
+          <div className="max-w-5xl mx-auto">
+            <div className="text-center mb-14 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Zap className="h-3 w-3" />
+                <span>{isAr ? 'الفرق واضح' : 'The difference'}</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
+                {isAr ? 'قبل ERP Link وبعده' : 'Before and after ERP Link'}
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-border bg-card p-6 md:p-7">
+                <h3 className="text-sm font-black text-muted-foreground uppercase tracking-wide mb-5">
+                  {isAr ? 'قبل' : 'Before'}
+                </h3>
+                <ul className="space-y-3">
+                  {before.map((item) => (
+                    <li key={item} className="flex items-start gap-2.5 text-sm">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground shrink-0 mt-0.5">
+                        <X className="h-3 w-3" />
+                      </span>
+                      <span className="text-muted-foreground leading-relaxed">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="rounded-2xl border border-primary/30 bg-card p-6 md:p-7 shadow-sm">
+                <h3 className="text-sm font-black text-primary uppercase tracking-wide mb-5">
+                  {isAr ? 'مع ERP Link' : 'With ERP Link'}
+                </h3>
+                <ul className="space-y-3">
+                  {after.map((item) => (
+                    <li key={item} className="flex items-start gap-2.5 text-sm">
+                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shrink-0 mt-0.5">
+                        <Check className="h-3 w-3" />
+                      </span>
+                      <span className="text-foreground/80 leading-relaxed">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
         </section>
 
         {/* ── How It Works ─────────────────────────────────────── */}
-        <section
-          id="how-it-works"
-          className="py-16 px-6 md:px-12 bg-muted/30"
-        >
+        <section id="how-it-works" className="py-20 md:py-28 px-6 md:px-12">
           <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-12">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground mb-3">
+            <div className="text-center mb-14 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
                 <Settings className="h-3 w-3" />
                 <span>{t('how.stepsBadge')}</span>
-              </span>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground mt-2">
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
                 {t('how.title')}
               </h2>
-              <p className="text-sm text-muted-foreground mt-2">
-                {t('how.subtitle')}
-              </p>
+              <p className="text-muted-foreground">{t('how.subtitle')}</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
               {[
-                {
-                  num: lang === 'ar' ? '١' : '1',
-                  icon: LinkIcon,
-                  title: t('how.step1'),
-                  desc: t('how.step1Desc'),
-                  dot: 'bg-blue-500',
-                },
-                {
-                  num: lang === 'ar' ? '٢' : '2',
-                  icon: Settings,
-                  title: t('how.step2'),
-                  desc: t('how.step2Desc'),
-                  dot: 'bg-emerald-500',
-                },
-                {
-                  num: lang === 'ar' ? '٣' : '3',
-                  icon: RefreshCw,
-                  title: t('how.step3'),
-                  desc: t('how.step3Desc'),
-                  dot: 'bg-violet-500',
-                },
-              ].map(({ num, icon: Icon, title, desc, dot }) => (
-                <div
-                  key={title}
-                  className="bg-card border border-border p-5 text-center"
-                >
-                  <div className="flex items-center justify-center mb-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded bg-foreground text-background text-sm font-bold">
+                { num: isAr ? '١' : '1', icon: LinkIcon, title: t('how.step1'), desc: t('how.step1Desc') },
+                { num: isAr ? '٢' : '2', icon: Settings, title: t('how.step2'), desc: t('how.step2Desc') },
+                { num: isAr ? '٣' : '3', icon: RefreshCw, title: t('how.step3'), desc: t('how.step3Desc') },
+              ].map(({ num, icon: Icon, title, desc }, idx) => (
+                <div key={title} className="relative rounded-2xl border border-border bg-card p-6 md:p-7">
+                  <div className="flex items-center justify-between mb-5">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background text-sm font-black">
                       {num}
-                    </div>
+                    </span>
+                    <Icon className="h-5 w-5 text-muted-foreground" />
                   </div>
-                  <div className="flex items-center justify-center gap-2 mb-2">
-                    <div className="flex h-7 w-7 items-center justify-center rounded bg-muted text-muted-foreground">
-                      <Icon className="h-3.5 w-3.5" />
-                    </div>
-                    <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dot)} />
-                  </div>
-                  <h3 className="text-xs font-semibold text-foreground mb-1">{title}</h3>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed max-w-xs mx-auto">
-                    {desc}
-                  </p>
+                  <h3 className="text-base font-bold mb-2">{title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
+                  {idx < 2 && (
+                    <span className="hidden md:block absolute top-1/2 -translate-y-1/2 ltr:-right-3 rtl:-left-3 text-muted-foreground/40">
+                      <ArrowLeft className={cn('h-5 w-5', !isAr && 'rotate-180')} />
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         </section>
 
+        {/* ── Pricing teaser ──────────────────────────────────── */}
+        <section className="py-20 md:py-24 px-6 md:px-12 bg-muted/30">
+          <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+            <div className="space-y-5">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
+                <Shield className="h-3 w-3" />
+                <span>{isAr ? 'خطة واحدة' : 'One plan'}</span>
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
+                {isAr ? 'سعر واحد، كل المزايا' : 'One price, every feature'}
+              </h2>
+              <p className="text-muted-foreground leading-relaxed max-w-md">
+                {isAr
+                  ? 'ابدأ بتجربة مجانية ٧ أيام، ثم استمر بسعر ثابت — بدون باقات متعددة ولا حدود مخفية.'
+                  : 'Start with a 7-day free trial, then continue at one flat price — no plan tiers, no hidden limits.'}
+              </p>
+              <ul className="space-y-2.5">
+                {[
+                  isAr ? 'متاجر وأعضاء فريق غير محدودين' : 'Unlimited stores and team members',
+                  isAr ? 'كل المزايا مفتوحة من اليوم الأول' : 'Every feature unlocked from day one',
+                  isAr ? 'إلغاء في أي وقت' : 'Cancel anytime',
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2.5 text-sm">
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-card text-foreground shrink-0 mt-0.5">
+                      <Check className="h-3 w-3" />
+                    </span>
+                    <span className="text-foreground/80">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="flex justify-center lg:justify-end">
+              <div className="relative w-full max-w-sm rotate-[2deg] transition-transform duration-300 hover:rotate-0">
+                <div className="absolute inset-0 -translate-x-3 translate-y-3 rounded-3xl border border-border bg-secondary/70" />
+
+                <div className="relative rounded-3xl border border-border bg-card p-8 shadow-xl">
+                  <p className="text-sm font-bold text-muted-foreground mb-3">
+                    {t('pricing.business.name')}
+                  </p>
+                  <div className="flex items-baseline gap-1.5 mb-2">
+                    <span className="text-5xl font-black">
+                      <span className="text-2xl font-black text-foreground/60 align-top">$</span>
+                      {t('pricing.business.price')}
+                    </span>
+                    <span className="text-sm text-muted-foreground font-medium">
+                      {t('pricing.business.period')}
+                    </span>
+                  </div>
+                  <p className="text-xs font-bold text-primary mb-7">
+                    {isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}
+                  </p>
+
+                  <Button
+                    asChild
+                    className="w-full rounded-xl font-bold bg-foreground text-background hover:opacity-90"
+                  >
+                    <Link href="/pricing">{isAr ? 'عرض الخطة' : 'View the plan'}</Link>
+                  </Button>
+                  <Link
+                    href="/sign-up"
+                    className="mt-3 block text-center text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {t('landing.startFree')}
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* ── FAQ ─────────────────────────────────────────────── */}
-        <section className="py-16 px-6 md:px-12 bg-muted/30">
+        <section className="py-20 md:py-28 px-6 md:px-12">
           <div className="max-w-3xl mx-auto">
-            <div className="text-center mb-10">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground mb-3">
+            <div className="text-center mb-12 space-y-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
                 <ChevronDown className="h-3 w-3" />
                 <span>{t('landing.faqBadge')}</span>
-              </span>
-              <h2 className="text-2xl font-bold tracking-tight text-foreground mt-2">
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
                 {t('landing.faqTitle')}
               </h2>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               {faqs.map((faq, idx) => (
                 <details
                   key={idx}
-                  className="group bg-card border border-border overflow-hidden"
+                  className="group rounded-2xl border border-border bg-card overflow-hidden shadow-sm"
                 >
-                  <summary className="flex items-center justify-between gap-4 px-4 py-3 cursor-pointer list-none">
-                    <span className="text-xs font-semibold text-foreground">
-                      {faq.q}
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-open:rotate-180 shrink-0" />
+                  <summary className="flex items-center justify-between gap-4 px-6 py-4 cursor-pointer list-none">
+                    <span className="font-bold text-sm">{faq.q}</span>
+                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180 shrink-0" />
                   </summary>
-                  <div className="px-4 pb-3 text-[11px] text-muted-foreground leading-relaxed border-t border-border pt-3">
+                  <div className="px-6 pb-5 text-sm text-muted-foreground leading-relaxed">
                     {faq.a}
                   </div>
                 </details>
@@ -551,34 +583,41 @@ export default async function HomePage() {
         </section>
 
         {/* ── CTA ──────────────────────────────────────────────── */}
-        <section className="py-16 px-6 md:px-12">
-          <div className="max-w-3xl mx-auto">
-            <div className="bg-card border border-border p-8 md:p-10 text-center relative">
-              <div className="space-y-4">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-muted border border-border text-[11px] font-semibold text-muted-foreground">
-                  <Shield className="h-3 w-3" />
+        <section className="pt-4 pb-20 px-6 md:px-12">
+          <div className="max-w-4xl mx-auto">
+            <div className="rounded-3xl bg-card border border-border p-10 md:p-14 text-center relative overflow-hidden shadow-sm">
+              <div className="absolute inset-0 bg-muted/20" />
+
+              <div className="relative space-y-5">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-muted text-muted-foreground text-sm font-semibold">
+                  <Bell className="h-3.5 w-3.5" />
                   <span>{t('cta.badge')}</span>
                 </div>
-                <h2 className="text-2xl font-bold tracking-tight text-foreground">
+
+                <h2 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
                   {t('cta.title')}
                 </h2>
-                <p className="text-sm text-muted-foreground max-w-md mx-auto">
+
+                <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
                   {t('cta.subtitle')}
                 </p>
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-1">
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
                   <Button
                     asChild
-                    className="bg-foreground text-background hover:bg-foreground/90 h-10 text-xs font-bold px-5"
+                    size="lg"
+                    className="bg-foreground text-background hover:opacity-90 rounded-xl px-8 py-6 text-base font-bold shadow-sm"
                   >
-                    <Link href="/sign-up" className="flex items-center gap-1.5">
+                    <Link href="/sign-up" className="flex items-center gap-2">
                       {t('cta.btnStart')}
-                      <ExternalLink className="h-3.5 w-3.5" />
+                      <ExternalLink className="h-4 w-4" />
                     </Link>
                   </Button>
                   <Button
                     asChild
                     variant="outline"
-                    className="border-border text-foreground hover:bg-muted h-10 text-xs font-semibold px-4"
+                    size="lg"
+                    className="rounded-xl px-6 py-6 text-base font-semibold"
                   >
                     <Link href="/sign-in">{t('landing.signIn')}</Link>
                   </Button>

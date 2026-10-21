@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers'
+import { ThemeProvider } from 'next-themes'
 
 import { LanguageProvider } from '@/components/language-provider'
 import { resolveLanguage } from '@/lib/translations'
@@ -7,5 +8,16 @@ export default async function PublicLayout({ children }: { children: React.React
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
 
-  return <LanguageProvider initialLang={lang}>{children}</LanguageProvider>
+  return (
+    <LanguageProvider initialLang={lang}>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="light"
+        enableSystem={true}
+        disableTransitionOnChange
+      >
+        {children}
+      </ThemeProvider>
+    </LanguageProvider>
+  )
 }

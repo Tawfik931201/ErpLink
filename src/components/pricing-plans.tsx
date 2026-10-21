@@ -20,6 +20,7 @@ const HIGHLIGHT_FEATURES = [
   'productsVariants',
   'customersCategories',
   'fieldMapping',
+  'customMapping',
   'stockLive',
 ] as const
 
@@ -28,6 +29,7 @@ const ALL_FEATURES = [
   'productsVariants',
   'customersCategories',
   'fieldMapping',
+  'customMapping',
   'stockLive',
   'telegram',
   'initialTransfer',
@@ -93,7 +95,7 @@ export function PricingPlans() {
               </span>
             ))}
             <span className="text-[10px] text-muted-foreground font-semibold mx-1">+</span>
-            {['Odoo', 'ERPNext', 'Zoho'].map((erp) => (
+            {['Odoo', 'ERPNext'].map((erp) => (
               <span key={erp} className="px-2 py-0.5 rounded-md bg-muted text-foreground/70 text-[10px] font-bold">
                 {erp}
               </span>

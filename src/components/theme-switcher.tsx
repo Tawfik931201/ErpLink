@@ -6,7 +6,12 @@ import { useEffect, useState, useRef } from 'react'
 
 import { useLanguage } from './language-provider'
 
-export default function ThemeSwitcher() {
+type SwitcherProps = {
+  compact?: boolean
+  placement?: 'up' | 'down'
+}
+
+export default function ThemeSwitcher({ compact = false, placement = 'up' }: SwitcherProps = {}) {
   const { theme, setTheme } = useTheme()
   const { lang } = useLanguage()
   const [mounted, setMounted] = useState(false)
@@ -31,7 +36,10 @@ export default function ThemeSwitcher() {
   if (!mounted) {
     return (
       <div
-        className="flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-border bg-card shadow-sm text-muted-foreground select-none px-2.5"
+        className={cn(
+          'flex items-center justify-center rounded-lg border border-border bg-card shadow-sm text-muted-foreground select-none',
+          compact ? 'h-8 w-8' : 'h-[38px] gap-1.5 px-2.5'
+        )}
         aria-hidden
       >
         <Moon className="h-4 w-4 shrink-0" />
@@ -53,25 +61,38 @@ export default function ThemeSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-border bg-card shadow-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-300 select-none px-2.5"
+        className={cn(
+          'flex items-center justify-center rounded-lg border border-border bg-card shadow-sm text-muted-foreground hover:text-foreground hover:bg-secondary transition-all duration-300 select-none',
+          compact ? 'h-8 w-8' : 'h-[38px] gap-1.5 px-2.5'
+        )}
         title={lang === 'ar' ? 'تغيير المظهر' : 'Toggle theme'}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <CurrentIcon className="h-4 w-4 shrink-0" />
-        <span className="text-sm font-medium font-sans">{current.label}</span>
-        <ChevronDown
-          className={cn(
-            'h-3 w-3 transition-transform duration-200',
-            open && 'rotate-180'
-          )}
-        />
+        {compact ? (
+          <CurrentIcon className="h-4 w-4 shrink-0" />
+        ) : (
+          <>
+            <CurrentIcon className="h-4 w-4 shrink-0" />
+            <span className="text-sm font-medium font-sans">{current.label}</span>
+            <ChevronDown
+              className={cn(
+                'h-3 w-3 transition-transform duration-200',
+                open && 'rotate-180'
+              )}
+            />
+          </>
+        )}
       </button>
 
       {open && (
         <div
           role="listbox"
-          className="absolute end-0 bottom-full mb-2 min-w-full rounded-xl bg-popover text-popover-foreground shadow-lg overflow-hidden z-50 animate-scale-in"
+          className={cn(
+            'absolute end-0 min-w-full rounded-xl bg-popover text-popover-foreground shadow-lg overflow-hidden z-50 animate-scale-in',
+            compact && 'min-w-[150px]',
+            placement === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'
+          )}
           dir="rtl"
         >
           {options.map((opt) => {

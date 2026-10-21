@@ -1,7 +1,5 @@
 import Link from 'next/link'
 
-import LanguageSwitcher from '@/components/language-switcher'
-import ThemeSwitcher from '@/components/theme-switcher'
 import { Logo } from '@/components/ui/logo'
 import type { Language } from '@/lib/translations'
 
@@ -12,7 +10,7 @@ const dict: Record<Language, Record<string, string>> = {
     'footer.contact': 'اتصل بنا',
     'footer.privacy': 'الخصوصية',
     'footer.terms': 'الشروط',
-    'footer.rights': '© 2024 ERP Link. جميع الحقوق محفوظة.',
+    'footer.rights': '© 2026 ERP Link. جميع الحقوق محفوظة.',
   },
   en: {
     'landing.heroSubtitle': 'Real-time automatic sync of orders, products, inventory, and customers between your store and ERP — no manual work.',
@@ -20,7 +18,7 @@ const dict: Record<Language, Record<string, string>> = {
     'footer.contact': 'Contact Us',
     'footer.privacy': 'Privacy',
     'footer.terms': 'Terms',
-    'footer.rights': '© 2024 ERP Link. All rights reserved.',
+    'footer.rights': '© 2026 ERP Link. All rights reserved.',
   },
 }
 
@@ -63,14 +61,10 @@ export function PublicSiteFooter({ lang }: { lang: Language }) {
           </div>
         </div>
 
-        <div className="border-t border-border pt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="border-t border-border pt-6 flex items-center justify-center">
           <p className="text-[10px] text-muted-foreground">
             {t(lang, 'footer.rights')}
           </p>
-          <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <ThemeSwitcher />
-          </div>
         </div>
       </div>
     </footer>
