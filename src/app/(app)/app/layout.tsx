@@ -81,7 +81,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     '/app/mapping-center': 'mapping-center',
     '/app/mapping-center/custom': 'mapping-center',
     '/app/mapping-center/add-field': 'mapping-center',
-    '/app/mapping-center/values': 'mapping-center',
     '/app/mapping-center/categories': 'mapping-center',
     '/app/queue': 'mapping-center',
     '/app/logs': 'mapping-center',

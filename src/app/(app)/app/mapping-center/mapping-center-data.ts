@@ -65,15 +65,3 @@ export function getFirstStoreId(
 ): string {
   return zidStores[0]?.id ?? sallaStores[0]?.id ?? shopifyStores[0]?.id ?? ''
 }
-
-/** First connected platform — default tab for platform-scoped widgets. */
-export function getFirstPlatform(
-  zidStores: MappingCenterStore[],
-  sallaStores: MappingCenterStore[],
-  shopifyStores: MappingCenterStore[]
-): string {
-  if (zidStores.length > 0) return 'zid'
-  if (sallaStores.length > 0) return 'salla'
-  if (shopifyStores.length > 0) return 'shopify'
-  return 'zid'
-}

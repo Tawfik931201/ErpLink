@@ -64,7 +64,9 @@ const SYNC_GROUPS = [
 ]
 
 // P0 core preset: orders + products + customers (store → ERP) ON by default.
-// Reverse direction (ERP → store) stays OFF — managed from Mapping Center.
+// NOTE (direction unification): the reverse column (`odoo2zid`, ERP → store) is
+// tracked in state and saved with the settings, but kept hidden in this table —
+// reverse sync is managed from Mapping Center / Data Transfer (same as Salla).
 const CORE_ZID_EVENTS = [
   'order_create',
   'order_status_update',
@@ -135,7 +137,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
     }))
   }
 
-  const handleCheckboxChange = (key: string, field: 'odoo2zid' | 'zid2odoo', value: boolean) => {
+  const handleCheckboxChange = (key: string, field: 'zid2odoo', value: boolean) => {
     setSettings(prev => ({
       ...prev,
       [key]: {
@@ -150,7 +152,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
       const next = { ...prev }
       SYNC_GROUPS.forEach(group => {
         group.options.forEach(opt => {
-          next[opt.key] = { odoo2zid: false, zid2odoo: CORE_ZID_EVENTS.includes(opt.key) }
+          next[opt.key] = { ...next[opt.key], zid2odoo: CORE_ZID_EVENTS.includes(opt.key) }
         })
       })
       return next
@@ -162,7 +164,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
       const next = { ...prev }
       SYNC_GROUPS.forEach(group => {
         group.options.forEach(opt => {
-          next[opt.key] = { odoo2zid: true, zid2odoo: true }
+          next[opt.key] = { ...next[opt.key], zid2odoo: true }
         })
       })
       return next
@@ -215,24 +217,19 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
               </Button>
             </div>
           </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">{t('sync.reverseNote')}</p>
           <div className="overflow-x-auto border border-border bg-card">
             <table className="w-full border-collapse text-start">
               <thead>
                 <tr className="border-b border-border bg-secondary/50">
-                  <th className="py-3 px-4 font-medium text-foreground text-start w-1/3">
+                  <th className="py-3 px-4 font-medium text-foreground text-start w-1/2">
                     {t('zid.event')}
                   </th>
-                  <th className="py-3 px-4 font-medium text-center w-1/3">
+                  <th className="py-3 px-4 font-medium text-center w-1/2">
                     <span className="text-muted-foreground">
                       {lang === 'ar' ? 'زد → أودو' : 'Zid → ERP'}
                     </span>
                     <span className="text-[10px] text-muted-foreground block mt-0.5">(store2erp)</span>
-                  </th>
-                  <th className="py-3 px-4 font-medium text-center w-1/3">
-                    <span className="text-muted-foreground">
-                      {lang === 'ar' ? 'أودو → زد' : 'ERP → Zid'}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block mt-0.5">(erp2store)</span>
                   </th>
                 </tr>
               </thead>
@@ -244,7 +241,7 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                       {/* Category Header Row (Sub-accordion Trigger) */}
                       <tr onClick={() => toggleGroup(group.title)}
                         className="hover:bg-muted/30 transition-colors border-b border-border cursor-pointer select-none">
-                        <td colSpan={3} className="py-2 px-4 text-[11px] font-medium text-foreground">
+                        <td colSpan={2} className="py-2 px-4 text-[11px] font-medium text-foreground">
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted-foreground">{isOpen ? <Minus className="h-3 w-3" /> : <Plus className="h-3 w-3" />}</span>
                             <span>{group.title}</span>
@@ -259,10 +256,6 @@ export default function SyncSettingsTable({ merchantId, initialSettings }: SyncS
                           <td className="py-2 px-4 text-center">
                             <CustomCheckbox checked={settings[opt.key]?.zid2odoo || false}
                               onChange={(val) => handleCheckboxChange(opt.key, 'zid2odoo', val)} />
-                          </td>
-                          <td className="py-2 px-4 text-center">
-                            <CustomCheckbox checked={settings[opt.key]?.odoo2zid || false}
-                              onChange={(val) => handleCheckboxChange(opt.key, 'odoo2zid', val)} />
                           </td>
                         </tr>
                       ))}

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowRightLeft, Database, Puzzle, SlidersHorizontal } from 'lucide-react'
+import { ArrowRightLeft, Puzzle, SlidersHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -49,13 +49,6 @@ export default function MappingCenterHeader({ erpType = 'odoo' }: { erpType?: st
           },
         ]
       : [])),
-    {
-      href: '/app/mapping-center/values',
-      labelAr: 'تحويل القيم',
-      labelEn: 'Value Mapping',
-      icon: <Database className="h-4 w-4" />,
-      exact: true,
-    },
   ]
 
   return (
