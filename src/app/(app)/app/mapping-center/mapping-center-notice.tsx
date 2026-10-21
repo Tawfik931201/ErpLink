@@ -31,8 +31,10 @@ export default function MappingCenterNotice({
   }
 
   return (
-    <div className="flex flex-col sm:flex-row items-start gap-3 rounded-lg border bg-muted p-3.5" dir={dir}>
-      <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+    <div className="flex flex-col sm:flex-row items-start gap-3 rounded-xl border border-primary/15 bg-primary/5 p-4" dir={dir}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+        <AlertCircle className="h-4 w-4" />
+      </span>
       <div className="space-y-1.5 flex-1">
         <h4 className="font-bold text-xs text-foreground">
           {lang === 'ar' ? `أنت غير متصل بنظام ${getErpName(erpType)}` : `${getErpNameEn(erpType)} is not connected`}
@@ -42,7 +44,7 @@ export default function MappingCenterNotice({
             ? `يرجى ضبط بيانات الاتصال مع ${getErpName(erpType)} أولاً لتتمكن من جلب النماذج والحقول الحية وتخصيصها. يتم عرض بيانات افتراضية للمعاينة الآن.`
             : `Please configure your ${getErpNameEn(erpType)} connection first to retrieve live models and fields. Showing offline demo data for preview now.`}
         </p>
-        <Button asChild variant="outline" size="sm" className="mt-1 text-[10px] h-7 font-semibold gap-1 rounded-lg">
+        <Button asChild variant="outline" size="sm" className="mt-1 text-[10px] h-7 font-semibold gap-1 rounded-full bg-card">
           <Link href="/app/connect-odoo">
             {lang === 'ar' ? `انتقل لصفحة ربط الـ ERP` : `Go to Connect ERP`}
             <ArrowRight className={cn("h-3 w-3", lang === 'ar' ? "rotate-180" : "")} />

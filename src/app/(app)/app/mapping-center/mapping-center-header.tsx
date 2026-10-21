@@ -60,40 +60,41 @@ export default function MappingCenterHeader({ erpType = 'odoo' }: { erpType?: st
 
   return (
     <div
-      className="fixed top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+      className="fixed top-0 z-50 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
       style={{ insetInlineStart: '200px', insetInlineEnd: '0px' }}
       dir={dir}
     >
-      <div className="flex items-center gap-0.5 px-6 h-14">
+      <div className="flex items-center gap-3 px-6 h-14">
         <span className={cn(
-          'text-sm font-bold text-foreground tracking-tight shrink-0',
-          dir === 'rtl' ? 'ml-6' : 'mr-6'
+          'flex items-center gap-2 text-sm font-bold text-foreground tracking-tight shrink-0',
+          dir === 'rtl' ? 'ml-4' : 'mr-4'
         )}>
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
           {lang === 'ar' ? 'مركز الربط' : 'Mapping Center'}
         </span>
-        <div className="h-5 w-px bg-border/60" />
-        {items.map((item) => {
-          const isActive = item.exact
-            ? cleanPathname === item.href
-            : cleanPathname.startsWith(item.href + '/')
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'relative flex items-center gap-2 px-4 h-14 text-sm font-semibold transition-all duration-200 border-b-2',
-                isActive
-                  ? 'text-foreground border-primary'
-                  : 'text-muted-foreground border-transparent hover:text-foreground hover:border-muted-foreground/30'
-              )}
-            >
-              <span className="flex items-center gap-1.5">
+        <div className="h-5 w-px bg-border/70" />
+        <nav className="flex items-center gap-1 rounded-full bg-muted/70 p-1">
+          {items.map((item) => {
+            const isActive = item.exact
+              ? cleanPathname === item.href
+              : cleanPathname.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  'relative flex items-center gap-1.5 px-3 h-8 rounded-full text-[13px] font-semibold transition-colors duration-200',
+                  isActive
+                    ? 'bg-card text-primary shadow-sm ring-1 ring-border/70'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-card/70'
+                )}
+              >
                 {item.icon}
                 <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
-              </span>
-            </Link>
-          )
-        })}
+              </Link>
+            )
+          })}
+        </nav>
       </div>
     </div>
   )

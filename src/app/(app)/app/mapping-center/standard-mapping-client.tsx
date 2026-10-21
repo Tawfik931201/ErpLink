@@ -1650,10 +1650,10 @@ export default function StandardMappingClient({
 
       {/* ── Row 2: Standard Entity Tabs ─────────────────────── */}
       <div
-        className="fixed top-14 z-40 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+        className="fixed top-14 z-40 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
         style={{ insetInlineStart: '200px', insetInlineEnd: '0px' }}
       >
-          <div className="flex items-center gap-0.5 px-6 h-10 border-t border-border/50 bg-muted/20">
+          <div className="flex items-center gap-1 px-6 h-10">
             {[
               { key: 'categories', labelAr: 'كاتيجوري', labelEn: 'Categories', icon: <FolderTree className="h-3.5 w-3.5" /> },
               { key: 'products', labelAr: 'المنتجات', labelEn: 'Products', icon: <Package className="h-3.5 w-3.5" /> },
@@ -1665,16 +1665,14 @@ export default function StandardMappingClient({
                 key={item.key}
                 onClick={() => setStandardSubTab(item.key as any)}
                 className={cn(
-                  'relative flex items-center gap-1.5 px-3 h-10 text-xs font-semibold transition-all duration-200 border-b-2',
+                  'flex items-center gap-1.5 px-3 h-7 rounded-full text-xs font-semibold transition-colors duration-200',
                   standardSubTab === item.key
-                    ? 'text-foreground border-primary'
-                    : 'text-muted-foreground border-transparent hover:text-foreground hover:border-muted-foreground/30'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/70'
                 )}
               >
-                <span className="flex items-center gap-1.5">
-                  {item.icon}
-                  <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
-                </span>
+                {item.icon}
+                <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
               </button>
             )
             })}
@@ -1694,18 +1692,19 @@ export default function StandardMappingClient({
 
             {/* ── Title ────────────────────────────────────── */}
             <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-xs font-semibold text-muted-foreground">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="inline-block h-5 w-1 rounded-full bg-primary/70 shrink-0" />
+                <span className="text-[11px] font-semibold text-muted-foreground">
                   {lang === 'ar' ? 'مركز الربط' : 'Mapping Center'}
                 </span>
-                <span className="text-muted-foreground/30 text-xs">{'/'}</span>
+                <span className="text-muted-foreground/30 text-[11px]">{'/'}</span>
                 <h1 className="text-xl font-extrabold tracking-tight text-foreground">
                   {lang === 'ar'
                     ? ({ categories: 'كاتيجوري', products: 'المنتجات', customers: 'العملاء', orders: 'الاوردرات' } as any)[standardSubTab]
                     : ({ categories: 'Categories', products: 'Products', customers: 'Customers', orders: 'Orders' } as any)[standardSubTab]}
                 </h1>
               </div>
-              <p className="text-muted-foreground text-[11px]">
+              <p className="text-muted-foreground text-[11px] ps-3">
                 {lang === 'ar' ? 'إعدادات الربط الافتراضية' : 'Default mapping settings'}
               </p>
             </div>
@@ -1722,7 +1721,7 @@ export default function StandardMappingClient({
                     >
                       <div className="card-base overflow-hidden">
                         {/* ── Store Tabs (one per connected store) ───── */}
-                        <div className="flex items-center px-4 border-b border-border/50 bg-muted/20 overflow-x-auto">
+                        <div className="flex items-center gap-1 px-3 py-2 border-b border-border/50 bg-muted/20 overflow-x-auto">
                           {storeTabs.length > 0 ? (
                             storeTabs.map((store) => {
                               const isActive = standardStoreTab === store.platform && standardStoreId === store.storeId
@@ -1731,10 +1730,10 @@ export default function StandardMappingClient({
                                 key={store.key}
                                 onClick={() => selectStoreTab(store.platform, store.storeId)}
                                 className={cn(
-                                  'relative flex items-center gap-2 px-3 h-9 text-xs font-semibold transition-all duration-200 border-b-2 whitespace-nowrap',
+                                  'flex items-center gap-2 px-3 h-8 rounded-full text-xs font-semibold transition-colors duration-200 whitespace-nowrap',
                                   isActive
-                                    ? 'text-foreground border-primary'
-                                    : 'text-muted-foreground border-transparent hover:text-foreground hover:border-muted-foreground/30'
+                                    ? 'bg-card text-foreground shadow-sm ring-1 ring-border/70'
+                                    : 'text-muted-foreground hover:text-foreground hover:bg-card/70'
                                 )}
                               >
                                 <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />
@@ -1748,7 +1747,7 @@ export default function StandardMappingClient({
                           ) : (
                             <Link
                               href="/app/connect-store"
-                              className="flex items-center gap-2 px-3 h-9 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              className="flex items-center gap-2 px-3 h-8 rounded-full text-xs text-muted-foreground hover:text-foreground hover:bg-card/70 transition-colors"
                             >
                               <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-muted-foreground/40" />
                               <span>
@@ -1767,7 +1766,7 @@ export default function StandardMappingClient({
                               <div className="space-y-5">
                                 {/* Section Header */}
                                 <div>
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'تقييم المخزون' : 'Inventory Valuation'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -1827,7 +1826,7 @@ export default function StandardMappingClient({
 
                                 {/* Company Section */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -1877,7 +1876,7 @@ export default function StandardMappingClient({
 
                                 {/* On Delete Section */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'عند حذف الكاتيجوري في زد' : 'On Category Deletion in Zid'}
                                   </h3>
                                   <div className="mt-3">
@@ -1902,7 +1901,7 @@ export default function StandardMappingClient({
 
                                 {/* Match Field Section */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -1950,7 +1949,7 @@ export default function StandardMappingClient({
 
                                 {/* Sync Actions Section */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -2057,7 +2056,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 1. Product Type & Inventory ═══ */}
                                 <div>
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'نوع المنتج والمخزون' : 'Product Type & Inventory'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -2140,7 +2139,7 @@ export default function StandardMappingClient({
                                  {/* Company Selection */}
                                  <div className="border-t border-border/80 pt-5">
                                    <div className="flex items-center gap-2 max-w-xs justify-between">
-                                     <h3 className="text-sm font-bold text-muted-foreground">
+                                     <h3 className="text-sm font-bold text-foreground">
                                        {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
                                      </h3>
                                      <button
@@ -2200,7 +2199,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 2. Pricing ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'التسعير' : 'Pricing'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -2281,7 +2280,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 3. Name & Description ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الاسم والوصف' : 'Name & Description'}
                                   </h3>
                                   <div className="grid grid-cols-2 gap-4 mt-3">
@@ -2374,7 +2373,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 4. Match Field ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -2421,7 +2420,7 @@ export default function StandardMappingClient({
                                 </div>
                                 {/* ═══ 4.5. Product Variants Sync Mode ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground mb-3">
+                                  <h3 className="text-sm font-bold text-foreground mb-3">
                                     {lang === 'ar' ? '📦 خيارات مزامنة المتغيرات (Product Variants)' : '📦 Product Variant Sync Mode'}
                                   </h3>
                                   <div className="space-y-3 text-start">
@@ -2489,7 +2488,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 4.6. Grouped Products & BoM (Bill of Materials) ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground mb-3">
+                                  <h3 className="text-sm font-bold text-foreground mb-3">
                                     {lang === 'ar' ? '🛠️ خيارات المنتجات المجمعة (Bundles / BoM)' : '🛠️ Grouped Products & BoM (Kits)'}
                                   </h3>
                                   <div className="space-y-3 text-start">
@@ -2594,7 +2593,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 5. Media & Categories ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الوسائط والتصنيفات' : 'Media & Categories'}
                                   </h3>
                                   <div className="grid grid-cols-3 gap-4 mt-3">
@@ -2659,7 +2658,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 6. Tax ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الضريبة' : 'Tax'}
                                   </h3>
                                   <div className="grid grid-cols-2 gap-4 mt-3">
@@ -2698,7 +2697,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 7. Sync Actions ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -2767,7 +2766,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 8. On Deletion ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'عند حذف المنتج في زد' : 'On Product Deletion in Zid'}
                                   </h3>
                                   <div className="mt-3">
@@ -2792,7 +2791,7 @@ export default function StandardMappingClient({
 
                                 {standardStoreTab === 'zid' || standardStoreTab === 'salla' ? (
                                   <div className="border-t border-border/80 pt-5">
-                                    <h3 className="text-sm font-bold text-muted-foreground">
+                                    <h3 className="text-sm font-bold text-foreground">
                                       {lang === 'ar' ? `مزامنة المخزون (من أودو إلى ${invSyncStoreNameAr})` : `Inventory Sync (Odoo → ${invSyncStoreNameEn})`}
                                     </h3>
                                     <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -3093,7 +3092,7 @@ export default function StandardMappingClient({
                               <div className="space-y-5">
                                 {/* ═══ 1. Customer Type ═══ */}
                                 <div>
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'نوع العميل الافتراضي' : 'Default Customer Type'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -3127,7 +3126,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 1b. Default Accounts ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الحسابات الافتراضية' : 'Default Accounts'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3181,7 +3180,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 1c. Default Company ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3230,7 +3229,7 @@ export default function StandardMappingClient({
                                 </div>
 
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'عند حذف العميل في زد' : 'On Customer Deletion in Zid'}
                                   </h3>
                                   <div className="mt-3">
@@ -3255,7 +3254,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 3. Match Field Section ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3303,7 +3302,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 4. Sync Actions ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3398,7 +3397,7 @@ export default function StandardMappingClient({
                               <div className="space-y-5">
                                 {/* ═══ 1. Müzamene & Operations ═══ */}
                                 <div>
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'إعدادات مزامنة الطلبات' : 'Order Sync Settings'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -3460,7 +3459,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 2. Match Field Section ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3510,7 +3509,7 @@ export default function StandardMappingClient({
                                 <div className="border-t border-border/80 pt-5">
                                   <div className="flex items-center justify-between">
                                     <div>
-                                      <h3 className="text-sm font-bold text-muted-foreground flex items-center gap-2">
+                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                                         <Users className="h-4 w-4 text-foreground/80" />
                                         <span>{lang === 'ar' ? 'سلوك مطابقة العميل في الطلب' : 'Order Customer Matching Policy'}</span>
                                       </h3>
@@ -3666,7 +3665,7 @@ export default function StandardMappingClient({
                                 <div className="border-t border-border/80 pt-5">
                                   <div className="flex items-center justify-between">
                                     <div>
-                                      <h3 className="text-sm font-bold text-muted-foreground flex items-center gap-2">
+                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
                                         <Package className="h-4 w-4 text-foreground/80" />
                                         <span>{lang === 'ar' ? 'سلوك مطابقة المنتجات في الطلب' : 'Order Product Matching Policy'}</span>
                                       </h3>
@@ -3820,7 +3819,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 3. Defaults ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'القيم والخصائص الافتراضية' : 'Default Values & Configurations'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -3968,7 +3967,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ Multi-Warehouse Rules ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'قواعد المستودعات المتعددة' : 'Multi-Warehouse Rules'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -4129,7 +4128,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 4. Shipping & Discount Options ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'بنود الشحن والخصومات' : 'Shipping & Discount Lines'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
@@ -4469,7 +4468,7 @@ export default function StandardMappingClient({
 
                                 {/* ═══ 5. Order Status Mapping ═══ */}
                                 <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-muted-foreground">
+                                  <h3 className="text-sm font-bold text-foreground">
                                     {lang === 'ar' ? 'ربط حالات الطلب' : 'Order Status Mapping'}
                                   </h3>
                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-4">
