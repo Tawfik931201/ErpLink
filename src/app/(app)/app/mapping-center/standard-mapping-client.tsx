@@ -63,7 +63,6 @@ import { SHOPIFY_FIELDS } from '@/lib/platforms/shopify/fields'
 import { ZID_FIELDS } from '@/lib/platforms/zid/fields'
 import { cn } from '@/lib/utils'
 
-import MappingCenterHeader from './mapping-center-header'
 import SearchableSelect from './searchable-select'
 import SyncLogModal from './sync-log-modal'
 
@@ -111,7 +110,6 @@ function useOdooModelFields(
 
 export default function StandardMappingClient({
   hasOdooConnection,
-  erpType = 'odoo',
   zidStores = [],
   sallaStores = [],
   shopifyStores = [],
@@ -1645,9 +1643,6 @@ export default function StandardMappingClient({
 
   return (
     <>
-      {/* ── Fixed Header: section links (shared) ───────────── */}
-      <MappingCenterHeader erpType={erpType} />
-
       {/* ── Row 2: Standard Entity Tabs ─────────────────────── */}
       <div
         className="fixed top-14 z-40 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
