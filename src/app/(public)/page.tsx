@@ -147,10 +147,10 @@ export default async function HomePage() {
                   size="lg"
                   className="rounded-xl px-6 py-6 text-sm font-semibold"
                 >
-                  <Link href="#how-it-works" className="flex items-center gap-1.5">
+                  <a href="#how-it-works" className="flex items-center gap-1.5">
                     {t('landing.btnHow')}
                     <ArrowLeft className={cn('h-4 w-4', !isAr && 'rotate-180')} />
-                  </Link>
+                  </a>
                 </Button>
               </div>
 
@@ -440,7 +440,10 @@ export default async function HomePage() {
         </section>
 
         {/* ── How It Works ─────────────────────────────────────── */}
-        <section id="how-it-works" className="py-20 md:py-28 px-6 md:px-12">
+        <section
+          id="how-it-works"
+          className="py-20 md:py-28 px-6 md:px-12 scroll-mt-16 md:scroll-mt-20"
+        >
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-14 space-y-4">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
