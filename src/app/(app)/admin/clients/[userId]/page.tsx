@@ -77,13 +77,13 @@ export default async function AdminClientStatementPage(
       label: lang === 'ar' ? 'اشتراكات نشطة' : 'Active Subs.',
       value: `${active_sub_count}`,
       icon: CircleDollarSign,
-      color: 'text-blue-600',
+      color: 'text-primary',
     },
     {
       label: lang === 'ar' ? 'إجمالي الاشتراكات' : 'All Subs.',
       value: `${subscriptions.length}`,
       icon: Layers,
-      color: 'text-purple-600',
+      color: 'text-muted-foreground',
     },
   ]
 

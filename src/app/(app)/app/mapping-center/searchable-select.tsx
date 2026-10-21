@@ -369,7 +369,7 @@ export default function SearchableSelect({
                 width: dropdownCoords.width,
               }}
               className={cn(
-                "z-[9999] rounded-md border border-border bg-popover text-popover-foreground outline-none shadow-lg",
+                "calm-ui z-[9999] rounded-md border border-border bg-popover text-popover-foreground outline-none shadow-lg",
                 dropdownDirection === 'up' ? "translate-y-[-4px]" : "translate-y-[4px]"
               )}
             >

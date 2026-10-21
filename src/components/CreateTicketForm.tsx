@@ -66,7 +66,7 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
 
   return (
     <Card className="shadow-lg border border-border bg-card/60 backdrop-blur-md overflow-hidden relative">
-      <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-primary/70 via-primary to-[#0089FF]" />
+      <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-primary/70 via-primary to-primary" />
       
       <CardHeader className="pb-4 flex flex-row items-start justify-between">
         <div className="space-y-1">

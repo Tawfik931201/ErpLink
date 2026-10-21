@@ -3599,7 +3599,7 @@ export default function StandardMappingClient({
                                         className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
                                       />
                                       <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-blue-600 dark:text-blue-400">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-primary">
                                           <UserCheck className="h-3.5 w-3.5" />
                                           <span>{lang === 'ar' ? 'اختيار عميل افتراضي' : 'Assign Default Customer'}</span>
                                         </div>
@@ -3755,7 +3755,7 @@ export default function StandardMappingClient({
                                         className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
                                       />
                                       <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-blue-600 dark:text-blue-400">
+                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-primary">
                                           <PackageCheck className="h-3.5 w-3.5" />
                                           <span>{lang === 'ar' ? 'اختيار منتج افتراضي' : 'Assign Default Product'}</span>
                                         </div>

@@ -1938,7 +1938,7 @@ export default function FieldMappingForm({
                                     top: popoverCoords?.top ?? 0,
                                     left: popoverCoords?.left ?? 0,
                                   }}
-                                  className="z-[9999] min-w-[220px] bg-card border border-border rounded-xl p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
+                                  className="calm-ui z-[9999] min-w-[220px] bg-card border border-border rounded-xl p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
                                 >
                                   <h4 className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/60">
                                     {lang === 'ar' ? 'إعدادات الأعمدة' : 'Column Visibility'}

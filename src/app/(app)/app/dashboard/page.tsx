@@ -178,7 +178,7 @@ export default async function DashboardPage() {
       value: stats ? String(stats.totalRecordsCreated) : '—',
       sub: isAr ? `${stats?.totalTransfers ?? 0} عملية ترحيل` : `${stats?.totalTransfers ?? 0} transfers`,
       icon: RefreshCw,
-      tone: 'text-violet-600 bg-violet-500/10',
+      tone: 'text-primary bg-primary/10',
     },
     {
       label: isAr ? 'قواعد ربط نشطة' : 'Active mapping rules',

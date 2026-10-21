@@ -13,9 +13,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AppProviders initialLang={lang}>
-      <NextTopLoader showSpinner={false} color="hsl(var(--foreground))" height={3} />
-      <ImpersonationBanner />
-      {children}
+      <div className="calm-ui min-h-screen bg-background text-foreground">
+        <NextTopLoader showSpinner={false} color="hsl(var(--foreground))" height={3} />
+        <ImpersonationBanner />
+        {children}
+      </div>
     </AppProviders>
   )
 }

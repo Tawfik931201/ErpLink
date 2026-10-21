@@ -440,7 +440,7 @@ export default function LogsClient() {
         'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border',
         isManual
           ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20'
-          : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20'
+          : 'bg-primary/10 text-primary border-primary/20'
       )}>
         {isManual ? t('log.manual') : t('log.automatic')}
       </span>

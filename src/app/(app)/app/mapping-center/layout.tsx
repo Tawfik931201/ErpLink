@@ -6,5 +6,5 @@ export const metadata: Metadata = {
 }
 
 export default function MappingCenterLayout({ children }: { children: React.ReactNode }) {
-  return <div className="calm-ui min-h-screen">{children}</div>
+  return children
 }
