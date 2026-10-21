@@ -619,43 +619,30 @@ export const ZidAPI = {
       zidClient.get('/v1/market/app/subscription', { headers: buildZidHeaders(creds) }),
   },
 
-  // ── Reverse / Refund / Waybill (P2 foundation — documented stubs) ────────
-  // Endpoints below follow the Zid Manager naming convention. If Zid renames an
-  // endpoint, only this block needs updating — callers use these wrappers.
-  // All three return the raw axios response and never throw for 404 (the caller
-  // decides whether reverse/refund is supported for the store).
+  // ── Reverse / Refund / Waybill (documented endpoints) ────────────────────
+  // Only the endpoints that exist are wrapped here. Verified against
+  // docs.zid.sa → "Reverse Orders" (2026-10-21): the folder publishes
+  // Create Reverse Order (POST /v1/managers/store/reverse-orders), Waybill,
+  // Reasons (add/list), Calculate Reverse Totals, Create Refund, Upload Bank
+  // Transfer Receipt, Update Return Products and Order Details – View for
+  // Return. **There is no GET list of a store's reverse orders**, so nothing
+  // polls one; Zid returns are detected from the order status and quantified
+  // with view-for-return instead.
   returns: {
     /**
-     * POST /v1/managers/store/orders/{order-id}/reverse — request order reversal.
-     * STUB: verify path against the official docs before enabling in UI.
+     * GET /v1/managers/store/orders/{order-id}/view-for-return
+     *
+     * The documented source of "what can still come back": products with
+     * `quantity` = remaining returnable (original − previous returns), and
+     * `products: []` once everything has been returned. Totals are
+     * recalculated for the remaining items.
      */
-    reverse: (creds: ZidCredentials, orderId: string, reason?: string) =>
-      zidClient.post(
-        `/v1/managers/store/orders/${orderId}/reverse`,
-        reason ? { reason } : {},
-        { headers: buildZidHeaders(creds) }
-      ),
-
-    /**
-     * POST /v1/managers/store/orders/{order-id}/refund — refund a paid order.
-     * STUB: verify path against the official docs before enabling in UI.
-     */
-    refund: (creds: ZidCredentials, orderId: string, amount?: number) =>
-      zidClient.post(
-        `/v1/managers/store/orders/${orderId}/refund`,
-        amount !== undefined ? { amount } : {},
-        { headers: buildZidHeaders(creds) }
-      ),
-
-    /**
-     * GET /v1/managers/store/orders/{order-id}/waybill — shipping waybill/PDF.
-     * STUB: verify path against the official docs before enabling in UI.
-     */
-    waybill: (creds: ZidCredentials, orderId: string) =>
-      zidClient.get(`/v1/managers/store/orders/${orderId}/waybill`, {
+    viewForReturn: (creds: ZidCredentials, orderId: string) =>
+      zidClient.get(`/v1/managers/store/orders/${orderId}/view-for-return`, {
         headers: buildZidHeaders(creds),
       }),
   },
+
 
   // ── Store metadata (auto-fill mapping dropdowns) ─────────────────────────
   storeMeta: {

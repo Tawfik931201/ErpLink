@@ -11,7 +11,7 @@
 
 import { getSmartDefaultOrderState } from '@/lib/auto-bootstrap'
 import { decrypt } from '@/lib/crypto'
-import { resolveEntityLinkId, STORED_ODOO_ID_FIELD } from '@/lib/entity-links'
+import { resolveEntityLinkId, STORED_ODOO_ID_FIELD, upsertEntityLink } from '@/lib/entity-links'
 import {
   buildErpNextValues,
   ErpNextClient,
@@ -34,6 +34,10 @@ import {
   platformIdFieldNames,
   platformLegacyIdField,
 } from '@/lib/platform-fields'
+import { extractSallaRefundedLines, isReturnSignal, type StoreReturnLine } from '@/lib/returns/detect'
+import { processReturnEvent } from '@/lib/returns/engine'
+import { normalizeReturnSettings } from '@/lib/returns/settings'
+import { fetchZidReturnState } from '@/lib/returns/zid'
 import { resolvePath, resolveShopifyCustomerFullName, resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
 import type {
@@ -3661,6 +3665,16 @@ export async function processWebhookEvent(
 
     const entityId = orderSource?.id
     const hasEntity = entityId !== undefined && entityId !== null
+    // `order.shipment.*` payloads are {id, reference_id, shipping_number} where
+    // `id` is the SHIPMENT id (e.g. 1427738113), never the order id, and
+    // `reference_id` is not the order id either. Fetching the order with it
+    // asked Salla for a non-existent order. Nothing to enrich here: the id is
+    // normalised to the order id further down.
+    const isShipmentEvent = normalizedEvent.includes('shipment')
+    const shipmentHasOrder = (data as any)?.order && typeof (data as any).order === 'object'
+    const shipmentEntityId = isShipmentEvent && !shipmentHasOrder
+      ? (data as any)?.order_id ?? (data as any)?.order?.id
+      : undefined
     // Payload size alone is the wrong test for orders. An `order.updated` payload
     // can carry a dozen fields and still omit `items`, and it would pass the
     // `keys.length <= 4` check below — so Odoo gets written with no line items and
@@ -3684,12 +3698,18 @@ export async function processWebhookEvent(
       try {
         const { getSallaOrder, getSallaCustomer, getSallaCategory, getSallaProduct } = await import('./salla-client')
         if (normalizedEvent.startsWith('order.')) {
-          const full = await getSallaOrder(storeIdStr, String(entityId))
+          const orderFetchId = isShipmentEvent && !shipmentHasOrder ? shipmentEntityId : entityId
+          if (orderFetchId === undefined || orderFetchId === null) {
+            // Shipment event with neither a nested order nor an order_id: there
+            // is nothing valid to fetch, and `entityId` is a shipment id.
+          } else {
+            const full = await getSallaOrder(storeIdStr, String(orderFetchId))
           // `full` first, then the event's own order object: when both describe
           // the same order the event wins (it is fresher than our GET), and the
           // thin envelope can no longer overwrite the correct id with a wrong one.
           // legacy delivery: يُعكس الاتجاه — API يفوز وتُتجاهل قيم الجسم المتعارضة.
           if (full) data = isLegacyDelivery ? { ...orderSource, ...full } : { ...full, ...orderSource }
+          }
         } else if (normalizedEvent.startsWith('customer.')) {
           const full = await getSallaCustomer(storeIdStr, String(entityId))
           if (full) data = isLegacyDelivery ? { ...data, ...full } : { ...full, ...data }
@@ -3712,6 +3732,24 @@ export async function processWebhookEvent(
   // ملاحظة: تنظيف السجلات المنتهية لا يُشغَّل هنا. كان يعمل عند كل ويب هوك،
   // أي عمليتا DELETE غير محدودتين على `sync_logs` في المسار الساخن. الآن
   // `maybeCleanup()` في `sync-queue.ts` يتكفّل به مرة كل ساعة.
+
+  // `order.shipment.*` describes a SHIPMENT, not an order: `data.id` is the
+  // shipment id and `reference_id` is not the order id. Point the event at the
+  // order it belongs to so the mapping matches (or creates) the right
+  // sale.order instead of writing against an unrelated id.
+  if (syncPlatform === 'salla' && normalizedEvent.includes('shipment')) {
+    const shipmentOrder = (data as any)?.order
+    const hasShipmentOrder =
+      shipmentOrder && typeof shipmentOrder === 'object' && !Array.isArray(shipmentOrder)
+    const targetOrderId = hasShipmentOrder ? (shipmentOrder as any).id : (data as any)?.order_id
+    if (targetOrderId !== undefined && targetOrderId !== null && String(targetOrderId) !== '') {
+      data = {
+        ...(hasShipmentOrder ? (shipmentOrder as Record<string, unknown>) : data),
+        id: targetOrderId,
+        __shipment_id: (data as any)?.__shipment_id ?? (data as any)?.id,
+      }
+    }
+  }
 
   // 1. Find all field_mappings matching this store + event
   if (!isProduct) {
@@ -5806,6 +5844,107 @@ async function executeOdooOperation(params: {
   // Resolve platform once for reuse across order/cancel/deliver operations
   const execPlatform: 'zid' | 'salla' | 'shopify' = platformHint ?? getPlatformFromEvent(event)
 
+  // ── Returns: intercept an order update that is really a return ───────────
+  // A return is NOT a new Odoo operation: `enabled_actions` in
+  // standard_mapping_settings has no `return` member, so adding one would make
+  // webhook-gate drop the event silently. It is detected here, after the
+  // settings merge, and replaces the normal order write.
+  if (
+    odooModel === 'sale.order' &&
+    odooOperation === 'update' &&
+    (execPlatform === 'zid' || execPlatform === 'salla') &&
+    isReturnSignal(execPlatform, event, zidData)
+  ) {
+    const returnSettings = normalizeReturnSettings((mergedSettings as any)?.order?.returns)
+    if (returnSettings.mode !== 'nothing') {
+      const nestedOrder = (zidData.order && typeof zidData.order === 'object')
+        ? (zidData.order as Record<string, unknown>)
+        : null
+      const returnOrderId = String(
+        execPlatform === 'salla'
+          ? nestedOrder?.id ?? zidData.order_id ?? zidEntityId
+          : zidEntityId
+      )
+
+      let remaining: { known: boolean; lines: StoreReturnLine[] } | undefined
+      if (execPlatform === 'zid') {
+        const injected = (zidData as any).__returnRemaining
+        if (injected && typeof injected.known === 'boolean') {
+          remaining = injected
+        } else {
+          try {
+            const { data: tokenRow } = await supabaseAdmin
+              .from('merchant_tokens')
+              .select('*')
+              .or(`store_id.eq.${storeId},merchant_id.eq.${storeId}`)
+              .maybeSingle()
+            if (tokenRow) {
+              const { getAccessToken } = await import('./zid/token')
+              const storedTokens = await getAccessToken(tokenRow.merchant_id)
+              remaining = await fetchZidReturnState(
+                {
+                  authorization: storedTokens.authorization || '',
+                  managerToken: storedTokens.accessToken,
+                  storeId: tokenRow.store_id || tokenRow.merchant_id,
+                },
+                returnOrderId
+              )
+            }
+          } catch (err: any) {
+            console.warn(
+              `[Returns] Failed to read Zid view-for-return for order ${returnOrderId}:`,
+              err?.message ?? err
+            )
+          }
+        }
+      }
+
+      const outcome = await processReturnEvent({
+        client,
+        platform: execPlatform,
+        event,
+        workspaceId: mapping.workspace_id,
+        storeId: storeId || mapping.merchant_id || '',
+        orderId: returnOrderId,
+        payload: zidData,
+        settings: returnSettings,
+        refundedLines: execPlatform === 'salla' ? extractSallaRefundedLines(zidData) : undefined,
+        remaining,
+        autoConfirm: Boolean((mergedSettings as any)?.order?.auto_confirm),
+      })
+
+      if (outcome.handled && outcome.status !== 'skipped') {
+        console.info(`[Returns] ${execPlatform} order ${returnOrderId}: ${outcome.message}`)
+        await logSync({
+          id: existingLogId,
+          workspace_id: mapping.workspace_id,
+          field_mapping_id: mapping.id,
+          event,
+          store_id: storeId,
+          zid_entity_id: returnOrderId,
+          odoo_model: 'sale.order',
+          odoo_record_id: outcome.odooRecordId ?? null,
+          status: outcome.status,
+          error_message: outcome.status === 'failed' ? outcome.message : null,
+          payload: zidData,
+          trigger_type: triggerType,
+          platform: execPlatform,
+        })
+        return {
+          mappingId: mapping.id,
+          mappingName: mapping.name,
+          model: 'sale.order',
+          status: outcome.status,
+          odooRecordId: outcome.odooRecordId,
+          message: outcome.message,
+        }
+      }
+      if (outcome.handled) {
+        console.info(`[Returns] ${execPlatform} order ${returnOrderId}: ${outcome.message} (continuing with normal sync)`)
+      }
+    }
+  }
+
   const matchStrategy = (mergedSettings)?.matching?.strategy
   let fixedMatch = (mergedSettings)?.matching?.odoo_field && (mergedSettings)?.matching?.zid_field
     ? { odoo_field: (mergedSettings).matching.odoo_field, zid_field: (mergedSettings).matching.zid_field }
@@ -6863,11 +7002,54 @@ async function executeOdooOperation(params: {
         }
         try {
           await client.execute(odooModel, '_create_invoices', [[newId]])
-          console.info(`[SyncEngine] ✅ Invoice created via _create_invoices for ${odooModel} #${newId}`)
+          console.info(`[SyncEngine] ? Invoice created via _create_invoices for ${odooModel} #${newId}`)
         } catch (modernErr: any) {
           console.info(`[SyncEngine] _create_invoices attempt failed, trying action_invoice_create fallback:`, modernErr?.message || modernErr)
           await client.execute(odooModel, 'action_invoice_create', [newId])
-          console.info(`[SyncEngine] ✅ Invoice created via action_invoice_create for ${odooModel} #${newId}`)
+          console.info(`[SyncEngine] ? Invoice created via action_invoice_create for ${odooModel} #${newId}`)
+        }
+
+        // Persist the invoice link. `_create_invoices`' return value is not a
+        // reliable shape across Odoo 16-19 (recordset marshalling differs), so
+        // the id is read back from `sale.order.invoice_ids` - version-safe and
+        // independent of which creation path ran. Without this link a later
+        // return cannot find the invoice to credit (AGENTS.md: the invoice id
+        // used to be discarded entirely).
+        if (mapping.workspace_id) {
+          try {
+            const [orderRow] = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['invoice_ids'])
+            const invoiceIds: number[] = Array.isArray(orderRow?.invoice_ids)
+              ? orderRow.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+              : []
+            if (invoiceIds.length > 0) {
+              const invoices = await client.searchRead<any>(
+                'account.move',
+                [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice']],
+                ['id', 'name', 'state'],
+                invoiceIds.length
+              )
+              const latest = (invoices || [])
+                .slice()
+                .sort((a: any, b: any) => Number(b.id) - Number(a.id))[0]
+              if (latest?.id) {
+                const linked = await upsertEntityLink(
+                  {
+                    workspaceId: mapping.workspace_id,
+                    platform: execPlatform,
+                    storeId: String(storeId),
+                    odooModel: 'account.move',
+                    storeEntityId: String(zidEntityId),
+                  },
+                  Number(latest.id)
+                )
+                console.info(
+                  `[SyncEngine] ${linked ? '?' : '?'} Invoice link order ${zidEntityId} -> account.move #${latest.id} (${latest.name || 'draft'}, ${latest.state || 'n/a'})`
+                )
+              }
+            }
+          } catch (linkErr: any) {
+            console.warn(`[SyncEngine] Invoice link failed for ${odooModel} #${newId}:`, linkErr?.message || linkErr)
+          }
         }
       } catch (invErr: any) {
         console.warn(`[SyncEngine] Auto-invoice failed for ${odooModel} #${newId}:`, invErr?.message || invErr)

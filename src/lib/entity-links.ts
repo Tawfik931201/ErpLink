@@ -65,6 +65,8 @@ export function inferEntityType(odooModel: string): string {
       return 'customers'
     case 'product.category':
       return 'categories'
+    case 'account.move':
+      return 'invoices'
     default:
       return 'records'
   }

@@ -1,0 +1,449 @@
+/**
+ * Odoo side of the return pipeline.
+ *
+ * Version notes (the app supports Odoo 16-19; production is 19):
+ *   - `stock.move` quantity is `quantity` on 17+ and `quantity_done` before.
+ *   - The return wizard method is `action_create_returns` on 17+ and
+ *     `create_returns` before; both are attempted at runtime instead of
+ *     pinning a version, because a custom build can lag behind its version.
+ *   - `account.move.reversal` is deliberately NOT used: it reverses the WHOLE
+ *     invoice, while a merchant return is usually partial. A manual
+ *     `out_refund` with `reversed_entry_id` + `sale_line_ids` works on every
+ *     supported version and matches the returned quantities exactly.
+ *   - UoM is never written: lines inherit it from the product, which removes
+ *     the `product_uom` -> `uom_id` rename from the equation.
+ */
+
+import type { OdooClient } from '@/lib/odoo-client'
+import {
+  platformIdFieldNames,
+  type PlatformKey,
+} from '@/lib/platform-fields'
+
+export interface SaleOrderLineInfo {
+  id: number
+  productId: number
+  productName: string
+  orderedQty: number
+  deliveredQty: number
+  priceUnit: number
+  taxIds: number[]
+}
+
+export interface OriginalSaleOrder {
+  id: number
+  name: string
+  state: string
+  partnerId: number | null
+  pricelistId: number | null
+  companyId: number | null
+  warehouseId: number | null
+  invoiceIds: number[]
+  lines: SaleOrderLineInfo[]
+}
+
+export interface OdooReturnLine {
+  productId: number
+  quantity: number
+  priceUnit: number
+  name: string
+  taxIds: number[]
+  saleLineId?: number
+}
+
+function many2oneId(value: unknown): number | null {
+  if (Array.isArray(value) && value.length > 0) {
+    const id = Number(value[0])
+    return Number.isInteger(id) && id > 0 ? id : null
+  }
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function many2manyIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(v => Number(Array.isArray(v) ? v[0] : v))
+    .filter(v => Number.isInteger(v) && v > 0)
+}
+
+function toNumber(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+const RETURN_REF_PREFIX = 'RET:'
+
+export function returnRefFor(orderName: string): string {
+  return `${RETURN_REF_PREFIX}${orderName}`
+}
+
+export async function readSaleOrder(
+  client: OdooClient,
+  orderId: number
+): Promise<OriginalSaleOrder | null> {
+  const [order] = await client.searchRead<any>(
+    'sale.order',
+    [['id', '=', orderId]],
+    [
+      'id',
+      'name',
+      'state',
+      'partner_id',
+      'pricelist_id',
+      'company_id',
+      'warehouse_id',
+      'invoice_ids',
+      'order_line',
+    ],
+    1
+  )
+  if (!order?.id) return null
+
+  const lineIds = many2manyIds(order.order_line)
+  const lines: SaleOrderLineInfo[] = []
+  if (lineIds.length > 0) {
+    const rows = await client.searchRead<any>(
+      'sale.order.line',
+      [['id', 'in', lineIds]],
+      ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', 'tax_id'],
+      lineIds.length
+    )
+    for (const row of rows || []) {
+      const productId = many2oneId(row.product_id)
+      if (!productId) continue
+      lines.push({
+        id: Number(row.id),
+        productId,
+        productName: String(row.name || ''),
+        orderedQty: toNumber(row.product_uom_qty),
+        deliveredQty: toNumber(row.qty_delivered),
+        priceUnit: toNumber(row.price_unit),
+        taxIds: many2manyIds(row.tax_id),
+      })
+    }
+  }
+
+  return {
+    id: Number(order.id),
+    name: String(order.name || ''),
+    state: String(order.state || ''),
+    partnerId: many2oneId(order.partner_id),
+    pricelistId: many2oneId(order.pricelist_id),
+    companyId: many2oneId(order.company_id),
+    warehouseId: many2oneId(order.warehouse_id),
+    invoiceIds: many2manyIds(order.invoice_ids),
+    lines,
+  }
+}
+
+/**
+ * Store product id / SKU -> Odoo `product.product` id.
+ *
+ * The engine stores `x_<platform>_id` on `product.template` (see AGENTS.md),
+ * while sale lines reference the variant, so the template is searched first
+ * and its `product_variant_id` is used.
+ */
+export async function resolveOdooProductId(
+  client: OdooClient,
+  platform: PlatformKey,
+  storeProductId: string,
+  sku: string
+): Promise<number | null> {
+  const idText = String(storeProductId || '').trim()
+  if (idText) {
+    for (const field of platformIdFieldNames(platform)) {
+      try {
+        const [template] = await client.searchRead<any>(
+          'product.template',
+          [[field, '=', idText]],
+          ['id', 'product_variant_id'],
+          1
+        )
+        const variantId = many2oneId(template?.product_variant_id)
+        if (variantId) return variantId
+      } catch {
+        // Field missing on this database - try the next candidate.
+      }
+      try {
+        const [variant] = await client.searchRead<any>(
+          'product.product',
+          [[field, '=', idText]],
+          ['id'],
+          1
+        )
+        if (variant?.id) return Number(variant.id)
+      } catch {
+        // Ignore and fall back to SKU.
+      }
+    }
+  }
+
+  const skuText = String(sku || '').trim()
+  if (skuText) {
+    for (const field of ['default_code', 'barcode']) {
+      try {
+        const [variant] = await client.searchRead<any>(
+          'product.product',
+          [[field, '=', skuText]],
+          ['id'],
+          1
+        )
+        if (variant?.id) return Number(variant.id)
+      } catch {
+        // Ignore.
+      }
+    }
+  }
+  return null
+}
+
+/** Quantities already returned through negative sale orders for this order. */
+export async function readNegativeReturnLedger(
+  client: OdooClient,
+  orderName: string
+): Promise<Map<number, number>> {
+  const ledger = new Map<number, number>()
+  const ref = returnRefFor(orderName)
+  const orders = await client.searchRead<any>(
+    'sale.order',
+    [['client_order_ref', '=', ref], ['state', '!=', 'cancel']],
+    ['id', 'order_line'],
+    50
+  )
+  const lineIds = (orders || []).flatMap(o => many2manyIds(o.order_line))
+  if (lineIds.length === 0) return ledger
+  const lines = await client.searchRead<any>(
+    'sale.order.line',
+    [['id', 'in', lineIds]],
+    ['id', 'product_id', 'product_uom_qty'],
+    lineIds.length
+  )
+  for (const line of lines || []) {
+    const productId = many2oneId(line.product_id)
+    if (!productId) continue
+    // Negative lines: the ledger tracks how much was already returned.
+    const qty = Math.abs(toNumber(line.product_uom_qty))
+    if (qty <= 0) continue
+    ledger.set(productId, (ledger.get(productId) || 0) + qty)
+  }
+  return ledger
+}
+
+export async function createNegativeSaleOrder(
+  client: OdooClient,
+  original: OriginalSaleOrder,
+  lines: readonly OdooReturnLine[],
+  reason: string
+): Promise<number> {
+  const values: Record<string, unknown> = {
+    partner_id: original.partnerId,
+    client_order_ref: returnRefFor(original.name),
+    origin: original.name,
+    note: reason || `Return of ${original.name}`,
+    order_line: lines.map(line => [
+      0,
+      0,
+      {
+        product_id: line.productId,
+        name: line.name || `Return - ${original.name}`,
+        product_uom_qty: -Math.abs(line.quantity),
+        price_unit: line.priceUnit,
+      },
+    ]),
+  }
+  if (original.pricelistId) values.pricelist_id = original.pricelistId
+  if (original.companyId) values.company_id = original.companyId
+  if (original.warehouseId) values.warehouse_id = original.warehouseId
+  return client.create('sale.order', values)
+}
+
+interface DeliveredMove {
+  id: number
+  pickingId: number
+  productId: number
+  quantity: number
+}
+
+async function readDeliveredMoves(
+  client: OdooClient,
+  orderId: number,
+  majorVersion: number
+): Promise<DeliveredMove[]> {
+  const pickings = await client.searchRead<any>(
+    'stock.picking',
+    [['sale_id', '=', orderId], ['state', '=', 'done']],
+    ['id'],
+    100
+  )
+  const pickingIds = (pickings || []).map(p => Number(p.id)).filter(Boolean)
+  if (pickingIds.length === 0) return []
+
+  const qtyField = majorVersion >= 17 ? 'quantity' : 'quantity_done'
+  let moves: any[] = []
+  try {
+    moves = await client.searchRead<any>(
+      'stock.move',
+      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
+      ['id', 'picking_id', 'product_id', qtyField],
+      Math.max(pickingIds.length * 50, 100)
+    )
+  } catch {
+    moves = await client.searchRead<any>(
+      'stock.move',
+      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
+      ['id', 'picking_id', 'product_id', 'product_uom_qty'],
+      Math.max(pickingIds.length * 50, 100)
+    )
+    return (moves || []).map(m => ({
+      id: Number(m.id),
+      pickingId: many2oneId(m.picking_id) || 0,
+      productId: many2oneId(m.product_id) || 0,
+      quantity: toNumber(m.product_uom_qty),
+    }))
+  }
+  return (moves || []).map(m => ({
+    id: Number(m.id),
+    pickingId: many2oneId(m.picking_id) || 0,
+    productId: many2oneId(m.product_id) || 0,
+    quantity: toNumber(m[qtyField]),
+  }))
+}
+
+async function createReturnPicking(
+  client: OdooClient,
+  pickingId: number,
+  moves: readonly { moveId: number; quantity: number }[]
+): Promise<number | null> {
+  const wizardId = await client.create('stock.return.picking', {
+    picking_id: pickingId,
+    product_return_moves: moves.map(m => [
+      0,
+      0,
+      { move_id: m.moveId, quantity: Math.abs(m.quantity), to_refund: true },
+    ]),
+  })
+  if (!wizardId) return null
+
+  let result: any
+  try {
+    result = await client.execute('stock.return.picking', 'action_create_returns', [[wizardId]])
+  } catch (modernErr: any) {
+    console.info(
+      `[Returns] action_create_returns unavailable, falling back to create_returns:`,
+      modernErr?.message || modernErr
+    )
+    result = await client.execute('stock.return.picking', 'create_returns', [[wizardId]])
+  }
+  const newPickingId = Number(result?.res_id ?? result?.resId ?? 0)
+  return Number.isInteger(newPickingId) && newPickingId > 0 ? newPickingId : null
+}
+
+export interface StockReturnResult {
+  pickingIds: number[]
+  returnedQty: number
+}
+
+export async function createStockReturn(
+  client: OdooClient,
+  orderId: number,
+  lines: readonly OdooReturnLine[],
+  majorVersion: number
+): Promise<StockReturnResult> {
+  const moves = await readDeliveredMoves(client, orderId, majorVersion)
+  const byPicking = new Map<number, { moveId: number; quantity: number }[]>()
+  const remaining = new Map<number, number>()
+  for (const line of lines) {
+    remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+  }
+
+  for (const move of moves) {
+    const need = remaining.get(move.productId) || 0
+    if (need <= 0) continue
+    const take = Math.min(need, move.quantity)
+    if (take <= 0) continue
+    const list = byPicking.get(move.pickingId) || []
+    list.push({ moveId: move.id, quantity: take })
+    byPicking.set(move.pickingId, list)
+    remaining.set(move.productId, need - take)
+  }
+
+  const pickingIds: number[] = []
+  let returnedQty = 0
+  for (const [pickingId, pickingMoves] of byPicking.entries()) {
+    const created = await createReturnPicking(client, pickingId, pickingMoves)
+    if (!created) {
+      throw new Error(`stock_return_not_created: picking ${pickingId}`)
+    }
+    await client.execute('stock.picking', 'button_validate', [[created]], {
+      context: { skip_backorder: true, skip_sms: true },
+    })
+    pickingIds.push(created)
+    returnedQty += pickingMoves.reduce((sum, m) => sum + m.quantity, 0)
+  }
+  return { pickingIds, returnedQty }
+}
+
+export async function findInvoiceForOrder(
+  client: OdooClient,
+  original: OriginalSaleOrder
+): Promise<number | null> {
+  for (const id of original.invoiceIds) {
+    const [invoice] = await client.searchRead<any>(
+      'account.move',
+      [['id', '=', id], ['move_type', '=', 'out_invoice'], ['state', '!=', 'cancel']],
+      ['id'],
+      1
+    )
+    if (invoice?.id) return Number(invoice.id)
+  }
+  if (!original.name) return null
+  const [fallback] = await client.searchRead<any>(
+    'account.move',
+    [
+      ['invoice_origin', '=', original.name],
+      ['move_type', '=', 'out_invoice'],
+      ['state', '!=', 'cancel'],
+    ],
+    ['id'],
+    1
+  )
+  return fallback?.id ? Number(fallback.id) : null
+}
+
+export async function createCreditNote(
+  client: OdooClient,
+  original: OriginalSaleOrder,
+  invoiceId: number,
+  lines: readonly OdooReturnLine[],
+  journalId: number | null,
+  reason: string
+): Promise<number> {
+  const today = new Date().toISOString().slice(0, 10)
+  const values: Record<string, unknown> = {
+    move_type: 'out_refund',
+    partner_id: original.partnerId,
+    invoice_date: today,
+    invoice_origin: original.name,
+    reversed_entry_id: invoiceId,
+    ref: reason || `Return of ${original.name}`,
+    invoice_line_ids: lines.map(line => [
+      0,
+      0,
+      {
+        product_id: line.productId,
+        name: line.name || `Return - ${original.name}`,
+        quantity: Math.abs(line.quantity),
+        price_unit: line.priceUnit,
+        ...(line.taxIds.length > 0 ? { tax_ids: [[6, 0, line.taxIds]] } : {}),
+        ...(line.saleLineId ? { sale_line_ids: [[6, 0, [line.saleLineId]]] } : {}),
+      },
+    ]),
+  }
+  if (original.companyId) values.company_id = original.companyId
+  if (journalId) values.journal_id = journalId
+  const creditId = await client.create('account.move', values)
+  if (!creditId) throw new Error('credit_note_not_created')
+  await client.execute('account.move', 'action_post', [[creditId]])
+  return creditId
+}

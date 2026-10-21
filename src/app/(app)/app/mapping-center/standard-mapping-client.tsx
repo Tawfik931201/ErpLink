@@ -262,6 +262,13 @@ export default function StandardMappingClient({
   const [orderAutoConfirm, setOrderAutoConfirm] = useState(false)
   const [orderAutoInvoice, setOrderAutoInvoice] = useState(false)
   const [orderPartialFulfillment, setOrderPartialFulfillment] = useState(false)
+  // Store returns: what to do in Odoo when a merchant reverses / refunds an
+  // order. `nothing` is the default so existing workspaces are unaffected.
+  const [orderReturnsMode, setOrderReturnsMode] = useState<'nothing' | 'negative_so' | 'stock_return_credit_note'>('nothing')
+  const [orderReturnsCreditNote, setOrderReturnsCreditNote] = useState(true)
+  const [orderReturnsJournalId, setOrderReturnsJournalId] = useState('')
+  const [orderReturnsFallback, setOrderReturnsFallback] = useState<'skip' | 'negative_so'>('skip')
+  const [orderReturnsReason, setOrderReturnsReason] = useState('')
   // Multi-warehouse rules: Zid location ↔ Odoo warehouse. Row-based so the
   // Zid side is a stable row key rather than an object key (a Record can't
   // represent two half-filled rows without clobbering one of them).
@@ -723,6 +730,11 @@ export default function StandardMappingClient({
           setOrderVatNonSaudiTaxId('')
           setOrderAutoInvoice(false)
           setOrderPartialFulfillment(false)
+          setOrderReturnsMode('nothing')
+          setOrderReturnsCreditNote(true)
+          setOrderReturnsJournalId('')
+          setOrderReturnsFallback('skip')
+          setOrderReturnsReason('')
           setStoreWarehouseRules([])
           setOrderCustomerFallbackPolicy('create_new')
           setOrderDefaultCustomerId('')
@@ -821,6 +833,20 @@ export default function StandardMappingClient({
         setOrderAutoConfirm(s.order?.auto_confirm || false)
         setOrderAutoInvoice(s.order?.auto_invoice || false)
         setOrderPartialFulfillment(s.order?.partial_fulfillment || false)
+        {
+          const returns = (s.order?.returns || {}) as Record<string, any>
+          setOrderReturnsMode(
+            returns.mode === 'negative_so' || returns.mode === 'stock_return_credit_note'
+              ? returns.mode
+              : 'nothing'
+          )
+          setOrderReturnsCreditNote(returns.create_credit_note !== false)
+          setOrderReturnsJournalId(
+            returns.credit_note_journal_id ? String(returns.credit_note_journal_id) : ''
+          )
+          setOrderReturnsFallback(returns.fallback_when_missing === 'negative_so' ? 'negative_so' : 'skip')
+          setOrderReturnsReason(typeof returns.reason === 'string' ? returns.reason : '')
+        }
         setStoreWarehouseRules(
           Object.entries((s.order?.store_warehouse_mappings || {}) as Record<string, unknown>).map(
             ([locId, whId], i) => ({
@@ -1639,6 +1665,15 @@ export default function StandardMappingClient({
           enabled: orderAnalyticEnabled,
           rules: analyticRules,
         },
+        // Consumed by the returns modules in src/lib/returns - no DB migration:
+        // it is plain JSON in the existing settings blob.
+        returns: {
+          mode: orderReturnsMode,
+          create_credit_note: orderReturnsCreditNote,
+          credit_note_journal_id: orderReturnsJournalId ? Number(orderReturnsJournalId) : null,
+          fallback_when_missing: orderReturnsFallback,
+          reason: orderReturnsReason,
+        },
       }
     }
     // Save settings first, then mappings (if settings fails, stop early)
@@ -1674,6 +1709,7 @@ export default function StandardMappingClient({
     orderDisabled, orderEnabledActions, orderMatchZidField, orderMatchOdooField,
     orderCompanyId, orderLinkCompany, orderWarehouseId, orderPricelistId, orderPaymentTermId,
     orderAutoConfirm, orderAutoInvoice, orderPartialFulfillment, storeWarehouseRules,
+    orderReturnsMode, orderReturnsCreditNote, orderReturnsJournalId, orderReturnsFallback, orderReturnsReason,
     orderAnalyticEnabled, orderAnalyticRules,
     orderCustomerFallbackPolicy, orderDefaultCustomerId, orderProductFallbackPolicy, orderDefaultProductId,
     orderAddShipping, orderShippingProductId, orderShippingProductSku,
@@ -4108,6 +4144,125 @@ export default function StandardMappingClient({
                                       <span className="text-xs font-semibold text-muted-foreground">
                                         {lang === 'ar' ? 'إنشاء الفاتورة تلقائياً بعد تأكيد الطلب' : 'Auto Create Invoice After Order Confirmation'}
                                       </span>
+                                    </div>
+                                    <div className="space-y-3 col-span-2 border-t border-border/50 pt-3">
+                                      <div>
+                                        <h3 className="text-sm font-bold text-foreground">
+                                          {lang === 'ar' ? 'مرتجعات المتجر' : 'Store Returns'}
+                                        </h3>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                          {lang === 'ar'
+                                            ? 'عند إرجاع عميل لطلب من Zid أو Salla، يُنفَّذ المرتجع في أودو بالطريقة المختارة أدناه.'
+                                            : 'When a customer returns a Zid / Salla order, apply it in Odoo the way you pick below.'}
+                                        </p>
+                                      </div>
+                                      <div className="space-y-1.5">
+                                        <label className="block text-xs font-semibold text-muted-foreground">
+                                          {lang === 'ar' ? 'طريقة تنفيذ المرتجع' : 'Return handling'}
+                                        </label>
+                                        <select
+                                          className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                          value={orderReturnsMode}
+                                          onChange={e => setOrderReturnsMode(e.target.value as typeof orderReturnsMode)}
+                                        >
+                                          <option value="nothing">
+                                            {lang === 'ar' ? 'لا شيء (تجاهل المرتجعات)' : 'Nothing (ignore returns)'}
+                                          </option>
+                                          <option value="negative_so">
+                                            {lang === 'ar' ? 'إنشاء أمر بيع بكميات سالبة' : 'Create a negative-quantity sale order'}
+                                          </option>
+                                          <option value="stock_return_credit_note">
+                                            {lang === 'ar' ? 'مرتجع مخزون على نفس أمر البيع + كريدت نوت' : 'Stock return on the original order + credit note'}
+                                          </option>
+                                        </select>
+                                        {orderReturnsMode === 'negative_so' && (
+                                          <p className="text-[11px] text-muted-foreground">
+                                            {lang === 'ar'
+                                              ? 'يُربط الأمر السالب بالأمر الأصلي عبر المرجع RET:<رقم الأمر> لتجنب الاحتساب المزدوج.'
+                                              : 'The negative order is linked to the original with client reference RET:<order>. This prevents double counting.'}
+                                          </p>
+                                        )}
+                                        {orderReturnsMode === 'stock_return_credit_note' && (
+                                          <p className="text-[11px] text-muted-foreground">
+                                            {lang === 'ar'
+                                              ? 'يتطلب أن يكون الطلب قد تم تسليمه فعليًا في أودو وأن الفاتورة مسجّلة. الكميات تُحسب من المتبقي القابل للإرجاع في المتجر مقابل الكميات المسلّمة في أودو.'
+                                              : 'Requires the order to be delivered in Odoo and its invoice posted. Quantities come from what is still returnable in the store versus what was delivered in Odoo.'}
+                                          </p>
+                                        )}
+                                      </div>
+                                      {orderReturnsMode !== 'nothing' && (
+                                        <>
+                                          {orderReturnsMode === 'stock_return_credit_note' && (
+                                            <>
+                                              <div className="flex items-center gap-2">
+                                                <button
+                                                  type="button"
+                                                  role="switch"
+                                                  dir="ltr"
+                                                  aria-checked={orderReturnsCreditNote}
+                                                  onClick={() => setOrderReturnsCreditNote(!orderReturnsCreditNote)}
+                                                  className={cn(
+                                                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
+                                                    orderReturnsCreditNote ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
+                                                  )}
+                                                >
+                                                  <span className={cn(
+                                                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
+                                                    orderReturnsCreditNote ? 'translate-x-[20px]' : 'translate-x-[2px]'
+                                                  )} />
+                                                </button>
+                                                <span className="text-xs font-semibold text-muted-foreground">
+                                                  {lang === 'ar' ? 'إنشاء كريدت نوت بمبلغ المرتجع' : 'Create a credit note for the returned amount'}
+                                                </span>
+                                              </div>
+                                              <div className="space-y-1.5">
+                                                <label className="block text-xs font-semibold text-muted-foreground">
+                                                  {lang === 'ar' ? 'دفتر يومية كريدت النوت (اختياري)' : 'Credit note journal (optional)'}
+                                                </label>
+                                                <input
+                                                  type="number"
+                                                  min={1}
+                                                  className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                  value={orderReturnsJournalId}
+                                                  onChange={e => setOrderReturnsJournalId(e.target.value)}
+                                                  placeholder={lang === 'ar' ? 'معرّف الدفتر في أودو' : 'Odoo journal id'}
+                                                />
+                                              </div>
+                                            </>
+                                          )}
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <div className="space-y-1.5">
+                                              <label className="block text-xs font-semibold text-muted-foreground">
+                                                {lang === 'ar' ? 'إذا لم يوجد الأمر الأصلي' : 'If the original order is missing'}
+                                              </label>
+                                              <select
+                                                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                value={orderReturnsFallback}
+                                                onChange={e => setOrderReturnsFallback(e.target.value as typeof orderReturnsFallback)}
+                                              >
+                                                <option value="skip">
+                                                  {lang === 'ar' ? 'تجاهل المرتجع' : 'Skip the return'}
+                                                </option>
+                                                <option value="negative_so">
+                                                  {lang === 'ar' ? 'أمر بيع سالب مستقل' : 'Standalone negative sale order'}
+                                                </option>
+                                              </select>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                              <label className="block text-xs font-semibold text-muted-foreground">
+                                                {lang === 'ar' ? 'سبب المرتجع (اختياري)' : 'Return reason (optional)'}
+                                              </label>
+                                              <input
+                                                type="text"
+                                                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+                                                value={orderReturnsReason}
+                                                onChange={e => setOrderReturnsReason(e.target.value)}
+                                                placeholder={lang === 'ar' ? 'يُكتب على الأمر/الفاتورة' : 'Written on the order / credit note'}
+                                              />
+                                            </div>
+                                          </div>
+                                        </>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2 col-span-2 border-t border-border/50 pt-3">
                                       <button

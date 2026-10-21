@@ -93,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 722 tests over 46 suites (added 2026-09-29, grown 2026-10-21)
+# Unit tests — 768 tests over 49 suites (added 2026-09-29, grown 2026-10-21)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 722 tests over 46 suites:
+- 768 tests over 49 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -231,6 +231,14 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     would otherwise strip it), that Zid/Salla are the only platforms, that an
     explicitly mapped line is never overwritten, and that a failure never fails
     the order
+  - `tests/unit/return-detect.test.ts` — the return-detection rules: Zid
+    statuses (`reverse_in_progress` ignored), Salla `refunded_items` mapping,
+    the snapshot signature and dedupe key. `tests/unit/return-settings.test.ts`
+    — `order.returns` normalisation (`nothing` stays the inert default).
+  - `tests/unit/return-wiring.test.ts` — source pins that the interception sits
+    before the first Odoo write in `executeOdooOperation`, that no `return`
+    operation was added to `event-operation.ts`, and that Salla shipment events
+    are normalised to the order id.
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -717,6 +725,83 @@ against** — see below, do not start it.
 - Server-Sent Events for webhook activity (`webhook-emitter`, the Zid
   `/api/webhooks/zid/stream` route, `useZidWebhooks`, `WebhookToast`) — the
   queues and `sync_logs` are the record of truth; nothing reads events live.
+
+## Store Returns (added 2026-10-21)
+
+Merchant returns are applied in Odoo from **Standard Mapping → Orders**. The
+setting lives in the existing JSON blob as `order.returns` — **no migration**.
+
+| Key | Values | Default |
+|---|---|---|
+| `mode` | `nothing` \| `negative_so` \| `stock_return_credit_note` | `nothing` |
+| `create_credit_note` | bool (stock mode only) | `true` |
+| `credit_note_journal_id` | int or null | null |
+| `fallback_when_missing` | `skip` \| `negative_so` | `skip` |
+| `reason` | string (max 200) | `''` |
+
+- **`mode: 'nothing'` is a true no-op**: `processReturnEvent` returns
+  `handled: false` and the normal order sync runs unchanged. A workspace that
+  never opens the controls behaves exactly as before.
+- **No `return` operation was added to `event-operation.ts`.** `webhook-gate`
+  gates on `standard_mapping_settings.enabled_actions`, and every saved array
+  lacks a `return` member, so a new operation would drop the event silently.
+  The interception happens in `executeOdooOperation` *after* the settings merge
+  and *before* matching/writes (`tests/unit/return-wiring.test.ts` pins the
+  order of those two positions).
+- **Detection** (`src/lib/returns/detect.ts`, import-free and unit-tested):
+  - Zid has **no return webhook**. Only `reversed` / `partially_reversed` count;
+    `reverse_in_progress` is ignored (the merchant can still cancel it).
+    The status is read as a string or as the documented `{ code, name }` object
+    (`slug`/`value` tolerated).
+  - Salla: `order.refunded`, `order.shipment.return.created`, or any order
+    payload whose `refunded_items` is non-empty.
+- **Quantities are always a delta, never a stored counter**:
+  `toReturn = platform's cumulative returned − Odoo's cumulative returned`.
+  Odoo's side is the negative-SO ledger (`client_order_ref = 'RET:<order>'`) or
+  `product_uom_qty − qty_delivered`. A redelivered webhook therefore computes
+  0, a second partial return computes the new delta, and a failed attempt is
+  retried with the full remainder. When one product sits on several order
+  lines, the per-product target is spent once (`consumed`), so a credit note
+  cannot refund the same units twice.
+- Zid quantities come from `GET /v1/managers/store/orders/{id}/view-for-return`.
+  **Verified against docs.zid.sa on 2026-10-21** (folder *Reverse Orders →
+  Order Details – View for Return*). The envelope is
+  `{ status, order: { id, code, order_status: { code }, products_count,
+  products: [{ id, order_product_id, name, sku, quantity, price,
+  tax_percentage, total }], payment: { invoice } }, message }` and two
+  documented rules drive the whole feature:
+  1. `products[].quantity` **is the remaining returnable quantity**
+     (`original − sum(previous_returns)`), not the ordered quantity.
+  2. The list contains **only** products that can still come back; a fully
+     reversed order answers `products: []`. So a product missing from the list
+     has **nothing left to return** — treating absence as "not returned" makes
+     a full reversal invisible. The one exception is a row that could not be
+     resolved to an Odoo product: then absence is ambiguous, so the order is
+     left untouched rather than guessed.
+  `id` is the order-product UUID and `order_product_id` its integer handle —
+  neither is the store product id, so Zid returns resolve products by **SKU**.
+  `price` is tax-inclusive; the net unit is derived from `tax_percentage`
+  before it is used on an unmapped line. An envelope without a `products`
+  array is `known: false`, never "everything came back".
+- **There is no reverse-orders list to poll.** The *Reverse Orders* folder
+  publishes Create (`POST /v1/managers/store/reverse-orders`), Waybill, add/list
+  Reasons, Calculate Reverse Totals, Create Refund, Upload Bank Transfer
+  Receipt, Update Return Products and View for Return — **no GET list**. Zid
+  returns are therefore detected from the order status (`order.status.update`,
+  and the 10-minute `reconcileZidOrders` pass, which re-enqueues any order whose
+  `updated_at` moved) and quantified with `view-for-return`. Do not add a poll
+  of a list endpoint; it does not exist.
+- `stock_return_credit_note` uses `stock.return.picking` with `to_refund: true`
+  (without it `qty_delivered` never drops), then a manual `account.move`
+  `out_refund` with `reversed_entry_id` + `sale_line_ids`. `account.move.reversal`
+  is deliberately not used: it reverses the whole invoice, while returns are
+  usually partial. The wizard method is `action_create_returns` on 17+ and
+  `create_returns` before; it is tried at runtime, not pinned to a version.
+- **Salla shipment events were targeting the wrong record.** `order.shipment.*`
+  payloads are `{id, reference_id, shipping_number}` where `id` is the
+  *shipment* id (`reference_id` is not the order id either). `sync-engine.ts`
+  now normalises them to the order id before the mapping lookup, so the default
+  `nothing` mode no longer writes the update against a non-existent order.
 
 ## Admin Checks
 - `ADMIN_USER_IDS` env var (comma-separated Clerk user IDs)
