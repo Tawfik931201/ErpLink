@@ -1,28 +1,21 @@
 'use client'
 
 import {
-  AreaChart,
   Area,
+  AreaChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from 'recharts'
 
 import { useLanguage } from '@/components/language-provider'
-import type { DailyActivity, EventDistribution } from '@/types'
-
-const PIE_COLORS = [
-  '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b',
-  '#ec4899', '#06b6d4', '#f97316', '#6366f1',
-]
+import type { DailyActivity } from '@/types'
 
 interface SyncAreaChartProps {
   data: DailyActivity[]
 }
+
 export function SyncAreaChart({ data }: SyncAreaChartProps) {
   const { dir } = useLanguage()
   const isRtl = dir === 'rtl'
@@ -55,7 +48,12 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
           axisLine={false}
           tickLine={false}
         />
-        <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
+        <YAxis
+          tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+          axisLine={false}
+          tickLine={false}
+          allowDecimals={false}
+        />
         <Tooltip
           contentStyle={{
             borderRadius: 8,
@@ -69,6 +67,14 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
               dateStyle: 'medium',
             })
           }
+          formatter={(value: number, name: string) => {
+            const label = name === 'success'
+              ? isRtl ? 'ناجح' : 'Success'
+              : name === 'failed'
+                ? isRtl ? 'فشل' : 'Failed'
+                : isRtl ? 'تم التخطي' : 'Skipped'
+            return [value, label]
+          }}
         />
         <Area
           type="monotone"
@@ -76,7 +82,6 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
           stroke="#10b981"
           strokeWidth={2}
           fill="url(#colorSuccess)"
-          name={isRtl ? 'ناجح' : 'Success'}
         />
         <Area
           type="monotone"
@@ -84,58 +89,8 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
           stroke="#f43f5e"
           strokeWidth={1.5}
           fill="url(#colorFailed)"
-          name={isRtl ? 'فاشل' : 'Failed'}
         />
       </AreaChart>
-    </ResponsiveContainer>
-  )
-}
-
-interface EventPieChartProps {
-  data: EventDistribution[]
-}
-export function EventPieChart({ data }: EventPieChartProps) {
-  const { dir } = useLanguage()
-  const isRtl = dir === 'rtl'
-
-  const truncate = (s: string) => (s.length > 22 ? s.slice(0, 20) + '…' : s)
-
-  if (data.length === 0) {
-    return (
-      <div className="flex h-[220px] items-center justify-center text-xs text-muted-foreground">
-        {isRtl ? 'لا توجد بيانات' : 'No data'}
-      </div>
-    )
-  }
-
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <PieChart>
-        <Pie
-          data={data}
-          dataKey="count"
-          nameKey="event"
-          cx="50%"
-          cy="50%"
-          innerRadius={50}
-          outerRadius={80}
-          paddingAngle={2}
-        >
-          {data.map((_, i) => (
-            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-          ))}
-        </Pie>
-        <Tooltip
-          formatter={(value: number, name: string) => [value, truncate(name)]}
-          contentStyle={{
-            borderRadius: 8,
-            border: '1px solid hsl(var(--border))',
-            background: 'hsl(var(--card))',
-            fontSize: 12,
-            color: 'hsl(var(--foreground))',
-          }}
-        />
-      </PieChart>
     </ResponsiveContainer>
   )
 }
