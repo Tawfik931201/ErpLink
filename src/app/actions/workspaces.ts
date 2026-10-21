@@ -12,6 +12,7 @@ import {
 } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
+import { isWorkspaceClosed } from '@/lib/workspace-archive'
 import { syncWebhooksWithSettings, unregisterAllZidWebhooks } from '@/lib/zid/webhooks'
 
 async function getOrCreateDbUser() {
@@ -102,16 +103,34 @@ export async function createWorkspace(name: string) {
 
     if (createError) throw new Error('Failed to create workspace in database')
 
-    // Automatically set the new workspace as active if the user doesn't have one
-    if (!user.active_workspace_id) {
-      await supabase
+    // Every workspace starts its own 7-day free trial from `created_at`
+    // (`src/lib/workspace-trial.ts`), so a replacement is immediately usable.
+    // It must also *become* the active workspace when the current one is
+    // closed (expired trial / expired subscription) or missing: previously the
+    // closed workspace stayed active, so the client kept landing on the
+    // "workspace closed" notice after creating a new one.
+    const currentActiveId = (user.active_workspace_id as string | null) ?? null
+    const shouldActivate =
+      !currentActiveId ||
+      (currentActiveId !== workspace.id && (await isWorkspaceClosed(currentActiveId)))
+
+    let activated = false
+    if (shouldActivate) {
+      const { error: activateError } = await supabase
         .from('users')
         .update({ active_workspace_id: workspace.id })
         .eq('id', user.id)
+
+      if (activateError) {
+        console.error('Failed to activate new workspace:', activateError.message)
+      } else {
+        activated = true
+      }
     }
 
     revalidatePath('/app/settings/workspace')
-    return { success: true, workspace }
+    if (activated) revalidatePath('/app/dashboard')
+    return { success: true, workspace, activated }
   } catch (error: any) {
     console.error('Failed to create workspace:', error)
     return { success: false, error: error.message || 'Failed to create workspace' }

@@ -20,8 +20,9 @@
  * normal module so it can also be imported by `sync-queue-runner.ts`.
  */
 
+import { isSubscriptionExpired } from '@/lib/subscription-utils'
 import { supabase } from '@/lib/supabase'
-import { TRIAL_DAYS } from '@/lib/workspace-trial'
+import { TRIAL_DAYS, isTrialExpired } from '@/lib/workspace-trial'
 
 /** Today's date as a YYYY-MM-DD string (UTC). */
 function today(): string {
@@ -77,6 +78,45 @@ export async function isWorkspaceArchived(workspaceId: string): Promise<boolean>
 
     if (error || !data) return false
     return data.archived_at != null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether a workspace is currently closed: archived, or with no live
+ * subscription and its free trial run out. Mirrors the gate in
+ * `src/app/(app)/app/layout.tsx` (`workspaceArchived || trial.isExpired ||
+ * subscription.isExpired`) without needing the per-request subscription
+ * payload — used when deciding whether a newly created workspace should take
+ * over as the active one.
+ *
+ * Fails open (returns false) on any read error, like `isWorkspaceArchived`.
+ * A *missing* row is reported as closed: a dangling `active_workspace_id`
+ * must not stop a newly created workspace from taking over.
+ */
+export async function isWorkspaceClosed(workspaceId: string): Promise<boolean> {
+  try {
+    const { data: ws, error: wsError } = await supabase
+      .from('workspaces')
+      .select('*')
+      .eq('id', workspaceId)
+      .maybeSingle()
+
+    if (wsError) return false
+    if (!ws) return true
+    if (ws.archived_at != null) return true
+
+    const { data: subs, error: subError } = await supabase
+      .from('subscriptions')
+      .select('end_date')
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'active')
+
+    if (subError) return false
+    if ((subs ?? []).some((s) => !isSubscriptionExpired(s))) return false
+
+    return isTrialExpired((ws.created_at as string | null) ?? null)
   } catch {
     return false
   }

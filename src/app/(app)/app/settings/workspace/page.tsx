@@ -2,6 +2,7 @@
 
 import { useUser } from '@clerk/nextjs'
 import { Briefcase, CheckCircle, Database, Edit3, Loader2, Plus, Store, Trash2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 import {
@@ -31,6 +32,7 @@ export default function WorkspacePage() {
   const [loading, setLoading] = useState(true)
   const { t, lang, dir } = useLanguage()
   const { user: clerkUser } = useUser()
+  const router = useRouter()
   const currentUserId = clerkUser?.id
   
   // Form/Modal states
@@ -65,6 +67,15 @@ export default function WorkspacePage() {
     if (res.success) {
       setNewName('')
       setIsAddOpen(false)
+      if (res.activated) {
+        // The new workspace took over as active (the previous one was closed
+        // or none was selected) — go straight back into the app with its own
+        // fresh 7-day trial instead of leaving the user on the closed notice.
+        setIsSubmitting(false)
+        router.push('/app/dashboard')
+        router.refresh()
+        return
+      }
       fetchWorkspaces()
     } else {
       alert(res.error || (lang === 'ar' ? 'فشل في إنشاء بيئة العمل' : 'Failed to create workspace'))

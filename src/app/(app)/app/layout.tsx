@@ -102,11 +102,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // run out — or that the backend has already archived (expired subscription) —
   // is closed, so the client app is replaced by a "closed" notice. Admins are
   // exempt (they manage billing and troubleshoot, mostly via /admin, and the
-  // strip still warns them), and /app/settings/workspace stays reachable so a
-  // user with another active workspace can switch to it.
+  // strip still warns them), and the whole /app/settings subtree stays reachable
+  // so the user can manage billing or create/switch to another workspace.
   const workspaceClosed =
     !layoutInfo.isAdmin &&
-    currentPath !== '/app/settings/workspace' &&
+    !currentPath.startsWith('/app/settings') &&
     subscriptionAccess.success === true &&
     (subscriptionAccess.workspaceArchived ||
       subscriptionAccess.trial?.isExpired === true ||
@@ -222,8 +222,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                   </h2>
                   <p className="text-sm text-muted-foreground leading-relaxed">
                     {lang === 'ar'
-                      ? 'انتهت فترة التجربة المجانية (7 أيام) ولم يتم تسجيل اشتراك، لذلك تم إغلاق مساحة العمل. تواصل مع الدعم للاشتراك وإعادة التفعيل.'
-                      : 'The 7-day free trial has ended and no subscription was registered, so the workspace has been closed. Contact support to subscribe and reactivate.'}
+                      ? 'انتهت فترة التجربة المجانية (7 أيام) ولم يتم تسجيل اشتراك، لذلك تم إغلاق مساحة العمل. تواصل مع الدعم للاشتراك وإعادة التفعيل، أو أنشئ مساحة عمل جديدة لتبدأ تجربة مجانية جديدة لمدة 7 أيام.'
+                      : 'The 7-day free trial has ended and no subscription was registered, so this workspace has been closed. Contact support to subscribe and reactivate it, or create a new workspace to start a fresh 7-day free trial.'}
                   </p>
                   <div className="mt-5 flex items-center justify-center gap-3">
                     <Link
@@ -236,7 +236,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                       href="/app/settings/workspace"
                       className="inline-flex items-center rounded-lg border border-border px-4 py-2 text-xs font-bold hover:bg-muted"
                     >
-                      {lang === 'ar' ? 'تبديل مساحة العمل' : 'Switch workspace'}
+                      {lang === 'ar' ? 'تبديل أو إنشاء مساحة عمل' : 'Switch or create workspace'}
                     </Link>
                   </div>
                 </div>

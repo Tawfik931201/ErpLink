@@ -638,8 +638,13 @@ against** — see below, do not start it.
   out with no subscription the workspace **closes**: `archived_at` is set
   (lazy + the 6h pass) and the client app is replaced by a "closed" notice
   (`workspaceClosed` gate in `src/app/(app)/app/layout.tsx`). The gate exempts
-  admins and keeps `/app/settings/workspace` reachable so a user with another
-  active workspace can still switch. A NULL/unparseable `created_at` is
+  admins and keeps the whole `/app/settings` subtree reachable so a user can
+  manage billing, or create/switch to another workspace. **Creating a new
+  workspace is always allowed and starts its own 7-day trial** (the clock is
+  per-workspace); if the currently active workspace is closed (or dangling),
+  `createWorkspace` makes the new one active automatically and the UI returns
+  to `/app/dashboard` — a closed workspace never has to be paid for first.
+  A NULL/unparseable `created_at` is
   **unknown, not expired** — no trial countdown, no auto-archive (fail-open).
 - Client sees a **fixed top alert strip** (`SubscriptionBanner.tsx`) rendered
   above the entire app shell on every page (layout is `h-screen overflow-hidden`,
