@@ -1,8 +1,6 @@
 import {
-  Check,
-  X,
-  Shield,
   BarChart3,
+  Shield,
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
@@ -12,7 +10,6 @@ import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
 import { resolveLanguage, translations, type Language } from '@/lib/translations'
-import { cn } from '@/lib/utils'
 
 function t(lang: Language, key: string): string {
   const dict = translations[lang] as Record<string, string>
@@ -27,71 +24,6 @@ export default async function PricingPage() {
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
 
-  const featureRows = [
-    { key: 'pricing.feature.ordersItems', free: true, starter: true, business: true },
-    { key: 'pricing.feature.productsVariants', free: true, starter: true, business: true },
-    { key: 'pricing.feature.customersCategories', free: true, starter: true, business: true },
-    { key: 'pricing.feature.fieldMapping', free: true, starter: true, business: true },
-    { key: 'pricing.feature.stockLive', free: true, starter: true, business: true },
-    { key: 'pricing.feature.telegram', free: true, starter: true, business: true },
-    { key: 'pricing.feature.initialTransfer', free: true, starter: true, business: true },
-    { key: 'pricing.feature.detailedLogs', free: true, starter: true, business: true },
-    { key: 'pricing.feature.dashboard', free: true, starter: true, business: true },
-    { key: 'pricing.feature.addCustomField', free: true, starter: true, business: true },
-    {
-      key: 'pricing.feature.stores',
-      type: 'value' as const,
-      free: 'pricing.val.stores.free',
-      starter: 'pricing.val.stores.starter',
-      business: 'pricing.val.stores.business',
-    },
-    {
-      key: 'pricing.feature.team',
-      type: 'value' as const,
-      free: 'pricing.val.team.free',
-      starter: 'pricing.val.team.starter',
-      business: 'pricing.val.team.business',
-    },
-    {
-      key: 'pricing.feature.support',
-      type: 'value' as const,
-      free: 'pricing.val.support.free',
-      starter: 'pricing.val.support.starter',
-      business: 'pricing.val.support.business',
-    },
-    {
-      key: 'pricing.feature.duration',
-      type: 'value' as const,
-      free: 'pricing.val.duration.free',
-      starter: 'pricing.val.duration.starter',
-      business: 'pricing.val.duration.business',
-    },
-    {
-      key: 'pricing.feature.erp',
-      type: 'value' as const,
-      free: 'pricing.val.erp.free',
-      starter: 'pricing.val.erp.starter',
-      business: 'pricing.val.erp.business',
-    },
-    {
-      key: 'pricing.platforms.stores',
-      type: 'value' as const,
-      free: 'pricing.val.platforms.stores',
-      starter: 'pricing.val.platforms.stores',
-      business: 'pricing.val.platforms.stores',
-    },
-    {
-      key: 'pricing.platforms.erp',
-      type: 'value' as const,
-      free: 'pricing.val.platforms.erp',
-      starter: 'pricing.val.platforms.erp',
-      business: 'pricing.val.platforms.erp',
-    },
-  ]
-
-  const planIds = ['free', 'starter', 'business'] as const
-  const planNames = ['pricing.free.name', 'pricing.starter.name', 'pricing.business.name'] as const
-
   return (
     <div
       className="flex min-h-screen flex-col bg-background text-foreground font-sans overflow-x-hidden"
@@ -101,7 +33,7 @@ export default async function PricingPage() {
 
       <main className="flex-1">
         {/* ── Hero ─────────────────────────────────────────────── */}
-        <section className="pt-20 pb-28 px-6 md:px-12 relative overflow-hidden bg-secondary/20">
+        <section className="pt-20 pb-24 px-6 md:px-12 relative overflow-hidden bg-secondary/20">
           <div className="absolute top-[-80px] right-[-80px] w-[400px] h-[400px] rounded-full bg-foreground/[0.03] blur-3xl pointer-events-none" />
           <div className="absolute bottom-[-80px] left-[-80px] w-[350px] h-[350px] rounded-full bg-foreground/[0.02] blur-3xl pointer-events-none" />
 
@@ -121,70 +53,10 @@ export default async function PricingPage() {
           </div>
         </section>
 
-        {/* ── Billing Toggle + Cards ──────────────────────────── */}
-        <section className="-mt-16 px-6 md:px-12 relative z-10">
+        {/* ── Single Plan + Features ──────────────────────────── */}
+        <section className="-mt-12 px-6 md:px-12 relative z-10">
           <div className="max-w-7xl mx-auto">
             <PricingPlans />
-          </div>
-        </section>
-
-        {/* ── Comparison Table ─────────────────────────────────── */}
-        <section className="py-24 px-6 md:px-12 bg-secondary/20 mt-20">
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center mb-14 space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <BarChart3 className="h-3 w-3" />
-                <span>{t(lang, 'pricing.compareTitle')}</span>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-black text-foreground tracking-tight">
-                {t(lang, 'pricing.compareTitle')}
-              </h2>
-              <p className="text-muted-foreground max-w-2xl mx-auto">
-                {t(lang, 'pricing.compareSubtitle')}
-              </p>
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border border-border shadow-sm">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-card border-b border-border">
-                    <th className={cn('px-6 py-4 font-bold text-foreground', lang === 'ar' ? 'text-right' : 'text-left')}>
-                      {lang === 'ar' ? 'الميزة' : 'Feature'}
-                    </th>
-                    {planNames.map((name) => (
-                      <th key={name} className="text-center px-4 py-4 font-bold text-foreground bg-muted/30">
-                        {t(lang, name)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {featureRows.map((row, idx) => (
-                    <tr
-                      key={row.key}
-                      className={cn('border-b border-border/50', idx % 2 === 0 ? 'bg-card' : 'bg-secondary/30')}
-                    >
-                      <td className={cn('px-6 py-4 font-semibold text-foreground', lang === 'ar' ? 'text-right' : 'text-left')}>
-                        {t(lang, row.key)}
-                      </td>
-                      {planIds.map((plan) => (
-                        <td key={plan} className="px-4 py-4 text-center">
-                          {row.type === 'value' ? (
-                            <span className="text-sm font-semibold text-foreground/80">
-                              {t(lang, (row as any)[plan])}
-                            </span>
-                          ) : (
-                            <span className={cn('inline-flex h-6 w-6 items-center justify-center rounded-full', (row as any)[plan] ? 'bg-muted text-foreground' : 'bg-muted text-muted-foreground')}>
-                              {(row as any)[plan] ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5" />}
-                            </span>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </div>
         </section>
 
