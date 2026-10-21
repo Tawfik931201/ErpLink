@@ -11,6 +11,7 @@
 import xmlrpc from 'xmlrpc'
 
 import { checkImpersonationWriteBlock } from './auth'
+import { parseOdooVersionInfo, type OdooVersionInfo } from './odoo/version'
 
 export interface OdooConfig {
   url: string      // e.g. https://mycompany.odoo.com
@@ -56,6 +57,7 @@ export class OdooClient {
   private config: OdooConfig
   private uid: number | null = null
   private majorVersion: number | null = null
+  private versionInfo: OdooVersionInfo | null = null
 
   constructor(config: OdooConfig) {
     this.config = config
@@ -69,13 +71,24 @@ export class OdooClient {
     return this.config.db
   }
 
+  /**
+   * Full version details as reported by `/xmlrpc/2/common` (no auth needed).
+   * Cached on the instance — one extra RPC per client at most.
+   */
+  async getVersionInfo(): Promise<OdooVersionInfo> {
+    if (this.versionInfo) return this.versionInfo
+    const common = createXmlRpcClient(this.config.url, '/xmlrpc/2/common')
+    const info = await callAsync<Record<string, unknown>>(common, 'version', [])
+    this.versionInfo = parseOdooVersionInfo(info)
+    if (this.versionInfo.majorVersion) this.majorVersion = this.versionInfo.majorVersion
+    return this.versionInfo
+  }
+
   /** Get Odoo major version (e.g. 17, 18, 19) */
   async getMajorVersion(): Promise<number> {
     if (this.majorVersion) return this.majorVersion
-    const common = createXmlRpcClient(this.config.url, '/xmlrpc/2/common')
-    const info = await callAsync<Record<string, unknown>>(common, 'version', [])
-    const infoArr = info.server_version_info as number[]
-    this.majorVersion = infoArr?.[0] ?? 17
+    const info = await this.getVersionInfo().catch(() => null)
+    this.majorVersion = info?.majorVersion ?? 17
     return this.majorVersion
   }
 

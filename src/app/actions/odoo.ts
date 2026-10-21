@@ -5,6 +5,7 @@ import { revalidatePath, unstable_cache, revalidateTag } from 'next/cache'
 import { getActiveUserId } from '@/lib/auth'
 import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
 import { encrypt, decrypt } from '@/lib/crypto'
+import { formatOdooVersion } from '@/lib/odoo/version'
 import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
@@ -84,6 +85,61 @@ export async function getActiveWorkspaceErpConnection() {
   }
 }
 
+const TTL_VERSION_MS = 6 * 60 * 60 * 1000 // 6 h — an ERP version does not change intraday
+
+/**
+ * Detect the version of the active workspace's connected Odoo server.
+ *
+ * Used by the connect screen when the stored connection has no version yet
+ * (connections created before migration 20261021, or a database where that
+ * migration has not been applied). Never throws: the version is decoration,
+ * the connection itself is already working.
+ */
+export async function detectOdooVersion(): Promise<{
+  success: boolean
+  version?: string | null
+  error?: string
+}> {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: false, error: 'لم يتم تحديد بيئة عمل نشطة (No active workspace selected)' }
+    }
+
+    const connection = await getCachedErpConnection(user.active_workspace_id)
+    if (!connection || connection.erp_type !== 'odoo') {
+      return { success: false, error: 'لا يوجد اتصال أودو نشط (No active Odoo connection)' }
+    }
+
+    const stored = connection.odoo_version as string | null | undefined
+    if (stored) return { success: true, version: stored }
+
+    const version = await ttlCache.get(
+      `odoo:version:${user.active_workspace_id}`,
+      TTL_VERSION_MS,
+      async () => formatOdooVersion(await createOdooClient(connection).getVersionInfo())
+    )
+
+    if (version) {
+      const { error } = await supabase
+        .from('erp_connections')
+        .update({ odoo_version: version })
+        .eq('id', connection.id)
+      if (error) {
+        console.warn(
+          '[Odoo Action] odoo_version not stored (is migration 20261021 applied?):',
+          error.message
+        )
+      }
+    }
+
+    return { success: true, version }
+  } catch (error: any) {
+    console.warn('[Odoo Action] detectOdooVersion failed:', error?.message ?? error)
+    return { success: false, error: error?.message || 'Failed to detect Odoo version' }
+  }
+}
+
 function validateSafeExternalUrl(rawUrl: string): { valid: boolean; error?: string } {
   try {
     const parsed = new URL(rawUrl)
@@ -151,7 +207,16 @@ export async function testErpConnection(url: string, db: string, username: strin
 
       const uid = await client.authenticate()
       if (uid) {
-        return { success: true, uid }
+        // The version is informational: a server that authenticates but does
+        // not answer `common.version` must still connect.
+        const version = await client
+          .getVersionInfo()
+          .then(formatOdooVersion)
+          .catch((err) => {
+            console.warn('[ERP Action] could not read Odoo version:', err?.message ?? err)
+            return null
+          })
+        return { success: true, uid, version }
       }
       return { success: false, error: 'فشل المصادقة مع أودو - يرجى التحقق من المدخلات (Auth failed - check inputs)' }
     } else if (erpType === 'erpnext') {
@@ -289,6 +354,9 @@ export async function saveErpConnection(data: {
       throw new Error(testResult.error || 'فشل اختبار الاتصال بالخادم (Connection test failed)')
     }
 
+    const detectedVersion =
+      erpType === 'odoo' && 'version' in testResult ? (testResult.version ?? null) : null
+
     // Encrypt apiKey before saving
     const encryptedKey = encrypt(data.apiKey.trim())
 
@@ -340,6 +408,26 @@ export async function saveErpConnection(data: {
       result = inserted
     }
 
+    // Store the detected Odoo version in a second, best-effort write: a
+    // database that has not applied migration 20261021 has no `odoo_version`
+    // column, and naming it in the insert above would fail the whole connect.
+    let storedVersion: string | null = result?.odoo_version ?? null
+    if (erpType === 'odoo' && detectedVersion) {
+      const { error: versionError } = await supabase
+        .from('erp_connections')
+        .update({ odoo_version: detectedVersion })
+        .eq('id', result.id)
+
+      if (versionError) {
+        console.warn(
+          '[Odoo Action] odoo_version not stored (is migration 20261021 applied?):',
+          versionError.message
+        )
+      } else {
+        storedVersion = detectedVersion
+      }
+    }
+
     revalidateTag('erp-connection')
     revalidateTag('odoo-models')
     revalidateTag('odoo-fields')
@@ -357,7 +445,7 @@ export async function saveErpConnection(data: {
       )
     }
 
-    return { success: true, connection: result }
+    return { success: true, connection: { ...result, odoo_version: storedVersion } }
   } catch (error: any) {
     console.error('[Odoo Action] saveOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to save connection details' }

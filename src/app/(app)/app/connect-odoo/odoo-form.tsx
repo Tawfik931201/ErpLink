@@ -17,9 +17,9 @@ import {
   ArrowLeft,
   ArrowRight
 } from 'lucide-react'
-import React, { useState, useTransition } from 'react'
+import React, { useEffect, useState, useTransition } from 'react'
 
-import { saveErpConnection, disconnectErpConnection } from '@/app/actions/odoo'
+import { saveErpConnection, disconnectErpConnection, detectOdooVersion } from '@/app/actions/odoo'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -58,6 +58,25 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
   // Connection state
   const [connection, setConnection] = useState(initialConnection)
   const [isEditing, setIsEditing] = useState(!initialConnection)
+
+  // Odoo server version, detected automatically after a successful connect.
+  // Older connections (saved before the version was stored) get one lazy
+  // detection pass instead of a live XML-RPC call on every page load.
+  const [odooVersion, setOdooVersion] = useState<string | null>(
+    initialConnection?.erp_type === 'odoo' ? (initialConnection?.odoo_version ?? null) : null
+  )
+  const [isDetectingVersion, setIsDetectingVersion] = useState(false)
+
+  useEffect(() => {
+    if (!connection || connection.erp_type !== 'odoo' || connection.odoo_version) return
+    let cancelled = false
+    setIsDetectingVersion(true)
+    detectOdooVersion()
+      .then((res) => { if (!cancelled) setOdooVersion(res.success ? (res.version ?? null) : null) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setIsDetectingVersion(false) })
+    return () => { cancelled = true }
+  }, [connection])
 
   // Selected ERP for flow control (null means show selector, non-null means show form)
   const [selectedErp, setSelectedErp] = useState<string | null>(connection?.erp_type || null)
@@ -200,6 +219,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
           delete res.connection.password;
         }
         setConnection(res.connection)
+        setOdooVersion(res.connection?.odoo_version ?? null)
         setIsEditing(false)
         setNameTouched(false)
         setApiKey('') // Force clear key state completely after save
@@ -239,6 +259,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
       const res = await disconnectErpConnection(connection.id)
       if (res.success) {
         setConnection(null)
+        setOdooVersion(null)
         setConnectionName(lang === 'ar' ? 'أودو الرئيسي' : 'Main Odoo')
         setUrl('')
         setDbName('')
@@ -347,6 +368,32 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                   {getErpTypeName(connection.erp_type)}
                 </div>
               </div>
+
+              {/* Odoo version — detected automatically from the server */}
+              {connection.erp_type === 'odoo' && (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+                      <Server className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-foreground">{lang === 'ar' ? 'إصدار أودو' : 'Odoo Version'}</h3>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {lang === 'ar'
+                          ? 'الإصدار الذي تم اكتشافه تلقائياً من خادم أودو عند الاتصال'
+                          : 'Detected automatically from the Odoo server when connected'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="sm:text-left text-xs font-semibold text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border" dir="ltr">
+                    {odooVersion
+                      ? `Odoo ${odooVersion}`
+                      : isDetectingVersion
+                        ? (lang === 'ar' ? 'جارٍ الكشف…' : 'Detecting…')
+                        : '—'}
+                  </div>
+                </div>
+              )}
 
               {/* Name */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">

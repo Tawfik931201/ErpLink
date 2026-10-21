@@ -93,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 681 tests over 43 suites (added 2026-09-29, grown 2026-10-19)
+# Unit tests — 692 tests over 44 suites (added 2026-09-29, grown 2026-10-21)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 681 tests over 43 suites:
+- 692 tests over 44 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -185,6 +185,11 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     the dead HMAC path and the unsupported `secret` registration field stay gone
     (see Ingress auth). It also asserts the refresh route is admin-gated and
     refuses to delete webhooks when no credential is derivable.
+  - `tests/unit/odoo-version.test.ts` — `parseOdooVersionInfo` /
+    `formatOdooVersion`: the real `common.version` payload, including Odoo
+    Online `saas~` strings, the mixed-type `server_version_info` tail
+    (`[17, 0, 0, 'final', 0, '']` — it is *not* all numbers), and that garbage
+    never throws (the version is decoration, the connection is not)
   - `tests/unit/build-odoo-values-mobile.test.ts` — `buildOdooValues`' `mobile`
     guard: the field is written when Odoo confirms it exists and skipped when it
     does not, without touching the other hardcoded fields (Odoo 19 removed it)
@@ -859,7 +864,16 @@ In order:
       `_paste_ready` variant: paste it directly into the Supabase SQL Editor.
       **Applied 2026-10-19** and verified live the same day: the column exists,
       and the trial pass archived the overdue workspace `703f0dae` (created
-      2026-10-08) ~24s after the deploy that shipped it.
+     2026-10-08) ~24s after the deploy that shipped it.
+6. `supabase/migrations/20261021_erp_connection_version.sql`
+   - `erp_connections.odoo_version` TEXT — display-only, written when an Odoo
+     connection is saved (`saveErpConnection`) or lazily detected by
+     `detectOdooVersion` on `/app/connect-odoo`
+   - **NOT a hard prerequisite**: the value is stored in a separate,
+     best-effort `update()` after the connection itself is saved, so a database
+     without the column still connects (the write warns and is skipped). The
+     connect screen still shows the version, it just is not persisted
+   - idempotent (`to_regclass` guard + `IF NOT EXISTS`, BEGIN/COMMIT), paste-ready
 
 If `20260922` is not applied, every webhook route returns 503
 (`webhook_inbox_missing`) by design. Do not deploy code without it.
