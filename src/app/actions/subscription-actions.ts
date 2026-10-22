@@ -28,9 +28,6 @@ interface RawSubscription {
   id: string
   workspace_id: string
   user_id: string
-  // Legacy column kept for read-compatibility (SELECT *). Always NULL for new
-  // rows — the affiliate system was removed, never write to this column.
-  affiliate_id: string | null
   start_date: string
   months_paid: number
   end_date: string
@@ -67,9 +64,6 @@ export interface MySubscription {
   id: string
   workspace_id: string
   user_id: string
-  // Legacy read-only field (affiliate system removed). Kept so `...sub` spreads
-  // from `select('*')` stay type-compatible. Never written, never displayed.
-  affiliate_id: string | null
   start_date: string
   months_paid: number
   end_date: string
@@ -219,8 +213,6 @@ const RegisterSchema = z.object({
   clientEmail: z.string().email().max(255),
   workspaceId: z.string().uuid().optional().nullable(),
   newWorkspaceName: z.string().trim().max(120).optional().nullable(),
-  // NOTE: affiliate system removed — no affiliateId accepted. The
-  // `affiliate_id` DB column is legacy read-only (always NULL for new rows).
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   monthsPaid: z.coerce.number().int().min(1).max(120),
   amountPaid: z.coerce.number().min(0).max(99_999_999),
@@ -237,8 +229,7 @@ const RegisterSchema = z.object({
  *   subscriptions on the workspace are cancelled, otherwise the new one is
  *   added alongside them.
  * - A payment row is created for the paid amount.
- * - No commission is created (affiliate system removed). `affiliate_id` is
- *   always stored as NULL for compatibility with older rows.
+ * - No commission is created (affiliate system removed).
  */
 export async function registerSubscription(input: {
   clientEmail: string
@@ -324,7 +315,7 @@ export async function registerSubscription(input: {
     }
 
     // NOTE: affiliate auto-detect removed (affiliate system cancelled).
-    // New subscriptions are always stored with affiliate_id = NULL.
+    // No affiliate column exists any more (dropped 2026-10-22).
 
     const startDate = parsed.startDate
     const endDate = computeEndDate(startDate, parsed.monthsPaid)
@@ -354,8 +345,6 @@ export async function registerSubscription(input: {
         {
           workspace_id: workspaceId,
           user_id: ownerUserId,
-          // Legacy read-only column — always NULL for new rows.
-          affiliate_id: null,
           start_date: startDate,
           months_paid: parsed.monthsPaid,
           end_date: endDate,
@@ -546,8 +535,7 @@ export async function extendSubscription(input: {
       if (payErr) console.error('[subscriptions] extension payment insert error:', payErr.message)
     }
 
-    // Record the extension payment (manual payment only — no commission;
-    // affiliate system removed).
+    // Record the extension payment (manual payment only — no commission).
 
     await recordAudit({
       actorId: adminId,
@@ -758,9 +746,6 @@ export interface AdminSubscriptionRow {
   id: string
   workspace_id: string
   user_id: string
-  // Legacy read-only (affiliate system removed). Kept for compatibility with
-  // older rows; always NULL for new subscriptions, never displayed.
-  affiliate_id: string | null
   start_date: string
   months_paid: number
   end_date: string
@@ -774,8 +759,6 @@ export interface AdminSubscriptionRow {
   workspace_name: string | null
   client_name: string | null
   client_email: string | null
-  // Legacy — always NULL (affiliate system removed, never displayed).
-  affiliate_name: string | null
   subscription_number: string | null
   active_sub_count: number
 }
@@ -790,8 +773,7 @@ export interface UserPick {
 
 // NOTE: Affiliate system removed.
 // `AffiliatePick`, `getActiveAffiliates` and `detectAffiliateForClient` were
-// deleted. The `partner_*` tables are left untouched in the DB; a cleanup
-// migration will drop them later. See AGENTS.md.
+// deleted, and the `partner_*` tables were dropped 2026-10-22. See AGENTS.md.
 
 /** Admin: list all subscriptions with client / workspace info (manual payments only). */
 export async function getAllSubscriptions() {
@@ -859,7 +841,6 @@ export async function getAllSubscriptions() {
           id: activeSub.id,
           workspace_id: ws.id,
           user_id: ws.user_id || '',
-          affiliate_id: activeSub.affiliate_id ?? null,
           start_date: activeSub.start_date,
           months_paid: activeSub.months_paid,
           end_date: activeSub.end_date,
@@ -873,7 +854,6 @@ export async function getAllSubscriptions() {
           workspace_name: ws.name,
           client_name: user?.name ?? null,
           client_email: user?.email ?? null,
-          affiliate_name: null,
           subscription_number: ws.subscription_number || null,
           active_sub_count: activeSubCount,
         }
@@ -884,7 +864,6 @@ export async function getAllSubscriptions() {
         id: '',
         workspace_id: ws.id,
         user_id: ws.user_id || '',
-        affiliate_id: null,
         start_date: '',
         months_paid: 0,
         end_date: '',
@@ -898,7 +877,6 @@ export async function getAllSubscriptions() {
         workspace_name: ws.name,
         client_name: user?.name ?? null,
         client_email: user?.email ?? null,
-        affiliate_name: null,
         subscription_number: ws.subscription_number || null,
         active_sub_count: activeSubCount,
       }
@@ -1005,7 +983,7 @@ export async function getAdminStats() {
     monthRevenue = Math.round(monthRevenue * 100) / 100
 
     // NOTE: affiliate system removed — no commission/payout queries.
-    // `partner_*` tables are left in the DB (cleanup migration later).
+    // The `partner_*` tables were dropped 2026-10-22.
     return {
       success: true as const,
       stats: {
@@ -1023,8 +1001,8 @@ export async function getAdminStats() {
 }
 
 // NOTE: `detectAffiliateForClient` removed — affiliate system cancelled.
-// `getActiveAffiliates` removed as well. `partner_*` tables stay in the DB
-// (cleanup migration later).
+// `getActiveAffiliates` removed as well. The `partner_*` tables were dropped
+// 2026-10-22 (migration 20261022_db_cleanup_and_cascade.sql).
 
 // ──────────────────────── Admin: Clients (statements) ────────────────────────
 
@@ -1195,10 +1173,6 @@ export interface ClientStatementSubscription {
   workspace_id: string
   workspace_name: string | null
   subscription_number: string | null
-  // Legacy read-only (affiliate system removed). Kept for compatibility with
-  // older rows; never written for new subscriptions, never displayed.
-  affiliate_id: string | null
-  affiliate_name: string | null
   start_date: string
   months_paid: number
   end_date: string
@@ -1278,8 +1252,6 @@ export async function getClientStatement(userId: string) {
         workspace_id: s.workspace_id,
         workspace_name: ws?.name ?? null,
         subscription_number: ws?.subscription_number ?? null,
-        affiliate_id: s.affiliate_id ?? null,
-        affiliate_name: null,
         start_date: s.start_date,
         months_paid: s.months_paid,
         end_date: s.end_date,

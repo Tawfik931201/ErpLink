@@ -639,13 +639,15 @@ against** — see below, do not start it.
 
 - `subscriptions`: workspace_id, user_id, start_date, months_paid, end_date,
   amount_paid, currency, status (active/cancelled), notes, created_by, archived_at.
-  `affiliate_id` is a **legacy read-only column** (old rows may have values via
-  `SELECT *`; new rows are always `NULL` — never write it, never display it).
+  `affiliate_id` was a legacy read-only column — **dropped 2026-10-22** (migration
+  `20261022_db_cleanup_and_cascade.sql`); the TS interfaces may still name it, but
+  `SELECT *` no longer returns it.
 - `subscription_payments`: per-payment rows (subscription_id, amount, paid_at, notes, created_by)
 - `workspaces`: id, user_id, name, subscription_number, `archived_at`
   (added 2026-10-18, migration `20261018_workspace_archive.sql` — set
   automatically when the last active subscription expires; cleared when a new
-  subscription is registered or extended). No affiliate linkage.
+  subscription is registered or extended). No affiliate linkage. The legacy
+  `partner_*` columns were **dropped 2026-10-22**.
 - `users`: id, email, name, active_workspace_id (+ `created_at`).
   ⚠️ **`phone` is NOT reliably there.** It exists only in migration
   `20260805_client_phone_and_archive.sql`, which was never applied in some
@@ -657,9 +659,18 @@ against** — see below, do not start it.
   probing the live table; `getAllClients` maps `phone: null` until the
   migration is applied.
 - `audit_logs`: security audit trail
-- Legacy (unused, **do not delete yet** — cleanup migration later):
+- Legacy affiliate tables **dropped 2026-10-22** (migration
+  `20261022_db_cleanup_and_cascade.sql`, user-authorized — all were empty, 0 code refs):
   `partner_profiles`, `partner_tier_history`, `partner_commissions`,
-  `payout_requests` (+ `partner_*` columns on `workspaces` if present)
+  `payout_requests`, `partner_agreements`, `partner_onboarding_invitations`,
+  `affiliate_client_invites`
+- **Workspace deletion cascade (completed 2026-10-22):** every table carrying
+  `workspace_id` now has an FK to `workspaces(id)` ON DELETE CASCADE.
+  `sync_logs`, `custom_odoo_fields` and `sync_queue_dead` previously had the
+  column but *no FK*, and `webhook_inbox` was SET NULL — those four leaked
+  orphan rows (including logs) when a workspace was deleted. `audit_logs` is a
+  global admin trail (no workspace_id) and `sync_reconcile_state` uses varchar
+  scopes — both intentionally kept.
 
 ## Status Lifecycle
 
@@ -845,10 +856,12 @@ setting lives in the existing JSON blob as `order.returns` — **no migration**.
 ## Notes
 - Always use `supabase` (service_role) for writes — RLS is bypassed intentionally
 - UI/texts never say "أفلييت/Affiliate" — clients are told to contact support
-- DB tables keep the `partner_*` names where they still exist — do not rename tables;
-  do not drop them yet (a later cleanup migration will handle it)
-- `affiliate_id` / `affiliate_name` fields remain in TS interfaces as legacy
-  read-only (old `SELECT *` rows) — always `NULL` for new data, never displayed
+- The `partner_*` tables and columns were **dropped 2026-10-22** — do not recreate
+  them and do not "restore" references to them
+- `affiliate_id` / `affiliate_name` are **fully purged from the code (2026-10-22)** —
+  no interface field, no insert, no mapping. The DB column was dropped the same
+  day, which is what forced the purge: `registerSubscription` used to insert
+  `affiliate_id: null` explicitly and PostgREST now errors on unknown columns.
 - **No ORM.** Prisma was removed entirely on 2026-09-29: `prisma/schema.prisma`,
   `@prisma/client`, `prisma` and the four `db:*` scripts are gone, and the
   `serverExternalPackages` list (top-level since Next 15) is now just
