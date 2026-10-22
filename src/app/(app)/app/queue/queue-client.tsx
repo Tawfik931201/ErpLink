@@ -7,7 +7,9 @@ import {
   getOrphanItems,
   getQueueItems,
   getQueueOverview,
+  replayAllDeadItems,
   replayDeadItem,
+  replayOrphanItems,
   retryFrozenItems,
   sendNowWorkspace,
   type QueueRow,
@@ -134,6 +136,33 @@ export default function QueueClient() {
     }
   }
 
+  /** إعادة تشغيل كل صفوف الأرشيف دفعة واحدة (بدل صفاً صفاً). */
+  async function handleReplayAllDead() {
+    if (!confirm(ar ? 'إعادة إرسال كل الطلبات في الأرشيف إلى الطابور؟' : 'Replay every dead-lettered item to the queue?')) return
+    setReplaying('all')
+    const res = await replayAllDeadItems(100)
+    setReplaying(null)
+    if (res.success) {
+      setNotice(ar ? `أُعيد ${res.replayed} طلباً إلى الطابور.` : `Replayed ${res.replayed} items to the queue.`)
+      load()
+    } else {
+      setNotice(res.error || '')
+    }
+  }
+
+  /** استرجاع الأيتام (وصلت قبل ربط المتجر). */
+  async function handleReplayOrphans() {
+    setReplaying('orphans')
+    const res = await replayOrphanItems()
+    setReplaying(null)
+    if (res.success) {
+      setNotice(ar ? `أُعيد ${res.replayed} حدثاً يتيم إلى الطابور.` : `Replayed ${res.replayed} orphaned events.`)
+      load()
+    } else {
+      setNotice(res.error || '')
+    }
+  }
+
   const cards = [
     { key: 'pending', label: ar ? 'معلقة في الطابور' : 'Pending', value: overview?.pending },
     { key: 'frozen', label: ar ? 'مجمدة (تحتاج تدخلاً)' : 'Frozen (needs action)', value: overview?.frozen },
@@ -203,6 +232,13 @@ export default function QueueClient() {
               : (ar ? `إعادة تشغيل المجمد (${overview.frozen})` : `Retry frozen (${overview.frozen})`)}
           </Button>
         )}
+        {(overview?.orphans ?? 0) > 0 && (
+          <Button size="sm" variant="outline" onClick={handleReplayOrphans} disabled={replaying === 'orphans'}>
+            {replaying === 'orphans'
+              ? (ar ? 'جارٍ…' : 'Working…')
+              : (ar ? `استرجاع الأيتام (${overview.orphans})` : `Replay orphans (${overview.orphans})`)}
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -262,9 +298,18 @@ export default function QueueClient() {
                     </td>
                     {tab === 'dead' && (
                       <td className="p-2">
-                        <Button size="sm" variant="outline" onClick={() => handleReplay(row.id)} disabled={replaying === row.id}>
-                          {replaying === row.id ? (ar ? 'جارٍ…' : '…') : (ar ? 'إعادة إرسال' : 'Replay')}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="outline" onClick={() => handleReplay(row.id)} disabled={replaying === row.id}>
+                            {replaying === row.id ? (ar ? 'جارٍ…' : '…') : (ar ? 'إعادة إرسال' : 'Replay')}
+                          </Button>
+                          {(overview?.dead ?? 0) > 1 && (
+                            <Button size="sm" variant="outline" onClick={handleReplayAllDead} disabled={replaying === 'all'}>
+                              {replaying === 'all'
+                                ? (ar ? 'جارٍ…' : '…')
+                                : (ar ? 'إعادة الكل' : 'Replay all')}
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>

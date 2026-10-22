@@ -1,13 +1,22 @@
 import { auth } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
+import { adminAlertWorkspaceId } from '@/lib/admin-alerts'
 import { isAdmin } from '@/lib/auth'
+import {
+  INGRESS_BASE_CEILING,
+  INGRESS_GLOBAL_CAP_PER_MIN,
+  INGRESS_MAX_CEILING,
+  INGRESS_TARGET_PENDING,
+  getIngressMetrics,
+} from '@/lib/ingress-admission'
 import { supabase } from '@/lib/supabase'
 import {
   MAX_CONCURRENT_PER_WORKSPACE,
   SYNC_QUEUE_CONCURRENCY,
   SYNC_QUEUE_DEFAULT_BATCH,
   SYNC_QUEUE_MAX_RETRIES,
+  coalesceWindowMs,
   getCircuitBreakerState,
   getSyncQueueMetrics,
   isSeasonMode,
@@ -78,22 +87,35 @@ export async function GET() {
   const inboxDedup = await checkTable('webhook_inbox', 'dedup_key')
   const dead = await checkTable('sync_queue_dead')
   const reconcileState = await checkTable('sync_reconcile_state')
+  // صندوق التليجرام — ترحيل 20261022. منفصل عن البقية لأن فائدته
+  // "الإشعارات" فقط، بينما البقية تمنع **فقد الطلبات**.
+  const telegramOutbox = await checkTable('telegram_outbox')
   const migrationsOk =
     inbox.ok && queueDedup.ok && inboxDedup.ok && dead.ok && reconcileState.ok
 
   // ── عمق الطابور ──────────────────────────────────────────────────
-  const [pending, frozen, orphans, deadCount, skipped24h] = await Promise.all([
-    countRows('sync_queue', (q: any) => q.not('next_retry_at', 'is', null)),
-    countRows('sync_queue', (q: any) => q.is('next_retry_at', null)),
-    countRows('webhook_inbox', (q: any) => q.eq('status', 'pending').is('workspace_id', null)),
-    countRows('sync_queue_dead'),
-    countRows('sync_logs', (q: any) =>
-      q
-        .eq('status', 'skipped')
-        .eq('trigger_type', 'webhook-ingress')
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    ),
-  ])
+  const [pending, frozen, orphans, deadCount, skipped24h, inboxPending, inboxFailed, telegramPending, telegramFailed] =
+    await Promise.all([
+      countRows('sync_queue', (q: any) => q.not('next_retry_at', 'is', null)),
+      countRows('sync_queue', (q: any) => q.is('next_retry_at', null)),
+      countRows('webhook_inbox', (q: any) => q.eq('status', 'pending').is('workspace_id', null)),
+      countRows('sync_queue_dead'),
+      countRows('sync_logs', (q: any) =>
+        q
+          .eq('status', 'skipped')
+          .eq('trigger_type', 'webhook-ingress')
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      ),
+      // إيصالات محفوظة تنتظر الدفع إلى الطابور — مسار الإنقاذ. ارتفاع هذا
+      // الرقم يعني أن الإدراج في `sync_queue` يفشل ويتراكم الإنقاذ.
+      countRows('webhook_inbox', (q: any) => q.eq('status', 'pending').not('workspace_id', 'is', null)),
+      // إيصالات فشلت 10 محاولات دفع ⇒ توقفت للأبد. كانت غير مرئية تماماً.
+      countRows('webhook_inbox', (q: any) => q.eq('status', 'failed')),
+      // صندوق التليجرام: رسائل لم تُرسل بعد (تأخّر أو إعادة محاولة).
+      countRows('telegram_outbox', (q: any) => q.eq('status', 'pending')),
+      // رسائل استنفدت محاولاتها ⇒ مرئية وقابلة للإعادة (لم تكن موجودة).
+      countRows('telegram_outbox', (q: any) => q.eq('status', 'failed')),
+    ])
 
   let oldestPendingAgeSec: number | null = null
   try {
@@ -111,11 +133,86 @@ export async function GET() {
   }
 
   const runnerOk = !isProduction || selfRunner
-  const ready = runnerOk && migrationsOk
+
+  // ── حكم الجاهزية: سؤال واحد — "هل نحن مستعدون لأول عميل؟" ─────────────
+  // كل عائق هنا = سبب **يضيّع طلباً** أو يُعطّل المعالجة. العناصر
+  // التحذيرية (warnings) لا تمنع الجاهزية.
+  const ingressSnapshot = getIngressMetrics()
+  const blockers: Array<{ key: string; ar: string; en: string }> = []
+  const warnings: Array<{ key: string; ar: string; en: string }> = []
+
+  if (!runnerOk) {
+    blockers.push({
+      key: 'runner_not_started',
+      ar: 'عامل الطابور لا يعمل — SYNC_QUEUE_SELF_RUNNER غير مضبوط. الطلبات ستتكدّس ولا تُعالَج.',
+      en: 'The queue runner is not running — SYNC_QUEUE_SELF_RUNNER is not set. Events will pile up and never sync.',
+    })
+  }
+  if (!migrationsOk) {
+    blockers.push({
+      key: 'missing_migrations',
+      ar: 'ترحيلات الموثوقية غير مطبَّقة — راجع قسم migrations أدناه.',
+      en: 'The reliability migrations are not applied — see the migrations section below.',
+    })
+  }
+  if (!telegramOutbox.ok) {
+    warnings.push({
+      key: 'telegram_outbox_missing',
+      ar: 'ترحيل 20261022_telegram_outbox.sql غير مطبَّق — إشعارات التليجرام تضيع (المزامنة نفسها سليمة).',
+      en: 'Migration 20261022_telegram_outbox.sql is not applied — Telegram notifications are lost (the sync itself is fine).',
+    })
+  }
+  if (ingressSnapshot.rejectedUnauthenticated > 0) {
+    blockers.push({
+      key: 'unauthenticated_rejections',
+      ar: `${ingressSnapshot.rejectedUnauthenticated} رفضاً لطلبات بلا اعتماد — متجر لم يُسجَّل بالأسرار المشتقة بعد. شغّل مسارات refresh.`,
+      en: `${ingressSnapshot.rejectedUnauthenticated} rejection(s) for requests without a credential — a store is not re-registered yet. Run the refresh routes.`,
+    })
+  }
+  if (ingressSnapshot.rejectedGlobal > 0) {
+    blockers.push({
+      key: 'global_cap_closed',
+      ar: 'صمام الأمان العام أُغلق — طلبات موثّقة رُفضت بـ503.',
+      en: 'The global safety valve closed — certified requests were refused with 503.',
+    })
+  }
+  if (frozen && frozen > 0) {
+    warnings.push({
+      key: 'frozen_rows',
+      ar: `${frozen} صفاً مجمداً — أعد تشغيلها من شاشة الطابور.`,
+      en: `${frozen} frozen row(s) — restart them from the queue screen.`,
+    })
+  }
+  if (inboxFailed && inboxFailed > 0) {
+    warnings.push({
+      key: 'inbox_failed',
+      ar: `${inboxFailed} إيصالاً توقّف بعد 10 محاولات دفع — تحتاج تدخّلاً يدوياً.`,
+      en: `${inboxFailed} receipt(s) stopped after 10 delivery attempts — they need manual attention.`,
+    })
+  }
+  if (!adminAlertWorkspaceId()) {
+    warnings.push({
+      key: 'admin_alerts_off',
+      ar: 'تنبيهات الأدمن معطّلة (ADMIN_ALERT_WORKSPACE_ID غير مضبوط) — لا إنذار تلقائي عند الخلل.',
+      en: 'Admin alerts are off (ADMIN_ALERT_WORKSPACE_ID is not set) — no automatic warning on failure.',
+    })
+  }
+
+  const ready = blockers.length === 0
 
   return NextResponse.json({
     success: true,
     ready,
+    /**
+     * حكم الجاهزية — كل `blockers` فيه سبب **يضيّع طلباً** أو يُعطّل
+     * المعالجة. `warnings` منها يخفّف (إشعارات، أدوات) ولا يوقف.
+     */
+    readiness: {
+      ready,
+      blockers,
+      warnings,
+      adminAlertsConfigured: Boolean(adminAlertWorkspaceId()),
+    },
     timestamp: new Date().toISOString(),
     runner: {
       ok: runnerOk,
@@ -128,6 +225,7 @@ export async function GET() {
       maxPerWorkspace: MAX_CONCURRENT_PER_WORKSPACE,
       maxRetries: SYNC_QUEUE_MAX_RETRIES,
       seasonMode: isSeasonMode(),
+      coalesceWindowMs: coalesceWindowMs(),
       circuitBreakerThreshold: Number(process.env.SYNC_CB_THRESHOLD) || 10,
       circuitBreakerCooldownMin: Number(process.env.SYNC_CB_COOLDOWN_MIN) || 15,
     },
@@ -138,6 +236,7 @@ export async function GET() {
       webhook_inbox_dedup_key: inboxDedup,
       sync_queue_dead: dead,
       sync_reconcile_state: reconcileState,
+      telegram_outbox: telegramOutbox,
     },
     depth: {
       pending,
@@ -145,11 +244,34 @@ export async function GET() {
       orphans,
       deadLetter: deadCount,
       ingressSkipped24h: skipped24h,
+      inboxPending,
+      inboxFailed,
+      telegramPending,
+      telegramFailed,
       oldestPendingAgeSec,
     },
     ingressRateLimit: {
-      perSenderPerMinute: 120,
-      note: 'سقف الاستقبال لكل مرسِل — تأكد أن زد/سلة لا تشترك في عنوان إرسال واحد وقت الذروة',
+      /**
+       * الحد 120/دقيقة يبقى **للمجهولين فقط** (طلب بلا أي اعتماد) — هو
+       * حماية العملية من سكربت عشوائي. الطلب الموثّق (توقيع HMAC أو سر مشتق)
+       * لا يخضع له: الاعتماد نفسه هو الحماية، والحد كان يحوّل ذروة العميل
+       * إلى ضياع صامت (429 ⇒ المنصات لا تعيد الإرسال بعد 4xx).
+       */
+      unauthenticatedPerIpPerMinute: 120,
+      authenticatedRejection: 'none — certified deliveries are never rejected',
+      note: 'الطلب الموثّق يمرّ ببوابة الاستقبال: يُقبل دائماً، وما فوق الحصة يُؤجَّل لا يُرفض.',
+    },
+    /**
+     * بوابة الاستقبال الجديدة (المرحلة 1): لا رفض للطلبات الموثّقة.
+     * `admitted` = مقبول ضمن الحصة، `overflow` = مقبول فوق الحصة (يُعالَج
+     * ويتأخّر، ولا يُرفض)، `rejectedGlobal` = صمام الأمان العام الوحيد.
+     */
+    ingressAdmission: {
+      baseCeilingPerMin: INGRESS_BASE_CEILING,
+      maxCeilingPerMin: INGRESS_MAX_CEILING,
+      targetPending: INGRESS_TARGET_PENDING,
+      globalCapPerMin: INGRESS_GLOBAL_CAP_PER_MIN,
+      ...getIngressMetrics(),
     },
     circuitBreakers: getCircuitBreakerState(),
     metrics: getSyncQueueMetrics(),

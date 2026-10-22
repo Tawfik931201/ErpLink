@@ -1,10 +1,11 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import {
   authorizeOdooWebhook,
   odooStockSecretScope,
 } from '@/lib/odoo/webhook-secret'
-import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
@@ -32,8 +33,20 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  */
 export async function POST(req: NextRequest) {
   const getHeader = (name: string) => req.headers.get(name)
-  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'odoo-stock-webhook'), 120, 60_000)
-  if (!rl.allowed) {
+  // حد الاستقبال: للمجهولين فقط (الس السر المشتق في `?secret=` أو
+  // `x-odoo-secret`). حد 120/دقيقة كان يحوّل ذروة العميل إلى ضياع صامت
+  // (429 ⇒ Automated Action في أودوو لا يعيد الإرسال بعد 4xx).
+  const credentialPresented =
+    !!req.headers.get('x-odoo-secret') ||
+    !!req.headers.get('authorization') ||
+    !!req.nextUrl.searchParams.get('secret') ||
+    !!req.nextUrl.searchParams.get('token')
+  const unauthLimit = checkUnauthenticatedIngressLimit({
+    scope: 'odoo-stock',
+    credentialPresented,
+    bucketKey: rateLimitKeyFromHeaders(getHeader, 'odoo-stock-webhook'),
+  })
+  if (!unauthLimit.allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
 

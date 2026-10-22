@@ -32,7 +32,8 @@ import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { recordAudit } from '@/lib/audit-logs'
-import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
+import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
   verifySallaWebhookAuth,
   sallaWebhookCredentialFingerprint,
@@ -159,9 +160,20 @@ export async function POST(req: NextRequest) {
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
 
-  // ── 0. Rate limit + body-size guard (before any parsing or DB I/O) ─────────
-  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'salla-webhook'), 120, 60_000)
-  if (!rl.allowed) {
+  // ── 0. حد الاستقبال (للمجهولين فقط) + حارس حجم الجسم ─────────────────────
+  // الطلب الموقّع (x-salla-signature أو السر المشتق) لا يخضع لحد الـIP:
+  // حد 120/دقيقة كان يحوّل عملاء الموسم إلى ضياع صامت (429 ⇒ سلة لا تعيد
+  // الإرسال بعد 4xx). الموثّق يمرّ ببوابة الاستقبال التي تؤجّل ولا ترفض.
+  const credentialPresented =
+    !!headersList.get('x-salla-signature') ||
+    !!headersList.get('x-erplink-webhook-secret') ||
+    !!headersList.get('authorization')
+  const unauthLimit = checkUnauthenticatedIngressLimit({
+    scope: 'salla',
+    credentialPresented,
+    bucketKey: rateLimitKeyFromHeaders(getHeader, 'salla-webhook'),
+  })
+  if (!unauthLimit.allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
   if (isWebhookBodyTooLarge(rawBody)) {
@@ -513,6 +525,7 @@ export async function POST(req: NextRequest) {
           event,
           storeId: merchantId,
           payload: (data ?? {}) as Record<string, unknown>,
+          eventKey: enqueued.id ? `queue:${enqueued.id}` : null,
         })
       )
       .catch(() => {})

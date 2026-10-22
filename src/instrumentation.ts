@@ -23,6 +23,13 @@ export async function register() {
       // so it does not need an action to wake it up.
       const { startTelegramPoller } = await import('@/lib/telegram-long-poller')
       startTelegramPoller()
+
+      // مُرسّل صندوق التليجرام: كل إشعار يُحفظ أولاً ثم يُرسل بمُرسّل
+      // مستقل. قبل ذلك كان `notifySyncResult` يستدعي api.telegram.org داخل
+      // عامل المزامنة — 429 كان يبتلع الرسالة بلا إعادة محاولة، و`fetch` بلا
+      // مهلة كان يحتجز عامل المزامنة إلى الأبد.
+      const { startTelegramOutboxRunner } = await import('@/lib/telegram-outbox')
+      startTelegramOutboxRunner()
     }
   }
 }

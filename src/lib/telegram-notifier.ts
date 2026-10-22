@@ -1,6 +1,5 @@
 import { createHash } from 'crypto'
 
-import { decrypt } from '@/lib/crypto'
 import { supabase } from '@/lib/supabase'
 
 export type SyncStatus = 'success' | 'failed' | 'skipped' | 'processing'
@@ -408,14 +407,21 @@ export async function sendTelegramWelcomeRaw(
 export async function notifySyncResult(args: {
   workspaceId: string | null | undefined
   record: SyncRecordSummary
+  /**
+   * هوية الحدث — تضمن **رسالة واحدة لكل طلب**: النتيجة الثانية لنفس
+   * الحدث (من إعداد افتراضي + كل خريطة مخصّصة) تُهمَل.
+   */
+  eventKey?: string | null
 }): Promise<void> {
-  const { workspaceId, record } = args
+  const { workspaceId, record, eventKey } = args
   if (!workspaceId) return
   if (record.status === 'processing') return
 
   try {
     const chats = await getWorkspaceChats(workspaceId)
     if (chats.length === 0) return
+
+    const priority: 0 | 1 | 2 = record.status === 'failed' ? 2 : 1
 
     for (const chat of chats) {
       // Notify mode filter
@@ -438,21 +444,24 @@ export async function notifySyncResult(args: {
       const mapFilter = parseMappingsFilter(chat.mapping_filter)
       if (mapFilter.length > 0 && record.mappingId && !mapFilter.includes(record.mappingId)) continue
 
-      // Decrypt token
-      let tokenPlain = ''
-      try { tokenPlain = decrypt(chat.bot_token) } catch { continue }
-      if (!tokenPlain) continue
-
       const text = buildSyncMessage(record, chat.language as 'ar' | 'en')
-      const sendRes = await callTelegramApi(tokenPlain, 'sendMessage', {
-        chat_id: chat.chat_id,
-        text,
+
+      // ── الكتابة في الصندوق، لا الإرسال المباشر ──────────────────────────
+      // الكتابة سريعة وثابتة (لا نداء خارجي)، والمُرسِل يتكفّل بالباقي.
+      // ⇒ 429 من تليجرام ⇒ إعادة محاولة بدل ضياع الرسالة، وتليجرام لا
+      //   يعطّل عامل المزامنة.
+      const { enqueueTelegramMessage } = await import('@/lib/telegram-outbox')
+      await enqueueTelegramMessage({
+        workspaceId,
+        botId: chat.bot_id,
+        chatId: chat.chat_id,
+        chatLabel: chat.chat_label,
+        language: chat.language === 'en' ? 'en' : 'ar',
+        kind: 'result',
+        priority,
+        eventKey: eventKey ?? null,
+        body: text,
       })
-      if (!sendRes.ok) {
-        console.error(`[TelegramNotifier] Send failed chat=${chat.chat_id}: status=${sendRes.statusCode} desc=${sendRes.description}`)
-      } else {
-        console.log(`[TelegramNotifier] Notification delivered to chat=${chat.chat_id} (category=${category}, status=${record.status})`)
-      }
     }
   } catch (err: any) {
     console.warn('[TelegramNotifier] notifySyncResult error (swallowed):', err?.message ?? err)
@@ -541,9 +550,11 @@ export async function notifyOrderArrival(args: {
   event: string
   storeId?: string | null
   payload?: Record<string, unknown>
+  /** هوية الحدث — نفس مفتاح رسالة النتيجة ⇒ رسالة واحدة لكل طلب. */
+  eventKey?: string | null
 }): Promise<void> {
   try {
-    const { workspaceId, platform, event, storeId } = args
+    const { workspaceId, platform, event, storeId, eventKey } = args
     if (!workspaceId) return
     // الوصول يُعلن للطلبات فقط.
     if (getEventCategory(event) !== 'orders') return
@@ -559,28 +570,31 @@ export async function notifyOrderArrival(args: {
       // استخراج الرقم best-effort — غيابه لا يمنع التنبيه.
     }
 
+    // ── تأخير رسالة الوصول ────────────────────────────────────────────────
+    // المزامنة تكتمل عادةً خلال ثوانٍ. بتأخير الرسالة هذه ننتظر، فإذا
+    // وصلت رسالة النتيجة (أولوية أعلى) أُلغيت رسالة الوصول ⇒ **رسالة
+    // واحدة لكل طلب**. إن تأخرت المزامنة، تخرج رسالة الوصول تنبيهاً فورياً.
+    const { TELEGRAM_ARRIVAL_DELAY_MS, enqueueTelegramMessage } = await import('@/lib/telegram-outbox')
+
     for (const chat of chats) {
       if (!chat.notify_on_arrival) continue
-      let tokenPlain = ''
-      try {
-        tokenPlain = decrypt(chat.bot_token)
-      } catch {
-        continue
-      }
-      if (!tokenPlain) continue
+
       const text = buildArrivalMessage(
         { platform, event, entityId, storeId: storeId ?? null, receivedAt: new Date().toISOString() },
         chat.language === 'en' ? 'en' : 'ar'
       )
-      const sendRes = await callTelegramApi(tokenPlain, 'sendMessage', {
-        chat_id: chat.chat_id,
-        text,
+      await enqueueTelegramMessage({
+        workspaceId,
+        botId: chat.bot_id,
+        chatId: chat.chat_id,
+        chatLabel: chat.chat_label,
+        language: chat.language === 'en' ? 'en' : 'ar',
+        kind: 'arrival',
+        priority: 0,
+        eventKey: eventKey ?? null,
+        body: text,
+        availableAt: new Date(Date.now() + TELEGRAM_ARRIVAL_DELAY_MS),
       })
-      if (!sendRes.ok) {
-        console.error(
-          `[TelegramNotifier] Arrival send failed chat=${chat.chat_id}: status=${sendRes.statusCode} desc=${sendRes.description}`
-        )
-      }
     }
   } catch {
     // تنبيه الوصول لا يكسر الاستلام أبداً.

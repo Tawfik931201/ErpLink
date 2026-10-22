@@ -27,6 +27,17 @@ export type WebhookSkipReason =
   | 'unknown_topic'
   | 'stale_event'
   | 'no_entity_mapping'
+  // ── مسار أودوو → المتجر (عامل المزامنة) ─────────────────────────────────
+  // كانت هذه الفروع تُرجع SKIP **بلا أي سجل** ⇒ الصف يُحذف من الطابور
+  // كـ«نجاح» والحدث يختفي بلا أثر. ومعظمها يعني أن **العميل لا يعرف**
+  // أن منتجه حُذف في أودوو ولم يُحذف في متجره.
+  | 'odoo_direction_disabled'
+  | 'odoo_erp_type_unsupported'
+  | 'odoo_no_field_mappings'
+  | 'odoo_deletion_unauthenticated'
+  | 'odoo_deletion_no_values'
+  | 'odoo_deletion_no_match_value'
+  | 'odoo_empty_match_field'
 
 const REASON_TEXT: Record<WebhookSkipReason, { ar: string; en: string }> = {
   disabled_in_settings: {
@@ -49,6 +60,34 @@ const REASON_TEXT: Record<WebhookSkipReason, { ar: string; en: string }> = {
     ar: 'الموضوع بلا كيان يُزامَن (لا preset ستاندرد ولا مدخل mapping) — لم يُحفظ في الطابور',
     en: 'Topic has no synced entity (no Standard preset or mapping entry) — not queued',
   },
+  odoo_direction_disabled: {
+    ar: 'الخريطة لا تدعم اتجاه أودوو ← المتجر — فعّل "erp_to_store" لتصل التغييرات',
+    en: 'The mapping does not include the ERP → Store direction — enable "erp_to_store"',
+  },
+  odoo_erp_type_unsupported: {
+    ar: 'نوع النظام المحاسبي غير مدعوم في هذا الاتجاه بعد',
+    en: 'The ERP type is not supported for this direction yet',
+  },
+  odoo_no_field_mappings: {
+    ar: 'لا توجد حقول مرتبطة لهذا الموديل في الخريطة — لم يُحدَّث شيء في المتجر',
+    en: 'The mapping has no fields for this model — nothing was pushed to the store',
+  },
+  odoo_deletion_unauthenticated: {
+    ar: 'الحذف مرفوض: التسليم بلا مفتاح — أعد تسجيل الإجراء الآلي لتفعيل الحذف',
+    en: 'Deletion refused: the delivery carried no credential — re-register the Automated Action',
+  },
+  odoo_deletion_no_values: {
+    ar: 'السجل لم يعد موجوداً في أودوو والجسم بلا قيم — تعذّر تنفيذ الحذف',
+    en: 'The record no longer exists in Odoo and the body carried no values — deletion could not run',
+  },
+  odoo_deletion_no_match_value: {
+    ar: 'السجل لم يعد موجوداً في أودوو وبلا قيمة حقل مطابقة — تعذّر تحديد المنتج',
+    en: 'The record no longer exists in Odoo and carries no match-field value — the product could not be identified',
+  },
+  odoo_empty_match_field: {
+    ar: 'حقل المطابقة فارغ في سجل أودوو — تعذّر تحديد السجل في المتجر',
+    en: 'The match field is empty on the Odoo record — the store record could not be identified',
+  },
 }
 
 /**
@@ -70,6 +109,13 @@ export interface WebhookSkipParams {
   reason: WebhookSkipReason
   detail?: string | null
   payload?: Record<string, unknown>
+  /**
+   * الموديل في أودوو (لمسار أودوو ← المتجر). يُكتب مكان
+   * `webhook-ingress` في `odoo_model` ليكون الصف قابلاً للفلترة بالموديل.
+   */
+  odooModel?: string | null
+  /** معرّف الخريطة — يجعل الصف قابلاً للاسترجاع من شاشة السجلات. */
+  fieldMappingId?: string | null
 }
 
 /**
@@ -88,11 +134,11 @@ export async function logWebhookSkip(params: WebhookSkipParams): Promise<void> {
     }
     await logSync({
       workspace_id: params.workspaceId,
-      field_mapping_id: '',
+      field_mapping_id: params.fieldMappingId ?? '',
       event: params.event,
       store_id: params.storeId,
       zid_entity_id: entityId,
-      odoo_model: 'webhook-ingress',
+      odoo_model: params.odooModel ?? 'webhook-ingress',
       status: 'skipped',
       error_message: buildSkipMessage(params.reason, params.detail).slice(0, 500),
       payload: {

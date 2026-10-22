@@ -19,7 +19,8 @@
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
+import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
@@ -71,8 +72,18 @@ export async function POST(req: NextRequest) {
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
 
-  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'zid-webhook'), 120, 60_000)
-  if (!rl.allowed) {
+  // ── حد الاستقبال: للمجهولين فقط ───────────────────────────────────────────
+  // الطلب الموثّق (Basic) لا يخضع لحد الـIP إطلاقاً: الاعتماد نفسه هو
+  // الحماية، والحد كان يحوّل عملاء الموسم إلى **ضياع صامت** (429 ⇒ المنصات
+  // لا تعيد الإرسال بعد 4xx). الطلب الموثّق يمرّ ببوابة الاستقبال
+  // (`ingress-admission.ts`) التي لا ترفض بل تأجّل.
+  const credentialPresented = !!headersList.get('authorization')
+  const unauthLimit = checkUnauthenticatedIngressLimit({
+    scope: 'zid',
+    credentialPresented,
+    bucketKey: rateLimitKeyFromHeaders(getHeader, 'zid-webhook'),
+  })
+  if (!unauthLimit.allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
   if (isWebhookBodyTooLarge(rawBody)) {
@@ -764,6 +775,7 @@ async function handleOrderEvent(
           event,
           storeId: String(storeId),
           payload: data,
+          eventKey: queued.id ? `queue:${queued.id}` : null,
         })
       )
       .catch(() => {})
@@ -821,6 +833,7 @@ async function handleProductEvent(
           event,
           storeId: String(storeId),
           payload: data,
+          eventKey: queued.id ? `queue:${queued.id}` : null,
         })
       )
       .catch(() => {})
@@ -878,6 +891,7 @@ async function handleCustomerEvent(
           event,
           storeId: String(storeId),
           payload: data,
+          eventKey: queued.id ? `queue:${queued.id}` : null,
         })
       )
       .catch(() => {})
@@ -936,6 +950,7 @@ async function handleCategoryEvent(
           event,
           storeId: String(storeId),
           payload: data,
+          eventKey: queued.id ? `queue:${queued.id}` : null,
         })
       )
       .catch(() => {})
@@ -1002,6 +1017,7 @@ async function handleAbandonedCartEvent(
           event,
           storeId: String(storeId),
           payload: data,
+          eventKey: queued.id ? `queue:${queued.id}` : null,
         })
       )
       .catch(() => {})

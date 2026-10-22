@@ -3,7 +3,8 @@ import { type NextRequest, NextResponse } from 'next/server'
 
 import { recordAudit } from '@/lib/audit-logs'
 import { resolveEventOperation } from '@/lib/event-operation'
-import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
+import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
   SHOPIFY_GDPR_TOPICS,
   SHOPIFY_TOPIC_CATALOG,
@@ -33,8 +34,16 @@ export async function POST(req: NextRequest) {
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
 
-  const rl = checkRateLimit(rateLimitKeyFromHeaders(getHeader, 'shopify-webhook'), 120, 60_000)
-  if (!rl.allowed) {
+  // حد الاستقبال: للمجهولين فقط. Shopify توقّع دائماً (x-shopify-hmac-sha256)،
+  // فكل طلب حقيقي موثّق ولا يخضع لحد الـIP — حد 120/دقيقة كان يحوّل عملاء
+  // الموسم إلى ضياع صامت (429 ⇒ Shopify لا يعيد الإرسال بعد 4xx).
+  const credentialPresented = !!headersList.get('x-shopify-hmac-sha256')
+  const unauthLimit = checkUnauthenticatedIngressLimit({
+    scope: 'shopify',
+    credentialPresented,
+    bucketKey: rateLimitKeyFromHeaders(getHeader, 'shopify-webhook'),
+  })
+  if (!unauthLimit.allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
   if (isWebhookBodyTooLarge(rawBody)) {
@@ -427,6 +436,7 @@ export async function POST(req: NextRequest) {
             event: topic,
             storeId: shopDomain,
             payload: (enrichedPayload ?? {}) as Record<string, unknown>,
+            eventKey: queued.id ? `queue:${queued.id}` : null,
           })
         )
         .catch(() => {})

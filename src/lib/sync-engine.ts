@@ -299,6 +299,7 @@ async function notifySyncForRecord(
   storeId?: string,
   errorMessage?: string | null,
   payloadData?: Record<string, unknown>,
+  eventKey?: string | null
 ) {
   let wsId = workspaceId
   if (!wsId && storeId) {
@@ -349,7 +350,7 @@ async function notifySyncForRecord(
     receivedAt: new Date().toISOString(),
     details,
   }
-  await notifySyncResult({ workspaceId: wsId, record: summary }).catch(() => {})
+  await notifySyncResult({ workspaceId: wsId, record: summary, eventKey: eventKey ?? null }).catch(() => {})
 }
 
 // ─── Helper: fetch Odoo field metadata (ttype + relation) for a model ─────────
@@ -3434,7 +3435,15 @@ export async function processWebhookEvent(
   data: Record<string, unknown>,
   platformHint?: 'zid' | 'salla' | 'shopify',
   isQueueExecution = false,
-  workspaceIdParam?: string
+  workspaceIdParam?: string,
+  /**
+   * رقم صف الطابور الذي يعالَج — **هوية الحدث**.
+   *
+   * تُستخدم كمفتاح `event_key` في صندوق التليجرام ⇒ **رسالة واحدة لكل
+   * طلب**: رسالة الوصول (عند الاستقبال) ورسالة النتيجة (بعد المزامنة)
+   * تشتركان في المفتاح نفسه، فالأعلى أولوية يُلغي الأدنى.
+   */
+  queueItemId?: string | null
 ): Promise<SyncEngineResult> {
   const storeIdNum = Number(storeId)
   const storeIdStr = Number.isNaN(storeIdNum) ? String(storeId) : String(storeIdNum)
@@ -3593,6 +3602,11 @@ export async function processWebhookEvent(
   }
 
   // ── If Zid order event, fetch full details when the payload is minimal ──
+  //
+  // ⚠️ إشعار زد لطلب جديد **لا يحمل بنود الطلب** ⇒ لازم نسحبه من زد.
+  // وسقف زد 60 قراءة/دقيقة ⇒ في ذروة 1000 طلب/دقيقة نحتاج 1000 سحب.
+  // لذلك: (1) ميزانية سحب تحترم سقف زد، (2) ذاكرة قصيرة تُغني عن السحب
+  // المتكرر لنفس الطلب. neither نتجاوز سقف المنصة ولا نكتب طلباً بلا بنود.
   if (syncPlatform === 'zid' && normalizedEvent.startsWith('order.')) {
     const hasOrderItems = ['products', 'items', 'order_items', 'order_items_list', 'line_items']
       .some(k => Array.isArray((data as any)?.[k]) && ((data as any)[k] as any[]).length > 0)
@@ -3608,16 +3622,41 @@ export async function processWebhookEvent(
         if (tokenRow) {
           const { getAccessToken } = await import('./zid/token')
           const { ZidAPI } = await import('./zid-client')
+          const { acquirePullToken, getCachedOrderDetails, setCachedOrderDetails } =
+            await import('./store-pull-budget')
 
-          const storedTokens = await getAccessToken(tokenRow.merchant_id)
-          const creds = {
-            authorization: storedTokens.authorization || '',
-            managerToken: storedTokens.accessToken,
-            storeId: tokenRow.store_id || tokenRow.merchant_id,
+          const orderIdStr = String(orderId)
+          const workspaceForCache = resolvedWorkspaceId || storeIdStr
+
+          // ذاكرة السحب: نفس الطلب يُقرأ مرة واحدة لا مرات.
+          const cached = getCachedOrderDetails('zid', workspaceForCache, orderIdStr)
+          let orderData: Record<string, unknown> | null = cached
+
+          if (!orderData) {
+            // ميزانية السحب: لا نتجاوز سقف زد (60/دقيقة).
+            const granted = await acquirePullToken('zid', workspaceForCache)
+            if (!granted) {
+              throw new Error(
+                'Zid API pull budget exhausted (60 reads/min) — the order is rescheduled instead of being written without its line items'
+              )
+            }
+            const storedTokens = await getAccessToken(tokenRow.merchant_id)
+            const creds = {
+              authorization: storedTokens.authorization || '',
+              managerToken: storedTokens.accessToken,
+              storeId: tokenRow.store_id || tokenRow.merchant_id,
+            }
+            console.info(`[SyncEngine] Zid order webhook payload is minimal. Fetching full details for ID ${orderId}...`)
+            const response = await ZidAPI.orders.get(creds, orderIdStr)
+            const raw = response.data?.order || response.data?.data || response.data
+            orderData = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+            if (orderData) {
+              setCachedOrderDetails('zid', workspaceForCache, orderIdStr, orderData)
+            }
+          } else {
+            console.info(`[SyncEngine] Zid order ${orderId} details served from the pull cache.`)
           }
-          console.info(`[SyncEngine] Zid order webhook payload is minimal. Fetching full details for ID ${orderId}...`)
-          const response = await ZidAPI.orders.get(creds, String(orderId))
-          const orderData = response.data?.order || response.data?.data || response.data
+
           if (orderData && (orderData.id || orderData.order_number || orderData.code)) {
             console.info(`[SyncEngine] Full Zid order data fetched for ID ${orderId}. Status: ${orderData.order_status || orderData.status || 'n/a'}`)
             //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
@@ -3627,16 +3666,37 @@ export async function processWebhookEvent(
                   ...orderData,
                   ...data,
                 }
+          } else {
+            // استُجيب لكن لا يوجد طلب بهذا المعرّف ⇒ لا بنود ⇒ لا نكتب.
+            throw new Error(`Zid returned no order data for id ${orderId}`)
           }
+        } else {
+          throw new Error(`no Zid token row for store ${storeIdStr}`)
         }
       } catch (err: any) {
         const msg = err?.message ?? String(err)
         const isTokenError = /401|403|unauthorized|token|expired|forbidden/i.test(msg)
+        // ⚠️ الفشل هنا كان **يُبتلع** ⇒ المتابعة ببيانات ناقصة ⇒ نكتب في
+        // أودوو طلباً **بلا بنود** (لا منتجات) ويبدو أنه تمّ بنجاح. التاجر
+        // يجد طلباً في أودوو بلا أصناف ولا يعرف why.
+        //
+        // الصحيح: **تفشل المهمة** ⇒ يُعاد جدولتها (5 محاولات) ثم صندوق
+        // الموتى — قابل للاسترجاع ومرئي. لا يُكتب شيء ناقص.
         if (isTokenError) {
-          console.error(`[SyncEngine] ⚠️ Zid token issue while fetching order ${orderId} — sync will continue with minimal payload. Error: ${msg}`)
+          console.error(`[SyncEngine] ⚠️ Zid token issue while fetching order ${orderId} — the order is NOT synced (it would have no line items). Error: ${msg}`)
         } else {
-          console.warn(`[SyncEngine] Failed to fetch full Zid order details for ID ${orderId}:`, msg)
+          console.error(`[SyncEngine] Failed to fetch full Zid order details for ID ${orderId} — the order is NOT synced (it would have no line items). Error: ${msg}`)
         }
+        result.records.push({
+          mappingId: '',
+          mappingName: 'zid_order_enrichment',
+          model: 'sale.order',
+          status: 'failed',
+          message: `Zid order details unavailable for id ${orderId}: ${msg}`.slice(0, 300),
+        })
+        result.processed += 1
+        result.failed += 1
+        return result
       }
     }
   }
@@ -3830,7 +3890,8 @@ export async function processWebhookEvent(
         presetRecord.model,
         storeIdStr,
         presetRecord.message,
-        data
+        data,
+        queueItemId ? `queue:${queueItemId}` : null
       )
     }
   }
@@ -3873,7 +3934,8 @@ export async function processWebhookEvent(
       record.model,
       storeIdStr,
       record.message,
-      data
+      data,
+      queueItemId ? `queue:${queueItemId}` : null
     )
   }
   if (!isProduct) {
@@ -3966,6 +4028,23 @@ async function processFixedMappingFallback(
     const presetCheck = await isEntityOperationAllowed(workspaceId, storeType, operation, presetEntity, storeIdStr)
     if (!presetCheck.allowed) {
       console.info(`[FixedMapping] ${presetEntity} operation blocked for preset="${presetKey}": ${presetCheck.reason}`)
+      // ⚠️ كان هذا الفرع يرجّع `null` **بلا أي سجل** ⇒ الصف يُحذف من الطابور
+      // كـ«نجاح» والحدث يختفي بلا أثر، والعميل لا يعرف why. الآن يُكتب صف
+      // `skipped` ظاهر في شاشة السجلات.
+      try {
+        const { logWebhookSkip } = await import('./webhook-skip-log')
+        await logWebhookSkip({
+          workspaceId,
+          platform: (storeType as 'zid' | 'salla' | 'shopify') || 'zid',
+          event,
+          storeId: storeIdStr,
+          reason: 'disabled_in_settings',
+          detail: presetCheck.reason,
+          odooModel: `preset:${presetKey}`,
+        })
+      } catch {
+        // التوثيق لا يكسر المزامنة أبداً.
+      }
       return null
     }
   }

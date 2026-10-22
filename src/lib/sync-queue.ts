@@ -23,6 +23,7 @@
 
 import { createHash } from 'crypto'
 
+import { admitWorkspaceEvent, getActiveWorkspaceIds } from './ingress-admission'
 import { processOdooStockEvent } from './stock-sync-engine'
 import { supabase } from './supabase'
 import { processWebhookEvent, cleanupExpiredLogs } from './sync-engine'
@@ -33,6 +34,44 @@ export const SYNC_QUEUE_CONCURRENCY = Number(process.env.SYNC_QUEUE_CONCURRENCY)
 export const SYNC_QUEUE_DEFAULT_BATCH = Number(process.env.SYNC_QUEUE_BATCH_SIZE) || 50
 export const MAX_CONCURRENT_PER_WORKSPACE = Number(process.env.SYNC_QUEUE_MAX_PER_WORKSPACE) || 3
 export const SYNC_QUEUE_MAX_RETRIES = 5
+/**
+ * الحد الأدنى لحصة مساحة عمل واحدة في دورة الجلب العادل.
+ * يمنع أن تستهلك مساحة واحدة (مثلاً 3) كل نافذة الجلب بينما الباقون ينتظرون.
+ */
+const MIN_SHARE_PER_WORKSPACE = 5
+/** أقصى عدد مساحات نعمل لها استعلاماً موجّهاً في دورة واحدة. */
+const MAX_FAIR_WORKSPACES = 50
+/**
+ * مهلة الحدث الواحد (ملي ثانية).
+ *
+ * حدّ أعلى معقول: حدث = 6..15 نداء أودوو، ولكل نداء مهلة 10 ثوانٍ ⇒
+ * أطول حالة سليمة ≈ 150 ثانية. المهلة تمنع حدثاً استثنائياً من حجز عامل
+ * (من أصل 10) بلا حدّ.
+ */
+const SYNC_QUEUE_ITEM_TIMEOUT_MS = Number(process.env.SYNC_QUEUE_ITEM_TIMEOUT_MS) || 120_000
+
+/**
+ * يحيط عملاً بمهلة — **خالص**.
+ * عند انتهاء المهلة يُرفض العمل، وتستمر المهمة الأصلية في الخلفية حتى تنتهي
+ * (أثرها محدود: الكتابة في أودوو idempotent، والصف يُعاد جدولته).
+ */
+export function withItemTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`sync item exceeded ${Math.round(timeoutMs / 1000)}s`))
+    }, timeoutMs)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
+}
 const BASE_BACKOFF_MINUTES = 5
 const MAX_BACKOFF_MINUTES = 360
 /**
@@ -43,6 +82,25 @@ const MAX_BACKOFF_MINUTES = 360
  */
 export function isSeasonMode(): boolean {
   return process.env.SYNC_SEASON_MODE === 'true'
+}
+
+/**
+ * نافذة الدمج (milliseconds) — كم ننتظر قبل معالجة الحدث.
+ *
+ * في وضع الموسم: نأخّر معالجة الصف 45 ثانية. لماذا: بداخل هذه النافذة
+ * تتكدّس تحديثات نفس الكيان (تغيّر حالة، دفعة، شحن…) فتُدمج في **صف واحد**
+ * ⇒ كتابة واحدة في أودوو بدل N. في ذروة 1000 تحديث لنفس الطلب: 5-10
+ * كتابة بدل 1000 — أي فرق هائل في ضغط أودوو ومنصة المتجر.
+ *
+ * التكلفة: تأخير 45 ثانية. وهو **مجاني** لأن هدف دفتر التشغيل هو "تسجيل
+ * كل الطلبات خلال ~30 دقيقة".
+ *
+ * خارج الموسم: صفر ⇒ لا تأخير إطلاقاً (سلوك اليوم).
+ */
+export function coalesceWindowMs(): number {
+  const explicit = Number(process.env.SYNC_COALESCE_WINDOW_MS)
+  if (Number.isFinite(explicit) && explicit >= 0) return Math.trunc(explicit)
+  return isSeasonMode() ? 45_000 : 0
 }
 function seasonBaseMinutes(): number {
   return isSeasonMode() ? 1 : BASE_BACKOFF_MINUTES
@@ -227,8 +285,28 @@ export function buildDedupeKey(params: {
   event: string
   storeId: string
   entityId: string
+  /**
+   * معرّف الخريطة — **ل مسار أودوو فقط**.
+   *
+   * خريطتان مختلفتان قد تشيران إلى نفس سجل أودوو، ولكل منهما منطق كتابة
+   * خاص (حقول مختلفة). بدون هذا التمييز تدمج الأُولى الثانية ⇒ **كتابة
+   * إحداهما تُسقط بصمت**. في مسارات المتجر ← أودوو لا معنى للتمييز (الكيان
+   * هو الكيان).
+   */
+  fieldMappingId?: string | null
 }): string {
-  return `${params.platform}:${params.event}:${params.storeId}:${params.entityId}`
+  const mappingScope =
+    params.platform === 'odoo' && params.fieldMappingId
+      ? `:${params.fieldMappingId}`
+      : ''
+  return `${params.platform}:${params.event}:${params.storeId}:${params.entityId}${mappingScope}`
+}
+
+/** معرّف الخريطة من الحمولة (مسار أودوو يحمله في body). */
+export function extractFieldMappingId(payload: Record<string, unknown>): string {
+  const v = (payload as Record<string, unknown>).field_mapping_id
+  if (v === undefined || v === null || String(v) === '') return ''
+  return String(v)
 }
 
 // ─── Metrics (in-memory, per process) ────────────────────────────────────────
@@ -324,6 +402,17 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
   if (!params.workspaceId || !params.storeId || !params.event) {
     return { skipped: true }
   }
+
+  // ── بوابة الاستقبال (نقطة Admission الوحيدة) ───────────────────────────────
+  // كل المنصات الخمس تمرّ من هنا ⇒ لا طريق لتسلّل طلب موثّق من دون البوابة.
+  // القاعدة: **لا رفض** — ما فوق حصة المساحة يُقبَل ويُحفظ ويُعالَج، ويظهر
+  // في لوحة الأدمن كـ«تجاوز». الرفض الوحيد هو صمام الأمان العام، ويعيد
+  // المسار 503 (قابل لإعادة الإرسال) لا 429 (فقد).
+  const admission = admitWorkspaceEvent(params.workspaceId)
+  if (!admission.admitted) {
+    return { error: 'ingress_overloaded' }
+  }
+
   const metrics = getMetricsStore()
   const entityId = extractEntityId(params.payload)
   const deliveryId = extractDeliveryId(params.payload)
@@ -341,15 +430,37 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
   // ── 0) الاستلام الدائم أولاً ───────────────────────────────────────────────
   // نكتب الحدث في `webhook_inbox` قبل أي شيء آخر. إن فشل ذلك نُرجع error
   // فيردّ المتصل بـ 5xx فتعيد المنصة الإرسال — لا تضيع.
+  //
+  // ⚠️ مسار أودوو **لا يُجمَّع**: Automated Action في أودوو لا يعيد الإرسال
+  // بعد خطأ، فنكتب فيه فوراً بلا انتظار. بقية المنصات تعيد الإرسال عند
+  // 5xx،⇒ التجميع الآمن فيها.
+  const useBatch = params.platform !== 'odoo'
   const { recordWebhookReceipt, completeWebhookReceipt } = await import('@/lib/webhook-inbox')
-  const receipt = await recordWebhookReceipt({
-    platform: params.platform,
-    storeId: params.storeId,
-    workspaceId: params.workspaceId,
-    event: params.event,
-    dedupKey,
-    payload: params.payload,
-  })
+
+  let receipt: { ok: boolean; duplicate?: boolean; id?: string; error?: string }
+  if (useBatch) {
+    const { insertReceipts } = await import('@/lib/ingress-batch')
+    const [outcome] = await insertReceipts([
+      {
+        dedupKey,
+        platform: params.platform,
+        storeId: params.storeId,
+        workspaceId: params.workspaceId,
+        event: params.event,
+        payload: params.payload,
+      },
+    ])
+    receipt = outcome ?? { ok: false, error: 'inbox_insert_failed' }
+  } else {
+    receipt = await recordWebhookReceipt({
+      platform: params.platform,
+      storeId: params.storeId,
+      workspaceId: params.workspaceId,
+      event: params.event,
+      dedupKey,
+      payload: params.payload,
+    })
+  }
   if (!receipt.ok) {
     metrics.lastError = `inbox write failed: ${receipt.error}`
     return { error: receipt.error ?? 'inbox_write_failed' }
@@ -399,6 +510,10 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
         .limit(5)
 
       let coalesceTarget: string | null = null
+      // في مسار أودوو: الخريطتان المختلفتان على نفس السجل لا تدمجان. كل خريطة
+      // تكتب بمنطقها الخاص (حقول مختلفة) ⇒ دمجهما يُسقط كتابة إحداهما بصمت.
+      const mappingScoped = params.platform === 'odoo'
+      const newMappingId = mappingScoped ? extractFieldMappingId(params.payload) : ''
       for (const row of (pending ?? []) as Array<{
         id: string
         payload: unknown
@@ -407,6 +522,7 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
       }>) {
         const rowPayload = (row.payload ?? {}) as Record<string, unknown>
         if (extractEntityId(rowPayload) !== entityId) continue
+        if (mappingScoped && extractFieldMappingId(rowPayload) !== newMappingId) continue
         const oldTs = extractPayloadUpdatedAt(rowPayload)
         const newTs = extractPayloadUpdatedAt(params.payload)
         const merged = newTs >= oldTs ? params.payload : rowPayload
@@ -446,9 +562,31 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     payload: params.payload,
     retry_count: 0,
     max_retries: SYNC_QUEUE_MAX_RETRIES,
-    next_retry_at: new Date().toISOString(),
+    // نافذة الدمج: تأخير المعالجة قليلاً حتى تتكدّس تحديثات نفس الكيان
+    // فتُدمج في صف واحد (يكتب أودوو مرة واحدة بدل مرات). صفر خارج الموسم.
+    next_retry_at: new Date(Date.now() + coalesceWindowMs()).toISOString(),
   }
   if (dedupKey) baseRow.dedup_key = dedupKey
+
+  if (useBatch) {
+    // ── إدراج مجمَّع ───────────────────────────────────────────────────────
+    // الكتابة التي تحمل الحمولة كاملة هي أثمن ما في المسار. تجميعها يحوّل
+    // 50 كتابة ⇒ واحدة.
+    const { insertQueueRows } = await import('@/lib/ingress-batch')
+    const [outcome] = await insertQueueRows([baseRow as never])
+    if (!outcome || !outcome.ok) {
+      if (outcome?.duplicate) {
+        metrics.duplicates += 1
+        settleReceipt()
+        return { duplicate: true }
+      }
+      metrics.lastError = `queue insert failed: ${outcome?.error ?? 'queue_insert_failed'}`
+      return { error: outcome?.error ?? 'queue_insert_failed' }
+    }
+    metrics.enqueued += 1
+    settleReceipt()
+    return { id: outcome.id }
+  }
 
   const { data, error } = await supabase
     .from('sync_queue')
@@ -535,6 +673,40 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
     const rows = (data ?? []) as QueueItem[]
     // احترم max_retries الخاص بكل صف (لا نفترض 3 ثابتة).
     items = rows.filter((r) => (r.retry_count ?? 0) < (r.max_retries ?? SYNC_QUEUE_MAX_RETRIES))
+
+    // ── الجلب العادل: لا Allows متجر واحد أن يملأ نافذة الجلب ──────────────
+    // نافذة الجلب مرتّبة بـ`next_retry_at` ⇒ متجر واحد فيه 10 آلاف صف يملأ
+    // الـ200 صف كلها، فلا يظهر أي متجر آخر ⇒ **يبقى محروماً حتى نهاية
+    // الموسم** (التوزيع بالتناوب لا ينقذه: ما لم يُجلب لا يُوزَّع).
+    //
+    // الحل: نعرف المساحات النشطة من بوابة الاستقبال (كل مساحة استقبلت حدثاً
+    // مسجّلاً)، فللمساحات التي غابت عن النافذة نعمل استعلاماً موجّهاً لكل
+    // منها. الاستعلام الإضافي لا يقع إلا عند وجود ظلم فعلي.
+    const present = new Set(items.map((r) => r.workspace_id))
+    const starved = getActiveWorkspaceIds().filter((ws) => !present.has(ws))
+    if (starved.length > 0) {
+      const share = Math.max(
+        MIN_SHARE_PER_WORKSPACE,
+        Math.ceil(maxItems / Math.max(1, starved.length + present.size))
+      )
+      for (const ws of starved.slice(0, MAX_FAIR_WORKSPACES)) {
+        try {
+          const { data: wsRows } = await supabase
+            .from('sync_queue')
+            .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
+            .eq('workspace_id', ws)
+            .not('next_retry_at', 'is', null)
+            .lte('next_retry_at', nowIso)
+            .order('next_retry_at', { ascending: true })
+            .limit(share)
+          for (const r of (wsRows ?? []) as QueueItem[]) {
+            if ((r.retry_count ?? 0) < (r.max_retries ?? SYNC_QUEUE_MAX_RETRIES)) items.push(r)
+          }
+        } catch {
+          // غير قاتل — المساحة تُخدم في الدورة التالية.
+        }
+      }
+    }
   } catch (err: unknown) {
     metrics.lastError = err instanceof Error ? err.message.slice(0, 300) : 'queue fetch failed'
     return 0
@@ -551,7 +723,13 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
     const entityId = extractEntityId(item.payload ?? {})
     const deliveryId = extractDeliveryId(item.payload ?? {})
     const key = entityId
-      ? buildDedupeKey({ platform: item.platform, event: item.event, storeId: item.store_id, entityId })
+      ? buildDedupeKey({
+          platform: item.platform,
+          event: item.event,
+          storeId: item.store_id,
+          entityId,
+          fieldMappingId: extractFieldMappingId(item.payload ?? {}),
+        })
       : deliveryId
         ? `delivery:${item.platform}:${item.event}:${item.store_id}:${deliveryId}`
         : `noid:${item.id}`
@@ -611,9 +789,18 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   // يتابَع، والخاسر يتخطى الصف. مدة الحجز 15 دقيقة — كافية لأبطأ حدث،
   // ولو تعطل العامل يُعاد الصف تلقائياً بعدها. الصف المحجوز يختفي أيضاً
   // من جلبات الدفعات الأخرى (next_retry_at مستقبلي).
+  //
+  // ⚠️ كان الحجز **متسلسلاً**: 50 تحديثاً واحداً تلو الآخر ⇒ 50 رحلة
+  // ذهاب وإياب. عند BATCH=100 (وضع الموسم) صار ذلك 5..10 ثوانٍ من
+  // انتظار قبل أن يبدأ أي عامل عمل — أي تأخير مباشر في الذروة.
+  //
+  // الحل: نفس التحديث المشروط (يبقى ذرّياً **لكل صف** — الشرط
+  // `.lte('next_retry_at', now)` هو ما يمنع العاملين من التقاط الصف
+  // نفسه)، لكن **بالتوازي** وبحدّ تزامن صغير. رحلة واحدة بدل 50.
   const CLAIM_LEASE_MS = 15 * 60 * 1000
+  const CLAIM_CONCURRENCY = 10
   const claimed: QueueItem[] = []
-  for (const item of batch) {
+  const claimOne = async (item: QueueItem) => {
     try {
       const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
       const { data: locked } = await supabase
@@ -623,9 +810,17 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
         .not('next_retry_at', 'is', null)
         .lte('next_retry_at', new Date().toISOString())
         .select('id')
-      if (locked && locked.length > 0) claimed.push(item)
+      return locked && locked.length > 0 ? item : null
     } catch {
       // فشل الحجز غير قاتل — تخطَّ هذا الصف في هذه الدفعة.
+      return null
+    }
+  }
+  for (let offset = 0; offset < batch.length; offset += CLAIM_CONCURRENCY) {
+    const slice = batch.slice(offset, offset + CLAIM_CONCURRENCY)
+    const results = await Promise.all(slice.map(claimOne))
+    for (const result of results) {
+      if (result) claimed.push(result)
     }
   }
 
@@ -814,34 +1009,38 @@ async function processOneItem(item: QueueItem) {
   metrics.processed += 1
   try {
     // isQueueExecution=true لمنع إعادة الإدراج المكررة من داخل المحرك.
-    let result:
-      | { ok: boolean; message?: string }
-      | { success: number; failed: number; skipped?: number; records: Array<{ status: string; message?: string }> }
-      | void
-    if (item.platform === 'odoo') {
-      if (item.event === 'odoo.model.sync') {
-        const { runBackgroundSync } = await import('@/app/api/webhooks/odoo/route')
-        const p = (item.payload || {}) as Record<string, unknown>
-        result = await runBackgroundSync(
-          String(p.field_mapping_id || ''),
-          String(p.model || ''),
-          Number(p.odooRecordId || 0),
-          p.payloadData as Record<string, unknown> | undefined,
-          typeof p.auth_status === 'string' ? p.auth_status : undefined
-        )
-      } else {
-        result = await processOdooStockEvent(item.payload as Record<string, unknown>)
-      }
-    } else {
-      result = await processWebhookEvent(
+    // ── مهلة لكل حدث ───────────────────────────────────────────────────────
+    // بلاها: حدث فيه 15 نداء متتالي وأحدها بطيء = 150 ثانية يحتجز عاملاً
+    // من أصل 10. عشرة أحداث سيئة = الطابور كله يقف.
+    const work = (async () => {
+      if (item.platform === 'odoo') {
+        if (item.event === 'odoo.model.sync') {
+          const { runBackgroundSync } = await import('@/app/api/webhooks/odoo/route')
+          const p = (item.payload || {}) as Record<string, unknown>
+          return runBackgroundSync(
+            String(p.field_mapping_id || ''),
+            String(p.model || ''),
+            Number(p.odooRecordId || 0),
+            p.payloadData as Record<string, unknown> | undefined,
+            typeof p.auth_status === 'string' ? p.auth_status : undefined
+          )
+        }
+        return processOdooStockEvent(item.payload as Record<string, unknown>)
+      }      return processWebhookEvent(
         item.event,
         item.store_id,
         item.payload as Record<string, unknown>,
         item.platform as 'zid' | 'salla' | 'shopify',
         true,
-        item.workspace_id
+        item.workspace_id,
+        item.id
       )
-    }
+    })()
+
+    const result = (await withItemTimeout(work, SYNC_QUEUE_ITEM_TIMEOUT_MS)) as
+      | { ok: boolean; message?: string }
+      | { success: number; failed: number; skipped?: number; records: Array<{ status: string; message?: string }> }
+      | void
 
     if (result && typeof result === 'object' && 'ok' in result) {
       if (result.ok) {
@@ -1052,6 +1251,10 @@ async function maybeCleanup() {
     await cleanupExpiredLogs().catch(() => {})
     const { pruneProcessedInbox } = await import('./webhook-inbox')
     await pruneProcessedInbox(INBOX_RETENTION_DAYS).catch(() => {})
+    // صندوق التليجرام: الصفوف المُرسلة بعد 7 أيام والفاشلة بعد 30 يوماً.
+    // بدون هذا ينمو الجدول بلا حد (رسالة لكل طلب).
+    const { pruneTelegramOutbox } = await import('./telegram-outbox')
+    await pruneTelegramOutbox().catch(() => {})
   } catch {
     // غير قاتل.
   }

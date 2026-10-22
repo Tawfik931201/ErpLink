@@ -7,6 +7,8 @@ import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
+// استيراد النوع فقط — يُمحى عند البناء، فلا يتحمّل المسار الساخن أي استيراد.
+import type { WebhookSkipReason } from '@/lib/webhook-skip-log'
 import { getAccessToken } from '@/lib/zid/token'
 import { ZidAPI } from '@/lib/zid-client'
 
@@ -28,11 +30,64 @@ const SKIP = (message: string): SyncOutcome => ({ ok: true, skipped: true, messa
 const FAIL = (message: string): SyncOutcome => ({ ok: false, message })
 const DONE = (message = 'done'): SyncOutcome => ({ ok: true, message })
 
+/**
+ * يسجّل "تخطّي" مرئياً في `sync_logs`.
+ *
+ * ⚠️ لماذا: كل فرع SKIP كان **بلا أي سجل** ⇒ العامل يحذف الصف من الطابور
+ * كـ«نجاح» والحدث يختفي بلا أثر. والأهم: فرع رفض الحذف لغياب المفتاح
+ * يعني أن **العميل لا يعرف** أن منتجه حُذف في أودوو وبقي في متجره.
+ *
+ * لا يغيّر نتيجة الدالة (يبقى SKIP ⇒ الصف يُحذف ولا يُعاد) — فقط يترك أثراً
+ * قابلاً للاستعلام في شاشة السجلات.
+ */
+async function logOdooSkip(params: {
+  workspaceId?: string | null
+  mappingId?: string | null
+  storeId?: string | null
+  model: string
+  recordId: number
+  event: string
+  reason: WebhookSkipReason
+  detail?: string
+}): Promise<void> {
+  try {
+    if (!params.workspaceId) return
+    const { logWebhookSkip } = await import('@/lib/webhook-skip-log')
+    await logWebhookSkip({
+      workspaceId: params.workspaceId,
+      platform: 'odoo',
+      event: params.event,
+      storeId: String(params.storeId ?? ''),
+      reason: params.reason,
+      detail: params.detail ?? `${params.model}#${params.recordId}`,
+      odooModel: params.model,
+      fieldMappingId: params.mappingId ?? null,
+      payload: { odooRecordId: params.recordId },
+    })
+  } catch {
+    // التوثيق لا يكسر المزامنة أبداً.
+  }
+}
+
 export async function POST(req: NextRequest) {
   const getHeader = (name: string) => req.headers.get(name)
-  const { checkRateLimit: checkRl, rateLimitKeyFromHeaders: keyFromHeaders } = await import('@/lib/rate-limit')
-  const rl = checkRl(keyFromHeaders(getHeader, 'odoo-webhook'), 120, 60_000)
-  if (!rl.allowed) {
+  // حد الاستقبال: للمجهولين فقط. أودوو يرسل السر المشتق في `?secret=` أو
+  // `x-odoo-secret` — فكل طلب حقيقي موثّق ولا يخضع لحد الـIP. حد 120/دقيقة
+  // كان يحوّل ذروة العميل إلى **ضياع صامت** (429 ⇒ Automated Action في أودوو
+  // لا يعيد الإرسال بعد 4xx).
+  const credentialPresented =
+    !!req.headers.get('x-odoo-secret') ||
+    !!req.headers.get('authorization') ||
+    !!req.nextUrl.searchParams.get('secret') ||
+    !!req.nextUrl.searchParams.get('token')
+  const { checkUnauthenticatedIngressLimit } = await import('@/lib/ingress-admission')
+  const { rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
+  const unauthLimit = checkUnauthenticatedIngressLimit({
+    scope: 'odoo',
+    credentialPresented,
+    bucketKey: rateLimitKeyFromHeaders(getHeader, 'odoo-webhook'),
+  })
+  if (!unauthLimit.allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
 
@@ -184,6 +239,16 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   const hasErpToStore = syncDirection.split(',').map((s: string) => s.trim()).includes('erp_to_store')
   if (!hasErpToStore) {
     console.warn(`[Odoo Webhook Bg] Mapping "${mapping.name}" does not support ERP to Store sync direction. Skipping.`)
+    await logOdooSkip({
+      workspaceId: mapping.workspace_id,
+      mappingId: mapping.id,
+      storeId: mapping.merchant_id,
+      model,
+      recordId: odooRecordId,
+      event: mapping.action,
+      reason: 'odoo_direction_disabled',
+      detail: `sync_direction=${syncDirection}`,
+    })
     return SKIP('mapping does not include erp_to_store direction')
   }
 
@@ -201,6 +266,16 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
 
   if (odooConn.erp_type && odooConn.erp_type !== 'odoo') {
     console.warn(`[Odoo Webhook Bg] Webhook sync for non-Odoo ERP (${odooConn.erp_type}) is not supported yet.`)
+    await logOdooSkip({
+      workspaceId: mapping.workspace_id,
+      mappingId: mapping.id,
+      storeId: mapping.merchant_id,
+      model,
+      recordId: odooRecordId,
+      event: mapping.action,
+      reason: 'odoo_erp_type_unsupported',
+      detail: `erp_type=${odooConn.erp_type}`,
+    })
     return SKIP(`non-odoo erp type: ${odooConn.erp_type}`)
   }
 
@@ -208,6 +283,15 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   const modelMappings = mapping.mappings?.[model] || []
   if (modelMappings.length === 0) {
     console.info(`[Odoo Webhook Bg] No mappings defined for model "${model}". Skipping.`)
+    await logOdooSkip({
+      workspaceId: mapping.workspace_id,
+      mappingId: mapping.id,
+      storeId: mapping.merchant_id,
+      model,
+      recordId: odooRecordId,
+      event: mapping.action,
+      reason: 'odoo_no_field_mappings',
+    })
     return SKIP(`no field mappings for model ${model}`)
   }
 
@@ -293,12 +377,31 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
       console.warn(
         `[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo and delivery is unauthenticated (${deliveryAuth || 'unclassified'}) — refusing to act on the body; re-register the Automated Action to enable deletions`
       )
+      await logOdooSkip({
+        workspaceId: mapping.workspace_id,
+        mappingId: mapping.id,
+        storeId: mapping.merchant_id,
+        model,
+        recordId: odooRecordId,
+        event: mapping.action,
+        reason: 'odoo_deletion_unauthenticated',
+        detail: `auth_status=${deliveryAuth || 'unclassified'} — re-register the Automated Action to enable deletions`,
+      })
       return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists (unauthenticated delivery)`)
     }
     console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo — honoring deletion flow (match-field value only, body values are never trusted)`)
     removalOnly = true
   } else {
     console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found in Odoo and body carried no field values`)
+    await logOdooSkip({
+      workspaceId: mapping.workspace_id,
+      mappingId: mapping.id,
+      storeId: mapping.merchant_id,
+      model,
+      recordId: odooRecordId,
+      event: mapping.action,
+      reason: 'odoo_deletion_no_values',
+    })
     return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
   }
 
@@ -359,6 +462,16 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
     const removalMatchValue = String(payloadData?.[matchField] ?? '').trim()
     if (!removalMatchValue) {
       console.warn(`[Odoo Webhook Bg] Record ${model}#${odooRecordId} not found and body carries no ${matchField} — cannot resolve deletion target`)
+      await logOdooSkip({
+        workspaceId: mapping.workspace_id,
+        mappingId: mapping.id,
+        storeId: mapping.merchant_id,
+        model,
+        recordId: odooRecordId,
+        event: mapping.action,
+        reason: 'odoo_deletion_no_match_value',
+        detail: `match field "${matchField}" missing from the body`,
+      })
       return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
     }
     odooRecord = { [matchField]: removalMatchValue }
@@ -411,6 +524,16 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
 
   if (!matchValue) {
     console.warn(`[Odoo Webhook Bg] Match field "${matchField}" is empty on Odoo record. Cannot sync.`)
+    await logOdooSkip({
+      workspaceId: mapping.workspace_id,
+      mappingId: mapping.id,
+      storeId: mapping.merchant_id,
+      model,
+      recordId: odooRecordId,
+      event: mapping.action,
+      reason: 'odoo_empty_match_field',
+      detail: `match field "${matchField}" is empty on the Odoo record`,
+    })
     return SKIP(`match field ${matchField} is empty — cannot identify the store record`)
   }
 

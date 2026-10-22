@@ -189,7 +189,7 @@ export async function getOrphanItems(limit = 25) {
     const lim = Math.min(100, Math.max(1, limit))
     const { data, count, error } = await supabase
       .from('webhook_inbox')
-      .select('id,platform,store_id,event,dedup_key,received_at,attempts', { count: 'exact' })
+      .select('id,platform,store_id,event,dedup_key,received_at,attempts,payload', { count: 'exact' })
       .eq('status', 'pending')
       .is('workspace_id', null)
       .in('store_id', [...storeIds])
@@ -264,6 +264,101 @@ export async function retryFrozenItems() {
     return { success: true, revived: (data ?? []).length }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Retry failed' }
+  }
+}
+
+/**
+ * إعادة تشغيل **جماعية** لأرشيف الموتى لمساحة العمل الحالية.
+ *
+ * لماذا: كان الاسترجاع صفاً صفاً ⇒ في ذروة (أو بعد انقطاع أودوو) عشرات
+ * الصفوف الميتة = عشرات ضغطات على زر. الآن بضغطة واحدة.
+ *
+ * الأمان: نفس قواعد `replayDeadItem` — نطاق المساحة فقط، ومفتاح dedup
+ * جديد لكل صف (`replay:<id>:<ts>`) حتى لا يصطدم الفهرس الجزئي.
+ */
+export async function replayAllDeadItems(limit = 100) {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+    const capped = Math.max(1, Math.min(Math.trunc(limit) || 100, 500))
+
+    const { data: rows, error: readErr } = await supabase
+      .from('sync_queue_dead')
+      .select('id,store_id,event,platform,payload,error_message')
+      .eq('workspace_id', workspaceId)
+      .order('died_at', { ascending: true })
+      .limit(capped)
+
+    if (readErr) return { success: false, error: readErr.message }
+    if (!rows || rows.length === 0) return { success: true, replayed: 0 }
+
+    const now = Date.now()
+    const inserts = (rows as Array<Record<string, any>>).map((row) => ({
+      workspace_id: workspaceId,
+      store_id: row.store_id,
+      event: row.event,
+      platform: row.platform,
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      retry_count: 0,
+      max_retries: 5,
+      next_retry_at: new Date().toISOString(),
+      dedup_key: `replay:${row.id}:${now}`,
+      error_message: `replayed from dead-letter: ${String(row.error_message ?? '').slice(0, 200)}`,
+    }))
+
+    const { error: insertErr } = await supabase.from('sync_queue').insert(inserts)
+    if (insertErr) return { success: false, error: insertErr.message }
+
+    revalidatePath('/app/queue')
+    return { success: true, replayed: inserts.length }
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Replay failed' }
+  }
+}
+
+/**
+ * استرجاع **الأيتام** — إيصالات محفوظة بلا مساحة عمل (المتجر غير مربوط).
+ *
+ * كانت للقراءة فقط: `getOrphanItems` يعرضها وبلا زر. فالنتيجة أن حدثاً
+ * حقيقياً لمتجر رُبط متأخراً ظلّ معطلاً حتى يدخل الأدمن يدوياً.
+ *
+ * الإجراء: نبحث عن متجر `store_id` غير مربوط، فإن وُجد نُعيد ربطه
+ * بمساحته ونعيد دفع الإيصالات. (إن لم يوجد متجر مربوط ⇒ نُبقي الأيتام
+ * كما هي — لا نُدرجها في طابور بلا مساحة عمل.)
+ */
+export async function replayOrphanItems() {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+
+    // اليتائم التي تعرضها getOrphanItems تخص متاجر **هذه المساحة** (الاستعلام
+    // يفلتر على store_id الخاص بها) ⇒ نستطيع ردّها إلى مساحتها مباشرة.
+    const orphans = await getOrphanItems(100)
+    const rows = (orphans as { rows?: Array<Record<string, any>> }).rows ?? []
+    if (rows.length === 0) return { success: true, replayed: 0 }
+
+    const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+    let replayed = 0
+    for (const orphan of rows) {
+      const queued = await enqueueWebhookEvent({
+        workspaceId,
+        storeId: String(orphan.store_id ?? ''),
+        event: String(orphan.event ?? ''),
+        platform: String(orphan.platform ?? 'zid'),
+        payload: (orphan.payload ?? {}) as Record<string, unknown>,
+      })
+      if (queued.id) {
+        replayed += 1
+        await supabase
+          .from('webhook_inbox')
+          .update({ status: 'done', processed_at: new Date().toISOString() })
+          .eq('id', orphan.id)
+      }
+    }
+    revalidatePath('/app/queue')
+    return { success: true, replayed }
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Orphan replay failed' }
   }
 }
 

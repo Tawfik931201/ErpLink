@@ -93,7 +93,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 768 tests over 49 suites (added 2026-09-29, grown 2026-10-21)
+# Unit tests — 864 tests over 55 suites (added 2026-09-29, grown 2026-10-22)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,7 +135,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 768 tests over 49 suites:
+- 864 tests over 55 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
@@ -239,6 +239,32 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     before the first Odoo write in `executeOdooOperation`, that no `return`
     operation was added to `event-operation.ts`, and that Salla shipment events
     are normalised to the order id.
+  - `tests/unit/ingress-admission.test.ts` (20 tests, added 2026-10-22) — the
+    no-rejection gate: certified deliveries are admitted at ANY volume, the
+    ceiling adapts to the queue depth, the anonymous-IP bucket still sheds
+    garbage, and the five webhook routes no longer carry a blanket
+    `checkRateLimit` (that limit was silent loss: 429 ⇒ no platform resend).
+  - `tests/unit/telegram-outbox.test.ts` (15 tests, added 2026-10-22) — the
+    Telegram outbox: one message per event, a timeout on the HTTP call, 429
+    `retry_after` handling, and the shared event key between the arrival
+    alert and the sync result.
+  - `tests/unit/ingress-durability.test.ts` (13 tests, added 2026-10-22) — the
+    silent-loss fixes: every Odoo→store skip leaves a `sync_logs` row, a Zid
+    order is never written without its line items, the coalescing identity
+    distinguishes two Odoo mappings, and the rescue path gets the full retry
+    budget.
+  - `tests/unit/ingress-batch.test.ts` (7 tests, added 2026-10-22) — the write
+    batcher: no 2xx before the durable write, the Odoo direction stays
+    unbatched (Odoo never resends), a duplicate stays benign.
+  - `tests/unit/no-loss-regression.test.ts` (21 tests, added 2026-10-22) — the
+    plan changed ingress, the queue and Telegram; these pin what must NOT
+    change: the Zid/Odoo credentials, the auth-before-select order, the trust
+    rule, the Standard Mapping shape, `enabled_actions`, and the
+    platform-facing HTTP codes.
+  - `tests/unit/pre-launch-tooling.test.ts` (20 tests, added 2026-10-22) — the
+    pre-first-customer tooling: the pipeline self-test (real code path, cleans
+    up after itself), the admin-alert thresholds (measured, not guessed), and
+    the parallel claim keeping its per-row atomicity.
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -897,6 +923,87 @@ setting lives in the existing JSON blob as `order.returns` — **no migration**.
 - `specs/001-simplify-and-integrate/history.md` — change log (started from 5 exploration reports)
 - Optional: `.github/prompts/speckit.*.prompt.md` — copy-paste helpers
 - Rule: spec-kit changes are docs-only (`md`/`yml`) — never break `type-check`
+
+---
+
+## No-Loss Plan (added 2026-10-22) — "لا تضيع ولا ترفض"
+
+> القاعدة الذهبية: **كل طلب صالح = يُحفظ أولاً، ثم يُعالَج متأخراً إن لزم.
+> لا شيء يُرفض.** الاستقبال لا يرفض طلباً موثّقاً أبداً؛ ما فوق الحصة يُؤجَّل
+> ولا يُحذف. الهدف: **التأخير مقبول، الفقد مرفوض**.
+
+### ما الذي كان يفقد الطلبات (قبل 2026-10-22)
+
+| العيب | الأثر |
+|---|---|
+| `checkRateLimit(..., 120, 60_000)` في كل مسار استقبال | **429 ⇒ ضياع صامت.** المنصات (زد/سلة/شوبيفاي) **لا تعيد الإرسال بعد 4xx** ⇒ الطلب ضاع بلا سجل وبلا عدّاد |
+| 7 فروع SKIP في مسار أودوو ← المتجر | بلا `sync_logs` ⇒ الصف يُحذف من الطابور كـ«نجاح» والحدث يختفي. وأخطرها: **رفض الحذف لغياب المفتاح** ⇒ العميل لا يعرف أن منتجه حُذف في أودوو وبقي في متجره |
+| مسار الـpreset (`processFixedMappingFallback`) | `return null` **بلا سجل** ⇒ نفس المشكلة |
+| فشل سحب تفاصيل الطلب من زد | كان **يُبتلع** ⇒ كُتب في أودوو طلب **بلا بنود** (لا منتجات) ويبدو ناجحاً |
+| الدمج (coalescing) بلا `field_mapping_id` | خريطتان على نفس سجل أودوو ⇒ إحداهما تُسقط بصمت |
+| تليجرام: `callTelegramApi` داخل عامل المزامنة | 429 من تليجرام **يُبتلع بلا إعادة محاولة** ⇒ الرسالة تضيع؛ و`fetch` بلا مهلة ⇒ تليجرام المعلّق **يحبس عامل المزامنة إلى الأبد** (10 تعليقات كانت تُوقف الطابور كله) |
+| تليجرام: تضخيم الرسائل | حدث واحد ⇒ رسالة وصول + (1 + N) رسالة نتيجة |
+| نافذة الجلب غير العادلة | نافذة الجلب مرتّبة بـ`next_retry_at` ⇒ **متجر واحد فيه 10 آلاف صف يملؤها** ⇒ بقية المتاجر لا تظهر فيها أبداً (التوزيع بالتناوب لا ينقذ ما لم يُجلب) |
+| `drainWebhookInbox` بلا `max_retries` | الصف المُعاد دفعه يرث افتراضي قاعدة البيانات (3) بدل 5 ⇒ يموت أبكر |
+| عميل أودوو: اتصال جديد + `authenticate` لكل حدث | كل نداء XML-RPC يفتح اتصال TLS جديداً ⇒ 6..15 نداء متتالي لكل حدث |
+
+### البنية بعد الخطة
+
+```
+منصة ──POST──▶ route: تحقّق ⇒ البوابة (لا ترفض الموثّق) ⇒
+   ├─ INSERT webhook_inbox   (إيصال دائم — write-ahead log)
+   └─ INSERT sync_queue      (دفعة عند الضغط)
+   └─ رد 2xx/202  ✅
+                        ↓
+   كل 30 ثانية: العامل الخلفي
+   ├─ drainWebhookInbox(100)  — مسار الإنقاذ
+   ├─ processSyncQueue(50)    — جلب عادل بين المساحات + 10 عمال + 3/مساحة
+   └─ publishIngressPendingDepth() — يربط السقف الديناميكي بفراغ الطابور
+                        ↓
+   processWebhookEvent ⇒ تليجرام **يُكتب في صندوق** (لا نداء مباشر)
+                        ↓
+   مُرسّل صندوق التليجرام (كل ثانيتين، 15 رسالة/ث، مهلة 5ث، retry_after)
+```
+
+### الملفات الجديدة
+
+| الملف | الدور |
+|---|---|
+| `src/lib/ingress-admission.ts` | بوابة الاستقبال: سقف ديناميكي 120⇄2000 لكل مساحة، صمام أمان عام ⇒ 503 (لا 429)، عدّادات مرئية |
+| `src/lib/ingress-batch.ts` | مجمّع الكتابة (دفعة 50 / 150 مللي). **مسار أودوو مستثنى** — لا يعيد الإرسال |
+| `src/lib/telegram-outbox.ts` | صندوق التليجرام + مُرسِل مستقل بمهلة و`retry_after` + رسالة واحدة لكل حدث |
+| `src/lib/store-pull-budget.ts` | ميزانية سحب المتجر (زد 60/دقيقة) + ذاكرة تفاصيل الطلب |
+| `src/lib/admin-alerts.ts` | تنبيهات الأدمن (نفس صندوق التليجرام) — رسالة واحدة مجمّعة، مُقيَّدة |
+| `src/lib/pipeline-selftest.ts` | **الفحص الذاتي للمسار** — يشغّل المسار الحقيقي على بيانات وهمية وينظّفها |
+| `src/app/api/admin/pipeline-selftest/route.ts` | نقطة تشغيل الفحص الذاتي (أدمن + `confirm:true`) |
+| `supabase/migrations/20261022_telegram_outbox.sql` | جدول `telegram_outbox` (paste-ready) |
+
+### القواعد التي يجب ألا تُكسر
+
+- **لا ترفض طلباً موثّقاً.** الحد 120/دقيقة بقي **للمجهولين فقط** (بلا أي اعتماد) — حماية من السكربت العشوائي. الاعتماد نفسه (توقيع HMAC أو سر مشتق) هو الحماية.
+- **الحد لكل مساحة عمل** حقيقي بالفعل: `MAX_CONCURRENT_PER_WORKSPACE=3` + توزيع بالتناوب + **جلب عادل** (استعلام موجّه لكل مساحة غائبة عن نافذة الجلب).
+- **لا تكتب في أودوو من جسم الطلب.** الجسم محفّز فقط؛ القيم تُقرأ من أودوو العميل.
+- **لا نتيجة = فشل** (لا نجاح صامت). و`status='skipped'` يكتب سطر `sync_logs`.
+- **حد أودوو → متجر يحتاج سراً مشتقاً** ⇒ الحذف معطّل حتى يُسجَّل كل Automated Action عبر `POST /api/admin/odoo-webhooks/refresh`.
+- **طابور التليجرام يحتاج الجدول** ⇒ طبّق `20261022_telegram_outbox.sql` قبل نشر الكود (وإلا ضاعت الإشعارات — المزامنة نفسها سليمة).
+
+### الترحيل المطلوب على الهوست
+
+1. `supabase/migrations/20261022_telegram_outbox.sql` (paste-ready، `BEGIN/COMMIT`).
+2. `SYNC_QUEUE_SELF_RUNNER=true` (إلزامي — لا cron صالح على هذا الهوست).
+3. `POST /api/admin/zid-webhooks/refresh` + `POST /api/admin/salla-webhooks/refresh` + `POST /api/admin/odoo-webhooks/refresh` — **هذا ما يحوّل كل حركة "legacy" إلى موثّقة، فتنتهي آخر رفضات 429**.
+4. `GET /api/admin/queue-health` بعد النشر — تأكد `ready: true` و`readiness.blockers: []` و`ingressAdmission.rejectedUnauthenticated: 0`.
+
+### أدوات ما قبل أول عميل (2026-10-22)
+
+> **لا يوجد عملاء حقيقيين بعد** ⇒ كل عيب يبقى مخفياً حتى أول موسم. هذه
+> الأدوات تجعل الموسم الأول مفاجأة **ممتعة** لا كارثة.
+
+| الأداة | ما تفعله |
+|---|---|
+| `POST /api/admin/pipeline-selftest` (`{workspaceId, confirm:true}`) | **الفحص الذاتي للمسار**: يشغّل البوابة + الحفظ + الطابور + صندوق التليجرام على بيانات وهمية، يفحص 8 ضمانات، وينظّف كل ما أنشأه. **لا يلمس أودوو ولا يرسل تليجرام فعلياً.** من لوحة الأدمن: «الفحص الذاتي للمسار» |
+| `GET /api/admin/queue-health` → `readiness` | حكم واحد: `blockers` (كل واحد = سبب **يضيّع طلباً**) و`warnings` (تخفيف) |
+| `ADMIN_ALERT_WORKSPACE_ID` | تنبيهات الأدمن: رسالة **واحدة مجمّعة** عند تجاوز أي حدّ، مُقيَّدة (نفس السبب مرة كل ساعة). اربط محادثتك بتليجرام في `/app/settings/notifications` لتلك المساحة |
 
 ---
 

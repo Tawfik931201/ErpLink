@@ -5,6 +5,7 @@ import { getAdminStats } from '@/app/actions/subscription-actions'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 
 import { OdooWebhooksRefresh } from './OdooWebhooksRefresh'
+import { PipelineSelfTest } from './PipelineSelfTest'
 import { SallaWebhooksRefresh } from './SallaWebhooksRefresh'
 import { WebhookOps } from './WebhookOps'
 import { ZidWebhooksRefresh } from './ZidWebhooksRefresh'
@@ -105,6 +106,7 @@ export default async function AdminStatsPage() {
         <ZidWebhooksRefresh isAr={isAr} />
         <SallaWebhooksRefresh isAr={isAr} />
         <WebhookOps isAr={isAr} />
+        <PipelineSelfTest isAr={isAr} />
       </div>
     </div>
   )

@@ -12,6 +12,15 @@
 
 import { supabase } from './supabase'
 
+/**
+ * عدد المحاولات القصوى للصف.
+ *
+ * **نسخة من `SYNC_QUEUE_MAX_RETRIES` في `sync-queue.ts`** — لا نستورده من
+ * هناك تفادياً لدورة استيراد (sync-queue يستورد هذا الملف ديناميكياً).
+ * تطابق القيمتين مضمون باختبار (`tests/unit/ingress-durability.test.ts`).
+ */
+const SYNC_QUEUE_MAX_RETRIES = 5
+
 export interface WebhookReceipt {
   platform: string
   storeId: string
@@ -156,6 +165,10 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
       platform: row.platform,
       payload: row.payload,
       retry_count: 0,
+      // ⚠️ كان هذا الإدراج **لا يضع** max_retries ⇒ الصف كان يرث افتراضي
+      // قاعدة البيانات (3) بدل الخمسة المستخدمة في كل مكان آخر ⇒ حدث يصل
+      // عبر مسار الإنقاذ يستنفد محاولاته أسرع ويموت أبكر.
+      max_retries: SYNC_QUEUE_MAX_RETRIES,
       next_retry_at: new Date().toISOString(),
     }
     if (row.dedup_key) queueRow.dedup_key = row.dedup_key

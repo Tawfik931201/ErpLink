@@ -57,10 +57,13 @@ const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000,
 const WORKSPACE_ARCHIVE_INTERVAL_MS = envInterval('WORKSPACE_ARCHIVE_INTERVAL_MS', 21_600_000, 300_000)
 
 /**
- * عدد سجلات صندوق الاستلام المُعاد دفعها في الدورة الواحدة. صغير عمداً:
- * الاستعادة حالة طوارئ، لا المسار الطبيعي.
+ * عدد سجلات صندوق الاستلام المُعاد دفعها في الدورة الواحدة.
+ *
+ * كان 25 ⇒ **50/دقيقة** فقط، أي أن موجة آلاف الأحداث تستغرق ساعات
+ * لتفريغها. المسار الآمن هو الاستقبال (كل حدث يُدرَج في الطابور مباشرة)،
+ * وهذا المسار هو **الإنقاذ** — فسعة الاستبقاء أهم من فسعة الفراغ.
  */
-const WEBHOOK_INBOX_DRAIN_BATCH = 25
+const WEBHOOK_INBOX_DRAIN_BATCH = 100
 
 /**
  * يمنع المؤقت من إبقاء العملية حية وحده (worker-friendly)، وكل عملية
@@ -94,10 +97,38 @@ async function runDrainCycle(): Promise<void> {
       )
     }
     await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
+
+    // ── نشر عمق الطابور لبوابة الاستقبال ───────────────────────────────────
+    // السقف الديناميكي (120 ← 2000) يُشتق من فراغ الطابور: وهو المصدر
+    // الوحيد الصادق لـ«كم ضغط النظام الآن». بدونه يبقى السقف على أساسه.
+    await publishIngressPendingDepth()
+
+    // ── تنبيهات الأدمن ─────────────────────────────────────────────────────
+    // الدالة نفسها تقيّد نفسها (مرة كل 5 دقائق + نفس السبب مرة كل ساعة).
+    const { checkAdminAlerts } = await import('./admin-alerts')
+    await checkAdminAlerts().catch(() => {})
   } catch {
     // الأخطاء مسجلة في عدادات الطابور — لا console لكل دورة.
   } finally {
     g.__syncQueueRunnerProcessing = false
+  }
+}
+
+/**
+ * يحسب عمق الطابور الحالي وينشره لبوابة الاستقبال.
+ * استعلام واحد عددي (head) — رخيص، ويجري مرة كل دورة.
+ */
+async function publishIngressPendingDepth(): Promise<void> {
+  try {
+    const { supabase } = await import('./supabase')
+    const { count } = await supabase
+      .from('sync_queue')
+      .select('id', { count: 'exact', head: true })
+      .not('next_retry_at', 'is', null)
+    const { setIngressPendingDepth } = await import('./ingress-admission')
+    setIngressPendingDepth(typeof count === 'number' ? count : 0)
+  } catch {
+    // غير قاتل — السقف يبقى على قيمته الأساسية.
   }
 }
 
