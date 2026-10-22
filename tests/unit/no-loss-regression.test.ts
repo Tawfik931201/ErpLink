@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'fs'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 
 /**
@@ -22,15 +22,6 @@ const SRC_DIR = join(__dirname, '..', '..', 'src')
 
 function read(...parts: string[]): string {
   return readFileSync(join(SRC_DIR, ...parts), 'utf8')
-}
-
-function walk(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walk(full, out)
-    else if (full.endsWith('.ts') || full.endsWith('.tsx')) out.push(full)
-  }
-  return out
 }
 
 describe('the Zid / Odoo binding is unchanged', () => {
@@ -216,15 +207,15 @@ describe('the plan did not break the existing source tree', () => {
       'lib/telegram-outbox.ts',
       'lib/store-pull-budget.ts',
     ]
-    for (const module of newModules) {
-      const src = read(...module.split('/'))
+    for (const rel of newModules) {
+      const src = read(...rel.split('/'))
       expect(src).not.toMatch(/\bFIXME\b|\bXXX\b|\bHACK\b/)
     }
   })
 
   it('keeps every new module free of a bare `any` in its public API', () => {
-    for (const module of ['lib/ingress-admission.ts', 'lib/telegram-outbox.ts']) {
-      const src = read(...module.split('/'))
+    for (const rel of ['lib/ingress-admission.ts', 'lib/telegram-outbox.ts']) {
+      const src = read(...rel.split('/'))
       expect(src).not.toMatch(/export (async )?function \w+\([^)]*:\s*any\b/)
     }
   })
