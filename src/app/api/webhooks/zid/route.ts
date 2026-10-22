@@ -26,6 +26,7 @@ import { ttlCache } from '@/lib/ttl-cache'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
 import { isStrictWebhookAuth, isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
+import { normalizeZidStoreId } from '@/lib/zid/store-identity'
 import {
   verifyZidWebhookAuthorization,
   zidWebhookCredentialFingerprint,
@@ -364,6 +365,15 @@ export async function POST(req: NextRequest) {
       console.warn('[Zid Webhook] store_id missing on unauthenticated delivery — guess refused.')
     }
   }
+
+  // ── توحيد هوية المتجر ────────────────────────────────────────────────────
+  // الـURL المحمول من الويب هوك يحمل معرف المالك (merchant_id) بينما جسم
+  // الأحداث يحمل معرف المتجر (store_id) أو لا يحمل شيئاً. استخدام القيمتين
+  // كهويتين مختلفتين سجّل صفوف sync_logs بـ store_id مختلف عن مفتاح البحث
+  // عند التحديث/الحذف اللاحق (خصوصاً أحداثاً بلا store_id في الجسم مثل
+  // product.delete)، فردّ "No matching record" رغم وجود السجل.
+  // الحل: أي قيمة معروفة تُحلّ إلى الـ store_id الفعلي للصف قبل أي استخدام.
+  store_id = await normalizeZidStoreId(store_id)
 
   // ── App uninstalled → fast 200 + clean the token (before any other lookup) ──
   if (isUninstallEvent(event)) {
