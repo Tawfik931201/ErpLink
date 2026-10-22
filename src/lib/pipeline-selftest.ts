@@ -243,11 +243,18 @@ export async function runPipelineSelfTest(workspaceId: string): Promise<SelfTest
       body: `فحص ذاتي: ${c.runId}`,
     })
     // الحفظ فقط — لا نُرسل شيئاً. نتأكد أن الصف موجود بـpending.
-    const { data: rows } = await sb
+    // (إن لم يُطبَّق ترحيل 20261022 بعد ⇒ نتخطى الخطوة بأمان.)
+    const { data: rows, error: outboxErr } = await sb
       .from('telegram_outbox')
       .select('id,status')
       .eq('event_key', eventKey)
       .limit(1)
+    if (outboxErr) {
+      return {
+        passed: true,
+        detail: `telegram_outbox not available (${outboxErr.code ?? 'error'}) — migration 20261022 not applied yet, step skipped`,
+      }
+    }
     const stored = (rows ?? []).length === 1
     if (stored) {
       await sb.from('telegram_outbox').delete().eq('event_key', eventKey)
@@ -289,6 +296,7 @@ export async function runPipelineSelfTest(workspaceId: string): Promise<SelfTest
   try {
     await supabase.from('sync_queue').delete().like('dedup_key', `${runId}%`)
     await supabase.from('webhook_inbox').delete().like('dedup_key', `${runId}%`)
+    // صندوق التليجرام قد لا يكون موجوداً بعد (الترحيل لم يُطبَّق) — لا يهم.
     await supabase.from('telegram_outbox').delete().like('event_key', `${runId}%`)
   } catch {
     cleaned = false

@@ -101,6 +101,29 @@ describe('the Telegram outbox wiring', () => {
     expect(outbox).toContain('retryAfterMs')
   })
 
+  it('recognises the PostgREST "relation missing" codes, not just the Postgres ones', () => {
+    // ⚠️ Learned in production on 2026-10-22: PostgREST answers a missing
+    // table with PGRST205, NOT 42P01. A guard that only knew 42P01 let the
+    // sender log an error every two seconds until the migration was applied.
+    const outbox = read('lib', 'telegram-outbox.ts')
+    expect(outbox).toContain('PGRST205')
+    expect(outbox).toContain('PGRST204')
+    expect(outbox).toContain('42P01')
+    // The guard must cover the FETCH path too — that is the one that spammed.
+    const fetchBlock = outbox.slice(
+      outbox.indexOf('export async function runTelegramOutboxCycle'),
+      outbox.indexOf('async function markFailed')
+    )
+    expect(fetchBlock).toContain('isMissingRelationError')
+    expect(fetchBlock).toContain('markOutboxUnavailable')
+  })
+
+  it('stops polling for a while once the table is known to be missing', () => {
+    const outbox = read('lib', 'telegram-outbox.ts')
+    expect(outbox).toContain('outboxUnavailableUntil = Date.now() + 10 * 60_000')
+    expect(outbox).toContain('if (outboxUnavailable())')
+  })
+
   it('starts the sender from instrumentation, not from a request', () => {
     const instrumentation = read('instrumentation.ts')
     expect(instrumentation).toContain('startTelegramOutboxRunner')

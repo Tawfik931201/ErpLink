@@ -51,6 +51,20 @@ export interface EnqueueResult {
 const OUTBOX_MAX_ATTEMPTS = 5
 
 /**
+ * هل هذا الخطأ يعني "الجدول/العمود غير موجود"؟
+ *
+ * ⚠️ PostgREST **لا يمرّر** كود Postgres (42P01) بل كوده هو:
+ *   - PGRST205 = الجدول غير موجود في مخطط البحث
+ *   - PGRST204 = العمود غير موجود
+ * وهذا خطأ متنكّر: الفحص على 42P01 وحده ترك المُرسّل يصرخ كل ثانيتين
+ * (نُشر 2026-10-22 ورُصد في سجلّات الإنتاج قبل تطبيق الترحيل).
+ */
+function isMissingRelationError(code: string | undefined): boolean {
+  if (!code) return false
+  return code === 'PGRST205' || code === 'PGRST204' || code === '42P01' || code === '42703'
+}
+
+/**
  * حارس "الجدول غير موجود": قبل تطبيق الترحيل
  * `20261022_telegram_outbox.sql` كل إدراج وكل جلب يفشل. بلا هذا الحارس
  * we'd have one failing insert per event plus a failing poll every 2s.
@@ -196,8 +210,8 @@ export async function enqueueTelegramMessage(args: EnqueueTelegramArgs): Promise
   if (error) {
     // 23505 = نفس الحدث مُدرج بالتوازي ⇒ تكرار حميد (لا رسالة ثانية).
     if (error.code === '23505') return { queued: false, reason: 'duplicate_event' }
-    // 42P01 = الجدول غير موجود ⇒ الترحيل لم يُطبَّق بعد.
-    if (error.code === '42P01' || error.code === '42703') {
+    // الجدول غير موجود ⇒ الترحيل لم يُطبَّق بعد (PostgREST: PGRST205).
+    if (isMissingRelationError(error.code)) {
       markOutboxUnavailable(error.message)
       return { queued: false, reason: 'insert_failed' }
     }
@@ -251,7 +265,7 @@ export async function runTelegramOutboxCycle(limit = 25): Promise<OutboxCycleRes
       .limit(Math.max(1, Math.min(limit, 100)))
 
     if (error) {
-      if (error.code === '42P01' || error.code === '42703') {
+      if (isMissingRelationError(error.code)) {
         markOutboxUnavailable(error.message)
         return result
       }
