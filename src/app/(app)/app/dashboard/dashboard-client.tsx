@@ -33,8 +33,8 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
       <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
         <defs>
           <linearGradient id="colorSuccess" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="colorFailed" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2} />
@@ -79,7 +79,7 @@ export function SyncAreaChart({ data }: SyncAreaChartProps) {
         <Area
           type="monotone"
           dataKey="success"
-          stroke="#10b981"
+          stroke="hsl(var(--primary))"
           strokeWidth={2}
           fill="url(#colorSuccess)"
         />

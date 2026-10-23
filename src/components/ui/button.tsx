@@ -26,7 +26,7 @@ const buttonVariants = cva(
         brand:
           'bg-[linear-gradient(135deg,hsl(var(--primary)),hsl(var(--brand-strong)))] text-primary-foreground shadow-[inset_0_1px_0_hsl(0_0%_100%/0.16),0_4px_14px_-4px_hsl(var(--primary)/0.55)] hover:brightness-105 active:brightness-95 dark:bg-[linear-gradient(135deg,hsl(var(--primary)),hsl(var(--brand)))] dark:brightness-100 dark:shadow-none dark:hover:brightness-110',
         success:
-          'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800 dark:bg-emerald-700 dark:text-emerald-50 dark:hover:bg-emerald-600',
+          'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90',
       },
       size: {
         default: 'h-10 px-4 py-2',

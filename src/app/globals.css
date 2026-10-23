@@ -58,7 +58,7 @@
     /* Custom brand tokens */
     --zid-primary: 217 85% 50%;
     --odoo-primary: 258 72% 56%;
-    --success: 158 64% 38%;
+    --success: 217 85% 50%;
     /* #0EA371 — green stays semantic (success only) */
     --warning: 37 91% 50%;
     /* #F59E0B */
@@ -162,7 +162,7 @@
     /* Custom brand tokens */
     --zid-primary: 216 92% 66%;
     --odoo-primary: 258 70% 68%;
-    --success: 158 55% 48%;
+    --success: 216 92% 66%;
     /* muted green */
     --warning: 37 85% 56%;
     /* muted amber */

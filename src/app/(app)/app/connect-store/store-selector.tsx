@@ -197,13 +197,13 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
       )}
 
       {success && (
-        <div className="flex items-start gap-3 border border-emerald-500/25 bg-emerald-500/[0.07] p-3">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <div className="flex items-start gap-3 border border-primary/25 bg-primary/[0.06] p-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div>
-            <p className="font-medium text-xs text-emerald-700 dark:text-emerald-300">
+            <p className="font-medium text-xs text-primary">
               {lang === 'ar' ? 'تم ربط المتجر بنجاح' : 'Store Connected'}
             </p>
-            <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
+            <p className="text-[11px] text-primary/80 mt-0.5">
               {getSuccessMessage(success)}
             </p>
           </div>
@@ -263,7 +263,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                       <span className="text-foreground">{t('connect.connected')}</span>
                     </div>
                   </td>
@@ -389,7 +389,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                   <span className="truncate" dir="auto">{display.name}</span>
                   {display.code && <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">({display.code})</span>}
                   <span className="inline-flex items-center gap-1 text-[10px] text-foreground/70 shrink-0">
-                    <span className="h-1 w-1 rounded-full bg-emerald-500" />
+                    <span className="h-1 w-1 rounded-full bg-primary" />
                     {t('connect.connected')}
                   </span>
                 </>
@@ -534,7 +534,7 @@ function ZidWebhookHealthPanel({ merchantId, lang }: { merchantId: string; lang:
           </div>
         ) : hasLoaded && healthyCount !== null ? (
           brokenCount === 0 && degradedCount === 0 ? (
-            <div className="flex items-center gap-2.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-emerald-700 dark:text-emerald-400">
+            <div className="flex items-center gap-2.5 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-primary">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold">
@@ -550,7 +550,7 @@ function ZidWebhookHealthPanel({ merchantId, lang }: { merchantId: string; lang:
               </div>
             </div>
           ) : (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-md bg-rose-500/10 border border-rose-500/20 p-2.5 text-rose-700 dark:text-rose-400">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-md bg-destructive/10 border border-destructive/20 p-2.5 text-destructive">
               <div className="flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span className="text-xs font-semibold">
@@ -563,7 +563,7 @@ function ZidWebhookHealthPanel({ merchantId, lang }: { merchantId: string; lang:
                 type="button"
                 onClick={handleRecover}
                 disabled={recovering}
-                className="inline-flex items-center justify-center gap-1.5 rounded bg-rose-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-rose-700 transition-colors disabled:opacity-50 shrink-0"
+                className="inline-flex items-center justify-center gap-1.5 rounded bg-destructive px-3 py-1 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50 shrink-0"
               >
                 <Wrench className="h-3 w-3" />
                 <span>{recovering ? (lang === 'ar' ? 'جارٍ الإصلاح…' : 'Repairing…') : (lang === 'ar' ? 'إصلاح المعطلة' : 'Repair Now')}</span>
@@ -571,7 +571,7 @@ function ZidWebhookHealthPanel({ merchantId, lang }: { merchantId: string; lang:
             </div>
           )
         ) : (
-          <div className="flex items-center gap-2 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-emerald-700 dark:text-emerald-400">
+          <div className="flex items-center gap-2 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-primary">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             <span className="text-xs font-semibold">
               {lang === 'ar' ? 'الربط نشط والتنبيهات تعمل بشكل طبيعي.' : 'Connection active and webhooks working normally.'}

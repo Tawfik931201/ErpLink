@@ -294,7 +294,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
         <div className="space-y-4 animate-in fade-in-50 slide-in-from-top-4 duration-300">
 
           {/* Status banner */}
-          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-3 text-emerald-700 dark:text-emerald-300">
+          <div className="flex items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.06] p-3 text-primary">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             <div className="flex-1 text-[11px] font-medium">
               {lang === 'ar' ? 'تم ربط نظام أودو ERP بنجاح ببيئة العمل النشطة. يمكنك الآن مطابقة الحقول ومزامنة البيانات.' : 'Odoo ERP connection completed successfully. You can now configure field mappings and sync data.'}
@@ -311,7 +311,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                 <div>
                   <h2 className="text-base font-bold text-foreground flex items-center gap-2">
                     {connection.connection_name || t('db.storeOdoo')}
-                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
                       {t('db.connected')}
                     </span>
                   </h2>
@@ -712,7 +712,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                 {/* Live Connection Test Results */}
                 {testStatus && (
                   <div className={`p-4 rounded-xl border text-sm flex items-start gap-3 ${testStatus.success
-                      ? 'bg-emerald-500/[0.07] border-emerald-500/25 text-emerald-700 dark:text-emerald-300'
+                      ? 'bg-primary/[0.06] border-primary/25 text-primary'
                       : 'bg-destructive/10 border-destructive/20 text-destructive'
                     }`}>
                     {testStatus.success ? (

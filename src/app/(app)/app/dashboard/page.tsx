@@ -165,7 +165,7 @@ export default async function DashboardPage() {
       value: stats ? String(stats.successfulSyncs) : '—',
       sub: timeAgo(stats?.lastSyncAt ?? null, isAr),
       icon: CheckCircle2,
-      tone: 'text-emerald-600 bg-emerald-500/10',
+      tone: 'text-primary bg-primary/10',
     },
     {
       label: isAr ? 'تحتاج مراجعة (٧ أيام)' : 'Needs review (7 days)',
@@ -254,13 +254,13 @@ export default async function DashboardPage() {
                 className={cn(
                   'flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-xs font-semibold transition-colors',
                   step.done
-                    ? 'border-emerald-500/30 bg-emerald-500/5 text-foreground'
+                    ? 'border-primary/30 bg-primary/[0.05] text-foreground'
                     : 'bg-muted/40 text-foreground hover:bg-muted'
                 )}
               >
                 <span>{step.label}</span>
                 {step.done ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />
                 ) : (
                   <ArrowLeft className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', !isAr && 'rotate-180')} />
                 )}
@@ -310,14 +310,14 @@ export default async function DashboardPage() {
           },
         ].map(({ icon: Icon, label, value, ok }) => (
           <div key={label} className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
-            <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', ok ? 'bg-emerald-500/10 text-emerald-600' : 'bg-muted text-muted-foreground')}>
+            <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', ok ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>
               <Icon className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</p>
               <p className={cn('truncate text-xs font-bold', ok ? 'text-foreground' : 'text-muted-foreground')}>{value}</p>
             </div>
-            <span className={cn('ms-auto h-1.5 w-1.5 shrink-0 rounded-full', ok ? 'bg-emerald-500' : 'bg-border')} />
+            <span className={cn('ms-auto h-1.5 w-1.5 shrink-0 rounded-full', ok ? 'bg-primary' : 'bg-border')} />
           </div>
         ))}
       </div>
@@ -348,8 +348,8 @@ export default async function DashboardPage() {
               {isAr ? 'نشاط المزامنة — آخر ٧ أيام' : 'Sync activity — last 7 days'}
             </h2>
             <div className="flex items-center gap-3 text-[11px] font-semibold">
-              <span className="flex items-center gap-1.5 text-emerald-600">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span className="flex items-center gap-1.5 text-primary">
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 {weekSuccess.toLocaleString(isAr ? 'ar-EG' : 'en-US')} {isAr ? 'ناجح' : 'success'}
               </span>
               <span className="flex items-center gap-1.5 text-rose-600">
@@ -456,7 +456,7 @@ export default async function DashboardPage() {
                     className={cn(
                       'h-2 w-2 shrink-0 rounded-full',
                       log.status === 'success'
-                        ? 'bg-emerald-500'
+                        ? 'bg-primary'
                         : log.status === 'failed'
                           ? 'bg-rose-500'
                           : log.status === 'processing'
@@ -487,7 +487,7 @@ export default async function DashboardPage() {
             {failedLogs.length > 0 ? (
               <AlertTriangle className="h-4 w-4 text-rose-600" />
             ) : (
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <CheckCircle2 className="h-4 w-4 text-primary" />
             )}
             <h2 className="text-sm font-bold">
               {failedLogs.length > 0

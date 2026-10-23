@@ -135,18 +135,18 @@ export default function SubscriptionStatusCard() {
       className={cn(
         'rounded-2xl border p-5 space-y-3',
         expired
-          ? 'border-red-200 bg-red-50/60'
+          ? 'border-destructive/25 bg-destructive/[0.05]'
           : soon
-            ? 'border-amber-200 bg-amber-50/60'
-            : 'border-emerald-200 bg-emerald-50/60',
+            ? 'border-amber-500/30 bg-amber-500/[0.05]'
+            : 'border-primary/25 bg-primary/[0.05]',
       )}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {expired ? (
-            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+            <AlertTriangle className="h-4 w-4 text-destructive shrink-0" />
           ) : (
-            <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
           )}
           <h3 className="text-sm font-bold text-foreground">
             {isAr ? 'بيانات الاشتراك' : 'Subscription'}
@@ -156,10 +156,10 @@ export default function SubscriptionStatusCard() {
           className={cn(
             'inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border',
             expired
-              ? 'bg-red-100 border-red-200 text-red-700'
+              ? 'bg-destructive/10 border-destructive/20 text-destructive'
               : soon
-                ? 'bg-amber-100 border-amber-200 text-amber-700'
-                : 'bg-emerald-100 border-emerald-200 text-emerald-700',
+                ? 'bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-300'
+                : 'bg-primary/10 border-primary/20 text-primary',
           )}
         >
           {expired
