@@ -15,10 +15,13 @@ import {
   CreditCard,
   ScrollText,
   ChevronDown,
+  SlidersHorizontal,
+  Puzzle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { PendingTicketsBadge } from '@/components/pending-tickets-badge'
 import { stripLocaleFromPathname } from '@/lib/locale'
@@ -37,6 +40,8 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   order: ShoppingCart,
   card: CreditCard,
   logs: ScrollText,
+  sliders: SlidersHorizontal,
+  puzzle: Puzzle,
 }
 
 export interface NavItem {
@@ -57,6 +62,14 @@ interface SidebarNavProps {
   sections: NavSection[]
 }
 
+interface FlyoutState {
+  href: string
+  top: number
+  left: number
+  right: number
+  rtl: boolean
+}
+
 function isItemActive(pathname: string, item: NavItem): boolean {
   if (pathname === item.href) return true
   if (item.exact) return false
@@ -66,10 +79,63 @@ function isItemActive(pathname: string, item: NavItem): boolean {
 export default function SidebarNav({ sections }: SidebarNavProps) {
   const pathname = usePathname()
   const cleanPathname = stripLocaleFromPathname(pathname)
-  const [closedMenus, setClosedMenus] = useState<Record<string, boolean>>({})
+  const [flyout, setFlyout] = useState<FlyoutState | null>(null)
+  const navRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    setFlyout(null)
+  }, [cleanPathname])
+
+  useEffect(() => {
+    if (!flyout) return
+    function handleOutside(event: MouseEvent) {
+      const target = event.target as Node
+      if (navRef.current?.contains(target)) return
+      const menu = document.getElementById('sidebar-flyout')
+      if (menu?.contains(target)) return
+      setFlyout(null)
+    }
+    function handleDismiss() {
+      setFlyout(null)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    window.addEventListener('scroll', handleDismiss, true)
+    window.addEventListener('resize', handleDismiss)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      window.removeEventListener('scroll', handleDismiss, true)
+      window.removeEventListener('resize', handleDismiss)
+    }
+  }, [flyout])
+
+  const flyoutItem = flyout
+    ? sections.flatMap((section) => section.items).find((item) => item.href === flyout.href)
+    : undefined
+
+  const flyoutActiveChild = (flyoutItem?.children ?? [])
+    .filter((child) => isItemActive(cleanPathname, child))
+    .sort((a, b) => b.href.length - a.href.length)[0]
+
+  const openFlyout = (event: React.MouseEvent<HTMLButtonElement>, item: NavItem) => {
+    if (flyout?.href === item.href) {
+      setFlyout(null)
+      return
+    }
+    const rect = event.currentTarget.getBoundingClientRect()
+    const estimatedHeight = 40 + (item.children?.length ?? 0) * 36
+    const top = Math.min(rect.top, Math.max(8, window.innerHeight - estimatedHeight - 8))
+    const rtl = navRef.current ? getComputedStyle(navRef.current).direction === 'rtl' : false
+    setFlyout({
+      href: item.href,
+      top,
+      left: rect.right + 8,
+      right: window.innerWidth - rect.left + 8,
+      rtl,
+    })
+  }
 
   return (
-    <nav className="flex flex-col gap-0.5 px-3 flex-1 py-3">
+    <nav ref={navRef} className="flex flex-col gap-0.5 px-3 flex-1 py-3">
       {sections.map((section, sectionIdx) => (
         <React.Fragment key={sectionIdx}>
           {section.label && (
@@ -87,7 +153,6 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
                 .sort((a, b) => b.href.length - a.href.length)[0]
               const childActive = !!activeChild
               const isActive = childActive || cleanPathname === href
-              const isOpen = closedMenus[href] !== undefined ? !closedMenus[href] : childActive
 
               const content = (
                 <>
@@ -120,57 +185,29 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
               )
 
               if (children && children.length > 0) {
+                const isOpen = flyout?.href === href
                 return (
-                  <div key={href} className="flex flex-col gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setClosedMenus((prev) => ({ ...prev, [href]: isOpen }))}
-                      aria-expanded={isOpen}
-                      className={cn(
-                        "group relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150 outline-none select-none w-full",
-                        isActive
-                          ? "text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                      )}
-                    >
-                      {content}
-                      <ChevronDown
-                        className={cn(
-                          "h-3.5 w-3.5 shrink-0 transition-transform duration-200 text-muted-foreground",
-                          isOpen && "rotate-180"
-                        )}
-                      />
-                    </button>
-
-                    {isOpen && (
-                      <div className="flex flex-col gap-0.5 ps-4 ms-4 border-s border-border/70">
-                        {children.map((child) => {
-                          const ChildIcon = ICON_MAP[child.icon] || LayoutDashboard
-                          const childIsActive = child === activeChild
-                          return (
-                            <Link
-                              key={child.href}
-                              href={child.href}
-                              className={cn(
-                                "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors duration-150 outline-none select-none",
-                                childIsActive
-                                  ? "text-primary bg-primary/5"
-                                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                              )}
-                            >
-                              <ChildIcon
-                                className={cn(
-                                  "h-[14px] w-[14px] transition-colors duration-150 shrink-0",
-                                  childIsActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
-                                )}
-                              />
-                              <span className="flex-1 truncate">{child.label}</span>
-                            </Link>
-                          )
-                        })}
-                      </div>
+                  <button
+                    key={href}
+                    type="button"
+                    onClick={(event) => openFlyout(event, item)}
+                    aria-expanded={isOpen}
+                    aria-haspopup="menu"
+                    className={cn(
+                      "group relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150 outline-none select-none w-full",
+                      isOpen || isActive
+                        ? "text-primary"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
-                  </div>
+                  >
+                    {content}
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0 transition-transform duration-200 text-muted-foreground",
+                        isOpen && "-rotate-90"
+                      )}
+                    />
+                  </button>
                 )
               }
 
@@ -196,6 +233,46 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
           )}
         </React.Fragment>
       ))}
+
+      {flyout && flyoutItem && typeof document !== 'undefined' && createPortal(
+        <div
+          id="sidebar-flyout"
+          role="menu"
+          className={cn(
+            "fixed z-[60] w-56 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-0.5 shadow-lg animate-in fade-in-50 duration-150",
+            flyout.rtl ? "slide-in-from-right-2" : "slide-in-from-left-2"
+          )}
+          style={flyout.rtl
+            ? { top: flyout.top, right: flyout.right }
+            : { top: flyout.top, left: flyout.left }}
+        >
+          <div className="px-2 py-1 border-b border-border/40 text-[9px] font-extrabold text-muted-foreground uppercase mb-1">
+            {flyoutItem.label}
+          </div>
+          {flyoutItem.children?.map((child) => {
+            const ChildIcon = ICON_MAP[child.icon] || LayoutDashboard
+            const childIsActive = child === flyoutActiveChild
+            return (
+              <Link
+                key={child.href}
+                href={child.href}
+                role="menuitem"
+                onClick={() => setFlyout(null)}
+                className={cn(
+                  "flex items-center gap-2.5 w-full rounded-lg px-3 py-2 text-xs font-medium transition-colors text-start",
+                  childIsActive
+                    ? "bg-muted/60 text-primary"
+                    : "text-foreground hover:bg-muted/40"
+                )}
+              >
+                <ChildIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="flex-1 truncate">{child.label}</span>
+              </Link>
+            )
+          })}
+        </div>,
+        document.body
+      )}
     </nav>
   )
 }

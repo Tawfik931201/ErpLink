@@ -156,7 +156,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {
           href: '/app/mapping-center',
           icon: 'mapping',
-          label: t('nav.fieldMapping'),
+          label: lang === 'ar' ? 'الربط والحقول' : 'Mapping & Fields',
           children: [
             {
               href: '/app/mapping-center',
@@ -165,12 +165,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             },
             {
               href: '/app/mapping-center/custom',
-              icon: 'settings',
+              icon: 'sliders',
               label: lang === 'ar' ? 'تخصيص الربط' : 'Custom Mapping',
             },
             {
               href: '/app/mapping-center/add-field',
-              icon: 'database',
+              icon: 'puzzle',
               label: lang === 'ar' ? 'إضافة حقل' : 'Add Field',
             },
           ],
