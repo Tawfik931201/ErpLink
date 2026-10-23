@@ -20,6 +20,8 @@ async function getOrCreateDbUser() {
 // The PostgREST select-string type parser cannot infer the lean column list,
 // so rows are normalized through this interface at the return site instead
 // of leaking the parser's error type to callers.
+export type StorePlatform = 'zid' | 'salla' | 'shopify'
+
 export interface SyncLogRow {
   id: string
   event: string | null
@@ -27,6 +29,9 @@ export interface SyncLogRow {
   error_message: string | null
   store_id: string | null
   zid_entity_id: string | null
+  // Resolved per record (token tables, scoped by workspace) — sync_logs has no
+  // platform column, so the list ignores it and only the detail page shows it.
+  platform?: StorePlatform | null
   odoo_model: string | null
   odoo_record_id: number | string | null
   field_mapping_id: string | null
@@ -276,6 +281,41 @@ export async function getSyncLogs(params: {
   }
 }
 
+// sync_logs has no platform column: `store_id` carries the merchant key, so the
+// platform is whatever token table owns that key in this workspace. Shopify is
+// a shop domain (has a dot), Zid keys on merchant_id/store_id, Salla on
+// merchant_id. Unknown stays null — the UI then shows a neutral label instead
+// of guessing a store name.
+async function resolveLogPlatform(
+  storeId: string | null,
+  workspaceId: string
+): Promise<StorePlatform | null> {
+  if (!storeId) return null
+  if (storeId.includes('.')) return 'shopify'
+
+  const key = storeId.replace(/[(),]/g, '')
+  if (!key) return null
+
+  const [zid, salla] = await Promise.all([
+    supabase
+      .from('merchant_tokens')
+      .select('merchant_id')
+      .eq('workspace_id', workspaceId)
+      .or(`merchant_id.eq.${key},store_id.eq.${key}`)
+      .limit(1),
+    supabase
+      .from('salla_tokens')
+      .select('merchant_id')
+      .eq('workspace_id', workspaceId)
+      .eq('merchant_id', key)
+      .limit(1),
+  ])
+
+  if ((zid.data?.length ?? 0) > 0) return 'zid'
+  if ((salla.data?.length ?? 0) > 0) return 'salla'
+  return null
+}
+
 // Single-row detail fetch (Odoo-style form view): full row WITH the heavy
 // `payload` JSON. The list stays lean; only the opened record pays for it.
 export async function getSyncLogById(logId: string) {
@@ -295,7 +335,10 @@ export async function getSyncLogById(logId: string) {
     if (error) throw new Error('Failed to fetch log: ' + error.message)
     if (!log) throw new Error('Sync log not found')
 
-    return { success: true, log: log as unknown as SyncLogRow }
+    const row = log as unknown as SyncLogRow
+    const platform = await resolveLogPlatform(row.store_id, user.active_workspace_id)
+
+    return { success: true, log: { ...row, platform } }
   } catch (error: any) {
     console.error('[Sync Logs Action] getSyncLogById failed:', error)
     return { success: false, error: error.message || 'Failed to fetch sync log' }

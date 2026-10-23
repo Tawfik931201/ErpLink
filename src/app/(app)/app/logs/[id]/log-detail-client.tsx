@@ -180,6 +180,17 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
 
   const canAct = log.status === 'failed' || log.status === 'skipped'
 
+  // The store id is generic in the database; name it after the platform that
+  // owns this record so a Salla/Shopify id is never labelled "Zid".
+  const entityIdLabel =
+    log.platform === 'salla'
+      ? (ar ? 'معرف العنصر في سلة' : 'Salla Entity ID')
+      : log.platform === 'shopify'
+        ? (ar ? 'معرف العنصر في شوبيفاي' : 'Shopify Entity ID')
+        : log.platform === 'zid'
+          ? (ar ? 'معرف العنصر في زد' : 'Zid Entity ID')
+          : (ar ? 'معرف العنصر في المتجر' : 'Store entity ID')
+
   return (
     <div className="space-y-5">
       {/* Breadcrumb — the record id is the URL segment, so each log is its own page. */}
@@ -207,7 +218,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
             <button
               type="button"
               onClick={() => copy(log.id, 'id')}
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title={t('log.copyId')}
             >
               {copiedId ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
@@ -222,7 +233,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
               variant="outline"
               onClick={handleResolveManually}
               disabled={isResolving}
-              className="h-8 gap-1 rounded-lg px-3 text-[10px] font-bold"
+              className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
             >
               {isResolving ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -238,7 +249,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
               variant="outline"
               onClick={handleResend}
               disabled={isRetrying}
-              className="h-8 gap-1 rounded-lg px-3 text-[10px] font-bold"
+              className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
             >
               {isRetrying ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
               {t('log.resend')}
@@ -248,7 +259,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
       </div>
 
       {/* Basic record data */}
-      <div className="rounded-lg border border-border bg-card p-4">
+      <div className="border border-border bg-card p-4">
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <InfoField label={ar ? 'الحدث' : 'Event'} mono>
             {log.event || '—'}
@@ -265,7 +276,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
           <InfoField label={t('log.model')} mono>
             {log.odoo_model || '—'}
           </InfoField>
-          <InfoField label={t('log.entityId')} mono>
+          <InfoField label={entityIdLabel} mono>
             {log.zid_entity_id || '—'}
           </InfoField>
           <InfoField label={ar ? 'الربط' : 'Mapping'}>
@@ -290,7 +301,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
       {errorMessage && (
         <div
           className={cn(
-            'flex items-start gap-2 rounded-lg border p-3 text-xs',
+            'flex items-start gap-2 border p-3 text-xs',
             log.status === 'failed'
               ? 'border-destructive/15 bg-destructive/5 text-destructive'
               : 'border-border bg-muted text-muted-foreground'
@@ -315,7 +326,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
       )}
 
       {/* Payload — fetched with this record only, never with the list. */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-hidden border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
           <span className="text-[10px] font-bold text-muted-foreground">{t('log.payloadTitle')}</span>
           <div className="flex items-center gap-2">
@@ -324,7 +335,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
               <button
                 type="button"
                 onClick={() => copy(payloadText, 'payload')}
-                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
               >
                 {copiedPayload ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
                 {copiedPayload ? (ar ? 'تم النسخ' : 'Copied') : (ar ? 'نسخ' : 'Copy')}

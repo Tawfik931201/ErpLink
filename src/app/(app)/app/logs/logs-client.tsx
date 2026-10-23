@@ -26,7 +26,6 @@ import { cn } from '@/lib/utils'
 
 import {
   eventEntity,
-  getDeletionCountdown,
   SyncStatusBadge,
   SyncTriggerBadge,
 } from './log-ui'
@@ -96,7 +95,7 @@ function FilterSelect({
           type="button"
           onClick={onToggle}
           className={cn(
-            'text-xs bg-muted/60 hover:bg-muted border border-border/70 rounded-xl px-3 py-1.5',
+            'text-xs bg-muted/60 hover:bg-muted border border-border/70 px-3 py-1.5',
             'focus:outline-none focus:ring-1 focus:ring-primary/30 font-semibold flex items-center gap-2',
             'select-none justify-between text-start transition-colors',
             minWidth
@@ -106,7 +105,7 @@ function FilterSelect({
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         </button>
         {isOpen && (
-          <div className="absolute z-50 mt-1.5 w-56 bg-card border border-border/70 rounded-xl py-1.5 shadow-card animate-in fade-in scale-in duration-150 max-h-60 overflow-y-auto">
+          <div className="absolute z-50 mt-1.5 w-56 bg-card border border-border/70 py-1.5 shadow-card animate-in fade-in scale-in duration-150 max-h-60 overflow-y-auto">
             {children}
           </div>
         )}
@@ -292,7 +291,7 @@ export default function LogsClient() {
 
   const statCards = [
     { key: 'total', label: ar ? 'الإجمالي' : 'Total', value: stats.total, statuses: [...ALL_STATUSES] },
-    { key: 'success', label: t('log.success'), value: stats.success, statuses: ['success'], dot: 'bg-emerald-500' },
+    { key: 'success', label: t('log.success'), value: stats.success, statuses: ['success'], dot: 'bg-success' },
     { key: 'failed', label: t('log.failed'), value: stats.failed, statuses: ['failed'], dot: 'bg-destructive' },
     { key: 'manual', label: ar ? 'حل يدوي' : 'Manual', value: stats.manual, statuses: ['manual'], dot: 'bg-amber-500' },
     { key: 'skipped', label: t('log.skipped'), value: stats.skipped, statuses: ['skipped'], dot: 'bg-muted-foreground' },
@@ -324,12 +323,12 @@ export default function LogsClient() {
       </div>
 
       {notice && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <div className="border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {notice}
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="flex flex-wrap items-center gap-1.5">
         {statCards.map(c => {
           const isActive = c.key === 'total'
             ? selectedStatuses.length === ALL_STATUSES.length
@@ -340,21 +339,21 @@ export default function LogsClient() {
               type="button"
               onClick={() => applyStatusPreset(c.statuses)}
               className={cn(
-                'rounded-lg border p-3 text-start transition-colors',
-                isActive ? 'border-foreground/30 bg-muted/50' : 'border-border'
+                'inline-flex items-center gap-1.5 border px-2 py-1 text-[10px] transition-colors',
+                isActive
+                  ? 'border-foreground/30 bg-muted/60 text-foreground'
+                  : 'border-border text-muted-foreground hover:bg-muted/40'
               )}
             >
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
-                {c.dot && <span className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />}
-                {c.label}
-              </p>
-              <p className="text-2xl font-bold text-foreground">{c.value}</p>
+              {c.dot && <span className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />}
+              <span className="font-medium">{c.label}</span>
+              <span className="font-bold tabular-nums text-foreground">{c.value}</span>
             </button>
           )
         })}
       </div>
 
-      <div className="rounded-lg border border-border bg-card px-3 py-2.5 flex flex-wrap items-center gap-3">
+      <div className="border border-border bg-card px-3 py-2.5 flex flex-wrap items-center gap-3">
         <FilterSelect
           label={t('log.status')}
           buttonRef={statusRef}
@@ -387,7 +386,7 @@ export default function LogsClient() {
           </label>
           <div className="border-t border-border/50 mx-2 my-1" />
           <CheckRow checked={selectedStatuses.includes('success')} onChange={() => toggleStatus('success')}>
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
             {t('log.success')}
           </CheckRow>
           <CheckRow checked={selectedStatuses.includes('manual')} onChange={() => toggleStatus('manual')}>
@@ -494,13 +493,13 @@ export default function LogsClient() {
             value={entityIdInput}
             onChange={e => setEntityIdInput(e.target.value)}
             placeholder={t('log.searchEntityId')}
-            className="h-7 w-44 text-xs rounded-xl border-border/70 bg-muted/60"
+            className="h-7 w-44 text-xs border-border/70 bg-muted/60"
           />
           <Button
             type="submit"
             size="icon"
             variant="ghost"
-            className="h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground"
+            className="h-7 w-7 rounded-none text-muted-foreground hover:text-foreground"
             title={t('log.search')}
           >
             <Search className="h-3.5 w-3.5" />
@@ -517,18 +516,16 @@ export default function LogsClient() {
             </Button>
           )}
         </form>
-      </div>
 
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-bold text-muted-foreground me-1">{t('log.entity')}:</span>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] font-bold text-muted-foreground">{t('log.entity')}:</span>
           {[{ key: 'all', label: t('log.all') }, ...ENTITY_KEYS.map(k => ({ key: k, label: entityLabels[k] }))].map(opt => (
             <button
               key={opt.key}
               type="button"
               onClick={() => setEntity(opt.key)}
               className={cn(
-                'rounded-full border px-3 py-1 text-xs transition-colors',
+                'border px-2 py-0.5 text-[10px] transition-colors',
                 entity === opt.key
                   ? 'border-foreground/40 bg-muted font-bold text-foreground'
                   : 'border-border text-muted-foreground hover:bg-muted/50'
@@ -538,35 +535,29 @@ export default function LogsClient() {
             </button>
           ))}
         </div>
-        {totalCount > 0 && (
-          <span className="text-[11px] text-muted-foreground font-mono select-none">
-            {offset + 1}-{Math.min(offset + logs.length, totalCount)} / {totalCount}
-          </span>
-        )}
       </div>
 
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[11px]">
           <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.status')}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{ar ? 'الحدث' : 'Event'}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.entity')}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.model')}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.entityId')}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.triggerType')}</th>
-              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.time')}</th>
-              <th className="px-2 py-2 w-8" />
+            <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.status')}</th>
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'الحدث' : 'Event'}</th>
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.entity')}</th>
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.model')}</th>
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.triggerType')}</th>
+              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.time')}</th>
+              <th className="px-2 py-2.5 w-8" />
             </tr>
           </thead>
           <tbody>
             {isLoading && logs.length === 0
               ? Array.from({ length: 8 }).map((_, i) => (
                   <tr key={`skeleton-${i}`}>
-                    {Array.from({ length: 8 }).map((__, j) => (
+                    {Array.from({ length: 7 }).map((__, j) => (
                       <td key={j} className="px-2 py-3">
-                        <div className="h-3 rounded bg-muted/60 animate-pulse" />
+                        <div className="h-3 bg-muted/60 animate-pulse" />
                       </td>
                     ))}
                   </tr>
@@ -590,34 +581,25 @@ export default function LogsClient() {
                       <td className="px-2 py-2.5 whitespace-nowrap">
                         <SyncStatusBadge status={log.status} resolvedManually={log.resolved_manually} />
                       </td>
-                      <td className="px-2 py-2.5">
-                        <div className="font-mono font-semibold text-foreground">{log.event || '—'}</div>
-                        {log.field_mappings?.name && (
-                          <div className="mt-0.5 text-[10px] text-muted-foreground truncate max-w-[180px]" title={log.field_mappings.name}>
-                            {log.field_mappings.name}
-                          </div>
-                        )}
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <div
+                          className="font-mono font-semibold text-foreground max-w-[220px] truncate"
+                          title={log.field_mappings?.name ? `${log.event} · ${log.field_mappings.name}` : (log.event || '')}
+                        >
+                          {log.event || '—'}
+                        </div>
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {entityLabels[logEntity] || '—'}
                       </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap">
-                        <div className="font-mono text-foreground">{log.odoo_model || '—'}</div>
-                        {log.odoo_record_id != null && (
-                          <div className="mt-0.5 text-[10px] text-muted-foreground font-mono">#{log.odoo_record_id}</div>
-                        )}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap font-mono text-muted-foreground">
-                        {log.zid_entity_id || '—'}
+                      <td className="px-2 py-2.5 whitespace-nowrap font-mono text-foreground">
+                        {log.odoo_model || '—'}
                       </td>
                       <td className="px-2 py-2.5 whitespace-nowrap">
                         <SyncTriggerBadge triggerType={log.trigger_type} />
                       </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap">
-                        <div className="text-muted-foreground">{formatDate(log.created_at)}</div>
-                        <div className="mt-0.5 text-[10px] text-muted-foreground/80">
-                          {getDeletionCountdown(log.created_at, log.status, ar)}
-                        </div>
+                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {formatDate(log.created_at)}
                       </td>
                       <td className="px-2 py-2.5 text-end text-muted-foreground">
                         <OpenIcon className="h-3.5 w-3.5 inline-block" />
@@ -654,7 +636,7 @@ export default function LogsClient() {
           <span className="text-[10px] text-muted-foreground font-semibold">
             {ar ? `إجمالي السجلات: ${totalCount}` : `Total logs: ${totalCount}`}
           </span>
-          <div className="flex items-center gap-2 border border-border bg-card rounded-xl p-1 text-xs font-medium">
+          <div className="flex items-center gap-2 border border-border bg-card p-1 text-xs font-medium">
             <span className="px-2 text-muted-foreground select-none font-mono">
               {offset + 1}-{Math.min(offset + logs.length, totalCount)} / {totalCount}
             </span>
@@ -664,7 +646,7 @@ export default function LogsClient() {
                 variant="ghost"
                 onClick={() => fetchAt(Math.max(0, offset - LIMIT))}
                 disabled={isFirstPage || isLoading}
-                className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-40"
+                className="h-7 w-7 rounded-none hover:bg-muted text-muted-foreground disabled:opacity-40"
                 title={ar ? 'الصفحة السابقة' : 'Previous page'}
               >
                 <PrevIcon className="h-4 w-4" />
@@ -674,7 +656,7 @@ export default function LogsClient() {
                 variant="ghost"
                 onClick={() => fetchAt(offset + LIMIT)}
                 disabled={isLastPage || isLoading}
-                className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-40"
+                className="h-7 w-7 rounded-none hover:bg-muted text-muted-foreground disabled:opacity-40"
                 title={ar ? 'الصفحة التالية' : 'Next page'}
               >
                 <NextIcon className="h-4 w-4" />

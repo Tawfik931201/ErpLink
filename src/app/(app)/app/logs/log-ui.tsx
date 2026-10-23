@@ -18,7 +18,7 @@ export function SyncStatusBadge({
 
   if (resolvedManually) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+      <span className="inline-flex items-center gap-1 border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-600 dark:text-amber-400">
         <CheckCircle2 className="h-3 w-3" />
         {t('log.resolvedManually')}
       </span>
@@ -28,28 +28,28 @@ export function SyncStatusBadge({
   switch (status) {
     case 'success':
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+        <span className="inline-flex items-center gap-1 border border-success/25 bg-success/10 px-2 py-0.5 text-[10px] font-bold text-success">
           <CheckCircle2 className="h-3 w-3" />
           {t('log.success')}
         </span>
       )
     case 'failed':
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[10px] font-bold text-destructive">
+        <span className="inline-flex items-center gap-1 border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[10px] font-bold text-destructive">
           <AlertCircle className="h-3 w-3" />
           {t('log.failed')}
         </span>
       )
     case 'skipped':
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+        <span className="inline-flex items-center gap-1 border border-border/60 bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
           <HelpCircle className="h-3 w-3" />
           {t('log.skipped')}
         </span>
       )
     case 'processing':
       return (
-        <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+        <span className="inline-flex items-center gap-1 border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
           <Loader2 className="h-3 w-3 animate-spin" />
           {ar ? 'جاري المزامنة...' : 'Syncing...'}
         </span>
@@ -67,7 +67,7 @@ export function SyncTriggerBadge({ triggerType }: { triggerType: string | null }
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold',
+        'inline-flex items-center gap-1 border px-2 py-0.5 text-[10px] font-bold',
         isManual
           ? 'border-orange-500/20 bg-orange-500/10 text-orange-600 dark:text-orange-400'
           : 'border-primary/20 bg-primary/10 text-primary'
