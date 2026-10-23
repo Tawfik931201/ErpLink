@@ -30,10 +30,13 @@ export default async function ConnectOdooPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-5 animate-in fade-in duration-300" dir={dir}>
       <div>
-        <h1 className="text-base font-semibold tracking-tight text-foreground">
-          {t('odoo.title')}
-        </h1>
-        <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
+        <div className="mb-1 flex items-center gap-2">
+          <div className="h-6 w-1 rounded-full bg-primary" />
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
+            {t('odoo.title')}
+          </h1>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
           {t('odoo.desc')}
         </p>
       </div>

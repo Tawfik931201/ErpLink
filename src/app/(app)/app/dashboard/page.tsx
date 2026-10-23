@@ -19,6 +19,7 @@ import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { getActiveWorkspaceZidTokens, getActiveWorkspaceSallaTokens, getActiveWorkspaceShopifyTokens } from '@/app/actions/workspaces'
 import SubscriptionStatusCard from '@/components/subscription/SubscriptionStatusCard'
 import { Badge } from '@/components/ui/badge'
+import { buttonVariants } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
@@ -188,7 +189,7 @@ export default async function DashboardPage() {
           ? isAr ? 'إشعارات التيليجرام مفعّلة' : 'Telegram alerts on'
           : isAr ? 'إشعارات التيليجرام غير مفعّلة' : 'Telegram alerts off',
       icon: GitCompare,
-      tone: 'text-amber-600 bg-amber-500/10',
+      tone: 'text-primary bg-primary/10',
     },
   ]
 
@@ -200,7 +201,7 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <div className="h-6 w-1 rounded-full bg-foreground" />
+            <div className="h-6 w-1 rounded-full bg-primary" />
             <h1 className="text-2xl font-bold tracking-tight">
               {isAr ? 'لوحة التحكم' : 'Dashboard'}
             </h1>
@@ -221,7 +222,7 @@ export default async function DashboardPage() {
           {!setupReady && (
             <Link
               href="/app/connect-store"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-[11px] font-bold text-background transition-opacity hover:opacity-90"
+              className={cn(buttonVariants({ variant: 'brand' }), 'h-7 gap-1.5 rounded-lg px-3 text-[11px] font-bold')}
             >
               <AlertTriangle className="h-3.5 w-3.5" />
               {isAr ? 'إكمال الإعداد' : 'Finish setup'}
@@ -365,7 +366,7 @@ export default async function DashboardPage() {
             <h2 className="text-sm font-bold">{isAr ? 'ترحيل البيانات' : 'Data transfer'}</h2>
             <Link
               href="/app/initial-transfer"
-              className="flex items-center gap-1 text-[11px] font-semibold text-foreground hover:text-muted-foreground transition-colors"
+              className="flex items-center gap-1 text-[11px] font-semibold text-primary transition-colors hover:text-primary/80"
             >
               {isAr ? 'فتح' : 'Open'}
               <ArrowLeft className={cn('h-3 w-3', !isAr && 'rotate-180')} />
@@ -409,11 +410,11 @@ export default async function DashboardPage() {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-center">
-              <RefreshCw className="h-7 w-7 text-muted-foreground/30 mb-2" />
+              <RefreshCw className="h-7 w-7 text-muted-foreground/40 mb-2" />
               <p className="text-xs text-muted-foreground">
                 {isAr ? 'لم تقم بترحيل بيانات سابقة بعد' : 'No data transferred yet'}
               </p>
-              <Link href="/app/initial-transfer" className="mt-3 text-[11px] font-bold text-foreground underline underline-offset-2">
+              <Link href="/app/initial-transfer" className="mt-3 text-[11px] font-bold text-primary underline underline-offset-2">
                 {isAr ? 'ابدأ الترحيل' : 'Start transfer'}
               </Link>
             </div>
@@ -428,7 +429,7 @@ export default async function DashboardPage() {
             <h2 className="text-sm font-bold">{isAr ? 'آخر العمليات' : 'Recent operations'}</h2>
             <Link
               href="/app/logs"
-              className="flex items-center gap-1 text-[11px] font-semibold text-foreground hover:text-muted-foreground transition-colors"
+              className="flex items-center gap-1 text-[11px] font-semibold text-primary transition-colors hover:text-primary/80"
             >
               {isAr ? 'كل السجلات' : 'All logs'}
               <ArrowLeft className={cn('h-3 w-3', !isAr && 'rotate-180')} />
@@ -437,7 +438,7 @@ export default async function DashboardPage() {
 
           {recentLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Activity className="h-9 w-9 text-muted-foreground/20 mb-3" />
+              <Activity className="h-9 w-9 text-muted-foreground/35 mb-3" />
               <p className="text-sm font-medium text-muted-foreground">
                 {isAr ? 'لا توجد عمليات بعد' : 'No operations yet'}
               </p>

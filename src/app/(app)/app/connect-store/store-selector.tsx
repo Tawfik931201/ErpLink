@@ -9,7 +9,7 @@ import { useSearchParams } from 'next/navigation'
 import { useEffect, useState, useCallback } from 'react'
 
 import { getZidWebhookHealth, recoverZidBrokenWebhooks } from '@/app/actions/workspaces'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import type { Language } from '@/lib/translations'
 import { translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
@@ -183,7 +183,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
   return (
     <div className="space-y-5" dir={dir}>
       {error && (
-        <div className="flex items-start gap-3 border border-border bg-card p-3">
+        <div className="flex items-start gap-3 border border-destructive/25 bg-destructive/[0.05] p-3">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <div>
             <p className="font-medium text-xs text-foreground">
@@ -197,13 +197,13 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
       )}
 
       {success && (
-        <div className="flex items-start gap-3 border border-emerald-200 bg-emerald-50 p-3">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+        <div className="flex items-start gap-3 border border-emerald-500/25 bg-emerald-500/[0.07] p-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
           <div>
-            <p className="font-medium text-xs text-emerald-800">
+            <p className="font-medium text-xs text-emerald-700 dark:text-emerald-300">
               {lang === 'ar' ? 'تم ربط المتجر بنجاح' : 'Store Connected'}
             </p>
-            <p className="text-[11px] text-emerald-700 mt-0.5">
+            <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80 mt-0.5">
               {getSuccessMessage(success)}
             </p>
           </div>
@@ -222,7 +222,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
           </div>
           <Button
             type="button"
-            variant="outline"
+            variant="brand"
             size="sm"
             onClick={() => setView('connect')}
             className="h-7 text-[11px] gap-1"
@@ -279,8 +279,8 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
         </table>
         ) : (
         <div className="p-5 flex flex-col sm:flex-row items-start gap-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded border border-border shrink-0">
-            <Store className="h-5 w-5 text-muted-foreground" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-primary/25 bg-primary/5 text-primary">
+            <Store className="h-5 w-5" />
           </div>
           <div className="flex-1 space-y-3">
             <div>
@@ -291,7 +291,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                   : 'Click Add store, pick your platform and approve — sync runs automatically afterwards.'}
               </p>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={() => setView('connect')} className="h-8 text-[11px] gap-1.5">
+            <Button type="button" variant="brand" size="sm" onClick={() => setView('connect')} className="h-8 text-[11px] gap-1.5">
               <Plus className="h-3 w-3" />
               <span>{lang === 'ar' ? 'إضافة متجر' : 'Add store'}</span>
             </Button>
@@ -320,7 +320,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
             <select
               value={connectPlatform}
               onChange={e => setConnectPlatform(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
+              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/25 outline-none transition-all"
             >
               {stores.map(s => (
                 <option key={s.id} value={s.id}>
@@ -364,7 +364,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                 </code>
               </div>
               <a href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
-                 className="inline-flex items-center gap-1.5 rounded border border-foreground/20 bg-background hover:bg-muted px-3 h-9 text-[11px] font-medium text-foreground transition-colors">
+                 className={cn(buttonVariants({ variant: 'brand' }), 'h-9 gap-1.5 px-3 text-[11px]')}>
                 <ExternalLink className="h-3 w-3" />
                 {lang === 'ar' ? 'اتصال' : 'Connect'}
               </a>

@@ -90,8 +90,8 @@ function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (va
       className={cn(
         "inline-flex items-center justify-center h-4 w-4 rounded border transition-colors",
         checked
-          ? "bg-foreground border-foreground text-background"
-          : "bg-background border-border hover:border-foreground/50"
+          ? "bg-primary border-primary text-primary-foreground"
+          : "bg-background border-border hover:border-primary/50"
       )}
     >
       <Check className={cn("h-3 w-3 stroke-[3]", checked ? "opacity-100" : "opacity-0")} />

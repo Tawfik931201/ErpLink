@@ -294,7 +294,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
         <div className="space-y-4 animate-in fade-in-50 slide-in-from-top-4 duration-300">
 
           {/* Status banner */}
-          <div className="flex items-center gap-2.5 rounded-xl border border-border bg-muted p-3 text-foreground">
+          <div className="flex items-center gap-2.5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] p-3 text-emerald-700 dark:text-emerald-300">
             <CheckCircle2 className="h-4 w-4 shrink-0" />
             <div className="flex-1 text-[11px] font-medium">
               {lang === 'ar' ? 'تم ربط نظام أودو ERP بنجاح ببيئة العمل النشطة. يمكنك الآن مطابقة الحقول ومزامنة البيانات.' : 'Odoo ERP connection completed successfully. You can now configure field mappings and sync data.'}
@@ -305,13 +305,13 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
           <div className="rounded-xl border bg-card p-4 relative">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-foreground">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Database className="h-5 w-5" />
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-foreground flex items-center gap-2">
                     {connection.connection_name || t('db.storeOdoo')}
-                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[9px] font-semibold text-foreground">
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-700 dark:text-emerald-300">
                       {t('db.connected')}
                     </span>
                   </h2>
@@ -497,7 +497,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
         // ERP Selection View
         <div className="rounded-xl border bg-card p-5 animate-in fade-in-50 slide-in-from-top-4 duration-300">
           <div className="flex items-center gap-3 pb-3.5 border-b border-border mb-5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted text-foreground">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Database className="h-5.5 w-5.5" />
             </div>
             <div>
@@ -522,9 +522,9 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                     key={opt.id}
                     type="button"
                     onClick={() => handleErpSelect(opt.id)}
-                    className="flex items-center gap-3.5 p-3.5 rounded-xl border border-border bg-card hover:bg-muted transition-colors cursor-pointer text-right w-full"
+                    className="flex items-center gap-3.5 p-3.5 rounded-xl border border-border bg-card hover:border-primary/40 hover:bg-primary/[0.04] transition-colors cursor-pointer text-right w-full"
                   >
-                    <div className="p-2 rounded-lg bg-muted text-muted-foreground shrink-0">
+                    <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
                       <Icon className="h-4.5 w-4.5" />
                     </div>
                     <div className="flex flex-col text-right">
@@ -561,7 +561,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                     {lang === 'ar' ? 'رجوع' : 'Back'}
                   </Button>
                   <div className="h-4 w-px bg-border mx-1" />
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted text-foreground">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
                     <Database className="h-4.5 w-4.5" />
                   </div>
                   <div>
@@ -712,7 +712,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                 {/* Live Connection Test Results */}
                 {testStatus && (
                   <div className={`p-4 rounded-xl border text-sm flex items-start gap-3 ${testStatus.success
-                      ? 'bg-muted border-border text-foreground'
+                      ? 'bg-emerald-500/[0.07] border-emerald-500/25 text-emerald-700 dark:text-emerald-300'
                       : 'bg-destructive/10 border-destructive/20 text-destructive'
                     }`}>
                     {testStatus.success ? (
@@ -731,8 +731,9 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                 <div className="flex flex-wrap gap-4 pt-4 border-t border-border">
                   <Button
                     type="submit"
+                    variant="brand"
                     disabled={isSaving}
-                    className="bg-foreground text-background rounded-xl px-6 py-5 gap-2 hover:opacity-90 transition-transform"
+                    className="rounded-xl px-6 py-5 gap-2"
                   >
                     {isSaving ? (
                       <>

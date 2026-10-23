@@ -34,16 +34,28 @@ export default async function ConnectZidPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
       <div>
-        <h1 className="text-base font-semibold tracking-tight text-foreground">
-          {t('zid.title')}
-        </h1>
-        <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
+        <div className="mb-1 flex items-center gap-2">
+          <div className="h-6 w-1 rounded-full bg-primary" />
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
+            {t('zid.title')}
+          </h1>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
           {t('zid.desc')}
         </p>
-        <ol className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <li><span className="font-semibold text-foreground">1.</span> {lang === 'ar' ? 'اختر منصتك' : 'Pick your platform'}</li>
-          <li><span className="font-semibold text-foreground">2.</span> {lang === 'ar' ? 'وافق على الصلاحيات' : 'Approve permissions'}</li>
-          <li><span className="font-semibold text-foreground">3.</span> {lang === 'ar' ? 'المزامنة تعمل تلقائياً' : 'Sync runs automatically'}</li>
+        <ol className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <li>
+            <span className="me-1 font-mono text-[10px] font-semibold text-primary">01</span>
+            {lang === 'ar' ? 'اختر منصتك' : 'Pick your platform'}
+          </li>
+          <li>
+            <span className="me-1 font-mono text-[10px] font-semibold text-primary">02</span>
+            {lang === 'ar' ? 'وافق على الصلاحيات' : 'Approve permissions'}
+          </li>
+          <li>
+            <span className="me-1 font-mono text-[10px] font-semibold text-primary">03</span>
+            {lang === 'ar' ? 'المزامنة تعمل تلقائياً' : 'Sync runs automatically'}
+          </li>
         </ol>
       </div>
 

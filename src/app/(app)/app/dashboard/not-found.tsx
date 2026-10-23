@@ -17,10 +17,13 @@ export default async function DashboardNotFound() {
     <div className="max-w-4xl mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
       {/* Header section matching Connect Store header style */}
       <div>
-        <h1 className="text-base font-semibold tracking-tight text-foreground">
-          {isAr ? 'الصفحة غير موجودة (404)' : 'Page Not Found (404)'}
-        </h1>
-        <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">
+        <div className="mb-1 flex items-center gap-2">
+          <div className="h-6 w-1 rounded-full bg-primary" />
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
+            {isAr ? 'الصفحة غير موجودة (404)' : 'Page Not Found (404)'}
+          </h1>
+        </div>
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
           {isAr 
             ? 'يبدو أن الصفحة التي تحاول الوصول إليها داخل لوحة التحكم غير موجودة أو تم نقلها.' 
             : 'The page you are trying to access inside the dashboard does not exist or has been moved.'}
@@ -39,8 +42,8 @@ export default async function DashboardNotFound() {
 
         {/* Card Content */}
         <div className="p-8 flex flex-col items-center text-center space-y-5">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-muted/30">
-            <FileQuestion className="h-6 w-6 text-muted-foreground" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-primary/25 bg-primary/5 text-primary">
+            <FileQuestion className="h-6 w-6" />
           </div>
 
           <div className="space-y-2">
@@ -58,7 +61,7 @@ export default async function DashboardNotFound() {
           <div className="flex flex-col sm:flex-row items-center gap-2 pt-2 w-full max-w-xs mx-auto">
             <Link 
               href="/app/dashboard"
-              className="flex items-center justify-center gap-1.5 w-full rounded border border-foreground/20 bg-background hover:bg-muted px-3 h-8 text-[11px] font-medium text-foreground transition-colors"
+              className="flex items-center justify-center gap-1.5 w-full rounded-lg bg-primary px-3 h-8 text-[11px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
             >
               <Home className="h-3.5 w-3.5" />
               <span>{isAr ? 'الرئيسية' : 'Home'}</span>
