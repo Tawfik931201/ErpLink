@@ -95,10 +95,13 @@ export async function getSyncLogs(params: {
     // only adds write contention to the read path.
 
     // Lean list mode (workspace logs page): explicit columns WITHOUT the heavy
-    // `payload` JSON, so listing stays fast. Full mode keeps `*` for the
-    // mapping-center modal, which renders the expandable payload view.
+    // `payload` JSON **and without `error_message`**, so listing stays fast.
+    // `error_message` can hold a multi-KB stack trace / raw platform response,
+    // which is exactly the weight the list does not need — the opened record
+    // (`getSyncLogById`) carries it. Full mode keeps `*` for the mapping-center
+    // modal, which renders the expandable payload view.
     const baseSelect = params.lean
-      ? 'id,event,status,error_message,store_id,zid_entity_id,odoo_model,odoo_record_id,field_mapping_id,trigger_type,created_at,resolved_manually,field_mappings(name)'
+      ? 'id,event,status,store_id,zid_entity_id,odoo_model,odoo_record_id,field_mapping_id,trigger_type,created_at,resolved_manually,field_mappings(name)'
       : '*, field_mappings(name)'
 
     // We want to fetch the logs and join with field_mappings if possible to get mapping names.

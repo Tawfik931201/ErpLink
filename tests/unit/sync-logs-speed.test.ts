@@ -6,7 +6,9 @@
  *     can serve and which made every stats call a full-table scan.
  *   - The status filter and the head-count stats read that column (plus plain
  *     `status` equality), so they stay index-only.
- *   - The lean list select names explicit columns (no `payload` JSON per row).
+ *   - The lean list select names explicit columns (no `payload` JSON and no
+ *     `error_message` per row). The list renders neither; the opened record
+ *     fetches the full row. `error_message` can be a multi-KB stack trace.
  *
  * Every pin is checked to fail when reverted (see the self-check suite), so
  * none of them is vacuous.
@@ -41,10 +43,20 @@ describe('the logs read path never scans text', () => {
     expect(readSource()).toMatch(/resolved_manually: true/)
   })
 
-  it('selects explicit lean columns instead of the payload', () => {
+  it('selects explicit lean columns without payload or error_message', () => {
     const source = readSource()
-    expect(source).toMatch(/id,event,status,error_message,store_id/)
+    expect(source).toMatch(/id,event,status,store_id/)
     expect(source).toMatch(/resolved_manually,field_mappings\(name\)/)
+
+    const leanSelect = source.match(/const baseSelect = params\.lean\s*\? '([^']+)'/)?.[1] ?? ''
+    expect(leanSelect).not.toMatch(/payload/)
+    expect(leanSelect).not.toMatch(/error_message/)
+  })
+
+  it('keeps the full row for the record page', () => {
+    // getSyncLogById (and the mapping-center modal) still read `*`, so the
+    // opened record carries payload + error_message.
+    expect(readSource()).toMatch(/\.select\('\*, field_mappings\(name\)'\)/)
   })
 })
 
@@ -65,6 +77,24 @@ describe('self-check: the pins actually detect a reverted rule', () => {
     const guardFn = (src: string) => has(src, /\.eq\('resolved_manually', true\)/)
     expect(guardFn(readSource())).toBe(true)
     const tampered = readSource().replace(".eq('resolved_manually', true)", ".eq('status', 'success')")
+    expect(guardFn(tampered)).toBe(false)
+  })
+
+  it('fails when the lean select starts fetching error_message again', () => {
+    const guardFn = (src: string) => {
+      const leanSelect = src.match(/const baseSelect = params\.lean\s*\? '([^']+)'/)?.[1] ?? ''
+      return (
+        leanSelect.includes('id,event,status,store_id') &&
+        leanSelect.includes('resolved_manually,field_mappings(name)') &&
+        !leanSelect.includes('payload') &&
+        !leanSelect.includes('error_message')
+      )
+    }
+    expect(guardFn(readSource())).toBe(true)
+    const tampered = readSource().replace(
+      "'id,event,status,store_id",
+      "'id,event,status,error_message,store_id"
+    )
     expect(guardFn(tampered)).toBe(false)
   })
 })

@@ -473,6 +473,12 @@ export const translations = {
     'log.subtitle': 'كل محاولات المزامنة الخاصة بمساحة العمل من جميع المتاجر — الناجح والفاشل.',
     'log.retryDone': 'تمت إعادة الإرسال',
     'log.resolveDone': 'تم التعليم كمحلول يدوياً',
+    'log.backToLogs': 'العودة إلى السجلات',
+    'log.detailsTitle': 'تفاصيل السجل',
+    'log.logNumber': 'رقم السجل',
+    'log.createdAt': 'تاريخ الإنشاء',
+    'log.copyId': 'نسخ رقم السجل',
+    'log.payloadEmpty': 'لا توجد بيانات محفوظة لهذا السجل.',
 
     // Pricing Page (AR)
     'pricing.badge': 'خطة واحدة، كل المزايا',
@@ -1076,6 +1082,12 @@ export const translations = {
     'log.subtitle': 'Every sync attempt in this workspace from all stores — succeeded and failed.',
     'log.retryDone': 'Resent successfully',
     'log.resolveDone': 'Marked as manually resolved',
+    'log.backToLogs': 'Back to logs',
+    'log.detailsTitle': 'Log details',
+    'log.logNumber': 'Log number',
+    'log.createdAt': 'Created at',
+    'log.copyId': 'Copy log number',
+    'log.payloadEmpty': 'No payload was stored for this log.',
   }
 } as const;
 

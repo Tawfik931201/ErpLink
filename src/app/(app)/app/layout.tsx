@@ -93,9 +93,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const currentPath = (await headers()).get('x-pathname') || ''
+  // A detail page under /app/logs/<id> is not an exact key in the map (the id
+  // is a UUID), so resolve it to the same permission as the list page.
+  const permissionKey = permissionMap[currentPath]
+    ?? (currentPath.startsWith('/app/logs/') ? 'mapping-center' : undefined)
   const isPageRestricted = !isOwner
     && currentPath !== '/app/settings/workspace'
-    && (permissionMap[currentPath] && !permissions.includes(permissionMap[currentPath]))
+    && (permissionKey && !permissions.includes(permissionKey))
 
   // Workspace access gate (2026-10-19): a workspace whose 7-day free trial has
   // run out — or that the backend has already archived (expired subscription) —

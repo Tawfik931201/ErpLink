@@ -2,38 +2,34 @@
 
 import {
   AlertCircle,
-  Calendar,
-  Check,
-  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Clock,
-  Database,
-  Eye,
-  EyeOff,
-  HelpCircle,
   Loader2,
   RefreshCw,
   Search,
   Tag,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import React, { useEffect, useRef, useState } from 'react'
 
 import { getFieldMappings } from '@/app/actions/field-mappings'
 import {
-  getSyncLogById,
   getSyncLogStats,
   getSyncLogs,
-  resolveLogManually,
-  retrySyncLog,
   type SyncLogRow,
 } from '@/app/actions/sync-logs'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+
+import {
+  eventEntity,
+  getDeletionCountdown,
+  SyncStatusBadge,
+  SyncTriggerBadge,
+} from './log-ui'
 
 const LIMIT = 20
 const ALL_STATUSES = ['success', 'manual', 'failed', 'skipped']
@@ -121,7 +117,7 @@ function FilterSelect({
 
 export default function LogsClient() {
   const { t, lang, dir } = useLanguage()
-  const { toast } = useToast()
+  const router = useRouter()
   const ar = lang === 'ar'
 
   const [logs, setLogs] = useState<SyncLogRow[]>([])
@@ -141,12 +137,6 @@ export default function LogsClient() {
   const [entityIdInput, setEntityIdInput] = useState('')
   const [appliedEntityId, setAppliedEntityId] = useState('')
 
-  const [isRetryingId, setIsRetryingId] = useState<string | null>(null)
-  const [isResolvingId, setIsResolvingId] = useState<string | null>(null)
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
-  const [payloadLoadingId, setPayloadLoadingId] = useState<string | null>(null)
-  const payloadCache = useRef<Map<string, unknown>>(new Map())
-
   const [isStatusOpen, setIsStatusOpen] = useState(false)
   const [isPlatformOpen, setIsPlatformOpen] = useState(false)
   const [isMappingOpen, setIsMappingOpen] = useState(false)
@@ -159,6 +149,7 @@ export default function LogsClient() {
     order: t('log.entityOrder'),
     customer: t('log.entityCustomer'),
     category: t('log.entityCategory'),
+    other: ar ? 'أخرى' : 'Other',
   }
 
   const platformLabel = (p: string) => {
@@ -253,8 +244,6 @@ export default function LogsClient() {
 
   useEffect(() => {
     if (!mappingsLoaded) return
-    payloadCache.current.clear()
-    setExpandedIds(new Set())
     fetchAt(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey, mappingsLoaded])
@@ -291,166 +280,15 @@ export default function LogsClient() {
     setAppliedEntityId('')
   }
 
-  const getDeletionCountdown = (createdAtStr: string, status: string) => {
-    if (!createdAtStr) return ''
-    const createdAt = new Date(createdAtStr).getTime()
-    const duration = status === 'success' ? 72 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000
-    const remainingMs = createdAt + duration - Date.now()
-    if (remainingMs <= 0) return ar ? 'جاري الحذف...' : 'Deleting soon...'
-    const remainingHours = Math.floor(remainingMs / (60 * 60 * 1000))
-    if (remainingHours >= 24) {
-      const days = Math.floor(remainingHours / 24)
-      const hours = remainingHours % 24
-      return ar ? `الحذف بعد: ${days} يوم و ${hours} ساعة` : `Deletes in: ${days}d ${hours}h`
-    }
-    const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000))
-    return ar
-      ? `الحذف بعد: ${remainingHours} ساعة و ${minutes} دقيقة`
-      : `Deletes in: ${remainingHours}h ${minutes}m`
-  }
-
-  const handleResend = async (logId: string) => {
-    setIsRetryingId(logId)
-    try {
-      const res = await retrySyncLog(logId)
-      if (res.success) {
-        toast({
-          title: ar ? 'إعادة الإرسال' : 'Sync Resend',
-          description: ar ? 'تمت إعادة الإرسال بنجاح والمزامنة قيد التشغيل!' : 'Retry sync started successfully!',
-        })
-        await Promise.all([fetchAt(offset), loadStats()])
-      } else {
-        toast({
-          title: ar ? 'فشلت إعادة الإرسال' : 'Resend Failed',
-          description: res.error || (ar ? 'حدث خطأ ما' : 'Something went wrong'),
-          variant: 'destructive',
-        })
-      }
-    } catch (err: any) {
-      toast({
-        title: ar ? 'خطأ' : 'Error',
-        description: err?.message || (ar ? 'حدث خطأ ما' : 'Something went wrong'),
-        variant: 'destructive',
-      })
-    } finally {
-      setIsRetryingId(null)
-    }
-  }
-
-  const handleResolveManually = async (logId: string) => {
-    setIsResolvingId(logId)
-    try {
-      const res = await resolveLogManually(logId)
-      if (res.success) {
-        toast({
-          title: ar ? 'تم الحل يدويًا' : 'Resolved Manually',
-          description: ar ? 'تم تعيين السجل كـ "محلول يدوياً في أودو" بنجاح!' : 'Log marked as resolved manually in Odoo!',
-        })
-        await Promise.all([fetchAt(offset), loadStats()])
-      } else {
-        toast({
-          title: ar ? 'فشل الإجراء' : 'Action Failed',
-          description: res.error || (ar ? 'حدث خطأ ما' : 'Something went wrong'),
-          variant: 'destructive',
-        })
-      }
-    } catch (err: any) {
-      toast({
-        title: ar ? 'خطأ' : 'Error',
-        description: err?.message || (ar ? 'حدث خطأ ما' : 'Something went wrong'),
-        variant: 'destructive',
-      })
-    } finally {
-      setIsResolvingId(null)
-    }
-  }
-
-  const togglePayload = async (log: SyncLogRow) => {
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(log.id)) {
-        next.delete(log.id)
-      } else {
-        next.add(log.id)
-      }
-      return next
-    })
-    if (!payloadCache.current.has(log.id)) {
-      setPayloadLoadingId(log.id)
-      try {
-        const res = await getSyncLogById(log.id)
-        if (res.success) {
-          payloadCache.current.set(log.id, (res.log as any).payload ?? {})
-        }
-      } catch {
-        payloadCache.current.set(log.id, {})
-      } finally {
-        setPayloadLoadingId(null)
-      }
-    }
-  }
-
-  const getStatusBadge = (status: string | null, errorMessage?: string | null) => {
-    if (status === 'success' && errorMessage?.includes('Resolved manually')) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-          <CheckCircle2 className="h-3 w-3" />
-          {t('log.resolvedManually')}
-        </span>
-      )
-    }
-    switch (status) {
-      case 'success':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            <CheckCircle2 className="h-3 w-3" />
-            {t('log.success')}
-          </span>
-        )
-      case 'failed':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-destructive/10 text-destructive border border-destructive/20">
-            <AlertCircle className="h-3 w-3" />
-            {t('log.failed')}
-          </span>
-        )
-      case 'skipped':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border/60">
-            <HelpCircle className="h-3 w-3" />
-            {t('log.skipped')}
-          </span>
-        )
-      case 'processing':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            {ar ? 'جاري المزامنة...' : 'Syncing...'}
-          </span>
-        )
-      default:
-        return null
-    }
-  }
-
-  const getTriggerBadge = (triggerType: string | null) => {
-    const isManual = triggerType === 'manual'
-    return (
-      <span className={cn(
-        'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border',
-        isManual
-          ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20'
-          : 'bg-primary/10 text-primary border-primary/20'
-      )}>
-        {isManual ? t('log.manual') : t('log.automatic')}
-      </span>
-    )
+  const openLog = (id: string) => {
+    router.push(`/app/logs/${id}`)
   }
 
   const isFirstPage = offset === 0
   const isLastPage = offset + logs.length >= totalCount
   const PrevIcon = dir === 'rtl' ? ChevronRight : ChevronLeft
   const NextIcon = dir === 'rtl' ? ChevronLeft : ChevronRight
+  const OpenIcon = dir === 'rtl' ? ChevronLeft : ChevronRight
 
   const statCards = [
     { key: 'total', label: ar ? 'الإجمالي' : 'Total', value: stats.total, statuses: [...ALL_STATUSES] },
@@ -460,14 +298,23 @@ export default function LogsClient() {
     { key: 'skipped', label: t('log.skipped'), value: stats.skipped, statuses: ['skipped'], dot: 'bg-muted-foreground' },
   ]
 
+  const formatDate = (value: string | null) => {
+    if (!value) return '—'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return '—'
+    return date.toLocaleString(ar ? 'ar-EG' : 'en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-            <Database className="h-4.5 w-4.5 text-primary" />
-            {t('log.title')}
-          </h2>
+          <h2 className="text-base font-bold text-foreground">{t('log.title')}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">{t('log.subtitle')}</p>
         </div>
         <Button size="sm" variant="outline" onClick={() => fetchAt(offset)} disabled={isLoading}>
@@ -692,7 +539,122 @@ export default function LogsClient() {
           ))}
         </div>
         {totalCount > 0 && (
-          <div className="flex items-center gap-2 border border-border bg-card rounded-xl p-1 text-xs font-medium shadow-sm">
+          <span className="text-[11px] text-muted-foreground font-mono select-none">
+            {offset + 1}-{Math.min(offset + logs.length, totalCount)} / {totalCount}
+          </span>
+        )}
+      </div>
+
+      {/* Odoo-style list: a header row and clean records, no cell borders. */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.status')}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{ar ? 'الحدث' : 'Event'}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.entity')}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.model')}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.entityId')}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.triggerType')}</th>
+              <th className="px-2 py-2 text-start font-semibold whitespace-nowrap">{t('log.time')}</th>
+              <th className="px-2 py-2 w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading && logs.length === 0
+              ? Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={`skeleton-${i}`}>
+                    {Array.from({ length: 8 }).map((__, j) => (
+                      <td key={j} className="px-2 py-3">
+                        <div className="h-3 rounded bg-muted/60 animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              : logs.map(log => {
+                  const logEntity = eventEntity(log.event)
+                  return (
+                    <tr
+                      key={log.id}
+                      tabIndex={0}
+                      role="button"
+                      onClick={() => openLog(log.id)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          openLog(log.id)
+                        }
+                      }}
+                      className="cursor-pointer transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
+                    >
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <SyncStatusBadge status={log.status} resolvedManually={log.resolved_manually} />
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <div className="font-mono font-semibold text-foreground">{log.event || '—'}</div>
+                        {log.field_mappings?.name && (
+                          <div className="mt-0.5 text-[10px] text-muted-foreground truncate max-w-[180px]" title={log.field_mappings.name}>
+                            {log.field_mappings.name}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {entityLabels[logEntity] || '—'}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <div className="font-mono text-foreground">{log.odoo_model || '—'}</div>
+                        {log.odoo_record_id != null && (
+                          <div className="mt-0.5 text-[10px] text-muted-foreground font-mono">#{log.odoo_record_id}</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap font-mono text-muted-foreground">
+                        {log.zid_entity_id || '—'}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <SyncTriggerBadge triggerType={log.trigger_type} />
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <div className="text-muted-foreground">{formatDate(log.created_at)}</div>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground/80">
+                          {getDeletionCountdown(log.created_at, log.status, ar)}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2.5 text-end text-muted-foreground">
+                        <OpenIcon className="h-3.5 w-3.5 inline-block" />
+                      </td>
+                    </tr>
+                  )
+                })}
+          </tbody>
+        </table>
+
+        {!isLoading && logs.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-14 text-center">
+            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mb-3">
+              <AlertCircle className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-xs font-bold text-muted-foreground">{t('log.noLogs')}</p>
+            <p className="text-[10px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
+              {ar
+                ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.'
+                : 'No sync operations match the selected filters.'}
+            </p>
+          </div>
+        )}
+
+        {isLoading && logs.length > 0 && (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
+      </div>
+
+      {totalCount > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <span className="text-[10px] text-muted-foreground font-semibold">
+            {ar ? `إجمالي السجلات: ${totalCount}` : `Total logs: ${totalCount}`}
+          </span>
+          <div className="flex items-center gap-2 border border-border bg-card rounded-xl p-1 text-xs font-medium">
             <span className="px-2 text-muted-foreground select-none font-mono">
               {offset + 1}-{Math.min(offset + logs.length, totalCount)} / {totalCount}
             </span>
@@ -719,200 +681,8 @@ export default function LogsClient() {
               </Button>
             </div>
           </div>
-        )}
-      </div>
-
-      {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 text-foreground animate-spin mb-2" />
-          <p className="text-xs text-muted-foreground font-medium">
-            {ar ? 'جاري تحميل السجلات...' : 'Loading logs...'}
-          </p>
-        </div>
-      ) : logs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mb-3">
-            <AlertCircle className="h-5 w-5 text-muted-foreground" />
-          </div>
-          <p className="text-xs font-bold text-muted-foreground">{t('log.noLogs')}</p>
-          <p className="text-[10px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
-            {ar
-              ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.'
-              : 'No sync operations match the selected filters.'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {logs.map(log => {
-            const isExpanded = expandedIds.has(log.id)
-            const dateFormatted = log.created_at
-              ? new Date(log.created_at).toLocaleString(ar ? 'ar-EG' : 'en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                })
-              : '-'
-            const isResolvedManually = log.status === 'success' && log.error_message?.includes('Resolved manually')
-            const cachedPayload = payloadCache.current.get(log.id)
-
-            return (
-              <div
-                key={log.id}
-                className={cn(
-                  'bg-card border border-border/80 rounded-xl p-4 transition-all duration-200 hover:border-border hover:shadow-sm',
-                  log.status === 'failed' && 'border-s-[3px] border-s-destructive',
-                  log.status === 'success' && (
-                    isResolvedManually
-                      ? 'border-s-[3px] border-s-amber-500/60'
-                      : 'border-s-[3px] border-s-emerald-500/60'
-                  ),
-                  log.status === 'processing' && 'border-s-[3px] border-s-primary/50'
-                )}
-              >
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {getStatusBadge(log.status, log.error_message)}
-                      {getTriggerBadge(log.trigger_type)}
-                      <span className="text-xs font-bold font-mono bg-muted/60 px-2.5 py-1 rounded-lg text-foreground border border-border/50">
-                        {log.event}
-                      </span>
-                      {log.field_mappings?.name && (
-                        <span
-                          className="text-[10px] font-bold text-foreground/70 max-w-[150px] truncate border-s border-border/50 ps-2"
-                          title={log.field_mappings.name}
-                        >
-                          {log.field_mappings.name}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-muted-foreground font-medium items-center">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3 w-3 text-muted-foreground/60" />
-                        <span>{dateFormatted}</span>
-                      </span>
-                      <span className="flex items-center gap-1.5 bg-muted/40 text-muted-foreground font-semibold px-2 py-0.5 rounded-lg border border-border/50">
-                        <Clock className="h-3 w-3 text-muted-foreground/60" />
-                        <span>{getDeletionCountdown(log.created_at || '', log.status || '')}</span>
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Database className="h-3 w-3 text-muted-foreground/60" />
-                        <span>
-                          {t('log.model')}: <span className="font-mono text-foreground font-semibold">{log.odoo_model}</span>
-                        </span>
-                      </span>
-                      {log.zid_entity_id && (
-                        <span>
-                          {t('log.entityId')}: <span className="font-mono text-foreground font-semibold">{log.zid_entity_id}</span>
-                        </span>
-                      )}
-                      {log.odoo_record_id && (
-                        <span>
-                          {t('log.recordId')}: <span className="font-mono text-foreground font-semibold">#{log.odoo_record_id}</span>
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end md:self-center shrink-0">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => togglePayload(log)}
-                      className="h-8 text-[10px] font-semibold gap-1 rounded-lg px-2.5 hover:bg-muted text-muted-foreground hover:text-foreground"
-                    >
-                      {isExpanded ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                      {t('log.viewPayload')}
-                    </Button>
-
-                    {(log.status === 'failed' || log.status === 'skipped') && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleResolveManually(log.id)}
-                        disabled={isResolvingId === log.id}
-                        className="h-8 text-[10px] font-bold border-border text-foreground hover:bg-muted rounded-lg px-3 transition-transform duration-200 gap-1"
-                      >
-                        {isResolvingId === log.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin text-foreground" />
-                        ) : (
-                          <Check className="h-3.5 w-3.5 text-foreground" />
-                        )}
-                        {ar ? 'حل يدوي' : 'Resolve Manually'}
-                      </Button>
-                    )}
-
-                    {(log.status === 'failed' || log.status === 'skipped') && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleResend(log.id)}
-                        disabled={isRetryingId === log.id}
-                        className="h-8 text-[10px] font-bold border-border text-foreground hover:bg-muted rounded-lg px-3 transition-transform duration-200 gap-1"
-                      >
-                        {isRetryingId === log.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin text-foreground" />
-                        ) : (
-                          <RefreshCw className="h-3 w-3" />
-                        )}
-                        {t('log.resend')}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {(log.status === 'failed' || log.status === 'skipped') && log.error_message && (
-                  <div className={cn(
-                    'mt-3 border rounded-lg p-3 flex items-start gap-2 text-xs',
-                    log.status === 'failed'
-                      ? 'bg-destructive/5 border-destructive/15 text-destructive'
-                      : 'bg-muted border-border text-muted-foreground'
-                  )}>
-                    {log.status === 'failed' ? (
-                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
-                    ) : (
-                      <HelpCircle className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
-                    )}
-                    <div className="space-y-0.5">
-                      <div className="font-bold">
-                        {log.status === 'failed'
-                          ? t('log.errorMessage')
-                          : (ar ? 'سبب التخطي / التفاصيل' : 'Skip Reason / Details')}
-                      </div>
-                      <div className="font-mono break-all leading-relaxed text-[11px] opacity-90">{log.error_message}</div>
-                    </div>
-                  </div>
-                )}
-
-                {isExpanded && (
-                  <div className="mt-3 border border-border rounded-lg overflow-hidden animate-in slide-in-from-top-2 duration-200">
-                    <div className="bg-muted border-b border-border px-3 py-1.5 flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-muted-foreground">{t('log.payloadTitle')}</span>
-                      <span className="text-[9px] font-mono text-muted-foreground">JSON Format</span>
-                    </div>
-                    {payloadLoadingId === log.id && cachedPayload === undefined ? (
-                      <div className="flex items-center justify-center py-6">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : (
-                      <pre className="p-3 bg-card text-foreground text-[10px] font-mono overflow-x-auto max-h-[250px] leading-relaxed">
-                        {JSON.stringify(cachedPayload ?? {}, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
         </div>
       )}
-
-      <div className="text-[10px] text-muted-foreground font-semibold">
-        {ar ? `إجمالي السجلات: ${totalCount}` : `Total logs: ${totalCount}`}
-      </div>
     </div>
   )
 }

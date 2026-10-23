@@ -40,6 +40,8 @@
 |------|---------|
 | `src/components/subscription/SubscriptionStatusCard.tsx` | Subscription status card on dashboard (contacts **support**, never affiliate) |
 | `src/components/subscription/SubscriptionBanner.tsx` | Expiry banner (always visible, not dismissible, shown to admins too since 2026-10-19; contacts **support**) |
+| `src/app/(app)/app/logs/logs-client.tsx` + `log-ui.tsx` | Odoo-style borderless sync-log list: header row + clickable rows, basic columns only. Uses `getSyncLogs({ lean: true })`, whose select omits **both** `payload` and `error_message` (the latter is a multi-KB stack trace) — do not re-add either to the list |
+| `src/app/(app)/app/logs/[id]/page.tsx` + `log-detail-client.tsx` | Per-record log page at `/app/logs/<id>` (id is the URL segment): full row via `getSyncLogById` — status/trigger, ids, mapping, error text, payload JSON, retry + resolve actions. `layout.tsx` resolves `/app/logs/` prefix to the list's `mapping-center` permission |
 
 ### Admin Facing
 | File | Purpose |
@@ -93,7 +95,7 @@ npm run type-check
 # Lint — clean (0 errors) as of 2026-09-29
 npm run lint
 
-# Unit tests — 864 tests over 55 suites (added 2026-09-29, grown 2026-10-22)
+# Unit tests — 879 tests over 56 suites (added 2026-09-29, grown 2026-10-23)
 npm test
 npm run test:watch
 npm run test:coverage
@@ -135,11 +137,15 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
   (`supabase.calls`) must import `../mocks/supabase` by path. Both resolve to
   the same file, hence one instance — `static-mappings-allowlist.test.ts`
   asserts that explicitly, because two instances would make it vacuous.
-- 864 tests over 55 suites:
+- 879 tests over 56 suites:
   - `tests/unit/zid-order-helpers.test.ts` — `resolveZidShippingCost`,
     `resolveZidCodAmount`, `isSaudiShippingAddress`, `resolveZidStatus`
   - `tests/unit/sync-queue-dedup.test.ts` — `fingerprintPayload`,
     `extractEntityId` (the anti-data-loss rules)
+  - `tests/unit/sync-logs-speed.test.ts` — no `ilike` text scans, the manual
+    state read/written via `resolved_manually`, the lean list select names
+    columns and excludes **both** `payload` and `error_message`, and
+    `getSyncLogById` keeps `*` (self-checks fail if either is reverted)
   - `tests/unit/sync-workspace-scoping.test.ts` — source pins proving the
     `field_mappings` query is scoped by `resolvedWorkspaceId` and the preset
     path prefers `deliveryWorkspaceId` over a borrowed mapping's workspace
