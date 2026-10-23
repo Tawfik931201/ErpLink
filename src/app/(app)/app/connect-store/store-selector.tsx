@@ -573,7 +573,7 @@ function WebhookStatusPill({
   // Salla/Shopify expose no health endpoint — state only what is actually known.
   if (!isZid) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/[0.06] px-2 h-7 text-[10px] font-medium text-primary">
+      <span className="inline-flex items-center gap-1.5 border border-primary/20 bg-primary/[0.06] px-2 h-7 text-[10px] font-medium text-primary">
         <span className="h-1.5 w-1.5 rounded-full bg-primary" />
         {lang === 'ar' ? 'المتجر متصل' : 'Connected'}
       </span>
@@ -583,13 +583,13 @@ function WebhookStatusPill({
   if (!merchantId) {
     return (
       <span className="inline-flex items-center gap-1">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/[0.06] px-2 h-7 text-[10px] font-medium text-amber-600">
+        <span className="inline-flex items-center gap-1.5 border border-amber-500/30 bg-amber-500/[0.06] px-2 h-7 text-[10px] font-medium text-amber-600">
           <AlertCircle className="h-3 w-3 shrink-0" />
           <span>{lang === 'ar' ? 'بيانات المتجر غير مكتملة' : 'Store data incomplete'}</span>
         </span>
         <a
           href={reconnectHref}
-          className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+          className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
         >
           <RefreshCw className="h-3 w-3" />
           <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>
@@ -599,7 +599,7 @@ function WebhookStatusPill({
   }
 
   const pillClass =
-    'inline-flex items-center gap-1.5 rounded-full border px-2 h-7 text-[10px] font-medium max-w-[210px]'
+    'inline-flex items-center gap-1.5 border px-2 h-7 text-[10px] font-medium max-w-[210px]'
 
   if (state === 'loading') {
     return (
@@ -644,7 +644,7 @@ function WebhookStatusPill({
           type="button"
           onClick={handleRecover}
           disabled={repairing}
-          className="inline-flex items-center gap-1 rounded-full border border-destructive/25 bg-background px-2 h-7 text-[10px] font-medium text-destructive hover:bg-destructive/[0.06] transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1 border border-destructive/25 bg-background px-2 h-7 text-[10px] font-medium text-destructive hover:bg-destructive/[0.06] transition-colors disabled:opacity-50"
         >
           <Wrench className={cn('h-3 w-3', repairing && 'animate-pulse')} />
           <span>{repairing ? (lang === 'ar' ? 'جارٍ الإصلاح…' : 'Repairing…') : (lang === 'ar' ? 'إصلاح' : 'Repair')}</span>
@@ -666,7 +666,7 @@ function WebhookStatusPill({
       </span>
       <a
         href={reconnectHref}
-        className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+        className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
       >
         <RefreshCw className="h-3 w-3" />
         <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>

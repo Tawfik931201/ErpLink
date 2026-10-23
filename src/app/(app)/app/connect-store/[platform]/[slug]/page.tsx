@@ -1,5 +1,7 @@
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
+import Link from 'next/link'
 import { Suspense } from 'react'
 
 import {
@@ -48,6 +50,14 @@ export default async function ConnectStoreDetailPage({ params }: DetailPageProps
           <h1 className="text-xl font-bold tracking-tight text-foreground">
             {lang === 'ar' ? 'تفاصيل المتجر' : 'Store details'}
           </h1>
+          <Link
+            href="/app/connect-store"
+            aria-label={lang === 'ar' ? 'رجوع إلى المتاجر' : 'Back to stores'}
+            title={lang === 'ar' ? 'رجوع إلى المتاجر' : 'Back to stores'}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
+          >
+            {dir === 'rtl' ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+          </Link>
         </div>
         <p className="text-[11px] text-muted-foreground leading-relaxed">
           {lang === 'ar'
