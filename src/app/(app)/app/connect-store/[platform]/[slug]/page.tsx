@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
@@ -45,19 +44,18 @@ export default async function ConnectStoreDetailPage({ params }: DetailPageProps
   return (
     <div className="max-w-4xl mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
       <div>
-        <div className="mb-1 flex items-center gap-2">
+        <div className="mb-1 flex items-center gap-2 text-xl font-bold tracking-tight">
           <div className="h-6 w-1 rounded-full bg-primary" />
-          <h1 className="text-xl font-bold tracking-tight text-foreground">
-            {lang === 'ar' ? 'تفاصيل المتجر' : 'Store details'}
-          </h1>
           <Link
             href="/app/connect-store"
-            aria-label={lang === 'ar' ? 'رجوع إلى المتاجر' : 'Back to stores'}
-            title={lang === 'ar' ? 'رجوع إلى المتاجر' : 'Back to stores'}
-            className="inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-background text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
+            className="text-muted-foreground/70 hover:text-foreground transition-colors"
           >
-            {dir === 'rtl' ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+            {lang === 'ar' ? 'المتجر' : 'Stores'}
           </Link>
+          <span className="text-muted-foreground/40 font-normal" aria-hidden="true">/</span>
+          <h1 className="text-foreground">
+            {lang === 'ar' ? 'تفاصيل المتجر' : 'Store details'}
+          </h1>
         </div>
         <p className="text-[11px] text-muted-foreground leading-relaxed">
           {lang === 'ar'
