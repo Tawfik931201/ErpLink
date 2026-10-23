@@ -2,10 +2,10 @@
 
 import {
   Store, ExternalLink, Mail, Calendar, Hash, RefreshCw,
-  User, AlertCircle, Globe, CheckCircle2, Activity, Wrench,
+  User, AlertCircle, Globe, CheckCircle2, Wrench,
   Plus, ChevronLeft, ChevronRight
 } from 'lucide-react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useCallback } from 'react'
 
 import { getZidWebhookHealth, recoverZidBrokenWebhooks } from '@/app/actions/workspaces'
@@ -51,6 +51,10 @@ interface StoreSelectorProps {
   sallaInstallUrl?: string
   lang: Language
   dir: 'rtl' | 'ltr'
+  // Detail route (/app/connect-store/<platform>/<slug>): the store is opened
+  // as its own page instead of a view toggled inside the list.
+  initialPlatform?: string
+  initialSlug?: string
 }
 
 interface ConnectedRow {
@@ -64,15 +68,33 @@ interface ConnectedRow {
 const storeKeyFor = (platform: string, tk: any): string =>
   platform === 'shopify' ? String(tk?.shop_domain ?? '') : String(tk?.merchant_id ?? '')
 
-export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopifyTokens = [], installUrl, sallaInstallUrl, lang, dir }: StoreSelectorProps) {
+// URL slug for a store key. Zid/Salla merchant ids are already URL-safe; a
+// Shopify shop domain contains dots, and a path segment ending in ".com" would
+// be skipped by the middleware matcher (it excludes static-file paths), so
+// dots become dashes. "a.b.myshopify.com" is never a real shop domain, so the
+// mapping stays collision-free in practice.
+const storeSlugFor = (platform: string, key: string): string =>
+  platform === 'shopify' ? key.replace(/\./g, '-') : key
+
+const storeSlugMatches = (platform: string, tk: any, slug: string): boolean =>
+  storeSlugFor(platform, storeKeyFor(platform, tk)) === slug
+
+const storeDetailHref = (platform: string, key: string): string =>
+  `/app/connect-store/${platform}/${encodeURIComponent(storeSlugFor(platform, key))}`
+
+export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopifyTokens = [], installUrl, sallaInstallUrl, lang, dir, initialPlatform, initialSlug }: StoreSelectorProps) {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const error = searchParams.get('error')
   const errorDescription = searchParams.get('description')
   const success = searchParams.get('success')
   // Odoo-style single screen: only one of list / connect-form / details is
   // visible at a time — never stacked together.
-  const [view, setView] = useState<'list' | 'connect' | 'details'>('list')
-  const [detail, setDetail] = useState<{ platform: string; key: string } | null>(null)
+  const isDetailRoute = Boolean(initialPlatform && initialSlug)
+  const [view, setView] = useState<'list' | 'connect' | 'details'>(isDetailRoute ? 'details' : 'list')
+  // On a detail route the opened store comes from the URL, so it survives a
+  // refresh, a shared link and the browser's own history.
+  const detail = isDetailRoute ? { platform: initialPlatform as string, slug: initialSlug as string } : null
   const [connectPlatform, setConnectPlatform] = useState<string>('zid')
 
   const getSuccessMessage = (s: string) => {
@@ -148,12 +170,11 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
   )
 
   const openDetails = (platform: string, key: string) => {
-    setDetail({ platform, key })
-    setView('details')
+    router.push(storeDetailHref(platform, key))
   }
 
-  const detailToken = detail?.platform
-    ? tokensFor(detail.platform).find(tk => storeKeyFor(detail.platform, tk) === detail.key) ?? null
+  const detailToken = detail?.platform && stores.some(s => s.id === detail.platform)
+    ? tokensFor(detail.platform).find(tk => storeSlugMatches(detail.platform, tk, detail.slug)) ?? null
     : null
 
   // After an OAuth redirect (?success=salla_connected …) jump straight to
@@ -163,8 +184,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
     const id = success === 'salla_connected' ? 'salla' : success === 'shopify_connected' ? 'shopify' : 'zid'
     const rows = tokensFor(id)
     if (rows.length > 0) {
-      setDetail({ platform: id, key: storeKeyFor(id, rows[0]) })
-      setView('details')
+      router.replace(storeDetailHref(id, storeKeyFor(id, rows[0])))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [success])
@@ -172,7 +192,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
   const BackButton = (
     <button
       type="button"
-      onClick={() => setView('list')}
+      onClick={() => (isDetailRoute ? router.push('/app/connect-store') : setView('list'))}
       className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
     >
       {dir === 'rtl' ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
@@ -375,9 +395,28 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
       )}
 
       {/* ── Details View: one connected store, standalone ──────────── */}
+      {view === 'details' && detail && !detailToken && (
+      <div className="border border-border bg-card p-5">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="flex-1 space-y-1.5">
+            <h2 className="text-sm font-semibold text-foreground">
+              {lang === 'ar' ? 'المتجر غير متصل' : 'Store not connected'}
+            </h2>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {lang === 'ar'
+                ? 'هذا المتجر غير مرتبط بمساحة العمل الحالية أو تم فصله. أعد ربطه للمتابعة.'
+                : 'This store is not linked to the current workspace or was disconnected. Reconnect it to continue.'}
+            </p>
+            <div className="pt-1">{BackButton}</div>
+          </div>
+        </div>
+      </div>
+      )}
+
       {view === 'details' && detail && detailToken && (
       <div className="border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2.5 bg-muted/30">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5 bg-muted/30">
           <div className="flex items-center gap-2 text-[11px] font-medium text-foreground min-w-0">
             {(() => {
               const meta = stores.find(s => s.id === detail.platform)
@@ -396,7 +435,13 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
               )
             })()}
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex flex-wrap items-center gap-1 shrink-0">
+            <WebhookStatusPill
+              platform={detail.platform}
+              merchantId={detail.platform === 'zid' ? String(detailToken.merchant_id ?? '') : ''}
+              reconnectHref={detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+              lang={lang}
+            />
             {BackButton}
             {detail.platform === 'zid' && (
               <>
@@ -409,7 +454,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                   merchantId={String(detailToken.merchant_id)}
                   confirmText={t('zid.disconnectConfirm')}
                   buttonText={t('zid.disconnect')}
-                  onDone={() => setView('list')}
+                  onDone={() => router.push('/app/connect-store')}
                 />
               </>
             )}
@@ -425,7 +470,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                   confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر سلة؟' : 'Are you sure you want to disconnect Salla store?'}
                   buttonText={t('zid.disconnect')}
                   platform="salla"
-                  onDone={() => setView('list')}
+                  onDone={() => router.push('/app/connect-store')}
                 />
               </>
             )}
@@ -435,7 +480,7 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
                 confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر شوبيفاي؟' : 'Are you sure you want to disconnect Shopify store?'}
                 buttonText={t('zid.disconnect')}
                 platform="shopify"
-                onDone={() => setView('list')}
+                onDone={() => router.push('/app/connect-store')}
               />
             )}
           </div>
@@ -465,123 +510,168 @@ function DetailRow({ icon: Icon, label, value }: { icon: any; label: string; val
 }
 
 /**
- * Webhook health-summary panel (P2): يعرض حالة webhooks زد مع زر recoverBroken.
- * Non-blocking — يفشل بصمت لو تعذر جلب الصحة حتى لا يكسر صفحة الربط.
+ * Inline webhook-health pill shown in the store-detail header, next to Back.
+ * Quiet by design: a dot plus one short line. It only grows a control when
+ * something is actually wrong — repair when webhooks are broken, reconnect
+ * when the check itself fails (expired credential, API unreachable).
+ * Non-blocking: a failed check never breaks the page.
  */
-function ZidWebhookHealthPanel({ merchantId, lang }: { merchantId: string; lang: string }) {
-  const [health, setHealth] = useState<any>(null)
-  const [loading, setLoading] = useState(false)
-  const [recovering, setRecovering] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
+function WebhookStatusPill({
+  platform,
+  merchantId,
+  reconnectHref,
+  lang,
+}: {
+  platform: string
+  merchantId: string
+  reconnectHref: string
+  lang: string
+}) {
+  const isZid = platform === 'zid'
+  const canCheck = isZid && Boolean(merchantId)
+  const [state, setState] = useState<'loading' | 'ok' | 'broken' | 'error'>('loading')
+  const [counts, setCounts] = useState<{ healthy: number | null; broken: number; degraded: number }>({ healthy: null, broken: 0, degraded: 0 })
+  const [reason, setReason] = useState<string | null>(null)
+  const [repairing, setRepairing] = useState(false)
 
-  const fetchHealth = useCallback(() => {
-    setLoading(true)
+  const check = useCallback(() => {
+    if (!canCheck) return
+    setState('loading')
     getZidWebhookHealth(merchantId)
       .then((res: any) => {
-        if (res?.success) setHealth(res.health)
+        if (!res?.success) {
+          setReason(res?.error || null)
+          setState('error')
+          return
+        }
+        const stats = res.health?.data ?? res.health
+        const broken = typeof stats?.broken === 'number' ? stats.broken : 0
+        const degraded = typeof stats?.degraded === 'number' ? stats.degraded : 0
+        const healthy = typeof stats?.healthy === 'number' ? stats.healthy : null
+        setCounts({ healthy, broken, degraded })
+        setReason(null)
+        setState(broken === 0 && degraded === 0 ? 'ok' : 'broken')
       })
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [merchantId])
+      .catch((err: any) => {
+        setReason(err?.message || null)
+        setState('error')
+      })
+  }, [canCheck, merchantId])
 
   useEffect(() => {
-    fetchHealth()
-  }, [fetchHealth])
+    check()
+  }, [check])
 
   const handleRecover = async () => {
-    setRecovering(true)
-    setMsg(null)
+    setRepairing(true)
     const res = await recoverZidBrokenWebhooks(merchantId)
-    setRecovering(false)
-    if (res.success) {
-      setMsg(lang === 'ar' ? 'تمت محاولة إصلاح الـ Webhooks وإعادة تفعيلها.' : 'Webhooks recovery attempted successfully.')
-      fetchHealth()
-    } else {
-      setMsg((res as any).error || (lang === 'ar' ? 'فشل الإصلاح.' : 'Recovery failed.'))
-    }
+    setRepairing(false)
+    if (res.success) check()
+    else setReason((res as any).error || null)
   }
 
-  const stats = health?.data ?? health
-  const healthyCount = typeof stats?.healthy === 'number' ? stats.healthy : null
-  const brokenCount = typeof stats?.broken === 'number' ? stats.broken : 0
-  const degradedCount = typeof stats?.degraded === 'number' ? stats.degraded : 0
-  const hasLoaded = health !== null && !loading
+  // Salla/Shopify expose no health endpoint — state only what is actually known.
+  if (!isZid) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/[0.06] px-2 h-7 text-[10px] font-medium text-primary">
+        <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+        {lang === 'ar' ? 'المتجر متصل' : 'Connected'}
+      </span>
+    )
+  }
 
-  return (
-    <div className="mt-3 rounded-lg border border-border bg-card p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[11px] font-semibold text-foreground">
-          <Activity className="h-3.5 w-3.5 text-muted-foreground" />
-          <span>{lang === 'ar' ? 'صحة التنبيهات (Webhooks)' : 'Webhook Health'}</span>
-        </div>
+  if (!merchantId) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/[0.06] px-2 h-7 text-[10px] font-medium text-amber-600">
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span>{lang === 'ar' ? 'بيانات المتجر غير مكتملة' : 'Store data incomplete'}</span>
+        </span>
+        <a
+          href={reconnectHref}
+          className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+        >
+          <RefreshCw className="h-3 w-3" />
+          <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>
+        </a>
+      </span>
+    )
+  }
+
+  const pillClass =
+    'inline-flex items-center gap-1.5 rounded-full border px-2 h-7 text-[10px] font-medium max-w-[210px]'
+
+  if (state === 'loading') {
+    return (
+      <span className={cn(pillClass, 'border-border bg-muted/40 text-muted-foreground')}>
+        <RefreshCw className="h-3 w-3 shrink-0 animate-spin" />
+        <span className="truncate">{lang === 'ar' ? 'جارٍ فحص التنبيهات…' : 'Checking webhooks…'}</span>
+      </span>
+    )
+  }
+
+  if (state === 'ok') {
+    return (
+      <button
+        type="button"
+        onClick={check}
+        title={
+          counts.healthy !== null
+            ? lang === 'ar'
+              ? `${counts.healthy} تنبيهات مفعّلة — اضغط لإعادة الفحص`
+              : `${counts.healthy} active webhooks — click to re-check`
+            : lang === 'ar' ? 'اضغط لإعادة الفحص' : 'Click to re-check'
+        }
+        className={cn(pillClass, 'border-primary/20 bg-primary/[0.06] text-primary hover:bg-primary/10 transition-colors')}
+      >
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+        <span className="truncate">{lang === 'ar' ? 'التنبيهات تعمل' : 'Webhooks healthy'}</span>
+      </button>
+    )
+  }
+
+  if (state === 'broken') {
+    const label = counts.broken > 0
+      ? lang === 'ar' ? `${counts.broken} تنبيهات معطّلة` : `${counts.broken} broken webhooks`
+      : lang === 'ar' ? `${counts.degraded} تنبيهات متأخرة` : `${counts.degraded} degraded webhooks`
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className={cn(pillClass, 'border-destructive/25 bg-destructive/[0.05] text-destructive')} title={label}>
+          <AlertCircle className="h-3 w-3 shrink-0" />
+          <span className="truncate">{label}</span>
+        </span>
         <button
           type="button"
-          onClick={fetchHealth}
-          disabled={loading || recovering}
-          className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-          title={lang === 'ar' ? 'تحديث الفحص' : 'Refresh'}
+          onClick={handleRecover}
+          disabled={repairing}
+          className="inline-flex items-center gap-1 rounded-full border border-destructive/25 bg-background px-2 h-7 text-[10px] font-medium text-destructive hover:bg-destructive/[0.06] transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
-          <span>{lang === 'ar' ? 'تحديث الفحص' : 'Refresh'}</span>
+          <Wrench className={cn('h-3 w-3', repairing && 'animate-pulse')} />
+          <span>{repairing ? (lang === 'ar' ? 'جارٍ الإصلاح…' : 'Repairing…') : (lang === 'ar' ? 'إصلاح' : 'Repair')}</span>
         </button>
-      </div>
+      </span>
+    )
+  }
 
-      <div className="mt-2.5">
-        {loading && !health ? (
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <RefreshCw className="h-3 w-3 animate-spin" />
-            <span>{lang === 'ar' ? 'جارٍ فحص صحة التنبيهات مع زد…' : 'Checking webhook health with Zid…'}</span>
-          </div>
-        ) : hasLoaded && healthyCount !== null ? (
-          brokenCount === 0 && degradedCount === 0 ? (
-            <div className="flex items-center gap-2.5 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-primary">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold">
-                  {lang === 'ar'
-                    ? `جميع التنبيهات تعمل بنشاط وبشكل سليم (${healthyCount} تنبيهات مفعلة)`
-                    : `All webhooks are active and healthy (${healthyCount} active)`}
-                </p>
-                <p className="text-[10px] opacity-80 mt-0.5">
-                  {lang === 'ar'
-                    ? 'الأحداث تصل للمنصة فورياً وتُعالج في الخلفية بدون أي تنبيهات معطلة.'
-                    : 'Events are being received and processed with 0 broken webhooks.'}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-md bg-destructive/10 border border-destructive/20 p-2.5 text-destructive">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span className="text-xs font-semibold">
-                  {lang === 'ar'
-                    ? `يوجد ${brokenCount} تنبيهات معطلة بحاجة لإصلاح`
-                    : `${brokenCount} broken webhooks detected`}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleRecover}
-                disabled={recovering}
-                className="inline-flex items-center justify-center gap-1.5 rounded bg-destructive px-3 py-1 text-[11px] font-semibold text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50 shrink-0"
-              >
-                <Wrench className="h-3 w-3" />
-                <span>{recovering ? (lang === 'ar' ? 'جارٍ الإصلاح…' : 'Repairing…') : (lang === 'ar' ? 'إصلاح المعطلة' : 'Repair Now')}</span>
-              </button>
-            </div>
-          )
-        ) : (
-          <div className="flex items-center gap-2 rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-primary">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            <span className="text-xs font-semibold">
-              {lang === 'ar' ? 'الربط نشط والتنبيهات تعمل بشكل طبيعي.' : 'Connection active and webhooks working normally.'}
-            </span>
-          </div>
-        )}
-      </div>
-
-      {msg && <div className="mt-2 text-[11px] text-foreground/80 font-medium">{msg}</div>}
-    </div>
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={cn(pillClass, 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600')}
+        title={reason || undefined}
+      >
+        <AlertCircle className="h-3 w-3 shrink-0" />
+        <span className="truncate">
+          {lang === 'ar' ? 'تعذّر التحقق من التنبيهات' : 'Webhook check failed'}
+        </span>
+      </span>
+      <a
+        href={reconnectHref}
+        className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+      >
+        <RefreshCw className="h-3 w-3" />
+        <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>
+      </a>
+    </span>
   )
 }
 
@@ -596,7 +686,6 @@ function ConnectedContent({ token, lang, t, formatDate }: any) {
       <DetailRow icon={Mail} label={t('zid.merchantEmail')} value={token.email || '—'} />
       <DetailRow icon={User} label={t('zid.merchantUsername')} value={token.username || '—'} />
       <DetailRow icon={Calendar} label={t('zid.lastUpdated')} value={formatDate(token.updated_at)} />
-      <ZidWebhookHealthPanel merchantId={token.merchant_id} lang={lang} />
       <div className="mt-4 border-t border-border pt-3 text-[11px] text-muted-foreground leading-relaxed">
         {t('sync.coreOn')}
       </div>

@@ -97,6 +97,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // is a UUID), so resolve it to the same permission as the list page.
   const permissionKey = permissionMap[currentPath]
     ?? (currentPath.startsWith('/app/logs/') ? 'mapping-center' : undefined)
+    ?? (currentPath.startsWith('/app/connect-store/') ? 'connect-store' : undefined)
   const isPageRestricted = !isOwner
     && currentPath !== '/app/settings/workspace'
     && (permissionKey && !permissions.includes(permissionKey))
