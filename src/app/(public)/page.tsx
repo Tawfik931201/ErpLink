@@ -1,22 +1,17 @@
 import {
   Activity,
   ArrowLeft,
-  Bell,
   Box,
   Check,
   ChevronDown,
   ExternalLink,
-  Gift,
   Link as LinkIcon,
   RefreshCw,
   Settings,
   Shield,
   ShoppingBag,
-  SlidersHorizontal,
-  Sparkles,
   Tag,
   Users,
-  Workflow,
   X,
   Zap,
 } from 'lucide-react'
@@ -28,6 +23,8 @@ import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
 import { resolveLanguage, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
+
+const EYEBROW = 'font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground'
 
 export default async function HomePage() {
   const cookieStore = await cookies()
@@ -47,31 +44,18 @@ export default async function HomePage() {
     { icon: RefreshCw, title: t('feature.multiStore.title'), desc: t('feature.multiStore.desc') },
   ]
 
-  const liveRows = [
-    {
-      icon: ShoppingBag,
-      title: isAr ? 'طلب جديد #1284' : 'New order #1284',
-      sub: isAr ? 'أُنشئ في Odoo' : 'Created in Odoo',
-      time: isAr ? 'قبل ثانيتين' : '2s ago',
-    },
-    {
-      icon: Box,
-      title: isAr ? 'تحديث مخزون' : 'Stock update',
-      sub: isAr ? 'من Odoo إلى المتجر' : 'Odoo → store',
-      time: isAr ? 'قبل ٤ ثوانٍ' : '4s ago',
-    },
-    {
-      icon: Tag,
-      title: isAr ? 'منتج جديد' : 'New product',
-      sub: isAr ? 'تمت مزامنته بالكامل' : 'Fully synced',
-      time: isAr ? 'قبل ٩ ثوانٍ' : '9s ago',
-    },
-    {
-      icon: Users,
-      title: isAr ? 'عميل جديد' : 'New customer',
-      sub: isAr ? 'تمت مزامنته' : 'Synced',
-      time: isAr ? 'قبل ١٢ ثانية' : '12s ago',
-    },
+  const flowLog = [
+    { time: '00:00.4', from: 'order.created', to: 'sale.order' },
+    { time: '00:01.1', from: 'stock.updated', to: 'stock.quant' },
+    { time: '00:01.8', from: 'product.updated', to: 'product.template' },
+    { time: '00:02.2', from: 'customer.created', to: 'res.partner' },
+  ]
+
+  const routes = [
+    { event: 'order.created', model: 'sale.order', custom: false },
+    { event: 'product.updated', model: 'product.template', custom: false },
+    { event: 'customer.created', model: 'res.partner', custom: false },
+    { event: 'x_custom.event', model: 'x_projects', custom: true },
   ]
 
   const before = [
@@ -88,6 +72,12 @@ export default async function HomePage() {
     isAr ? 'تنبيه فوري على تيليجرام عند أي مشكلة' : 'Instant Telegram alert on any issue',
   ]
 
+  const steps = [
+    { icon: LinkIcon, title: t('how.step1'), desc: t('how.step1Desc') },
+    { icon: Settings, title: t('how.step2'), desc: t('how.step2Desc') },
+    { icon: RefreshCw, title: t('how.step3'), desc: t('how.step3Desc') },
+  ]
+
   const faqs = [
     { q: t('landing.faq1Q'), a: t('landing.faq1A') },
     { q: t('landing.faq2Q'), a: t('landing.faq2A') },
@@ -99,158 +89,197 @@ export default async function HomePage() {
 
   return (
     <div
-      className="flex min-h-screen flex-col bg-background text-foreground font-sans overflow-x-hidden"
+      className="flex min-h-screen flex-col overflow-x-hidden bg-background font-sans text-foreground"
       dir={dir}
     >
       <PublicSiteHeader lang={lang} />
 
       <main className="flex-1">
         {/* ── Hero ─────────────────────────────────────────────── */}
-        <section className="pt-20 pb-20 px-6 md:px-12 relative overflow-hidden">
-          <div className="absolute top-[-120px] right-[-120px] w-[420px] h-[420px] rounded-full bg-primary/[0.04] blur-3xl pointer-events-none" />
-          <div className="absolute bottom-[-140px] left-[-100px] w-[380px] h-[380px] rounded-full bg-foreground/[0.03] blur-3xl pointer-events-none" />
+        <section className="relative overflow-hidden border-b border-border">
+          <div className="blueprint-grid pointer-events-none absolute inset-0 opacity-70" aria-hidden />
 
-          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-14 lg:gap-16 items-center relative">
+          <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-14 px-6 pb-20 pt-14 md:px-12 md:pb-28 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
             {/* Copy */}
-            <div className="space-y-7">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Gift className="h-3 w-3" />
-                <span>{isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}</span>
+            <div>
+              <div className="mb-8 flex flex-wrap items-center gap-3">
+                <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
+                  <Zap className="h-3 w-3" />
+                  {isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}
+                </span>
+                <span className={EYEBROW}>erp-link / sync-layer</span>
               </div>
 
-              <h1 className="text-4xl md:text-5xl xl:text-6xl font-black leading-[1.12] tracking-tight">
+              <h1 className="text-[2.5rem] font-black leading-[1.1] tracking-tight md:text-6xl md:leading-[1.02]">
                 {isAr ? (
-                  <>اربط متجرك بنظام ERP —<br className="hidden md:block" /> وانسَ الإدخال اليدوي</>
+                  <>
+                    اربط متجرك بالـ ERP
+                    <br />
+                    <span className="text-primary">بخطٍّ واحد لا ينقطع</span>
+                  </>
                 ) : (
-                  <>Connect your store to your ERP —<br className="hidden md:block" /> and forget manual entry</>
+                  <>
+                    Connect your store to your ERP
+                    <br />
+                    <span className="text-primary">over one unbroken line</span>
+                  </>
                 )}
               </h1>
 
-              <p className="text-base md:text-lg text-muted-foreground leading-relaxed max-w-xl">
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
                 {t('landing.heroSubtitle')}
               </p>
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <Button
-                  asChild
-                  size="lg"
-                  className="bg-foreground text-background hover:opacity-90 rounded-xl px-7 py-6 text-sm font-bold shadow-sm"
-                >
-                  <Link href="/sign-up" className="flex items-center gap-1.5">
+              <div className="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                <Button asChild size="lg" variant="brand" className="h-12 rounded-xl px-7 text-sm font-bold">
+                  <Link href="/sign-up" className="inline-flex items-center gap-2">
                     {t('landing.btnStart')}
                     <ExternalLink className="h-4 w-4" />
                   </Link>
                 </Button>
-                <Button
-                  asChild
-                  variant="outline"
-                  size="lg"
-                  className="rounded-xl px-6 py-6 text-sm font-semibold"
-                >
-                  <a href="#how-it-works" className="flex items-center gap-1.5">
+                <Button asChild size="lg" variant="outline" className="h-12 rounded-xl px-6 text-sm font-semibold">
+                  <a href="#how-it-works" className="inline-flex items-center gap-2">
                     {t('landing.btnHow')}
                     <ArrowLeft className={cn('h-4 w-4', !isAr && 'rotate-180')} />
                   </a>
                 </Button>
               </div>
 
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-                {[
-                  isAr ? 'بدون بطاقة ائتمانية' : 'No credit card',
-                  isAr ? 'إعداد في دقائق' : 'Setup in minutes',
-                  isAr ? 'إلغاء في أي وقت' : 'Cancel anytime',
-                ].map((item) => (
+              <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-semibold text-muted-foreground">
+                {[t('landing.bullet1'), t('landing.bullet2'), t('landing.bullet3')].map((item) => (
                   <span key={item} className="flex items-center gap-1.5">
-                    <Check className="h-3.5 w-3.5" />
+                    <Check className="h-3.5 w-3.5 text-primary" />
                     {item}
                   </span>
                 ))}
               </div>
             </div>
 
-            {/* Live sync visual */}
-            <div className="flex justify-center lg:justify-end">
-              <div className="relative w-full max-w-md rotate-[-2deg] transition-transform duration-300 hover:rotate-0">
-                <div className="absolute inset-0 translate-x-3 translate-y-3 rounded-3xl border border-border bg-secondary/60" />
-
-                <div className="relative rounded-3xl border border-border bg-card p-6 shadow-xl">
-                  <div className="flex items-center justify-between mb-5">
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                      </span>
-                      <span className="text-xs font-bold">
-                        {isAr ? 'المزامنة المباشرة' : 'Live sync'}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-semibold text-muted-foreground">
-                      {isAr ? 'الآن' : 'Now'}
+            {/* Sync schematic */}
+            <div className="relative">
+              <div className="relative rounded-2xl border border-border bg-card p-5 shadow-[0_30px_80px_-60px_hsl(var(--primary)/0.6)] md:p-6">
+                <div className="mb-5 flex items-center justify-between border-b border-border pb-4">
+                  <span className="flex items-center gap-2 text-xs font-bold">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
                     </span>
+                    {isAr ? 'قناة المزامنة' : 'Sync channel'}
+                  </span>
+                  <span className={EYEBROW}>{isAr ? 'مباشر' : 'live'}</span>
+                </div>
+
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-background/60 p-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground/70">
+                      <ShoppingBag className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className={cn(EYEBROW, 'text-[9px]')}>{isAr ? 'المتجر' : 'Store'}</p>
+                      <p className="truncate text-sm font-bold">Zid · Salla · Shopify</p>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    {liveRows.map(({ icon: Icon, title, sub, time }) => (
-                      <div
-                        key={title}
-                        className="flex items-center gap-3 rounded-xl border border-border/70 bg-secondary/30 px-3 py-2.5"
-                      >
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-card text-foreground/70 shrink-0">
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-bold truncate">{title}</p>
-                          <p className="text-[10px] text-muted-foreground truncate">{sub}</p>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[9px] text-muted-foreground">{time}</span>
-                          <Check className="h-3.5 w-3.5 text-emerald-500" />
-                        </div>
-                      </div>
-                    ))}
+                  <div className="ms-[28px] flex h-10 items-center" aria-hidden>
+                    <svg width="2" height="40" viewBox="0 0 2 40" className="overflow-visible">
+                      <line
+                        x1="1"
+                        y1="0"
+                        x2="1"
+                        y2="40"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth="2"
+                        strokeOpacity="0.55"
+                        className="flow-line"
+                      />
+                    </svg>
                   </div>
 
-                  <div className="mt-5 pt-4 border-t border-border flex flex-wrap items-center justify-center gap-1.5">
-                    {platforms.map((p) => (
-                      <span
-                        key={p}
-                        className="px-2 py-0.5 rounded-md bg-muted text-foreground/70 text-[10px] font-bold"
-                      >
-                        {p}
-                      </span>
-                    ))}
+                  <div className="flex items-center gap-3 rounded-lg border border-primary/35 bg-primary/[0.06] p-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <LinkIcon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className={cn(EYEBROW, 'text-[9px]')}>{isAr ? 'محرّك الربط' : 'Link engine'}</p>
+                      <p className="truncate text-sm font-bold">ErpLink</p>
+                    </div>
+                    <span className="ms-auto font-mono text-[10px] font-bold text-primary">2s</span>
+                  </div>
+
+                  <div className="ms-[28px] flex h-10 items-center" aria-hidden>
+                    <svg width="2" height="40" viewBox="0 0 2 40" className="overflow-visible">
+                      <line
+                        x1="1"
+                        y1="0"
+                        x2="1"
+                        y2="40"
+                        stroke="hsl(var(--primary))"
+                        strokeWidth="2"
+                        strokeOpacity="0.55"
+                        className="flow-line"
+                      />
+                    </svg>
+                  </div>
+
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-background/60 p-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground/70">
+                      <Box className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className={cn(EYEBROW, 'text-[9px]')}>{isAr ? 'نظام الـ ERP' : 'ERP'}</p>
+                      <p className="truncate text-sm font-bold">Odoo · ERPNext</p>
+                    </div>
                   </div>
                 </div>
+
+                <div className="mt-5 space-y-1.5 border-t border-border pt-4 font-mono text-[10.5px] leading-relaxed">
+                  {flowLog.map((row) => (
+                    <div key={row.from} className="flex items-center gap-2">
+                      <span className="w-12 shrink-0 text-muted-foreground">{row.time}</span>
+                      <span className="truncate text-muted-foreground">{row.from}</span>
+                      <span className="text-primary">→</span>
+                      <span className="truncate font-bold text-foreground">{row.to}</span>
+                      <Check className="ms-auto h-3 w-3 shrink-0 text-primary" />
+                    </div>
+                  ))}
+                </div>
               </div>
+
+              <span className="absolute -top-3 end-4 rounded-md border border-border bg-background px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+                schema 01
+              </span>
             </div>
           </div>
 
-          {/* Stats */}
-          <div className="max-w-7xl mx-auto mt-16 grid grid-cols-3 gap-4 md:gap-6">
-            {[
-              { value: '99.9%', label: t('landing.stats1') },
-              { value: '<2s', label: t('landing.stats2') },
-              { value: '24/7', label: isAr ? 'دعم فني' : 'Support' },
-            ].map((s) => (
-              <div key={s.label} className="text-center">
-                <div className="text-2xl md:text-3xl font-black tracking-tight">{s.value}</div>
-                <div className="text-[11px] text-muted-foreground mt-1 font-semibold">
-                  {s.label}
+          {/* Proof numbers */}
+          <div className="relative border-t border-border bg-secondary/30">
+            <div className="mx-auto grid max-w-7xl grid-cols-3 divide-x divide-border px-6 md:px-12 rtl:divide-x-reverse">
+              {[
+                { value: '99.9%', label: t('landing.stats1') },
+                { value: '<2s', label: t('landing.stats2') },
+                { value: '24/7', label: isAr ? 'دعم فني' : 'Support' },
+              ].map((s) => (
+                <div key={s.label} className="px-3 py-6 text-center">
+                  <div className="font-mono text-2xl font-black tabular-nums tracking-tight md:text-3xl">
+                    {s.value}
+                  </div>
+                  <div className={cn(EYEBROW, 'mt-1.5 text-[9px]')}>{s.label}</div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </section>
 
         {/* ── Platforms strip ─────────────────────────────────── */}
-        <section className="py-10 px-6 md:px-12 border-y border-border bg-muted/30">
-          <div className="max-w-5xl mx-auto">
-            <p className="text-center text-[10px] text-muted-foreground font-semibold uppercase tracking-widest mb-5">
-              {t('landing.trustedBy')}
-            </p>
-            <div className="flex items-center justify-center flex-wrap gap-x-8 gap-y-3 md:gap-x-12">
+        <section className="border-b border-border">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-5 md:px-12">
+            <span className={EYEBROW}>{t('landing.trustedBy')}</span>
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 md:gap-x-10">
               {platforms.map((p) => (
-                <span key={p} className="text-sm font-bold text-foreground/60">
+                <span
+                  key={p}
+                  className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-foreground/65"
+                >
                   {p}
                 </span>
               ))}
@@ -258,56 +287,130 @@ export default async function HomePage() {
           </div>
         </section>
 
-        {/* ── Features ─────────────────────────────────────────── */}
-        <section id="features" className="py-20 md:py-28 px-6 md:px-12">
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center mb-14 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Sparkles className="h-3 w-3" />
-                <span>{t('landing.featuresBadge')}</span>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
-                {t('landing.featuresTitle')}
+        {/* ── 01 · Before / After ─────────────────────────────── */}
+        <section className="px-6 py-20 md:px-12 md:py-28">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+              <div className={cn(EYEBROW, 'md:pt-2')}>01 — {isAr ? 'الفارق' : 'the delta'}</div>
+              <h2 className="text-3xl font-black leading-tight tracking-tight md:text-5xl">
+                {isAr ? (
+                  <>
+                    قبل ERP Link،
+                    <br />
+                    <span className="text-muted-foreground">كل طلب كان عملية يدوية.</span>
+                  </>
+                ) : (
+                  <>
+                    Before ERP Link,
+                    <br />
+                    <span className="text-muted-foreground">every order was manual work.</span>
+                  </>
+                )}
               </h2>
-              <p className="text-muted-foreground max-w-xl mx-auto leading-relaxed">
-                {t('landing.featuresDesc')}
-              </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {features.map(({ icon: Icon, title, desc }) => (
+            <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-2">
+              <div className="bg-card p-6 md:p-8">
+                <p className={cn(EYEBROW, 'mb-5')}>{isAr ? 'قبل' : 'before'}</p>
+                <ul className="space-y-3">
+                  {before.map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-sm">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
+                        <X className="h-3 w-3" />
+                      </span>
+                      <span className="leading-relaxed text-muted-foreground">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="bg-card p-6 md:p-8">
+                <p className={cn(EYEBROW, 'mb-5 text-primary')}>{isAr ? 'بعد' : 'after'}</p>
+                <ul className="space-y-3">
+                  {after.map((item) => (
+                    <li key={item} className="flex items-start gap-3 text-sm">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                        <Check className="h-3 w-3" />
+                      </span>
+                      <span className="leading-relaxed text-foreground/85">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── 02 · Capabilities ───────────────────────────────── */}
+        <section
+          id="features"
+          className="scroll-mt-14 border-y border-border bg-secondary/20 px-6 py-20 md:scroll-mt-16 md:px-12 md:py-28"
+        >
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+              <div className={cn(EYEBROW, 'md:pt-2')}>02 — {isAr ? 'القدرات' : 'capabilities'}</div>
+              <div className="space-y-4">
+                <h2 className="text-3xl font-black tracking-tight md:text-5xl">
+                  {t('landing.featuresTitle')}
+                </h2>
+                <p className="max-w-xl text-sm leading-relaxed text-muted-foreground md:text-base">
+                  {t('landing.featuresDesc')}
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t border-border">
+              {features.map(({ icon: Icon, title, desc }, idx) => (
                 <div
                   key={title}
-                  className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md"
+                  className="group grid grid-cols-[32px_1fr] items-start gap-x-4 gap-y-2 border-b border-border py-6 transition-colors hover:bg-card md:grid-cols-[56px_250px_1fr] md:items-center md:gap-6 md:px-3"
                 >
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-foreground/70 mb-4">
-                    <Icon className="h-5 w-5" />
+                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                    {String(idx + 1).padStart(2, '0')}
                   </span>
-                  <h3 className="text-base font-bold mb-2">{title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
+                  <div className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    <h3 className="text-sm font-bold md:text-base">{title}</h3>
+                  </div>
+                  <p className="col-start-2 text-sm leading-relaxed text-muted-foreground md:col-start-3">
+                    {desc}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── Custom mapping ──────────────────────────────────── */}
-        <section id="custom-mapping" className="py-20 md:py-28 px-6 md:px-12 border-y border-border">
-          <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-14 items-center">
-            <div className="space-y-5">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Workflow className="h-3 w-3" />
-                <span>{isAr ? 'ميزة متقدمة' : 'Advanced feature'}</span>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
-                {isAr ? 'ربط مخصص… مش بس الافتراضي' : 'Custom mapping, not just the default'}
+        {/* ── 03 · Custom mapping ─────────────────────────────── */}
+        <section
+          id="custom-mapping"
+          className="scroll-mt-14 px-6 py-20 md:scroll-mt-16 md:px-12 md:py-28"
+        >
+          <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-[1fr_0.9fr] lg:gap-16">
+            <div>
+              <div className={cn(EYEBROW, 'mb-5')}>03 — {isAr ? 'الربط المخصص' : 'custom mapping'}</div>
+              <h2 className="text-3xl font-black leading-tight tracking-tight md:text-5xl">
+                {isAr ? (
+                  <>
+                    ربط مخصص…
+                    <br />
+                    <span className="text-primary">مش بس الافتراضي</span>
+                  </>
+                ) : (
+                  <>
+                    Custom mapping,
+                    <br />
+                    <span className="text-primary">not just the default</span>
+                  </>
+                )}
               </h2>
-              <p className="text-muted-foreground leading-relaxed max-w-md">
+              <p className="mt-5 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
                 {isAr
                   ? 'لو احتياجك خارج الجاهز، ابنِ ربطك بنفسك: اختر أي موديول في Odoo — حتى الموديولات المخصصة التي أنشأتها — وحدّد الحدث في متجرك، والاتجاه، والعملية، والحقول. كله من داخل النظام بدون كود.'
                   : 'If your case goes beyond the built-in presets, build the mapping yourself: pick any Odoo module — including your own custom models — then choose the store event, direction, operation, and fields. All in-app, no code.'}
               </p>
-              <ul className="space-y-3">
+
+              <ul className="mt-7 space-y-3">
                 {[
                   isAr
                     ? 'أي موديول في Odoo، حتى الموديولات المخصصة (x_)'
@@ -323,262 +426,169 @@ export default async function HomePage() {
                     : 'Full control of fields, related models, and custom fields',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2.5 text-sm">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shrink-0 mt-0.5">
-                      <Check className="h-3 w-3" />
-                    </span>
-                    <span className="text-foreground/80 leading-relaxed">{item}</span>
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                    <span className="leading-relaxed text-foreground/80">{item}</span>
                   </li>
                 ))}
               </ul>
-              <Button
-                asChild
-                size="sm"
-                className="bg-foreground text-background hover:bg-foreground/90 h-9 text-xs font-bold px-4"
-              >
-                <Link href="/sign-up">
-                  {isAr ? 'جرّب الربط المخصص' : 'Try custom mapping'}
-                </Link>
+
+              <Button asChild size="sm" className="mt-7 h-9 px-4 text-xs font-bold">
+                <Link href="/sign-up">{isAr ? 'جرّب الربط المخصص' : 'Try custom mapping'}</Link>
               </Button>
             </div>
 
-            {/* Mapping visual */}
-            <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-foreground/70">
-                    <SlidersHorizontal className="h-4 w-4" />
-                  </span>
-                  <span className="text-sm font-bold">
-                    {isAr ? 'مركز الربط — ربط مخصص' : 'Mapping Center — Custom'}
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[10px] font-bold">
-                  {isAr ? 'اتجاهان' : 'Dual'}
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="flex items-center justify-between border-b border-border px-4 py-3">
+                <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                  routes.json
+                </span>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  {isAr ? 'اتجاهان' : 'bidirectional'}
                 </span>
               </div>
               <div className="divide-y divide-border">
-                {[
-                  { event: 'order.created', model: 'sale.order', custom: false },
-                  { event: 'product.updated', model: 'product.template', custom: false },
-                  { event: 'customer.created', model: 'res.partner', custom: false },
-                  { event: 'x_custom.event', model: 'x_projects', custom: true },
-                ].map((row) => (
-                  <div key={row.event} className="flex items-center gap-3 px-5 py-3.5">
-                    <code className="text-[11px] text-muted-foreground font-mono truncate">
-                      {row.event}
-                    </code>
-                    <ArrowLeft className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground/50', !isAr && 'rotate-180')} />
-                    <code className="text-[11px] font-mono font-bold text-foreground truncate">
-                      {row.model}
-                    </code>
-                    {row.custom && (
-                      <span className="ms-auto shrink-0 px-2 py-0.5 rounded-md bg-foreground text-background text-[9px] font-bold">
-                        {isAr ? 'موديول مخصص' : 'Custom'}
-                      </span>
+                {routes.map((row) => (
+                  <div
+                    key={row.event}
+                    className={cn(
+                      'grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 font-mono text-[11px]',
+                      row.custom && 'bg-primary/[0.04]'
                     )}
+                  >
+                    <span className={cn('truncate', row.custom ? 'text-primary' : 'text-muted-foreground')}>
+                      {row.event}
+                    </span>
+                    <ArrowLeft className={cn('h-3 w-3 shrink-0 text-primary/70', !isAr && 'rotate-180')} />
+                    <span className="truncate text-end font-bold text-foreground">{row.model}</span>
                   </div>
                 ))}
               </div>
-              <div className="px-5 py-3.5 bg-muted/40 border-t border-border">
-                <p className="text-[11px] text-muted-foreground">
-                  {isAr
-                    ? 'أي موديول • أي حدث • تحكم كامل بالحقول'
-                    : 'Any module • any event • full field control'}
-                </p>
+              <div className="border-t border-border bg-secondary/40 px-4 py-2.5 font-mono text-[10px] text-muted-foreground">
+                {isAr ? '٣ مسارات افتراضية + مسار مخصص' : '3 default routes + 1 custom'}
               </div>
             </div>
           </div>
         </section>
 
-        {/* ── Before / After ──────────────────────────────────── */}
-        <section className="py-20 md:py-28 px-6 md:px-12 bg-muted/30">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-14 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Zap className="h-3 w-3" />
-                <span>{isAr ? 'الفرق واضح' : 'The difference'}</span>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
-                {isAr ? 'قبل ERP Link وبعده' : 'Before and after ERP Link'}
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-border bg-card p-6 md:p-7">
-                <h3 className="text-sm font-black text-muted-foreground uppercase tracking-wide mb-5">
-                  {isAr ? 'قبل' : 'Before'}
-                </h3>
-                <ul className="space-y-3">
-                  {before.map((item) => (
-                    <li key={item} className="flex items-start gap-2.5 text-sm">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground shrink-0 mt-0.5">
-                        <X className="h-3 w-3" />
-                      </span>
-                      <span className="text-muted-foreground leading-relaxed">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="rounded-2xl border border-primary/30 bg-card p-6 md:p-7 shadow-sm">
-                <h3 className="text-sm font-black text-primary uppercase tracking-wide mb-5">
-                  {isAr ? 'مع ERP Link' : 'With ERP Link'}
-                </h3>
-                <ul className="space-y-3">
-                  {after.map((item) => (
-                    <li key={item} className="flex items-start gap-2.5 text-sm">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground text-background shrink-0 mt-0.5">
-                        <Check className="h-3 w-3" />
-                      </span>
-                      <span className="text-foreground/80 leading-relaxed">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ── How It Works ─────────────────────────────────────── */}
+        {/* ── 04 · How it works ───────────────────────────────── */}
         <section
           id="how-it-works"
-          className="py-20 md:py-28 px-6 md:px-12 scroll-mt-16 md:scroll-mt-20"
+          className="scroll-mt-16 border-y border-border bg-secondary/20 px-6 py-20 md:scroll-mt-20 md:px-12 md:py-28"
         >
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-14 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Settings className="h-3 w-3" />
-                <span>{t('how.stepsBadge')}</span>
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-12 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+              <div className={cn(EYEBROW, 'md:pt-2')}>04 — {isAr ? 'الخطوات' : 'the steps'}</div>
+              <div className="space-y-3">
+                <h2 className="text-3xl font-black tracking-tight md:text-5xl">{t('how.title')}</h2>
+                <p className="text-sm text-muted-foreground md:text-base">{t('how.subtitle')}</p>
               </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
-                {t('how.title')}
-              </h2>
-              <p className="text-muted-foreground">{t('how.subtitle')}</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
-              {[
-                { num: isAr ? '١' : '1', icon: LinkIcon, title: t('how.step1'), desc: t('how.step1Desc') },
-                { num: isAr ? '٢' : '2', icon: Settings, title: t('how.step2'), desc: t('how.step2Desc') },
-                { num: isAr ? '٣' : '3', icon: RefreshCw, title: t('how.step3'), desc: t('how.step3Desc') },
-              ].map(({ num, icon: Icon, title, desc }, idx) => (
-                <div key={title} className="relative rounded-2xl border border-border bg-card p-6 md:p-7">
-                  <div className="flex items-center justify-between mb-5">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-foreground text-background text-sm font-black">
-                      {num}
+            <div className="grid gap-10 md:grid-cols-3 md:gap-8">
+              {steps.map(({ icon: Icon, title, desc }, idx) => (
+                <div key={title} className="relative">
+                  <div className="mb-5 flex items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 font-mono text-[11px] font-bold text-primary">
+                      {String(idx + 1).padStart(2, '0')}
                     </span>
-                    <Icon className="h-5 w-5 text-muted-foreground" />
+                    <span
+                      className={cn(
+                        'hidden h-px flex-1 md:block',
+                        idx < steps.length - 1
+                          ? 'bg-gradient-to-r from-primary/40 to-border rtl:bg-gradient-to-l'
+                          : 'bg-transparent'
+                      )}
+                    />
+                    <Icon className="h-4 w-4 text-muted-foreground md:hidden" />
                   </div>
-                  <h3 className="text-base font-bold mb-2">{title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{desc}</p>
-                  {idx < 2 && (
-                    <span className="hidden md:block absolute top-1/2 -translate-y-1/2 ltr:-right-3 rtl:-left-3 text-muted-foreground/40">
-                      <ArrowLeft className={cn('h-5 w-5', !isAr && 'rotate-180')} />
-                    </span>
-                  )}
+                  <h3 className="text-base font-bold">{title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{desc}</p>
                 </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* ── Pricing teaser ──────────────────────────────────── */}
-        <section className="py-20 md:py-24 px-6 md:px-12 bg-muted/30">
-          <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
-            <div className="space-y-5">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <Shield className="h-3 w-3" />
-                <span>{isAr ? 'خطة واحدة' : 'One plan'}</span>
+        {/* ── 05 · One plan ───────────────────────────────────── */}
+        <section className="px-6 py-20 md:px-12 md:py-24">
+          <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1fr_auto] lg:gap-16">
+            <div>
+              <div className="mb-5 flex items-center gap-2">
+                <div className={EYEBROW}>05 — {isAr ? 'الخطة' : 'the plan'}</div>
+                <Shield className="h-3.5 w-3.5 text-primary" />
               </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
+              <h2 className="text-3xl font-black tracking-tight md:text-5xl">
                 {isAr ? 'سعر واحد، كل المزايا' : 'One price, every feature'}
               </h2>
-              <p className="text-muted-foreground leading-relaxed max-w-md">
+              <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
                 {isAr
                   ? 'ابدأ بتجربة مجانية ٧ أيام، ثم استمر بسعر ثابت — بدون باقات متعددة ولا حدود مخفية.'
                   : 'Start with a 7-day free trial, then continue at one flat price — no plan tiers, no hidden limits.'}
               </p>
-              <ul className="space-y-2.5">
+              <ul className="mt-6 space-y-2.5">
                 {[
                   isAr ? 'متاجر وأعضاء فريق غير محدودين' : 'Unlimited stores and team members',
                   isAr ? 'كل المزايا مفتوحة من اليوم الأول' : 'Every feature unlocked from day one',
                   isAr ? 'إلغاء في أي وقت' : 'Cancel anytime',
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2.5 text-sm">
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-card text-foreground shrink-0 mt-0.5">
-                      <Check className="h-3 w-3" />
-                    </span>
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                     <span className="text-foreground/80">{item}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="flex justify-center lg:justify-end">
-              <div className="relative w-full max-w-sm rotate-[2deg] transition-transform duration-300 hover:rotate-0">
-                <div className="absolute inset-0 -translate-x-3 translate-y-3 rounded-3xl border border-border bg-secondary/70" />
-
-                <div className="relative rounded-3xl border border-border bg-card p-8 shadow-xl">
-                  <p className="text-sm font-bold text-muted-foreground mb-3">
-                    {t('pricing.business.name')}
-                  </p>
-                  <div className="flex items-baseline gap-1.5 mb-2">
-                    <span className="text-5xl font-black">
-                      <span className="text-2xl font-black text-foreground/60 align-top">$</span>
-                      {t('pricing.business.price')}
-                    </span>
-                    <span className="text-sm text-muted-foreground font-medium">
-                      {t('pricing.business.period')}
-                    </span>
-                  </div>
-                  <p className="text-xs font-bold text-primary mb-7">
-                    {isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}
-                  </p>
-
-                  <Button
-                    asChild
-                    className="w-full rounded-xl font-bold bg-foreground text-background hover:opacity-90"
-                  >
-                    <Link href="/pricing">{isAr ? 'عرض الخطة' : 'View the plan'}</Link>
-                  </Button>
-                  <Link
-                    href="/sign-up"
-                    className="mt-3 block text-center text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    {t('landing.startFree')}
-                  </Link>
-                </div>
+            <div className="w-full rounded-2xl border border-border bg-card p-8 lg:w-[340px]">
+              <div className="flex items-center justify-between">
+                <p className={EYEBROW}>{t('pricing.business.name')}</p>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                  {isAr ? '٧ أيام مجاناً' : '7 days free'}
+                </span>
               </div>
+              <div className="mt-5 flex items-baseline gap-1.5">
+                <span className="font-mono text-5xl font-black tabular-nums">
+                  <span className="align-top text-xl text-muted-foreground">$</span>
+                  {t('pricing.business.price')}
+                </span>
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t('pricing.business.period')}
+                </span>
+              </div>
+              <Button asChild variant="brand" className="mt-7 w-full rounded-xl font-bold">
+                <Link href="/pricing">{isAr ? 'عرض الخطة' : 'View the plan'}</Link>
+              </Button>
+              <Link
+                href="/sign-up"
+                className="mt-3 block text-center text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t('landing.startFree')}
+              </Link>
             </div>
           </div>
         </section>
 
         {/* ── FAQ ─────────────────────────────────────────────── */}
-        <section className="py-20 md:py-28 px-6 md:px-12">
-          <div className="max-w-3xl mx-auto">
-            <div className="text-center mb-12 space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
-                <ChevronDown className="h-3 w-3" />
-                <span>{t('landing.faqBadge')}</span>
-              </div>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight">
-                {t('landing.faqTitle')}
-              </h2>
+        <section className="border-t border-border px-6 py-20 md:px-12 md:py-28">
+          <div className="mx-auto max-w-4xl">
+            <div className="mb-8 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+              <div className={cn(EYEBROW, 'md:pt-2')}>{t('landing.faqBadge')}</div>
+              <h2 className="text-3xl font-black tracking-tight md:text-4xl">{t('landing.faqTitle')}</h2>
             </div>
 
-            <div className="space-y-3">
+            <div className="border-t border-border">
               {faqs.map((faq, idx) => (
-                <details
-                  key={idx}
-                  className="group rounded-2xl border border-border bg-card overflow-hidden shadow-sm"
-                >
-                  <summary className="flex items-center justify-between gap-4 px-6 py-4 cursor-pointer list-none">
-                    <span className="font-bold text-sm">{faq.q}</span>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180 shrink-0" />
+                <details key={idx} className="group border-b border-border">
+                  <summary className="flex cursor-pointer list-none items-start gap-4 py-5">
+                    <span className="pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {String(idx + 1).padStart(2, '0')}
+                    </span>
+                    <span className="flex-1 text-sm font-bold md:text-base">{faq.q}</span>
+                    <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
                   </summary>
-                  <div className="px-6 pb-5 text-sm text-muted-foreground leading-relaxed">
+                  <p className="pb-5 ps-10 pe-8 text-sm leading-relaxed text-muted-foreground">
                     {faq.a}
-                  </div>
+                  </p>
                 </details>
               ))}
             </div>
@@ -586,45 +596,32 @@ export default async function HomePage() {
         </section>
 
         {/* ── CTA ──────────────────────────────────────────────── */}
-        <section className="pt-4 pb-20 px-6 md:px-12">
-          <div className="max-w-4xl mx-auto">
-            <div className="rounded-3xl bg-card border border-border p-10 md:p-14 text-center relative overflow-hidden shadow-sm">
-              <div className="absolute inset-0 bg-muted/20" />
+        <section className="px-6 pb-20 md:px-12 md:pb-28">
+          <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-border bg-card">
+            <div className="blueprint-grid pointer-events-none absolute inset-0 opacity-70" aria-hidden />
+            <div className="pointer-events-none absolute -end-16 -top-16 h-56 w-56 rounded-full bg-primary/10 blur-3xl" aria-hidden />
 
-              <div className="relative space-y-5">
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-muted text-muted-foreground text-sm font-semibold">
-                  <Bell className="h-3.5 w-3.5" />
-                  <span>{t('cta.badge')}</span>
-                </div>
-
-                <h2 className="text-3xl md:text-4xl font-black tracking-tight leading-tight">
-                  {t('cta.title')}
-                </h2>
-
-                <p className="text-muted-foreground max-w-lg mx-auto leading-relaxed">
-                  {t('cta.subtitle')}
-                </p>
-
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-                  <Button
-                    asChild
-                    size="lg"
-                    className="bg-foreground text-background hover:opacity-90 rounded-xl px-8 py-6 text-base font-bold shadow-sm"
-                  >
-                    <Link href="/sign-up" className="flex items-center gap-2">
-                      {t('cta.btnStart')}
-                      <ExternalLink className="h-4 w-4" />
-                    </Link>
-                  </Button>
-                  <Button
-                    asChild
-                    variant="outline"
-                    size="lg"
-                    className="rounded-xl px-6 py-6 text-base font-semibold"
-                  >
-                    <Link href="/sign-in">{t('landing.signIn')}</Link>
-                  </Button>
-                </div>
+            <div className="relative px-6 py-14 text-center md:px-14 md:py-20">
+              <span className={cn(EYEBROW, 'inline-flex items-center gap-2')}>
+                <Shield className="h-3.5 w-3.5 text-primary" />
+                {t('cta.badge')}
+              </span>
+              <h2 className="mx-auto mt-5 max-w-2xl text-3xl font-black leading-tight tracking-tight md:text-5xl">
+                {t('cta.title')}
+              </h2>
+              <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-muted-foreground md:text-base">
+                {t('cta.subtitle')}
+              </p>
+              <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+                <Button asChild size="lg" variant="brand" className="h-12 rounded-xl px-8 text-sm font-bold">
+                  <Link href="/sign-up" className="inline-flex items-center gap-2">
+                    {t('cta.btnStart')}
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </Button>
+                <Button asChild size="lg" variant="outline" className="h-12 rounded-xl px-6 text-sm font-semibold">
+                  <Link href="/sign-in">{t('landing.signIn')}</Link>
+                </Button>
               </div>
             </div>
           </div>
