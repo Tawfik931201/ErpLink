@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Check,
   Loader2,
   RefreshCw,
   Search,
@@ -139,9 +140,11 @@ export default function LogsClient() {
   const [isStatusOpen, setIsStatusOpen] = useState(false)
   const [isPlatformOpen, setIsPlatformOpen] = useState(false)
   const [isMappingOpen, setIsMappingOpen] = useState(false)
+  const [isEntityOpen, setIsEntityOpen] = useState(false)
   const statusRef = useRef<HTMLDivElement>(null)
   const platformRef = useRef<HTMLDivElement>(null)
   const mappingRef = useRef<HTMLDivElement>(null)
+  const entityRef = useRef<HTMLDivElement>(null)
 
   const entityLabels: Record<string, string> = {
     product: t('log.entityProduct'),
@@ -163,6 +166,7 @@ export default function LogsClient() {
       if (statusRef.current && !statusRef.current.contains(event.target as Node)) setIsStatusOpen(false)
       if (platformRef.current && !platformRef.current.contains(event.target as Node)) setIsPlatformOpen(false)
       if (mappingRef.current && !mappingRef.current.contains(event.target as Node)) setIsMappingOpen(false)
+      if (entityRef.current && !entityRef.current.contains(event.target as Node)) setIsEntityOpen(false)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
@@ -488,7 +492,36 @@ export default function LogsClient() {
           )}
         </FilterSelect>
 
-        <form onSubmit={applyEntityIdSearch} className="flex items-center gap-1.5">
+        <FilterSelect
+          label={t('log.entity')}
+          buttonRef={entityRef}
+          isOpen={isEntityOpen}
+          onToggle={() => setIsEntityOpen(!isEntityOpen)}
+          triggerText={entity === 'all' ? t('log.all') : entityLabels[entity] || entity}
+          minWidth="min-w-[110px]"
+        >
+          {[{ key: 'all', label: t('log.all') }, ...ENTITY_KEYS.map(k => ({ key: k, label: entityLabels[k] }))].map(opt => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => {
+                setEntity(opt.key)
+                setIsEntityOpen(false)
+              }}
+              className={cn(
+                'flex w-full items-center justify-between gap-2 px-3 py-2 text-xs transition-colors',
+                entity === opt.key
+                  ? 'bg-muted/60 font-bold text-foreground'
+                  : 'font-medium text-muted-foreground hover:bg-muted'
+              )}
+            >
+              <span className="truncate">{opt.label}</span>
+              {entity === opt.key && <Check className="h-3.5 w-3.5 shrink-0" />}
+            </button>
+          ))}
+        </FilterSelect>
+
+        <form onSubmit={applyEntityIdSearch} className="flex items-center gap-1.5 ms-auto">
           <Input
             value={entityIdInput}
             onChange={e => setEntityIdInput(e.target.value)}
@@ -517,24 +550,6 @@ export default function LogsClient() {
           )}
         </form>
 
-        <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10px] font-bold text-muted-foreground">{t('log.entity')}:</span>
-          {[{ key: 'all', label: t('log.all') }, ...ENTITY_KEYS.map(k => ({ key: k, label: entityLabels[k] }))].map(opt => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => setEntity(opt.key)}
-              className={cn(
-                'border px-2 py-0.5 text-[10px] transition-colors',
-                entity === opt.key
-                  ? 'border-foreground/40 bg-muted font-bold text-foreground'
-                  : 'border-border text-muted-foreground hover:bg-muted/50'
-              )}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
