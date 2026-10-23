@@ -12,6 +12,7 @@ export interface MobileNavSectionItem {
   href: string
   icon: string
   label: string
+  children?: MobileNavSectionItem[]
 }
 
 export interface MobileNavSection {
@@ -49,6 +50,32 @@ export default function MobileNav({
           {sections.map((section, i) => (
             <div key={i} className="space-y-1">
               {section.items.map((item) => {
+                if (item.children && item.children.length > 0) {
+                  return (
+                    <div key={item.href} className="space-y-1">
+                      <span className="flex items-center gap-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {item.label}
+                      </span>
+                      {item.children.map((child) => {
+                        const childActive = pathname === child.href
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={() => setOpen(false)}
+                            className={cn(
+                              'flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+                              childActive ? 'bg-foreground text-background' : 'text-foreground hover:bg-muted'
+                            )}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
+                            {child.label}
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )
+                }
                 const active = pathname === item.href
                 return (
                   <Link

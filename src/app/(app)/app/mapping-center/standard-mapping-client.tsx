@@ -1853,11 +1853,8 @@ export default function StandardMappingClient({
   return (
     <>
       {/* ── Row 2: Standard Entity Tabs ─────────────────────── */}
-      <div
-        className="fixed top-14 z-40 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60"
-        style={{ insetInlineStart: '200px', insetInlineEnd: '0px' }}
-      >
-          <div className="flex items-center gap-1 px-6 h-10">
+      <div className="sticky top-0 z-30 -mx-6 md:-mx-8 px-6 md:px-8 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+          <div className="flex items-center gap-1 h-10">
             {[
               { key: 'categories', labelAr: 'كاتيجوري', labelEn: 'Categories', icon: <FolderTree className="h-3.5 w-3.5" /> },
               { key: 'products', labelAr: 'المنتجات', labelEn: 'Products', icon: <Package className="h-3.5 w-3.5" /> },
@@ -1884,7 +1881,7 @@ export default function StandardMappingClient({
       </div>
 
       {/* ── Scrollable Content ──────────────────────────────── */}
-      <div className="max-w-7xl mx-auto space-y-5 font-sans pt-[73px] md:pt-[65px]" dir={dir}>
+      <div className="max-w-7xl mx-auto space-y-5 font-sans" dir={dir}>
 
         <motion.div
           key="standard-tab"

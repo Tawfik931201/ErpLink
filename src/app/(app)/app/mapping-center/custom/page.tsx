@@ -10,7 +10,6 @@ import {
   getMappingCenterModels,
   getMappingCenterPreloadedFields,
 } from '../mapping-center-data'
-import MappingCenterHeader from '../mapping-center-header'
 import MappingCenterNotice from '../mapping-center-notice'
 
 export const metadata: Metadata = {
@@ -32,8 +31,6 @@ export default async function CustomMappingPage() {
 
   return (
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
-      <MappingCenterHeader erpType={erpType} />
-
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}

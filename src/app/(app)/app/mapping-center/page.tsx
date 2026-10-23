@@ -4,7 +4,6 @@ import { cookies } from 'next/headers'
 import { resolveLanguage } from '@/lib/translations'
 
 import { getMappingCenterConnection } from './mapping-center-data'
-import MappingCenterHeader from './mapping-center-header'
 import MappingCenterNotice from './mapping-center-notice'
 import StandardMappingClient from './standard-mapping-client'
 
@@ -36,8 +35,6 @@ export default async function MappingCenterPage(
 
   return (
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
-      <MappingCenterHeader erpType={erpType} />
-
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}

@@ -5,7 +5,6 @@ import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
 import { resolveLanguage } from '@/lib/translations'
 
 import AddCustomFieldForm from '../add-custom-field-form'
-import MappingCenterHeader from '../mapping-center-header'
 import MappingCenterNotice from '../mapping-center-notice'
 
 export const metadata: Metadata = {
@@ -30,13 +29,11 @@ export default async function AddFieldPage() {
 
   return (
     <div className="w-full max-w-[95%] mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
-      <MappingCenterHeader erpType={erpType} />
-
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}
 
-      <div className="max-w-7xl mx-auto space-y-5 pt-[33px] md:pt-[25px]" dir={dir}>
+      <div className="max-w-7xl mx-auto space-y-5" dir={dir}>
         <div>
           <div className="flex items-center gap-2 mb-0.5">
             <span className="text-xs font-semibold text-muted-foreground">

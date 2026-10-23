@@ -307,7 +307,7 @@ export default function CustomMappingClient({
   ]
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 pt-[33px] md:pt-[25px]" dir={dir}>
+    <div className="max-w-7xl mx-auto space-y-4" dir={dir}>
       <motion.div
         key="mapping-tab"
         initial={{ opacity: 0, y: 8 }}

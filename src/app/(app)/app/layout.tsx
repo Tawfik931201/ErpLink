@@ -153,7 +153,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     {
       label: lang === 'ar' ? 'المزامنة' : 'Sync',
       items: [
-        { href: '/app/mapping-center', icon: 'mapping', label: t('nav.fieldMapping') },
+        {
+          href: '/app/mapping-center',
+          icon: 'mapping',
+          label: t('nav.fieldMapping'),
+          children: [
+            {
+              href: '/app/mapping-center',
+              icon: 'mapping',
+              label: lang === 'ar' ? 'ستاندرد مابينج' : 'Standard Mapping',
+            },
+            {
+              href: '/app/mapping-center/custom',
+              icon: 'settings',
+              label: lang === 'ar' ? 'تخصيص الربط' : 'Custom Mapping',
+            },
+            {
+              href: '/app/mapping-center/add-field',
+              icon: 'database',
+              label: lang === 'ar' ? 'إضافة حقل' : 'Add Field',
+            },
+          ],
+        },
         { href: '/app/queue', icon: 'order', label: t('nav.queue') },
         { href: '/app/logs', icon: 'logs', label: t('nav.logs') },
         { href: '/app/initial-transfer', icon: 'transfer', label: t('nav.initialTransfer') },
