@@ -23,6 +23,7 @@ import fs from 'fs'
 import path from 'path'
 
 import { normalizeZidStoreId } from '@/lib/zid/store-identity'
+
 import { supabase } from '../mocks/supabase'
 
 function readStripped(relativePath: string): string {

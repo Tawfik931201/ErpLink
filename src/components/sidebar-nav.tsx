@@ -83,15 +83,15 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
                   className={cn(
                     "group relative flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-150 outline-none select-none",
                     isActive
-                      ? "bg-muted/60 dark:bg-[#424242f0] text-muted-foreground dark:text-[#999999] shadow-sm dark:shadow-none"
-                      : "text-muted-foreground dark:text-[#999999] hover:text-foreground hover:bg-muted/40 dark:hover:bg-[#424242e0]"
+                      ? "text-primary"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   )}
                 >
                   {/* Sliding Active Background Pill */}
                   {isActive && (
                     <motion.div
                       layoutId="activeNavPill"
-                      className="absolute inset-0 bg-muted/60 dark:bg-[#424242f0] -z-10 rounded-lg shadow-sm dark:shadow-none"
+                      className="absolute inset-0 rounded-lg bg-primary/10 ring-1 ring-inset ring-primary/15 -z-10"
                       transition={{ type: "spring", stiffness: 380, damping: 30 }}
                     />
                   )}
@@ -100,7 +100,7 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
                   <Icon
                     className={cn(
                       "h-[16px] w-[16px] transition-colors duration-150 shrink-0",
-                      "text-muted-foreground dark:text-[#999999] group-hover:text-foreground"
+                      isActive ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
                     )}
                   />
 

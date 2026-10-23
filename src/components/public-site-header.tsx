@@ -12,7 +12,7 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
   const isSignedIn = !!userId
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border bg-background">
+    <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/65">
       <div className="flex h-14 items-center justify-between px-6 md:px-12 max-w-7xl mx-auto">
         <Link href="/" className="flex items-center select-none" aria-label="ErpLink Home">
           <Logo variant="horizontal" size="md" priority />
@@ -32,11 +32,7 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
           <ThemeSwitcher compact placement="down" />
           <span className="hidden sm:block mx-0.5 h-5 w-px bg-border" aria-hidden />
           {isSignedIn ? (
-            <Button
-              asChild
-              size="sm"
-              className="bg-foreground text-background hover:bg-foreground/90 h-8 text-[11px] font-bold px-3.5"
-            >
+            <Button asChild size="sm" className="h-8 text-[11px] font-bold px-3.5">
               <Link href="/app/dashboard">
                 {lang === 'ar' ? 'لوحة التحكم' : 'Dashboard'}
               </Link>
@@ -49,11 +45,7 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
               >
                 {lang === 'ar' ? 'تسجيل الدخول' : 'Sign In'}
               </Link>
-              <Button
-                asChild
-                size="sm"
-                className="bg-foreground text-background hover:bg-foreground/90 h-8 text-[11px] font-bold px-3.5"
-              >
+              <Button asChild size="sm" variant="brand" className="h-8 text-[11px] font-bold px-3.5">
                 <Link href="/sign-up">
                   {lang === 'ar' ? 'ابدأ مجاناً' : 'Start Free'}
                 </Link>
