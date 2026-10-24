@@ -64,9 +64,11 @@ describe('extractOrderLocationInfo — Salla branch paths', () => {
 })
 
 describe('orders multi-warehouse rules UI is platform-aware', () => {
-  const client = readStripped(
-    'src/app/(app)/app/mapping-center/standard-mapping-client.tsx'
-  )
+  const client =
+    readStripped('src/app/(app)/app/mapping-center/standard-mapping-client.tsx') +
+    readStripped(
+      'src/app/(app)/app/mapping-center/standard-components/order-settings-tab.tsx'
+    )
 
   it('builds a Salla branch options list next to the Zid one', () => {
     expect(client).toContain('sallaOrderLocationOptions')

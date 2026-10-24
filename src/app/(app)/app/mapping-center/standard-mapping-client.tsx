@@ -1,50 +1,32 @@
 'use client'
 
-import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Plus, 
-  Trash2, 
-  SlidersHorizontal, 
-  Loader2,
-  History,
-  ArrowRightLeft,
+import { AnimatePresence, motion } from 'framer-motion'
+import {
   FolderTree,
   Package,
-  PackagePlus,
-  PackageX,
-  PackageCheck,
-  Users,
-  UserPlus,
-  UserX,
-  UserCheck,
   ShoppingCart,
-  Activity,
-  Pencil,
-  RefreshCw,
-  Zap,
-  Receipt,
-  Wand2,
-  Calculator,
+  SlidersHorizontal,
+  Users,
 } from 'lucide-react'
 import Link from 'next/link'
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { getFieldMappings } from '@/app/actions/field-mappings'
 import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
 import {
   getOdooAnalyticAccounts,
+  getOdooCustomers,
   getOdooFieldValueOptions,
   getOdooLocations,
-  getOdooWarehouses,
-  getOdooCustomers,
   getOdooProducts,
   getOdooTaxes,
+  getOdooWarehouses,
 } from '@/app/actions/odoo'
 import {
-  createZidOrderStatusFieldInOdoo,
   checkZidOrderStatusField,
+  createZidOrderStatusFieldInOdoo,
 } from '@/app/actions/order-custom-status'
-import { saveOrderStatusMappings, getOrderStatusMappings } from '@/app/actions/order-status-mappings'
+import { getOrderStatusMappings, saveOrderStatusMappings } from '@/app/actions/order-status-mappings'
 import { getSallaLocations, getSallaPaymentMethods, type SallaLocation } from '@/app/actions/salla'
 import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
 import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
@@ -52,7 +34,6 @@ import { getZidLocations, getZidPaymentMethods, type ZidLocation } from '@/app/a
 import { useLanguage } from '@/components/language-provider'
 import CategoryMappingDialog from '@/components/mapping/category-mapping-dialog'
 import ProductMappingDialog from '@/components/mapping/product-mapping-dialog'
-import { Button } from '@/components/ui/button'
 import { useToast } from '@/hooks/use-toast'
 import { toOdooFieldOption, type OdooFieldOption } from '@/lib/odoo-field-options'
 import {
@@ -65,7 +46,10 @@ import { SHOPIFY_FIELDS } from '@/lib/platforms/shopify/fields'
 import { ZID_FIELDS } from '@/lib/platforms/zid/fields'
 import { cn } from '@/lib/utils'
 
-import SearchableSelect from './searchable-select'
+import { CategorySettingsTab } from './standard-components/category-settings-tab'
+import { CustomerSettingsTab } from './standard-components/customer-settings-tab'
+import { OrderSettingsTab } from './standard-components/order-settings-tab'
+import { ProductSettingsTab } from './standard-components/product-settings-tab'
 import SyncLogModal from './sync-log-modal'
 
 interface StandardMappingClientProps {
@@ -1852,3270 +1836,459 @@ export default function StandardMappingClient({
 
   return (
     <>
-      {/* ── Row 2: Standard Entity Tabs ─────────────────────── */}
-      <div className="sticky top-0 z-30 -mx-6 md:-mx-8 px-6 md:px-8 border-b border-border/70 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
-          <div className="flex items-center gap-1 h-10">
+      {/* ── Sticky Navigation Header ─────────────────────── */}
+      <div className="sticky top-0 z-30 -mx-4 md:-mx-8 px-4 md:px-8 border-b border-border/70 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 shadow-xs">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 h-12">
+          {/* Entity Tabs (Underline / Pill hybrid clean style) */}
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
             {[
-              { key: 'categories', labelAr: 'كاتيجوري', labelEn: 'Categories', icon: <FolderTree className="h-3.5 w-3.5" /> },
-              { key: 'products', labelAr: 'المنتجات', labelEn: 'Products', icon: <Package className="h-3.5 w-3.5" /> },
-              { key: 'customers', labelAr: 'العملاء', labelEn: 'Customers', icon: <Users className="h-3.5 w-3.5" /> },
-              { key: 'orders', labelAr: 'الاوردرات', labelEn: 'Orders', icon: <ShoppingCart className="h-3.5 w-3.5" /> },
+              { key: 'categories', labelAr: 'التصنيفات (Categories)', labelEn: 'Categories', icon: <FolderTree className="h-4 w-4" /> },
+              { key: 'products', labelAr: 'المنتجات (Products)', labelEn: 'Products', icon: <Package className="h-4 w-4" /> },
+              { key: 'customers', labelAr: 'العملاء (Customers)', labelEn: 'Customers', icon: <Users className="h-4 w-4" /> },
+              { key: 'orders', labelAr: 'الطلبات (Orders)', labelEn: 'Orders', icon: <ShoppingCart className="h-4 w-4" /> },
             ].map((item) => {
+              const isActive = standardSubTab === item.key
               return (
-              <button
-                key={item.key}
-                onClick={() => setStandardSubTab(item.key as any)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 h-7 rounded-full text-xs font-semibold transition-colors duration-200',
-                  standardSubTab === item.key
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/70'
-                )}
-              >
-                {item.icon}
-                <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
-              </button>
-            )
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setStandardSubTab(item.key as any)}
+                  className={cn(
+                    'flex items-center gap-2 px-3.5 h-8 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap',
+                    isActive
+                      ? 'bg-primary/10 text-primary shadow-2xs font-bold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                  )}
+                >
+                  <span className={cn(isActive ? 'text-primary' : 'text-muted-foreground/80')}>{item.icon}</span>
+                  <span>{lang === 'ar' ? item.labelAr : item.labelEn}</span>
+                </button>
+              )
             })}
           </div>
+
+          {/* Quick status badge if ERP connected */}
+          {hasOdooConnection && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span>{lang === 'ar' ? 'أودو متصل' : 'Odoo Connected'}</span>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── Scrollable Content ──────────────────────────────── */}
-      <div className="max-w-7xl mx-auto space-y-5 font-sans" dir={dir}>
-
-        <motion.div
-          key="standard-tab"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <div className="flex flex-col gap-4">
-
-            {/* ── Title ────────────────────────────────────── */}
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="inline-block h-5 w-1 rounded-full bg-primary/70 shrink-0" />
-                <span className="text-[11px] font-semibold text-muted-foreground">
-                  {lang === 'ar' ? 'مركز الربط' : 'Mapping Center'}
-                </span>
-                <span className="text-muted-foreground/30 text-[11px]">{'/'}</span>
-                <h1 className="text-xl font-extrabold tracking-tight text-foreground">
-                  {lang === 'ar'
-                    ? ({ categories: 'كاتيجوري', products: 'المنتجات', customers: 'العملاء', orders: 'الاوردرات' } as any)[standardSubTab]
-                    : ({ categories: 'Categories', products: 'Products', customers: 'Customers', orders: 'Orders' } as any)[standardSubTab]}
-                </h1>
-              </div>
-              <p className="text-muted-foreground text-[11px] ps-3">
-                {lang === 'ar' ? 'إعدادات الربط الافتراضية' : 'Default mapping settings'}
-              </p>
+      {/* ── Main Content Area ──────────────────────────────── */}
+      <div className="max-w-7xl mx-auto space-y-6 pt-2 pb-16 font-sans" dir={dir}>
+        {/* Top Header Card */}
+        <div className="rounded-2xl border border-border/80 bg-card/70 p-5 shadow-xs backdrop-blur-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-4 w-1.5 rounded-full bg-primary shrink-0" />
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                {lang === 'ar' ? 'مركز الربط القياسي' : 'Standard Mapping Center'}
+              </span>
             </div>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+              {lang === 'ar'
+                ? ({ categories: 'إعدادات ربط التصنيفات', products: 'إعدادات ربط المنتجات والمخزون', customers: 'إعدادات ربط العملاء والحسابات', orders: 'إعدادات ربط الطلبات والفواتير' } as any)[standardSubTab]
+                : ({ categories: 'Category Mapping Settings', products: 'Product & Inventory Mapping', customers: 'Customer & Account Mapping', orders: 'Order & Invoice Mapping' } as any)[standardSubTab]}
+            </h1>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {lang === 'ar'
+                ? 'تخصيص قواعد المزامنة الآلية، الحقول المطابقة، والسلوك الافتراضي بين متجرك ونظام ERP'
+                : 'Configure synchronization rules, field mapping, and fallback policies with your ERP'}
+            </p>
+          </div>
 
-              {/* ── Settings Panel ─────────────────────────── */}
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={standardSubTab}
-                      initial={{ opacity: 0, x: lang === 'ar' ? -20 : 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: lang === 'ar' ? -20 : 20 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-4"
+          {/* Connected Stores Selector (Tabs / Pills) */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 md:pt-0">
+            <span className="text-xs font-medium text-muted-foreground">
+              {lang === 'ar' ? 'المتجر المستهدف:' : 'Active Store:'}
+            </span>
+            <div className="flex items-center gap-1.5 p-1 rounded-xl border border-border/70 bg-muted/40 overflow-x-auto max-w-full">
+              {storeTabs.length > 0 ? (
+                storeTabs.map((store) => {
+                  const isActive = standardStoreTab === store.platform && standardStoreId === store.storeId
+                  return (
+                    <button
+                      key={store.key}
+                      type="button"
+                      onClick={() => selectStoreTab(store.platform, store.storeId)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap',
+                        isActive
+                          ? 'bg-background text-foreground shadow-2xs border border-border'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                      )}
                     >
-                      <div className="card-base overflow-hidden">
-                        {/* ── Store Tabs (one per connected store) ───── */}
-                        <div className="flex items-center gap-1 px-3 py-2 border-b border-border/50 bg-muted/20 overflow-x-auto">
-                          {storeTabs.length > 0 ? (
-                            storeTabs.map((store) => {
-                              const isActive = standardStoreTab === store.platform && standardStoreId === store.storeId
-                              return (
-                              <button
-                                key={store.key}
-                                onClick={() => selectStoreTab(store.platform, store.storeId)}
-                                className={cn(
-                                  'flex items-center gap-2 px-3 h-8 rounded-full text-xs font-semibold transition-colors duration-200 whitespace-nowrap',
-                                  isActive
-                                    ? 'bg-card text-foreground shadow-sm ring-1 ring-border/70'
-                                    : 'text-muted-foreground hover:text-foreground hover:bg-card/70'
-                                )}
-                              >
-                                <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />
-                                <span dir="auto">{store.name}({store.storeId})</span>
-                                <span className="rounded-full bg-muted px-1.5 py-px text-[10px] font-normal text-muted-foreground">
-                                  {platformLabel(store.platform)}
-                                </span>
-                              </button>
-                              )
-                            })
-                          ) : (
-                            <Link
-                              href="/app/connect-store"
-                              className="flex items-center gap-2 px-3 h-8 rounded-full text-xs text-muted-foreground hover:text-foreground hover:bg-card/70 transition-colors"
-                            >
-                              <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-muted-foreground/40" />
-                              <span>
-                                {lang === 'ar'
-                                  ? 'لا يوجد متجر متصل — اربط متجراً أولاً'
-                                  : 'No store connected — connect a store first'}
-                              </span>
-                            </Link>
-                          )}
-                        </div>
-
-                        {/* ── Store Content ────────────────────── */}
-                        <div className="min-h-[250px] p-6">
-                          {activeStoreTab ? (
-                            standardSubTab === 'categories' ? (
-                              <div className="space-y-5">
-                                {/* Section Header */}
-                                <div>
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'تقييم المخزون' : 'Inventory Valuation'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    {lang === 'ar'
-                                      ? 'إعدادات تقييم المخزون الافتراضية عند إنشاء كاتيجوري جديدة في أودو'
-                                      : 'Default inventory valuation settings when creating a new category in Odoo'}
-                                  </p>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4">
-                                  {/* Costing Method */}
-                                  <div className="space-y-1.5">
-                                    <label className="block text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar' ? 'Costing Method' : 'Costing Method'}
-                                    </label>
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={costMethod}
-                                      onChange={e => setCostMethod(e.target.value)}
-                                    >
-                                      <option value="">
-                                        {lang === 'ar' ? '— استخدم الإعداد الافتراضي في أودو —' : '— Use Odoo default —'}
-                                      </option>
-                                      {isLoadingOdooOpts ? (
-                                        <option disabled>
-                                          {lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}
-                                        </option>
-                                      ) : costMethodOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-
-                                  {/* Inventory Valuation */}
-                                  <div className="space-y-1.5">
-                                    <label className="block text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar' ? 'Inventory Valuation' : 'Inventory Valuation'}
-                                    </label>
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={inventoryValuation}
-                                      onChange={e => setInventoryValuation(e.target.value)}
-                                    >
-                                      <option value="">
-                                        {lang === 'ar' ? '— استخدم الإعداد الافتراضي في أودو —' : '— Use Odoo default —'}
-                                      </option>
-                                      {isLoadingOdooOpts ? (
-                                        <option disabled>
-                                          {lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}
-                                        </option>
-                                      ) : valuationOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {/* Company Section */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'تحديد الشركة التابع لها عند إنشاء الكاتيجوري في أودو'
-                                      : 'Specify the Odoo company associated with categories'}
-                                  </p>
-                                  <div className="space-y-1.5 max-w-xs">
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={categoryCompanyId}
-                                      onChange={e => setCategoryCompanyId(e.target.value)}
-                                      disabled={isLoadingCompanies}
-                                    >
-                                      <option value="">
-                                        {lang === 'ar' ? '— اختر الشركة (اختياري) —' : '— Select Company (Optional) —'}
-                                      </option>
-                                      {companyOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  {categoryCompanyId && (
-                                    <div className="flex items-center gap-2 mt-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={categoryLinkCompany}
-                                        onClick={() => setCategoryLinkCompany(!categoryLinkCompany)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          categoryLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          categoryLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs text-muted-foreground">
-                                        {lang === 'ar' ? 'ربط وتحديد الشركة بالسجل في أودو' : 'Link and set company on the Odoo record'}
-                                      </span>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* On Delete Section */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'عند حذف الكاتيجوري في زد' : 'On Category Deletion in Zid'}
-                                  </h3>
-                                  <div className="mt-3">
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={onDeleteAction}
-                                      onChange={e => setOnDeleteAction(e.target.value)}
-                                    >
-                                      {[
-                                        { value: 'nothing', labelAr: 'لا شيء', labelEn: 'Nothing' },
-                                        { value: 'delete', labelAr: 'حذف', labelEn: 'Delete' },
-                                        { value: 'archive', labelAr: 'أرشفة', labelEn: 'Archive' },
-                                        { value: 'delete_or_archive', labelAr: 'محاولة الحذف فإن لم تنجح يعمل أرشفة', labelEn: 'Try Delete, then Archive' },
-                                      ].map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                          {lang === 'ar' ? opt.labelAr : opt.labelEn}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {/* Match Field Section */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد أي حقل من زد يطابق أي حقل في أودو للتعرف على الكاتيجوري'
-                                      : 'Select which Zid field matches which Odoo field to identify the category'}
-                                  </p>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل زد' : 'Zid Field'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={categoryFields}
-                                        value={matchZidField}
-                                        onChange={setMatchZidField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل زد —' : '— Select Zid field —'}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => fetchOdooCategoryFields(true)}
-                                          disabled={isLoadingOdooFields}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingOdooFields && "animate-spin")} />
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={odooCategoryFields}
-                                        value={matchOdooField}
-                                        onChange={setMatchOdooField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo field —'}
-                                        disabled={isLoadingOdooFields}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Sync Actions Section */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد عمليات المزامنة المسموح بها للكاتيجوري'
-                                      : 'Select which sync operations are enabled for categories'}
-                                  </p>
-                                  <div className="space-y-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'العمليات المسموح بها' : 'Allowed Operations'}
-                                      </label>
-                                      {(() => {
-                                        const syncActionOptions = [
-                                          { value: 'create', label: lang === 'ar' ? 'إنشاء (Create)' : 'Create' },
-                                          { value: 'update', label: lang === 'ar' ? 'تعديل (Update)' : 'Update' },
-                                          { value: 'delete', label: lang === 'ar' ? 'حذف (Delete)' : 'Delete' },
-                                        ]
-                                        return (
-                                          <SearchableSelect
-                                            multiple={true}
-                                            collapseTags={false}
-                                            value={enabledActions}
-                                            onChange={setEnabledActions}
-                                            options={syncActionOptions}
-                                            disabled={disabled}
-                                            placeholder={lang === 'ar'
-                                              ? (disabled ? '— المزامنة معطلة —' : '— اختر العمليات —')
-                                              : (disabled ? '— Sync is disabled —' : '— Select operations —')}
-                                          />
-                                        )
-                                      })()}
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={!disabled}
-                                        onClick={() => setDisabled(!disabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          !disabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span
-                                          className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            !disabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )}
-                                        />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? (disabled ? 'تعطيل مزامنة الكاتيجوري' : 'تفعيل مزامنة الكاتيجوري')
-                                          : (disabled ? 'Disable category sync' : 'Enable category sync')}
-                                      </span>
-                                    </div>
-                                    {disabled && (
-                                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                                        {lang === 'ar'
-                                          ? 'عند تعطيل المزامنة، لن يتم إنشاء أو تعديل أو حذف أي كاتيجوري في أودو.'
-                                          : 'When disabled, no categories will be created, updated, or deleted in Odoo.'}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ── Save & Log Buttons ───────────────── */}
-                                <div className="border-t border-border/80 pt-5 flex items-center gap-2">
-                                  <Button
-                                    onClick={handleSave}
-                                    disabled={isSaving}
-                                    className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-9 text-xs px-6"
-                                  >
-                                    {isSaving ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <>{lang === 'ar' ? 'حفظ الإعدادات' : 'Save Settings'}</>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsCategoryMappingOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'ربط يدوي' : 'Manual Mapping'}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsCategoryLogOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <History className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : standardSubTab === 'products' ? (
-                              <div className="space-y-5">
-
-                                {/* ═══ 1. Product Type & Inventory ═══ */}
-                                <div>
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'نوع المنتج والمخزون' : 'Product Type & Inventory'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    {lang === 'ar'
-                                      ? 'إعدادات نوع المنتج الافتراضية وتتبع المخزون'
-                                      : 'Default product type and inventory tracking settings'}
-                                  </p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-1.5">
-                                    <label className="block text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar' ? 'نوع المنتج الافتراضي' : 'Default Product Type'}
-                                    </label>
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={productType}
-                                      onChange={e => setProductType(e.target.value)}
-                                    >
-                                      <option value="">
-                                        {lang === 'ar' ? '— استخدم الإعداد الافتراضي في أودو —' : '— Use Odoo default —'}
-                                      </option>
-                                      {isLoadingProductOpts ? (
-                                        <option disabled>{lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</option>
-                                      ) : productTypeOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <label className="block text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar' ? 'تتبع المخزون' : 'Track Inventory'}
-                                    </label>
-                                    <div className="flex items-center gap-3 h-9">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={trackInventory}
-                                        onClick={() => setTrackInventory(!trackInventory)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          trackInventory ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          trackInventory ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs text-muted-foreground">
-                                        {trackInventory
-                                          ? (lang === 'ar' ? 'نعم' : 'Yes')
-                                          : (lang === 'ar' ? 'لا' : 'No')}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                                {trackInventory && (
-                                  <div className="grid grid-cols-1 gap-4">
-                                    <div className="space-y-1.5 max-w-xs">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'طريقة التتبع' : 'Tracking Method'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={trackingMethod}
-                                        onChange={e => setTrackingMethod(e.target.value)}
-                                      >
-                                        <option value="">
-                                          {lang === 'ar' ? '— لا شيء —' : '— None —'}
-                                        </option>
-                                        {trackingOptions.map(opt => (
-                                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  </div>
-                                )}
-
-                                 {/* Company Selection */}
-                                 <div className="border-t border-border/80 pt-5">
-                                   <div className="flex items-center gap-2 max-w-xs justify-between">
-                                     <h3 className="text-sm font-bold text-foreground">
-                                       {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
-                                     </h3>
-                                     <button
-                                       type="button"
-                                       onClick={fetchCompanies}
-                                       disabled={isLoadingCompanies}
-                                       className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                       title={lang === 'ar' ? 'تحديث الشركات' : 'Refresh Companies'}
-                                     >
-                                       <RefreshCw className={cn("h-3 w-3", isLoadingCompanies && "animate-spin")} />
-                                     </button>
-                                   </div>
-                                   <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                     {lang === 'ar'
-                                       ? 'تحديد الشركة التابع لها عند إنشاء المنتجات في أودو'
-                                       : 'Specify the Odoo company associated with products'}
-                                   </p>
-                                   <div className="space-y-1.5 max-w-xs">
-                                     <select
-                                       className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                       value={productCompanyId}
-                                       onChange={e => setProductCompanyId(e.target.value)}
-                                       disabled={isLoadingCompanies}
-                                     >
-                                       <option value="">
-                                         {lang === 'ar' ? '— اختر الشركة (اختياري) —' : '— Select Company (Optional) —'}
-                                       </option>
-                                       {companyOptions.map(opt => (
-                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                       ))}
-                                     </select>
-                                   </div>
-                                    {productCompanyId && (
-                                      <div className="flex items-center gap-2 mt-3">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={productLinkCompany}
-                                          onClick={() => setProductLinkCompany(!productLinkCompany)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            productLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            productLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs text-muted-foreground">
-                                          {lang === 'ar' ? 'ربط وتحديد الشركة بالسجل في أودو' : 'Link and set company on the Odoo record'}
-                                        </span>
-                                      </div>
-                                    )}
-                                 </div>
-
-                                {/* ═══ 2. Pricing ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'التسعير' : 'Pricing'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'إعدادات تحويل الأسعار والعلامات التجارية'
-                                      : 'Price transformation and markup settings'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'نسبة الربح/الخصم %' : 'Markup/Discount %'}
-                                      </label>
-                                      <input
-                                        type="number"
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={markupPercent}
-                                        onChange={e => setMarkupPercent(Number(e.target.value))}
-                                        placeholder="0"
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'مصدر التكلفة' : 'Cost Source'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={costSource}
-                                        onChange={e => setCostSource(e.target.value)}
-                                      >
-                                        <option value="cost">{lang === 'ar' ? 'حقل التكلفة (cost)' : 'Cost field'}</option>
-                                        <option value="price">{lang === 'ar' ? 'حقل السعر (price)' : 'Price field'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'مصدر السعر' : 'Price Source'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={priceSource}
-                                        onChange={e => setPriceSource(e.target.value)}
-                                      >
-                                        <option value="price">{lang === 'ar' ? 'السعر (price)' : 'Price'}</option>
-                                        <option value="sale_price">{lang === 'ar' ? 'سعر التخفيض (sale_price)' : 'Sale Price'}</option>
-                                        <option value="cost">{lang === 'ar' ? 'التكلفة (cost)' : 'Cost'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'التقريب' : 'Rounding'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={rounding}
-                                        onChange={e => setRounding(e.target.value)}
-                                      >
-                                        <option value="">{lang === 'ar' ? '— لا شيء —' : '— None —'}</option>
-                                        <option value="nearest">{lang === 'ar' ? 'أقرب رقم' : 'Nearest'}</option>
-                                        <option value="ceil">{lang === 'ar' ? 'رفع (Ceil)' : 'Ceil'}</option>
-                                        <option value="floor">{lang === 'ar' ? 'خفض (Floor)' : 'Floor'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'الخانات العشرية' : 'Decimal Places'}
-                                      </label>
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max="6"
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={decimalPlaces}
-                                        onChange={e => setDecimalPlaces(Number(e.target.value))}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 3. Name & Description ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الاسم والوصف' : 'Name & Description'}
-                                  </h3>
-                                  <div className="grid grid-cols-2 gap-4 mt-3">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'لغة الاسم' : 'Name Language'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={nameLanguage}
-                                        onChange={e => setNameLanguage(e.target.value)}
-                                      >
-                                        <option value="ar">{lang === 'ar' ? 'العربية' : 'Arabic'}</option>
-                                        <option value="en">{lang === 'ar' ? 'الإنجليزية' : 'English'}</option>
-                                        <option value="both">{lang === 'ar' ? 'الاثنتين معاً' : 'Both'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'الرجوع للغة الأخرى' : 'Fallback to Other'}
-                                      </label>
-                                      <div className="flex items-center gap-3 h-9">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={nameFallback}
-                                          onClick={() => setNameFallback(!nameFallback)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            nameFallback ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            nameFallback ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs text-muted-foreground">
-                                          {nameFallback
-                                            ? (lang === 'ar' ? 'نعم' : 'Yes')
-                                            : (lang === 'ar' ? 'لا' : 'No')}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'لغة الوصف' : 'Description Language'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={descLanguage}
-                                        onChange={e => setDescLanguage(e.target.value)}
-                                      >
-                                        <option value="ar">{lang === 'ar' ? 'العربية' : 'Arabic'}</option>
-                                        <option value="en">{lang === 'ar' ? 'الإنجليزية' : 'English'}</option>
-                                        <option value="both">{lang === 'ar' ? 'الاثنتين معاً' : 'Both'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'الرجوع في الوصف' : 'Description Fallback'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={descFallback}
-                                        onChange={e => setDescFallback(e.target.value)}
-                                      >
-                                        <option value="none">{lang === 'ar' ? '— لا شيء —' : '— None —'}</option>
-                                        <option value="name">{lang === 'ar' ? 'استخدام الاسم' : 'Use Name'}</option>
-                                        <option value="custom">{lang === 'ar' ? 'نص مخصص' : 'Custom Text'}</option>
-                                        <option value="empty">{lang === 'ar' ? 'ترك فارغاً' : 'Leave Empty'}</option>
-                                      </select>
-                                    </div>
-                                    {descFallback === 'custom' && (
-                                      <div className="col-span-2 space-y-1.5">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'النص المخصص' : 'Custom Text'}
-                                        </label>
-                                        <textarea
-                                          className="w-full h-20 px-3 py-2 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all resize-none"
-                                          value={descCustomText}
-                                          onChange={e => setDescCustomText(e.target.value)}
-                                          placeholder={lang === 'ar' ? 'أدخل نص الوصف المخصص...' : 'Enter custom description text...'}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ═══ 4. Match Field ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد أي حقل من زد يطابق أي حقل في أودو للتعرف على المنتج'
-                                      : 'Select which Zid field matches which Odoo field to identify the product'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل زد' : 'Zid Field'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={productFields}
-                                        value={productMatchZidField}
-                                        onChange={setProductMatchZidField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل زد —' : '— Select Zid field —'}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => fetchOdooProductFields(true)}
-                                          disabled={isLoadingProductFields}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingProductFields && "animate-spin")} />
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={productOdooFields}
-                                        value={productMatchOdooField}
-                                        onChange={setProductMatchOdooField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo field —'}
-                                        disabled={isLoadingProductFields}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* ═══ 4.5. Product Variants Sync Mode ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground mb-3">
-                                    {lang === 'ar' ? '📦 خيارات مزامنة المتغيرات (Product Variants)' : '📦 Product Variant Sync Mode'}
-                                  </h3>
-                                  <div className="space-y-3 text-start">
-                                    <span className="text-[11px] text-muted-foreground block font-medium">
-                                      {lang === 'ar' 
-                                        ? 'حدد كيفية مزامنة المنتجات التي تحتوي على خيارات متعددة (مثل المقاس أو اللون) في أودو:' 
-                                        : 'Choose how products with multiple variants (e.g. size or color) should be synced in Odoo:'}
-                                    </span>
-                                    
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                                      <label className={cn(
-                                        "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                        productVariantSyncMode === 'AS_VARIANTS' 
-                                          ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
-                                          : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                      )}>
-                                        <input
-                                          type="radio"
-                                          name="productVariantSyncMode"
-                                          value="AS_VARIANTS"
-                                          checked={productVariantSyncMode === 'AS_VARIANTS'}
-                                          onChange={() => setProductVariantSyncMode('AS_VARIANTS')}
-                                          className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                        />
-                                        <div className="space-y-1">
-                                          <span className="font-semibold block text-xs">
-                                            {lang === 'ar' ? 'مزامنة كمنتج بمتغيرات (AS_VARIANTS)' : 'Sync as Product with Variants'}
-                                          </span>
-                                          <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                            {lang === 'ar' 
-                                              ? 'يتم إنشاء منتج رئيسي واحد في Odoo وربط الخيارات به كمتغيرات (مثل اللون والمقاس).' 
-                                              : 'Creates a single main product template in Odoo and groups all option variants under it.'}
-                                          </span>
-                                        </div>
-                                      </label>
-
-                                      <label className={cn(
-                                        "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                        productVariantSyncMode === 'AS_SEPARATE_PRODUCTS' 
-                                          ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
-                                          : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                      )}>
-                                        <input
-                                          type="radio"
-                                          name="productVariantSyncMode"
-                                          value="AS_SEPARATE_PRODUCTS"
-                                          checked={productVariantSyncMode === 'AS_SEPARATE_PRODUCTS'}
-                                          onChange={() => setProductVariantSyncMode('AS_SEPARATE_PRODUCTS')}
-                                          className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                        />
-                                        <div className="space-y-1">
-                                          <span className="font-semibold block text-xs">
-                                            {lang === 'ar' ? 'مزامنة كمنتجات منفصلة (AS_SEPARATE_PRODUCTS)' : 'Sync as Separate Products'}
-                                          </span>
-                                          <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                            {lang === 'ar' 
-                                              ? 'يتم إنشاء كل متغير كمنتج مستقل تماماً في Odoo، ودمج اسم المتغير في اسم المنتج.' 
-                                              : 'Creates a completely standalone product in Odoo for each variant option.'}
-                                          </span>
-                                        </div>
-                                      </label>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 4.6. Grouped Products & BoM (Bill of Materials) ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground mb-3">
-                                    {lang === 'ar' ? '🛠️ خيارات المنتجات المجمعة (Bundles / BoM)' : '🛠️ Grouped Products & BoM (Kits)'}
-                                  </h3>
-                                  <div className="space-y-3 text-start">
-                                    <span className="text-[11px] text-muted-foreground block font-medium">
-                                      {lang === 'ar' 
-                                        ? 'تفعيل خيار إنشاء قائمة المواد (BoM / Kit) للمنتجات المجمعة في Odoo:' 
-                                        : 'Enable Bill of Materials (BoM / Kit) creation for grouped products in Odoo:'}
-                                    </span>
-                                    
-                                    <div className="flex items-center gap-3 p-3.5 rounded-xl border bg-background border-border shadow-sm">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={bomEnabled}
-                                        aria-label={lang === 'ar' ? 'تفعيل إنشاء قائمة المواد BoM' : 'Enable BoM Creation'}
-                                        onClick={() => setBomEnabled(!bomEnabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          bomEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          bomEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <button type="button" onClick={() => setBomEnabled(!bomEnabled)} className="space-y-1 cursor-pointer text-start">
-                                        <span className="font-semibold block text-xs">
-                                          {lang === 'ar' ? 'تفعيل إنشاء قائمة المواد BoM' : 'Enable BoM Creation'}
-                                        </span>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar' 
-                                            ? 'عند التفعيل، سيقوم النظام تلقائياً بإنشاء قائمة المواد BoM بالنوع المحدد أدناه.' 
-                                            : 'When enabled, the system will automatically create a BoM with the type specified below.'}
-                                        </span>
-                                      </button>
-                                    </div>
-
-                                    {bomEnabled && (
-                                      <div className="mt-3 pl-7 space-y-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                                        <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                          {lang === 'ar' ? 'نوع قائمة المواد BoM:' : 'BoM Type:'}
-                                        </label>
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <label className={cn(
-                                            "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm",
-                                            bomType === 'phantom' 
-                                              ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
-                                              : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                          )}>
-                                            <input
-                                              type="radio"
-                                              name="bomType"
-                                              value="phantom"
-                                              checked={bomType === 'phantom'}
-                                              onChange={() => setBomType('phantom')}
-                                              className="mt-1 h-3.5 w-3.5 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                            />
-                                            <div className="space-y-0.5">
-                                              <span className="font-semibold block text-[11px]">
-                                                {lang === 'ar' ? 'تجمع (Kit / Phantom)' : 'Kit (Phantom)'}
-                                              </span>
-                                              <span className="text-[10px] leading-relaxed block text-muted-foreground font-normal">
-                                                {lang === 'ar' 
-                                                  ? 'تُباع كمجموعة ويتم خصم مكوناتها مباشرة من المخزن.' 
-                                                  : 'Sold as a kit and component stock is deducted directly.'}
-                                              </span>
-                                            </div>
-                                          </label>
-
-                                          <label className={cn(
-                                            "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm",
-                                            bomType === 'normal' 
-                                              ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
-                                              : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                          )}>
-                                            <input
-                                              type="radio"
-                                              name="bomType"
-                                              value="normal"
-                                              checked={bomType === 'normal'}
-                                              onChange={() => setBomType('normal')}
-                                              className="mt-1 h-3.5 w-3.5 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                            />
-                                            <div className="space-y-0.5">
-                                              <span className="font-semibold block text-[11px]">
-                                                {lang === 'ar' ? 'تصنيع (Manufacture / Normal)' : 'Manufacture (Normal)'}
-                                              </span>
-                                              <span className="text-[10px] leading-relaxed block text-muted-foreground font-normal">
-                                                {lang === 'ar' 
-                                                  ? 'منتج يتم تصنيعه من المكونات عبر أمر تصنيع في التصنيع.' 
-                                                  : 'Produced from components via a manufacturing order.'}
-                                              </span>
-                                            </div>
-                                          </label>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ═══ 5. Media & Categories ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الوسائط والتصنيفات' : 'Media & Categories'}
-                                  </h3>
-                                  <div className="grid grid-cols-3 gap-4 mt-3">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'مزامنة الصور' : 'Image Sync Mode'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={imageSyncMode}
-                                        onChange={e => setImageSyncMode(e.target.value)}
-                                      >
-                                        <option value="all">{lang === 'ar' ? 'الكل' : 'All'}</option>
-                                        <option value="main_only">{lang === 'ar' ? 'الأساسية فقط' : 'Main Only'}</option>
-                                        <option value="skip">{lang === 'ar' ? 'تخطي' : 'Skip'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'مزامنة التصنيفات' : 'Category Sync'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={categorySyncMode}
-                                        onChange={e => setCategorySyncMode(e.target.value)}
-                                      >
-                                        <option value="auto">{lang === 'ar' ? 'تلقائي' : 'Auto'}</option>
-                                        <option value="skip">{lang === 'ar' ? 'تخطي' : 'Skip'}</option>
-                                        <option value="map_existing">{lang === 'ar' ? 'ربط الموجود' : 'Map Existing'}</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'إنشاء وحدة قياس' : 'UOM Auto Create'}
-                                      </label>
-                                      <div className="flex items-center gap-3 h-9">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={uomAutoCreate}
-                                          onClick={() => setUomAutoCreate(!uomAutoCreate)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            uomAutoCreate ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            uomAutoCreate ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs text-muted-foreground">
-                                          {uomAutoCreate
-                                            ? (lang === 'ar' ? 'نعم' : 'Yes')
-                                            : (lang === 'ar' ? 'لا' : 'No')}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 6. Tax ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الضريبة' : 'Tax'}
-                                  </h3>
-                                  <div className="grid grid-cols-2 gap-4 mt-3">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'طريقة مزامنة الضريبة' : 'Tax Sync Mode'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={taxSyncMode}
-                                        onChange={e => setTaxSyncMode(e.target.value)}
-                                      >
-                                        <option value="auto_by_name">{lang === 'ar' ? 'تلقائي حسب الاسم' : 'Auto by Name'}</option>
-                                        <option value="static_ids">{lang === 'ar' ? 'معرفات ثابتة' : 'Static IDs'}</option>
-                                        <option value="skip">{lang === 'ar' ? 'تخطي' : 'Skip'}</option>
-                                      </select>
-                                    </div>
-                                    {taxSyncMode === 'static_ids' && (
-                                      <div className="space-y-1.5">
-                                        <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                          {lang === 'ar' ? 'معرفات الضريبة الافتراضية' : 'Default Tax IDs'}
-                                        </label>
-                                        <SearchableSelect
-                                          multiple={true}
-                                          collapseTags={true}
-                                          value={defaultTaxIds}
-                                          onChange={setDefaultTaxIds}
-                                          options={taxOptions}
-                                          disabled={isLoadingTaxOpts}
-                                          placeholder={lang === 'ar' ? '— اختر الضرائب —' : '— Select taxes —'}
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ═══ 7. Sync Actions ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد عمليات المزامنة المسموح بها للمنتجات'
-                                      : 'Select which sync operations are enabled for products'}
-                                  </p>
-                                  <div className="space-y-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'العمليات المسموح بها' : 'Allowed Operations'}
-                                      </label>
-                                      {(() => {
-                                        const syncActionOptions = [
-                                          { value: 'create', label: lang === 'ar' ? 'إنشاء (Create)' : 'Create' },
-                                          { value: 'update', label: lang === 'ar' ? 'تعديل (Update)' : 'Update' },
-                                          { value: 'delete', label: lang === 'ar' ? 'حذف (Delete)' : 'Delete' },
-                                        ]
-                                        return (
-                                          <SearchableSelect
-                                            multiple={true}
-                                            collapseTags={false}
-                                            value={productEnabledActions}
-                                            onChange={setProductEnabledActions}
-                                            options={syncActionOptions}
-                                            disabled={productDisabled}
-                                            placeholder={lang === 'ar'
-                                              ? (productDisabled ? '— المزامنة معطلة —' : '— اختر العمليات —')
-                                              : (productDisabled ? '— Sync is disabled —' : '— Select operations —')}
-                                          />
-                                        )
-                                      })()}
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={!productDisabled}
-                                        onClick={() => setProductDisabled(!productDisabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          !productDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          !productDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? (productDisabled ? 'تعطيل مزامنة المنتجات' : 'تفعيل مزامنة المنتجات')
-                                          : (productDisabled ? 'Disable product sync' : 'Enable product sync')}
-                                      </span>
-                                    </div>
-                                    {productDisabled && (
-                                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                                        {lang === 'ar'
-                                          ? 'عند تعطيل المزامنة، لن يتم إنشاء أو تعديل أو حذف أي منتج في أودو.'
-                                          : 'When disabled, no products will be created, updated, or deleted in Odoo.'}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ═══ 8. On Deletion ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'عند حذف المنتج في زد' : 'On Product Deletion in Zid'}
-                                  </h3>
-                                  <div className="mt-3">
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={productOnDelete}
-                                      onChange={e => setProductOnDelete(e.target.value)}
-                                    >
-                                      {[
-                                        { value: 'nothing', labelAr: 'لا شيء', labelEn: 'Nothing' },
-                                        { value: 'delete', labelAr: 'حذف', labelEn: 'Delete' },
-                                        { value: 'archive', labelAr: 'أرشفة', labelEn: 'Archive' },
-                                        { value: 'delete_or_archive', labelAr: 'محاولة الحذف فإن لم تنجح يعمل أرشفة', labelEn: 'Try Delete, then Archive' },
-                                      ].map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                          {lang === 'ar' ? opt.labelAr : opt.labelEn}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {standardStoreTab === 'zid' || standardStoreTab === 'salla' ? (
-                                  <div className="border-t border-border/80 pt-5">
-                                    <h3 className="text-sm font-bold text-foreground">
-                                      {lang === 'ar' ? `مزامنة المخزون (من أودو إلى ${invSyncStoreNameAr})` : `Inventory Sync (Odoo → ${invSyncStoreNameEn})`}
-                                    </h3>
-                                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                                      {lang === 'ar'
-                                        ? `عند التفعيل: أي تغيير في مخزون أودو (مشتريات/مبيعات/جرد) يُحدّث مخزون ${invSyncStoreNameAr} تلقائيًا. أودو هو مصدر الحقيقة للمخزون، ولا تُرسل الكميات من ${invSyncStoreNameAr} إلى أودو.`
-                                        : `When enabled: any Odoo stock change (purchases/sales/stock counts) updates ${invSyncStoreNameEn} automatically. Odoo is the source of truth — quantities are never pushed ${invSyncStoreNameEn} → Odoo.`}
-                                    </p>
-
-                                    {/* Toggle */}
-                                    <div className="flex items-center justify-between gap-3 mt-4">
-                                      <div>
-                                        <div className="text-xs font-semibold text-foreground">
-                                          {lang === 'ar' ? 'تفعيل مزامنة المخزون' : 'Enable inventory sync'}
-                                        </div>
-                                        <div className="text-[11px] text-muted-foreground mt-0.5">
-                                          {lang === 'ar' ? 'مزامنة تلقائية فورية عند تغيّر الكميات في أودو' : 'Instant automatic sync when Odoo quantities change'}
-                                        </div>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={invSyncEnabled}
-                                        onClick={() => setInvSyncEnabled(!invSyncEnabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          invSyncEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          invSyncEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                    </div>
-
-                                    {/* Odoo stock Webhook buttons */}
-                                    <div className="mt-3 rounded-lg border border-border/80 bg-inputBg/40 p-3">
-                                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                                        <div className="min-w-[220px]">
-                                          <div className="text-xs font-semibold text-foreground">
-                                            {lang === 'ar' ? 'استقبال تحديثات الكميات من أودو' : 'Odoo stock Webhook'}
-                                          </div>
-                                          <div className="text-[11px] text-muted-foreground mt-0.5">
-                                            {odooStockWebhook?.base_automation_id ? (
-                                              lang === 'ar'
-                                                ? `تم إنشاؤه — القاعدة الآلية #${odooStockWebhook.base_automation_id}`
-                                                : `Created — base automation #${odooStockWebhook.base_automation_id}`
-                                            ) : (
-                                              lang === 'ar'
-                                                ? 'لإرسال أي تغيير على كميات الأصناف من أودو تلقائيًا، أنشئ الـ Webhook ثم فعّل المزامنة.'
-                                                : 'Create the Webhook so Odoo sends every product quantity change, then enable sync.'
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={handleCreateOdooWebhook}
-                                            disabled={isSyncingWebhook || !!odooStockWebhook}
-                                          >
-                                            <Plus className="h-3.5 w-3.5" />
-                                            {lang === 'ar' ? 'إنشاء Webhook' : 'Create Webhook'}
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={handleDeleteOdooWebhook}
-                                            disabled={isSyncingWebhook || !odooStockWebhook}
-                                            className="text-destructive hover:text-destructive"
-                                          >
-                                            <Trash2 className="h-3.5 w-3.5" />
-                                            {lang === 'ar' ? 'حذف' : 'Delete'}
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {isSyncingWebhook && (
-                                      <div className="flex items-center gap-2 mt-3 text-[11px] text-muted-foreground">
-                                        <Loader2 className="h-3 w-3 animate-spin" />
-                                        {lang === 'ar'
-                                          ? 'جاري إعداد الاستقبال الآلي للمخزون في أودو...'
-                                          : 'Registering the Odoo stock webhook…'}
-                                      </div>
-                                    )}
-                                    {invSyncWebhookError && (
-                                      <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
-                                        {invSyncWebhookError}
-                                      </div>
-                                    )}
-
-                                    {invSyncEnabled && (
-                                      <>
-                                        {/* Balance mode */}
-                                        <div className="mt-5">
-                                          <div className="text-xs font-semibold text-muted-foreground mb-2">
-                                            {lang === 'ar' ? 'الرصيد المراد مزامنته' : 'Balance to sync'}
-                                          </div>
-                                          <div className="flex flex-col gap-2">
-                                            <label className="flex items-center gap-2 cursor-pointer">
-                                              <input
-                                                type="radio"
-                                                name="invSyncMode"
-                                                checked={invSyncMode === 'actual'}
-                                                onChange={() => setInvSyncMode('actual')}
-                                                className="accent-foreground"
-                                              />
-                                              <span className="text-xs text-foreground">
-                                                {lang === 'ar' ? 'الرصيد الفعلي (On Hand)' : 'Actual balance (On Hand)'}
-                                              </span>
-                                            </label>
-                                            <label className="flex items-center gap-2 cursor-pointer">
-                                              <input
-                                                type="radio"
-                                                name="invSyncMode"
-                                                checked={invSyncMode === 'forecast'}
-                                                onChange={() => setInvSyncMode('forecast')}
-                                                className="accent-foreground"
-                                              />
-                                              <span className="text-xs text-foreground">
-                                                {lang === 'ar' ? 'الفوركاست المتوقع (Forecasted)' : 'Forecasted balance'}
-                                              </span>
-                                            </label>
-                                            {invSyncMode === 'forecast' && (
-                                              <p className="text-[11px] text-muted-foreground">
-                                                {lang === 'ar'
-                                                  ? 'الرصيد الفعلي + الوارد – الصادر (كما يظهر في تقرير المخزون المتوقع بأودو).'
-                                                  : 'On hand + incoming − outgoing (as shown in the Odoo Forecasted report).'}
-                                              </p>
-                                            )}
-                                          </div>
-                                        </div>
-
-                                        {/* Location pairing */}
-                                        <div className="mt-5">
-                                          <div className="text-xs font-semibold text-muted-foreground">
-                                            {lang === 'ar' ? 'ربط المستودعات/المواقع' : 'Warehouse / Location pairing'}
-                                          </div>
-                                          <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                            {lang === 'ar'
-                                              ? `اربط موقع ${invSyncStoreNameAr} بموقع أودو — يُحدَّث مخزون ${invSyncStoreNameAr} في هذا الموقع حسب رصيد أودو فقط.`
-                                              : `Pair a ${invSyncStoreNameEn} location with an Odoo location — ${invSyncStoreNameEn} stock at that location is updated from the paired Odoo balance only.`}
-                                          </p>
-
-                                          {isLoadingInvSync ? (
-                                            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                                              <Loader2 className="h-3 w-3 animate-spin" />
-                                              {lang === 'ar' ? 'جاري تحميل المواقع...' : 'Loading locations…'}
-                                            </div>
-                                          ) : (
-                                            <div className="space-y-2">
-                                              {invSyncPairs.map((row, index) =>
-                                                row._removed ? null : (
-                                                  <div key={row.id || `new-${index}`} className="flex items-center gap-2">
-                                                    <select
-                                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                      value={row.source_location_id}
-                                                      onChange={(e) => handlePairChange(index, 'source_location_id', e.target.value)}
-                                                    >
-                                                      <option value="">
-                                                        {lang === 'ar' ? `— موقع ${invSyncStoreNameAr} —` : `— ${invSyncStoreNameEn} location —`}
-                                                      </option>
-                                                      {(isSallaInvSync ? sallaLocations : zidLocations).map(loc => {
-                                                        const locId = String(loc.id)
-                                                        const taken = usedPairSources.has(locId) && String(row.source_location_id) !== locId
-                                                        return (
-                                                          <option key={locId} value={locId} disabled={taken}>
-                                                            {loc.name || locId}{taken ? (lang === 'ar' ? ' (مربوط)' : ' (paired)') : ''}
-                                                          </option>
-                                                        )
-                                                      })}
-                                                    </select>
-                                                    <ArrowRightLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                                    <select
-                                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                      value={row.odoo_location_id}
-                                                      onChange={(e) => handlePairChange(index, 'odoo_location_id', e.target.value)}
-                                                    >
-                                                      <option value="">
-                                                        {lang === 'ar' ? '— موقع أودو —' : '— Odoo location —'}
-                                                      </option>
-                                                      {odooLocations.map(loc => (
-                                                        <option key={loc.id} value={String(loc.id)}>
-                                                          {loc.complete_name || loc.name}
-                                                        </option>
-                                                      ))}
-                                                    </select>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => handleRemovePair(index)}
-                                                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors p-1"
-                                                      title={lang === 'ar' ? 'حذف' : 'Remove'}
-                                                    >
-                                                      <Trash2 className="h-4 w-4" />
-                                                    </button>
-                                                  </div>
-                                                )
-                                              )}
-                                              {invSyncPairs.filter(p => !p._removed).length === 0 && (
-                                                <p className="text-[11px] text-muted-foreground">
-                                                  {lang === 'ar'
-                                                    ? 'لا توجد أزواج بعد — أضف زوجًا لبدء المزامنة.'
-                                                    : 'No pairs yet — add one to start syncing.'}
-                                                </p>
-                                              )}
-                                              {allPairSourcesTaken && invSyncPairs.filter(p => !p._removed).length > 0 && (
-                                                <p className="text-[11px] text-muted-foreground">
-                                                  {lang === 'ar'
-                                                    ? 'كل المواقع مربوطة بزوج — كل موقع يقبل زوجًا واحدًا فقط. لتغيير ربطٍ ما عدّل صفه أو احذفه أولًا.'
-                                                    : 'All locations are paired — one pair per location. Edit or remove its row to change a pairing.'}
-                                                </p>
-                                              )}
-                                            </div>
-                                          )}
-
-                                          <div className="mt-3 flex flex-wrap items-center gap-2">
-                                            <Button
-                                              type="button"
-                                              variant="outline"
-                                              size="sm"
-                                              className="h-9 w-9 shrink-0 p-0"
-                                              onClick={handleRefreshInvLocations}
-                                              disabled={isRefreshingInvLocations || isLoadingInvSync}
-                                              title={lang === 'ar' ? `تحديث المواقع من ${invSyncStoreNameAr} وأودو` : `Refresh locations from ${invSyncStoreNameEn} & Odoo`}
-                                              aria-label={lang === 'ar' ? 'تحديث المواقع' : 'Refresh locations'}
-                                            >
-                                              <RefreshCw className={cn('h-3.5 w-3.5', isRefreshingInvLocations && 'animate-spin')} />
-                                            </Button>
-                                            <Button
-                                              type="button"
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={handleAddPair}
-                                            >
-                                              <Plus className="h-3.5 w-3.5" />
-                                              {lang === 'ar' ? 'إضافة زوج' : 'Add pair'}
-                                            </Button>
-                                            <Button
-                                              type="button"
-                                              size="sm"
-                                              onClick={handleSavePairs}
-                                              disabled={isSavingPairs || isLoadingInvSync}
-                                            >
-                                              {isSavingPairs ? (
-                                                <>
-                                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                  {lang === 'ar' ? 'حفظ...' : 'Saving…'}
-                                                </>
-                                              ) : (
-                                                lang === 'ar' ? 'حفظ مواقع الربط' : 'Save location pairs'
-                                              )}
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-                                ) : null}
-
-                                {/* ── Save & Log Buttons ───────────────── */}
-                                <div className="border-t border-border/80 pt-5 flex items-center gap-2">
-                                  <Button
-                                    onClick={handleSaveProducts}
-                                    disabled={isSavingProducts}
-                                    className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-9 text-xs px-6"
-                                  >
-                                    {isSavingProducts ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <>{lang === 'ar' ? 'حفظ إعدادات المنتجات' : 'Save Product Settings'}</>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsProductMappingOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <Zap className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'ربط يدوي وتلقائي' : 'Manual & Auto Mapping'}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsProductLogOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <History className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : standardSubTab === 'customers' ? (
-                              <div className="space-y-5">
-                                {/* ═══ 1. Customer Type ═══ */}
-                                <div>
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'نوع العميل الافتراضي' : 'Default Customer Type'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    {lang === 'ar'
-                                      ? 'تحديد نوع الحساب الافتراضي عند إنشاء عميل جديد في أودو'
-                                      : 'Specify the default account type when creating a new customer in Odoo'}
-                                  </p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="space-y-1.5 max-w-xs">
-                                    <label className="block text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar' ? 'نوع العميل' : 'Customer Type'}
-                                    </label>
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={customerDefaultType}
-                                      onChange={e => setCustomerDefaultType(e.target.value)}
-                                    >
-                                      <option value="auto">
-                                        {lang === 'ar' ? 'تلقائي (تحديد فرد أو شركة حسب الحقول)' : 'Auto (Detect individual/company)'}
-                                      </option>
-                                      <option value="person">
-                                        {lang === 'ar' ? 'فرد (Individual)' : 'Individual (Person)'}
-                                      </option>
-                                      <option value="company">
-                                        {lang === 'ar' ? 'شركة (Company)' : 'Company'}
-                                      </option>
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 1b. Default Accounts ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الحسابات الافتراضية' : 'Default Accounts'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'تحديد حسابات المدينين والدائنين الافتراضية للعملاء الجدد في أودو'
-                                      : 'Specify the default receivable and payable accounts for new customers in Odoo'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'حساب المدينين (Receivable)' : 'Account Receivable'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={receivableAccountId}
-                                        onChange={e => setReceivableAccountId(e.target.value)}
-                                        disabled={isLoadingAccounts}
-                                      >
-                                        <option value="">
-                                          {lang === 'ar' ? '— اختر حساب المدينين —' : '— Select Account Receivable —'}
-                                        </option>
-                                        {receivableAccountOptions.map(opt => (
-                                          <option key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'حساب الدائنين (Payable)' : 'Account Payable'}
-                                      </label>
-                                      <select
-                                        className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                        value={payableAccountId}
-                                        onChange={e => setPayableAccountId(e.target.value)}
-                                        disabled={isLoadingAccounts}
-                                      >
-                                        <option value="">
-                                          {lang === 'ar' ? '— اختر حساب الدائنين —' : '— Select Account Payable —'}
-                                        </option>
-                                        {payableAccountOptions.map(opt => (
-                                          <option key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 1c. Default Company ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'تحديد الشركة التابع لها عند إنشاء العملاء في أودو لضمان توافق الحسابات'
-                                      : 'Specify the Odoo company associated with customers to prevent account inconsistencies'}
-                                  </p>
-                                  <div className="space-y-1.5 max-w-xs">
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={customerCompanyId}
-                                      onChange={e => setCustomerCompanyId(e.target.value)}
-                                      disabled={isLoadingCompanies}
-                                    >
-                                      <option value="">
-                                        {lang === 'ar' ? '— اختر الشركة (اختياري) —' : '— Select Company (Optional) —'}
-                                      </option>
-                                      {companyOptions.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                   {customerCompanyId && (
-                                     <div className="flex items-center gap-2 mt-3">
-                                       <button
-                                         type="button"
-                                         role="switch"
-                                          dir="ltr"
-                                         aria-checked={customerLinkCompany}
-                                         onClick={() => setCustomerLinkCompany(!customerLinkCompany)}
-                                         className={cn(
-                                           'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                           customerLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                         )}
-                                       >
-                                         <span className={cn(
-                                           'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                           customerLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                         )} />
-                                       </button>
-                                       <span className="text-xs text-muted-foreground">
-                                         {lang === 'ar' ? 'ربط وتحديد الشركة بالسجل في أودو' : 'Link and set company on the Odoo record'}
-                                       </span>
-                                     </div>
-                                   )}
-                                </div>
-
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'عند حذف العميل في زد' : 'On Customer Deletion in Zid'}
-                                  </h3>
-                                  <div className="mt-3">
-                                    <select
-                                      className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                      value={customerOnDelete}
-                                      onChange={e => setCustomerOnDelete(e.target.value)}
-                                    >
-                                      {[
-                                        { value: 'nothing', labelAr: 'لا شيء', labelEn: 'Nothing' },
-                                        { value: 'delete', labelAr: 'حذف', labelEn: 'Delete' },
-                                        { value: 'archive', labelAr: 'أرشفة (نشط = false)', labelEn: 'Archive (Active = false)' },
-                                        { value: 'delete_or_archive', labelAr: 'محاولة الحذف فإن لم تنجح يعمل أرشفة', labelEn: 'Try Delete, then Archive' },
-                                      ].map(opt => (
-                                        <option key={opt.value} value={opt.value}>
-                                          {lang === 'ar' ? opt.labelAr : opt.labelEn}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 3. Match Field Section ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد أي حقل من زد يطابق أي حقل في أودو للتعرف على العميل وتجنب تكراره'
-                                      : 'Select which Zid field matches which Odoo field to identify the customer and avoid duplicates'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل زد' : 'Zid Field'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={customerFields}
-                                        value={customerMatchZidField}
-                                        onChange={setCustomerMatchZidField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل زد —' : '— Select Zid field —'}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => fetchOdooCustomerFields(true)}
-                                          disabled={isLoadingCustomerFields}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingCustomerFields && "animate-spin")} />
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={odooCustomerFields}
-                                        value={customerMatchOdooField}
-                                        onChange={setCustomerMatchOdooField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo field —'}
-                                        disabled={isLoadingCustomerFields}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 4. Sync Actions ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'إعدادات المزامنة' : 'Sync Actions'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد عمليات المزامنة المسموح بها للعملاء'
-                                      : 'Select which sync operations are enabled for customers'}
-                                  </p>
-                                  <div className="space-y-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'العمليات المسموح بها' : 'Allowed Operations'}
-                                      </label>
-                                      {(() => {
-                                        const syncActionOptions = [
-                                          { value: 'create', label: lang === 'ar' ? 'إنشاء (Create)' : 'Create' },
-                                          { value: 'update', label: lang === 'ar' ? 'تعديل (Update)' : 'Update' },
-                                          { value: 'delete', label: lang === 'ar' ? 'حذف (Delete)' : 'Delete' },
-                                        ]
-                                        return (
-                                          <SearchableSelect
-                                            multiple={true}
-                                            collapseTags={false}
-                                            value={customerEnabledActions}
-                                            onChange={setCustomerEnabledActions}
-                                            options={syncActionOptions}
-                                            disabled={customerDisabled}
-                                            placeholder={lang === 'ar'
-                                              ? (customerDisabled ? '— المزامنة معطلة —' : '— اختر العمليات —')
-                                              : (customerDisabled ? '— Sync is disabled —' : '— Select operations —')}
-                                          />
-                                        )
-                                      })()}
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={!customerDisabled}
-                                        onClick={() => setCustomerDisabled(!customerDisabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          !customerDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          !customerDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? (customerDisabled ? 'تعطيل مزامنة العملاء' : 'تفعيل مزامنة العملاء')
-                                          : (customerDisabled ? 'Disable customer sync' : 'Enable customer sync')}
-                                      </span>
-                                    </div>
-                                    {customerDisabled && (
-                                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                                        {lang === 'ar'
-                                          ? 'عند تعطيل المزامنة، لن يتم إنشاء أو تعديل أو حذف أي عميل في أودو.'
-                                          : 'When disabled, no customers will be created, updated, or deleted in Odoo.'}
-                                      </p>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* ── Save & Log Buttons ───────────────── */}
-                                <div className="border-t border-border/80 pt-5 flex items-center gap-2">
-                                  <Button
-                                    onClick={handleSaveCustomers}
-                                    disabled={isSavingCustomers}
-                                    className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-9 text-xs px-6"
-                                  >
-                                    {isSavingCustomers ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <>{lang === 'ar' ? 'حفظ إعدادات العملاء' : 'Save Customer Settings'}</>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsLogOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <History className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="space-y-5">
-                                {/* ═══ 1. Müzamene & Operations ═══ */}
-                                <div>
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'إعدادات مزامنة الطلبات' : 'Order Sync Settings'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    {lang === 'ar'
-                                      ? 'تفعيل مزامنة الطلبات وتحديد العمليات المسموح بها'
-                                      : 'Enable order synchronization and specify allowed operations'}
-                                  </p>
-                                </div>
-                                <div className="space-y-4">
-                                  <div className="flex items-center gap-3">
-                                    <button
-                                      type="button"
-                                      role="switch"
-                                          dir="ltr"
-                                      aria-checked={!orderDisabled}
-                                      onClick={() => setOrderDisabled(!orderDisabled)}
-                                      className={cn(
-                                        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                        !orderDisabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                      )}
-                                    >
-                                      <span className={cn(
-                                        'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                        !orderDisabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                      )} />
-                                    </button>
-                                    <span className="text-xs font-semibold text-muted-foreground">
-                                      {lang === 'ar'
-                                        ? (orderDisabled ? 'تعطيل مزامنة الطلبات' : 'تفعيل مزامنة الطلبات')
-                                        : (orderDisabled ? 'Disable Order Sync' : 'Enable Order Sync')}
-                                    </span>
-                                  </div>
-                                  {!orderDisabled && (
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'العمليات المسموح بها' : 'Allowed Operations'}
-                                      </label>
-                                      {(() => {
-                                        const syncActionOptions = [
-                                          { value: 'create', label: lang === 'ar' ? 'إنشاء (Create)' : 'Create' },
-                                          { value: 'update', label: lang === 'ar' ? 'تعديل (Update)' : 'Update' },
-                                          { value: 'cancel', label: lang === 'ar' ? 'إلغاء (Cancel)' : 'Cancel' },
-                                          { value: 'deliver', label: lang === 'ar' ? 'توصيل (Deliver)' : 'Deliver' },
-                                        ]
-                                        return (
-                                          <SearchableSelect
-                                            multiple={true}
-                                            collapseTags={false}
-                                            value={orderEnabledActions}
-                                            onChange={setOrderEnabledActions}
-                                            options={syncActionOptions}
-                                            placeholder={lang === 'ar' ? '— اختر العمليات —' : '— Select operations —'}
-                                          />
-                                        )
-                                      })()}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* ═══ 2. Match Field Section ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'حقل المطابقة' : 'Match Field'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'حدد أي حقل من المتجر يطابق أي حقل في أودو للتعرف على الطلب وتجنب التكرار'
-                                      : 'Select which Store field matches which Odoo field to identify the order and avoid duplicates'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground mb-1">
-                                        {lang === 'ar' ? 'حقل المتجر' : 'Store Field'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={orderFields}
-                                        value={orderMatchZidField}
-                                        onChange={setOrderMatchZidField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل المتجر —' : '— Select Store field —'}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between mb-1">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'حقل أودو' : 'Odoo Field'}
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => fetchOdooOrderFields(true)}
-                                          disabled={isLoadingOrderFields}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                                          title={lang === 'ar' ? 'تحديث حقول أودو' : 'Refresh Odoo Fields'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingOrderFields && "animate-spin")} />
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={odooOrderFields}
-                                        value={orderMatchOdooField}
-                                        onChange={setOrderMatchOdooField}
-                                        placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo field —'}
-                                        disabled={isLoadingOrderFields}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ Customer Matching Policy ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                        <Users className="h-4 w-4 text-foreground/80" />
-                                        <span>{lang === 'ar' ? 'سلوك مطابقة العميل في الطلب' : 'Order Customer Matching Policy'}</span>
-                                      </h3>
-                                      <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                        {lang === 'ar'
-                                          ? 'حدد الإجراء المطلوب تنفيذه عند استلام طلب ولم يتم العثور على العميل في أودو'
-                                          : 'Specify what to do when an incoming order has a customer that is not matched in Odoo'}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    {/* Option 1: Create New Customer */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderCustomerFallbackPolicy === 'create_new'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderCustomerFallbackPolicy"
-                                        value="create_new"
-                                        checked={orderCustomerFallbackPolicy === 'create_new'}
-                                        onChange={() => setOrderCustomerFallbackPolicy('create_new')}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs">
-                                          <UserPlus className="h-3.5 w-3.5 text-emerald-600" />
-                                          <span>{lang === 'ar' ? 'تسجيل عميل جديد' : 'Create New Customer'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'إنشاء سجل عميل جديد تلقائياً في أودو باستخدام بيانات العميل المرسلة مع الطلب.'
-                                            : 'Automatically create a new customer record in Odoo with the customer details received.'}
-                                        </span>
-                                      </div>
-                                    </label>
-
-                                    {/* Option 2: Cancel/Skip Order */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderCustomerFallbackPolicy === 'skip_order'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderCustomerFallbackPolicy"
-                                        value="skip_order"
-                                        checked={orderCustomerFallbackPolicy === 'skip_order'}
-                                        onChange={() => setOrderCustomerFallbackPolicy('skip_order')}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-600 dark:text-amber-400">
-                                          <UserX className="h-3.5 w-3.5" />
-                                          <span>{lang === 'ar' ? 'إلغاء تسجيل الأوردر' : 'Cancel Order Registration'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'إلغاء وتخطي تسجيل الطلب في أودو إذا لم يكن العميل مسجلاً مسبقاً.'
-                                            : 'Skip and cancel order registration in Odoo if the customer does not already exist.'}
-                                        </span>
-                                      </div>
-                                    </label>
-
-                                    {/* Option 3: Choose Default Customer */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderCustomerFallbackPolicy === 'default_customer'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderCustomerFallbackPolicy"
-                                        value="default_customer"
-                                        checked={orderCustomerFallbackPolicy === 'default_customer'}
-                                        onChange={() => {
-                                          setOrderCustomerFallbackPolicy('default_customer')
-                                          if (customerOptions.length === 0 && !isLoadingCustomers) {
-                                            handleRefreshCustomers(false)
-                                          }
-                                        }}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-primary">
-                                          <UserCheck className="h-3.5 w-3.5" />
-                                          <span>{lang === 'ar' ? 'اختيار عميل افتراضي' : 'Assign Default Customer'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'ربط الطلب بعميل عام أو افتراضي من أودو عند عدم التعرف على العميل.'
-                                            : 'Assign the order to a pre-selected default customer in Odoo when not matched.'}
-                                        </span>
-                                      </div>
-                                    </label>
-                                  </div>
-
-                                  {/* If default_customer is selected, show dropdown */}
-                                  {orderCustomerFallbackPolicy === 'default_customer' && (
-                                    <div className="mt-3 p-4 rounded-xl border border-border bg-muted/10 space-y-2">
-                                      <div className="flex items-center justify-between">
-                                        <label className="block text-xs font-semibold text-foreground">
-                                          {lang === 'ar' ? 'العميل الافتراضي في أودو (Odoo Customer)' : 'Default Customer in Odoo'}
-                                          <span className="text-red-500 mx-1">*</span>
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRefreshCustomers(true)}
-                                          disabled={isLoadingCustomers}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 text-[11px] flex items-center gap-1"
-                                          title={lang === 'ar' ? 'تحديث قائمة العملاء' : 'Refresh Customers'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingCustomers && "animate-spin")} />
-                                          <span>{lang === 'ar' ? 'تحديث' : 'Refresh'}</span>
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={customerOptions}
-                                        value={orderDefaultCustomerId}
-                                        onChange={setOrderDefaultCustomerId}
-                                        placeholder={isLoadingCustomers
-                                          ? (lang === 'ar' ? 'جاري تحميل العملاء من أودو...' : 'Loading customers from Odoo...')
-                                          : (lang === 'ar' ? '— اختر العميل من العملاء المسجلين في أودو —' : '— Select customer from Odoo registered customers —')}
-                                        disabled={isLoadingCustomers}
-                                      />
-                                      {!isLoadingCustomers && customerOptions.length === 0 && (
-                                        <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
-                                          <span>{lang === 'ar' ? 'لم يتم العثور على عملاء في أودو أو تعذر جلبهم.' : 'No customers found or failed to load.'}</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRefreshCustomers(true)}
-                                            className="underline font-semibold hover:text-amber-700"
-                                          >
-                                            {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-                                          </button>
-                                        </div>
-                                      )}
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? 'سيتم تعيين هذا العميل كعميل للطلب في أودو عند عدم مطابقة بيانات العميل الواردة في الطلب.'
-                                          : 'This customer will be assigned to orders whose customer is not matched in Odoo.'}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* ═══ Product Matching Policy ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                        <Package className="h-4 w-4 text-foreground/80" />
-                                        <span>{lang === 'ar' ? 'سلوك مطابقة المنتجات في الطلب' : 'Order Product Matching Policy'}</span>
-                                      </h3>
-                                      <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                        {lang === 'ar'
-                                          ? 'حدد الإجراء المطلوب تنفيذه عند احتواء الطلب على منتج غير مطابق في أودو (عدم تطابق الـ SKU أو الباركود)'
-                                          : 'Specify what to do when an order contains a product not matched in Odoo (SKU or barcode mismatch)'}
-                                      </p>
-                                    </div>
-                                  </div>
-
-                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                    {/* Option 1: Create New Product */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderProductFallbackPolicy === 'create_new'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderProductFallbackPolicy"
-                                        value="create_new"
-                                        checked={orderProductFallbackPolicy === 'create_new'}
-                                        onChange={() => setOrderProductFallbackPolicy('create_new')}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs">
-                                          <PackagePlus className="h-3.5 w-3.5 text-emerald-600" />
-                                          <span>{lang === 'ar' ? 'تسجيل منتج جديد' : 'Create New Product'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'إنشاء منتج جديد تلقائياً في أودو بالاسم والـ SKU والسعر الوارد في الطلب.'
-                                            : 'Automatically create a new product in Odoo with the item name, SKU, and price.'}
-                                        </span>
-                                      </div>
-                                    </label>
-
-                                    {/* Option 2: Cancel/Skip Order */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderProductFallbackPolicy === 'skip_order'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderProductFallbackPolicy"
-                                        value="skip_order"
-                                        checked={orderProductFallbackPolicy === 'skip_order'}
-                                        onChange={() => setOrderProductFallbackPolicy('skip_order')}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-amber-600 dark:text-amber-400">
-                                          <PackageX className="h-3.5 w-3.5" />
-                                          <span>{lang === 'ar' ? 'إلغاء تسجيل الأوردر' : 'Cancel Order Registration'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'إلغاء وتخطي تسجيل الطلب في أودو إذا كان يحتوي على أي منتج غير مسجل مسبقاً.'
-                                            : 'Skip and cancel order registration in Odoo if any item in the order is not matched.'}
-                                        </span>
-                                      </div>
-                                    </label>
-
-                                    {/* Option 3: Choose Default Product */}
-                                    <label className={cn(
-                                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
-                                      orderProductFallbackPolicy === 'default_product'
-                                        ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20"
-                                        : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
-                                    )}>
-                                      <input
-                                        type="radio"
-                                        name="orderProductFallbackPolicy"
-                                        value="default_product"
-                                        checked={orderProductFallbackPolicy === 'default_product'}
-                                        onChange={() => {
-                                          setOrderProductFallbackPolicy('default_product')
-                                          if (productOptions.length === 0 && !isLoadingProducts) {
-                                            handleRefreshProducts(false)
-                                          }
-                                        }}
-                                        className="mt-1 h-4 w-4 text-foreground border-border focus:ring-foreground focus:ring-offset-0 focus:ring-0 cursor-pointer"
-                                      />
-                                      <div className="space-y-1">
-                                        <div className="flex items-center gap-1.5 font-semibold text-xs text-primary">
-                                          <PackageCheck className="h-3.5 w-3.5" />
-                                          <span>{lang === 'ar' ? 'اختيار منتج افتراضي' : 'Assign Default Product'}</span>
-                                        </div>
-                                        <span className="text-[11px] leading-relaxed block text-muted-foreground font-normal">
-                                          {lang === 'ar'
-                                            ? 'استخدام منتج افتراضي محدد مسبقاً من أودو للبنود التي لا يتوفر لها منتج مطابق.'
-                                            : 'Assign unmapped order lines to a pre-selected default product in Odoo.'}
-                                        </span>
-                                      </div>
-                                    </label>
-                                  </div>
-
-                                  {/* If default_product is selected, show dropdown */}
-                                  {orderProductFallbackPolicy === 'default_product' && (
-                                    <div className="mt-3 p-4 rounded-xl border border-border bg-muted/10 space-y-2">
-                                      <div className="flex items-center justify-between">
-                                        <label className="block text-xs font-semibold text-foreground">
-                                          {lang === 'ar' ? 'المنتج الافتراضي في أودو (Odoo Product)' : 'Default Product in Odoo'}
-                                          <span className="text-red-500 mx-1">*</span>
-                                        </label>
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRefreshProducts(true)}
-                                          disabled={isLoadingProducts}
-                                          className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 text-[11px] flex items-center gap-1"
-                                          title={lang === 'ar' ? 'تحديث قائمة المنتجات' : 'Refresh Products'}
-                                        >
-                                          <RefreshCw className={cn("h-3 w-3", isLoadingProducts && "animate-spin")} />
-                                          <span>{lang === 'ar' ? 'تحديث' : 'Refresh'}</span>
-                                        </button>
-                                      </div>
-                                      <SearchableSelect
-                                        options={productOptions}
-                                        value={orderDefaultProductId}
-                                        onChange={setOrderDefaultProductId}
-                                        placeholder={isLoadingProducts
-                                          ? (lang === 'ar' ? 'جاري تحميل المنتجات من أودو...' : 'Loading products from Odoo...')
-                                          : (lang === 'ar' ? '— اختر المنتج من منتجات أودو المسجلة —' : '— Select product from Odoo registered products —')}
-                                        disabled={isLoadingProducts}
-                                      />
-                                      {!isLoadingProducts && productOptions.length === 0 && (
-                                        <div className="flex items-center justify-between text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg border border-amber-500/20">
-                                          <span>{lang === 'ar' ? 'لم يتم العثور على منتجات في أودو أو تعذر جلبها.' : 'No products found or failed to load.'}</span>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleRefreshProducts(true)}
-                                            className="underline font-semibold hover:text-amber-700"
-                                          >
-                                            {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-                                          </button>
-                                        </div>
-                                      )}
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? 'سيتم استخدام هذا المنتج في بنود الطلب لأي منتج لا يتطابق الـ SKU أو الباركود الخاص به مع منتجات أودو، مع الاحتفاظ باسم المنتج الأصلي في الوصف.'
-                                          : 'This product will be used in sales order lines when an item is not found in Odoo, preserving the original item name in line description.'}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* ═══ 3. Defaults ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'القيم والخصائص الافتراضية' : 'Default Values & Configurations'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'تحديد المستودع الافتراضي، قائمة الأسعار، شروط الدفع، والشركة في أودو للطلب الجديد'
-                                      : 'Specify default warehouse, pricelist, payment terms, and company in Odoo for new orders'}
-                                  </p>
-                                  <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'المستودع الافتراضي' : 'Default Warehouse'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={warehouseOptions}
-                                        value={orderWarehouseId}
-                                        onChange={setOrderWarehouseId}
-                                        placeholder={lang === 'ar' ? '— اختر المستودع —' : '— Select Warehouse —'}
-                                        disabled={isLoadingWarehouses}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'قائمة الأسعار الافتراضية' : 'Default Pricelist'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={pricelistOptions}
-                                        value={orderPricelistId}
-                                        onChange={setOrderPricelistId}
-                                        placeholder={lang === 'ar' ? '— اختر قائمة الأسعار —' : '— Select Pricelist —'}
-                                        disabled={isLoadingPricelists}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'شروط الدفع الافتراضية' : 'Default Payment Terms'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={paymentTermOptions}
-                                        value={orderPaymentTermId}
-                                        onChange={setOrderPaymentTermId}
-                                        placeholder={lang === 'ar' ? '— اختر شروط الدفع —' : '— Select Payment Terms —'}
-                                        disabled={isLoadingPaymentTerms}
-                                      />
-                                    </div>
-                                    <div className="space-y-1.5">
-                                      <label className="block text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
-                                      </label>
-                                      <SearchableSelect
-                                        options={companyOptions}
-                                        value={orderCompanyId}
-                                        onChange={setOrderCompanyId}
-                                        placeholder={lang === 'ar' ? '— اختر الشركة (اختياري) —' : '— Select Company (Optional) —'}
-                                        disabled={isLoadingCompanies}
-                                      />
-                                    </div>
-                                    {orderCompanyId && (
-                                      <div className="flex items-center gap-2 col-span-2 mt-2">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={orderLinkCompany}
-                                          onClick={() => setOrderLinkCompany(!orderLinkCompany)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            orderLinkCompany ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            orderLinkCompany ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs text-muted-foreground">
-                                          {lang === 'ar' ? 'ربط وتحديد الشركة بالسجل في أودو' : 'Link and set company on the Odoo record'}
-                                        </span>
-                                      </div>
-                                    )}
-                                    <div className="flex items-center gap-2 col-span-2 mt-2 border-t border-border/50 pt-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={orderAutoConfirm}
-                                        onClick={() => setOrderAutoConfirm(!orderAutoConfirm)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderAutoConfirm ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderAutoConfirm ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'تأكيد الطلب تلقائياً (تحويل من مسودة إلى أمر مبيعات مؤكد)' : 'Auto Confirm Order (Convert Draft to Sales Order)'}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-2 col-span-2 border-t border-border/50 pt-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={orderAutoInvoice}
-                                        onClick={() => setOrderAutoInvoice(!orderAutoInvoice)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderAutoInvoice ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderAutoInvoice ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'إنشاء الفاتورة تلقائياً بعد تأكيد الطلب' : 'Auto Create Invoice After Order Confirmation'}
-                                      </span>
-                                    </div>
-                                    <div className="space-y-3 col-span-2 border-t border-border/50 pt-3">
-                                      <div>
-                                        <h3 className="text-sm font-bold text-foreground">
-                                          {lang === 'ar' ? 'مرتجعات المتجر' : 'Store Returns'}
-                                        </h3>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                          {lang === 'ar'
-                                            ? 'عند إرجاع عميل لطلب من Zid أو Salla، يُنفَّذ المرتجع في أودو بالطريقة المختارة أدناه.'
-                                            : 'When a customer returns a Zid / Salla order, apply it in Odoo the way you pick below.'}
-                                        </p>
-                                      </div>
-                                      <div className="space-y-1.5">
-                                        <label className="block text-xs font-semibold text-muted-foreground">
-                                          {lang === 'ar' ? 'طريقة تنفيذ المرتجع' : 'Return handling'}
-                                        </label>
-                                        <select
-                                          className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                          value={orderReturnsMode}
-                                          onChange={e => setOrderReturnsMode(e.target.value as typeof orderReturnsMode)}
-                                        >
-                                          <option value="nothing">
-                                            {lang === 'ar' ? 'لا شيء (تجاهل المرتجعات)' : 'Nothing (ignore returns)'}
-                                          </option>
-                                          <option value="negative_so">
-                                            {lang === 'ar' ? 'إنشاء أمر بيع بكميات سالبة' : 'Create a negative-quantity sale order'}
-                                          </option>
-                                          <option value="stock_return_credit_note">
-                                            {lang === 'ar' ? 'مرتجع مخزون على نفس أمر البيع + كريدت نوت' : 'Stock return on the original order + credit note'}
-                                          </option>
-                                        </select>
-                                        {orderReturnsMode === 'negative_so' && (
-                                          <p className="text-[11px] text-muted-foreground">
-                                            {lang === 'ar'
-                                              ? 'يُربط الأمر السالب بالأمر الأصلي عبر المرجع RET:<رقم الأمر> لتجنب الاحتساب المزدوج.'
-                                              : 'The negative order is linked to the original with client reference RET:<order>. This prevents double counting.'}
-                                          </p>
-                                        )}
-                                        {orderReturnsMode === 'stock_return_credit_note' && (
-                                          <p className="text-[11px] text-muted-foreground">
-                                            {lang === 'ar'
-                                              ? 'يتطلب أن يكون الطلب قد تم تسليمه فعليًا في أودو وأن الفاتورة مسجّلة. الكميات تُحسب من المتبقي القابل للإرجاع في المتجر مقابل الكميات المسلّمة في أودو.'
-                                              : 'Requires the order to be delivered in Odoo and its invoice posted. Quantities come from what is still returnable in the store versus what was delivered in Odoo.'}
-                                          </p>
-                                        )}
-                                      </div>
-                                      {orderReturnsMode !== 'nothing' && (
-                                        <>
-                                          {orderReturnsMode === 'stock_return_credit_note' && (
-                                            <>
-                                              <div className="flex items-center gap-2">
-                                                <button
-                                                  type="button"
-                                                  role="switch"
-                                                  dir="ltr"
-                                                  aria-checked={orderReturnsCreditNote}
-                                                  onClick={() => setOrderReturnsCreditNote(!orderReturnsCreditNote)}
-                                                  className={cn(
-                                                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                                    orderReturnsCreditNote ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                                  )}
-                                                >
-                                                  <span className={cn(
-                                                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                                    orderReturnsCreditNote ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                                  )} />
-                                                </button>
-                                                <span className="text-xs font-semibold text-muted-foreground">
-                                                  {lang === 'ar' ? 'إنشاء كريدت نوت بمبلغ المرتجع' : 'Create a credit note for the returned amount'}
-                                                </span>
-                                              </div>
-                                              <div className="space-y-1.5">
-                                                <label className="block text-xs font-semibold text-muted-foreground">
-                                                  {lang === 'ar' ? 'دفتر يومية كريدت النوت (اختياري)' : 'Credit note journal (optional)'}
-                                                </label>
-                                                <input
-                                                  type="number"
-                                                  min={1}
-                                                  className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                  value={orderReturnsJournalId}
-                                                  onChange={e => setOrderReturnsJournalId(e.target.value)}
-                                                  placeholder={lang === 'ar' ? 'معرّف الدفتر في أودو' : 'Odoo journal id'}
-                                                />
-                                              </div>
-                                            </>
-                                          )}
-                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <div className="space-y-1.5">
-                                              <label className="block text-xs font-semibold text-muted-foreground">
-                                                {lang === 'ar' ? 'إذا لم يوجد الأمر الأصلي' : 'If the original order is missing'}
-                                              </label>
-                                              <select
-                                                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                value={orderReturnsFallback}
-                                                onChange={e => setOrderReturnsFallback(e.target.value as typeof orderReturnsFallback)}
-                                              >
-                                                <option value="skip">
-                                                  {lang === 'ar' ? 'تجاهل المرتجع' : 'Skip the return'}
-                                                </option>
-                                                <option value="negative_so">
-                                                  {lang === 'ar' ? 'أمر بيع سالب مستقل' : 'Standalone negative sale order'}
-                                                </option>
-                                              </select>
-                                            </div>
-                                            <div className="space-y-1.5">
-                                              <label className="block text-xs font-semibold text-muted-foreground">
-                                                {lang === 'ar' ? 'سبب المرتجع (اختياري)' : 'Return reason (optional)'}
-                                              </label>
-                                              <input
-                                                type="text"
-                                                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                value={orderReturnsReason}
-                                                onChange={e => setOrderReturnsReason(e.target.value)}
-                                                placeholder={lang === 'ar' ? 'يُكتب على الأمر/الفاتورة' : 'Written on the order / credit note'}
-                                              />
-                                            </div>
-                                          </div>
-                                        </>
-                                      )}
-                                    </div>
-                                    <div className="flex items-center gap-2 col-span-2 border-t border-border/50 pt-3">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                          dir="ltr"
-                                        aria-checked={orderPartialFulfillment}
-                                        onClick={() => setOrderPartialFulfillment(!orderPartialFulfillment)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderPartialFulfillment ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderPartialFulfillment ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-muted-foreground">
-                                        {lang === 'ar' ? 'تفعيل التنفيذ الجزئي (شحنات متعددة)' : 'Enable Partial Fulfillment (Multiple Shipments)'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ Multi-Warehouse Rules ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'قواعد المستودعات المتعددة' : 'Multi-Warehouse Rules'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? `اختر موقع ${standardStoreTab === 'salla' ? 'سلة (الفرع)' : 'زد'} والمستودع المقابل له في أودو — يُستخدم المستودع المحدد عند وصول طلب من ذلك الموقع (وإلا فالمستودع الافتراضي أعلاه)`
-                                      : `Pick a ${standardStoreTab === 'salla' ? 'Salla branch' : 'Zid location'} and its matching Odoo warehouse — that warehouse is used for orders coming from that location (otherwise the default above)`}
-                                  </p>
-                                  <div className="space-y-2">
-                                    {storeWarehouseRules.map((rule) => (
-                                      <div key={rule.rowKey} className="flex items-center gap-2">
-                                        <SearchableSelect
-                                          className="flex-1 min-w-0"
-                                          options={standardStoreTab === 'salla' ? sallaOrderLocationOptions : zidLocationOptions}
-                                          value={rule.zid_location_id}
-                                          onChange={(v: string) => handleWarehouseRuleChange(rule.rowKey, 'zid_location_id', String(v ?? ''))}
-                                          placeholder={lang === 'ar'
-                                            ? (standardStoreTab === 'salla' ? '— فرع سلة —' : '— موقع زد —')
-                                            : (standardStoreTab === 'salla' ? '— Salla branch —' : '— Zid location —')}
-                                        />
-                                        <ArrowRightLeft className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                        <SearchableSelect
-                                          className="flex-1 min-w-0"
-                                          options={warehouseOptions}
-                                          value={rule.odoo_warehouse_id}
-                                          onChange={(v: string) => handleWarehouseRuleChange(rule.rowKey, 'odoo_warehouse_id', String(v ?? ''))}
-                                          placeholder={lang === 'ar' ? '— مستودع أودو —' : '— Odoo warehouse —'}
-                                          disabled={isLoadingWarehouses}
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveWarehouseRule(rule.rowKey)}
-                                          title={lang === 'ar' ? 'حذف القاعدة' : 'Remove rule'}
-                                          className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
-                                        >
-                                          <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                      </div>
-                                    ))}
-                                    {storeWarehouseRules.length === 0 && (
-                                      <p className="text-[11px] text-muted-foreground">
-                                        {lang === 'ar'
-                                          ? 'لا توجد قواعد — كل الطلبات ستذهب للمستودع الافتراضي.'
-                                          : 'No rules yet — every order goes to the default warehouse.'}
-                                      </p>
-                                    )}
-                                    <div className="flex flex-wrap items-center gap-2 pt-1">
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 w-7 shrink-0 p-0"
-                                        onClick={handleRefreshOrderWarehouses}
-                                        disabled={isRefreshingOrderWarehouses || isLoadingWarehouses}
-                                        title={lang === 'ar'
-                                          ? (standardStoreTab === 'salla' ? 'تحديث فروع سلة ومستودعات أودو' : 'تحديث مواقع زد ومستودعات أودو')
-                                          : (standardStoreTab === 'salla' ? 'Refresh Salla branches & Odoo warehouses' : 'Refresh Zid locations & Odoo warehouses')}
-                                        aria-label={lang === 'ar' ? 'تحديث المستودعات' : 'Refresh warehouses'}
-                                      >
-                                        <RefreshCw className={cn('h-3 w-3', isRefreshingOrderWarehouses && 'animate-spin')} />
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleAddWarehouseRule}
-                                        className="h-7 text-[10px] gap-1"
-                                      >
-                                        <Plus className="h-3 w-3" />
-                                        {lang === 'ar' ? 'إضافة قاعدة' : 'Add Rule'}
-                                      </Button>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ ضريبة القيمة المضافة (VAT) ═══ */}
-                                {/* ─── Analytic Distribution ─── */}
-                                {standardStoreTab !== 'shopify' && (
-                                  <div className="border-t border-border/80 pt-5">
-                                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                                      <div>
-                                        <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                          <Calculator className="h-4 w-4 text-emerald-500" />
-                                          {lang === 'ar' ? 'التوزيع التحليلي (الحسابات التحليلية)' : 'Analytic Distribution (Analytic Accounts)'}
-                                        </h3>
-                                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                                          {lang === 'ar'
-                                            ? 'اربط طلبات المتجر بحسابات أودوو التحليلية حسب المخزن أو طريقة الدفع. النسب تُعتبر أوزاناً نسبية ويتم تطبيعها إجمالاً إلى 100%. صف "موحّد" يُستخدم فقط عندما لا يطابق أي شرط مخزن أو دفع.'
-                                            : 'Attach Odoo analytic accounts to orders by warehouse or payment method. Percentages are relative weights, normalised to 100%. A "unified" rule applies only when no warehouse/payment rule matches.'}
-                                        </p>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                        dir="ltr"
-                                        aria-checked={orderAnalyticEnabled}
-                                        onClick={() => setOrderAnalyticEnabled(!orderAnalyticEnabled)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderAnalyticEnabled ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderAnalyticEnabled ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                    </div>
-
-                                    {orderAnalyticEnabled && (
-                                      <div className="mt-3 space-y-2">
-                                        {orderAnalyticRules.map((rule) => {
-                                          const sourceOptions = rule.condition === 'warehouse'
-                                            ? (standardStoreTab === 'salla' ? sallaOrderLocationOptions : zidLocationOptions)
-                                            : paymentMethodOptions
-                                          return (
-                                            <div
-                                              key={rule.rowKey}
-                                              className="grid grid-cols-1 sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(0,1.6fr)_92px_28px] items-center gap-2"
-                                            >
-                                              <SearchableSelect
-                                                options={[
-                                                  { value: 'all', label: lang === 'ar' ? 'جميع الطلبات (موحّد)' : 'All orders (unified)' },
-                                                  { value: 'warehouse', label: lang === 'ar' ? 'حسب المخزن' : 'By warehouse' },
-                                                  { value: 'payment', label: lang === 'ar' ? 'حسب طريقة الدفع' : 'By payment method' },
-                                                ]}
-                                                value={rule.condition}
-                                                onChange={(v: string) => handleAnalyticRuleChange(rule.rowKey, {
-                                                  condition: v === 'warehouse' || v === 'payment' ? v : 'all',
-                                                  source_value: '',
-                                                  source_label: '',
-                                                })}
-                                              />
-
-                                              {rule.condition === 'all' ? (
-                                                <div className="flex h-9 items-center rounded-lg border border-dashed border-border px-3 text-[11px] text-muted-foreground">
-                                                  {lang === 'ar' ? 'يُطبَّق على كل الطلبات' : 'Applies to every order'}
-                                                </div>
-                                              ) : (
-                                                <SearchableSelect
-                                                  options={sourceOptions}
-                                                  value={rule.source_value}
-                                                  onChange={(v: string) => {
-                                                    const selected = sourceOptions.find(option => option.value === String(v ?? ''))
-                                                    handleAnalyticRuleChange(rule.rowKey, {
-                                                      source_value: String(v ?? ''),
-                                                      source_label: selected?.label || String(v ?? ''),
-                                                    })
-                                                  }}
-                                                  placeholder={isLoadingAnalyticOptions
-                                                    ? (lang === 'ar' ? 'جارٍ التحميل…' : 'Loading…')
-                                                    : rule.condition === 'warehouse'
-                                                      ? (standardStoreTab === 'salla' ? (lang === 'ar' ? '- اختر الفرع -' : '- Salla branch -') : (lang === 'ar' ? '- اختر المخزن -' : '- Zid location -'))
-                                                      : (lang === 'ar' ? '- اختر طريقة الدفع -' : '- Payment method -')}
-                                                  disabled={isLoadingAnalyticOptions}
-                                                />
-                                              )}
-
-                                              <SearchableSelect
-                                                options={analyticAccountOptions}
-                                                value={rule.odoo_analytic_account_id}
-                                                onChange={(v: string) => handleAnalyticRuleChange(rule.rowKey, {
-                                                  odoo_analytic_account_id: String(v ?? ''),
-                                                })}
-                                                placeholder={isLoadingAnalyticOptions
-                                                  ? (lang === 'ar' ? 'جارٍ التحميل…' : 'Loading…')
-                                                  : (lang === 'ar' ? '- الحساب التحليلي -' : '- Analytic account -')}
-                                                disabled={isLoadingAnalyticOptions}
-                                              />
-
-                                              <div className="relative">
-                                                <input
-                                                  type="number"
-                                                  min="0.01"
-                                                  max="100"
-                                                  step="0.01"
-                                                  className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                  value={rule.percentage}
-                                                  onChange={e => handleAnalyticRuleChange(rule.rowKey, { percentage: e.target.value })}
-                                                  placeholder="100"
-                                                  aria-label={lang === 'ar' ? 'النسبة' : 'Percentage'}
-                                                />
-                                                <span className="pointer-events-none absolute inset-y-0 end-2 flex items-center text-[10px] text-muted-foreground">%</span>
-                                              </div>
-
-                                              <button
-                                                type="button"
-                                                onClick={() => handleRemoveAnalyticRule(rule.rowKey)}
-                                                title={lang === 'ar' ? 'حذف القاعدة' : 'Remove rule'}
-                                                className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
-                                              >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                              </button>
-                                            </div>
-                                          )
-                                        })}
-
-                                        {orderAnalyticRules.length === 0 && (
-                                          <p className="text-[11px] text-muted-foreground">
-                                            {lang === 'ar'
-                                              ? 'لا توجد قواعد بعد - أضف قاعدة لربط الطلبات بحساب تحليلي.'
-                                              : 'No rules yet - add one to attach orders to an analytic account.'}
-                                          </p>
-                                        )}
-
-                                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-7 w-7 shrink-0 p-0"
-                                            onClick={handleRefreshAnalyticOptions}
-                                            disabled={isLoadingAnalyticOptions}
-                                            title={lang === 'ar' ? 'تحديث الحسابات وطرق الدفع' : 'Refresh accounts & payment methods'}
-                                            aria-label={lang === 'ar' ? 'تحديث الخيارات' : 'Refresh options'}
-                                          >
-                                            <RefreshCw className={cn('h-3 w-3', isLoadingAnalyticOptions && 'animate-spin')} />
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={handleAddAnalyticRule}
-                                            className="h-7 text-[10px] gap-1"
-                                          >
-                                            <Plus className="h-3 w-3" />
-                                            {lang === 'ar' ? 'إضافة قاعدة' : 'Add Rule'}
-                                          </Button>
-                                        </div>
-
-                                        {!isLoadingAnalyticOptions && analyticAccountOptions.length === 0 && !analyticOptionsError && (
-                                          <p className="text-[11px] text-amber-600">
-                                            {lang === 'ar'
-                                              ? 'لم يتم العثور على حسابات تحليلية في أودوو. أنشئ حساباً تحليلياً أولاً ثم اضغط تحديث.'
-                                              : 'No analytic accounts were found in Odoo. Create one there, then press refresh.'}
-                                          </p>
-                                        )}
-                                        {analyticOptionsError && (
-                                          <p className="text-[11px] text-red-500">{analyticOptionsError}</p>
-                                        )}
-                                        {(() => {
-                                          const total = orderAnalyticRules.reduce((sum, rule) => sum + (Number(rule.percentage) || 0), 0)
-                                          if (orderAnalyticRules.length < 2 || Math.round(total * 100) / 100 === 100) return null
-                                          return (
-                                            <p className="text-[11px] text-muted-foreground">
-                                              {lang === 'ar'
-                                                ? `مجموع النسب ${Math.round(total * 100) / 100}% - سيتم تطبيعه إلى 100% عند المزامنة.`
-                                                : `Percentages total ${Math.round(total * 100) / 100}% - normalised to 100% on sync.`}
-                                            </p>
-                                          )
-                                        })()}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-
-                                <div className="border-t border-border/80 pt-5">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div>
-                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                        <Receipt className="h-4 w-4 text-emerald-500" />
-                                        {lang === 'ar' ? 'ضريبة القيمة المضافة (VAT)' : 'Value Added Tax (VAT)'}
-                                      </h3>
-                                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                                        {lang === 'ar'
-                                          ? 'تحديد ضريبة الطلب في أودو بناءً على عنوان شحن العميل (سعودي أو غير سعودي)'
-                                          : 'Configure order taxes in Odoo based on the customer shipping destination'}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                        dir="ltr"
-                                        aria-checked={orderEnableVat}
-                                        onClick={() => setOrderEnableVat(!orderEnableVat)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderEnableVat ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderEnableVat ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-foreground">
-                                        {lang === 'ar' ? 'تفعيل ضريبة القيمة المضافة' : 'Enable Value Added Tax'}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {orderEnableVat ? (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 p-4 rounded-xl border border-border bg-muted/10">
-                                      <div className="space-y-1.5">
-                                        <label className="block text-xs font-semibold text-foreground">
-                                          {lang === 'ar' ? 'العميل السعودي' : 'Saudi Customer'}
-                                        </label>
-                                        <SearchableSelect
-                                          options={orderTaxOptions}
-                                          value={orderVatSaudiTaxId}
-                                          onChange={setOrderVatSaudiTaxId}
-                                          placeholder={lang === 'ar' ? '— اختر ضريبة العميل السعودي من أودو —' : '— Select Saudi Tax from Odoo —'}
-                                          disabled={isLoadingOrderTaxes}
-                                        />
-                                        <p className="text-[10px] text-muted-foreground">
-                                          {lang === 'ar'
-                                            ? 'يتم تطبيق هذه الضريبة على بنود الطلب في أودو إذا كان عنوان الشحن داخل السعودية'
-                                            : 'Applied to Odoo order lines when the shipping address is in Saudi Arabia'}
-                                        </p>
-                                      </div>
-
-                                      <div className="space-y-1.5">
-                                        <label className="block text-xs font-semibold text-foreground">
-                                          {lang === 'ar' ? 'عميل غير سعودي' : 'Non-Saudi Customer'}
-                                        </label>
-                                        <SearchableSelect
-                                          options={orderTaxOptions}
-                                          value={orderVatNonSaudiTaxId}
-                                          onChange={setOrderVatNonSaudiTaxId}
-                                          placeholder={lang === 'ar' ? '— اختر ضريبة العميل غير السعودي من أودو —' : '— Select Non-Saudi Tax from Odoo —'}
-                                          disabled={isLoadingOrderTaxes}
-                                        />
-                                        <p className="text-[10px] text-muted-foreground">
-                                          {lang === 'ar'
-                                            ? 'يتم تطبيق هذه الضريبة على بنود الطلب في أودو إذا كان عنوان الشحن خارج السعودية'
-                                            : 'Applied to Odoo order lines when the shipping address is outside Saudi Arabia'}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <p className="text-[11px] text-muted-foreground mt-2">
-                                      {lang === 'ar'
-                                        ? 'الضريبة غير مفعلة: سيتم إرسال الطلبات إلى أودو بدون أي ضرائب على البنود.'
-                                        : 'VAT disabled: Orders will be sent to Odoo without taxes on line items.'}
-                                    </p>
-                                  )}
-                                </div>
-
-                                {/* ═══ 4. Shipping & Discount Options ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'بنود الشحن والخصومات' : 'Shipping & Discount Lines'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-3">
-                                    {lang === 'ar'
-                                      ? 'تحديد كيفية إضافة تكلفة الشحن ومبالغ الخصومات كبنود مستقلة في الفاتورة'
-                                      : 'Specify how to append shipping costs and discount amounts as line items in the order'}
-                                  </p>
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Shipping section */}
-                                    <div className="space-y-4 p-4 rounded-xl border border-border bg-muted/10">
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={orderAddShipping}
-                                          onClick={() => setOrderAddShipping(!orderAddShipping)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            orderAddShipping ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            orderAddShipping ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs font-bold text-foreground">
-                                          {lang === 'ar' ? 'إضافة الشحن كبند مستقل' : 'Add Shipping as Line Item'}
-                                        </span>
-                                      </div>
-                                      {orderAddShipping && (
-                                        <div className="space-y-3 pt-2">
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'منتج الشحن في أودو' : 'Odoo Shipping Product'}
-                                            </label>
-                                            <SearchableSelect
-                                              options={productOptions}
-                                              value={orderShippingProductId}
-                                              onChange={setOrderShippingProductId}
-                                              placeholder={lang === 'ar' ? '— اختر منتج الشحن —' : '— Select Shipping Product —'}
-                                              disabled={isLoadingProducts}
-                                            />
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'رمز المنتج المرجعي للشحن (SKU)' : 'Shipping Product SKU Fallback'}
-                                            </label>
-                                            <input
-                                              type="text"
-                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                              value={orderShippingProductSku}
-                                              onChange={e => setOrderShippingProductSku(e.target.value)}
-                                              placeholder={lang === 'ar' ? 'مثال: shipping-product' : 'e.g. shipping-product'}
-                                            />
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* COD section */}
-                                    <div className="space-y-4 p-4 rounded-xl border border-border bg-muted/10">
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={orderAddCod}
-                                          onClick={() => setOrderAddCod(!orderAddCod)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            orderAddCod ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            orderAddCod ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs font-bold text-foreground">
-                                          {lang === 'ar' ? 'إضافة رسوم الدفع عند الاستلام كبند' : 'Add COD Fee as Line Item'}
-                                        </span>
-                                      </div>
-                                      {orderAddCod && (
-                                        <div className="space-y-3 pt-2">
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'منتج رسوم الدفع عند الاستلام في أودو' : 'Odoo COD Fee Product'}
-                                            </label>
-                                            <SearchableSelect
-                                              options={productOptions}
-                                              value={orderCodProductId}
-                                              onChange={setOrderCodProductId}
-                                              placeholder={lang === 'ar' ? '— اختر منتج رسوم COD —' : '— Select COD Fee Product —'}
-                                              disabled={isLoadingProducts}
-                                            />
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'رمز المنتج المرجعي (SKU)' : 'COD Product SKU Fallback'}
-                                            </label>
-                                            <input
-                                              type="text"
-                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                              value={orderCodProductSku}
-                                              onChange={e => setOrderCodProductSku(e.target.value)}
-                                              placeholder={lang === 'ar' ? 'مثال: cod-fee-product' : 'e.g. cod-fee-product'}
-                                            />
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'مبلغ احتياطي (يُستخدم عند غياب المبلغ من زد)' : 'Fallback Amount (used when Zid sends none)'}
-                                            </label>
-                                            <input
-                                              type="number"
-                                              min="0"
-                                              step="0.01"
-                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                              value={orderCodAmount}
-                                              onChange={e => setOrderCodAmount(e.target.value)}
-                                              placeholder={lang === 'ar' ? 'مثال: 10' : 'e.g. 10'}
-                                            />
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Discount section */}
-                                    <div className="space-y-4 p-4 rounded-xl border border-border bg-muted/10">
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          type="button"
-                                          role="switch"
-                                          dir="ltr"
-                                          aria-checked={orderAddDiscount}
-                                          onClick={() => setOrderAddDiscount(!orderAddDiscount)}
-                                          className={cn(
-                                            'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                            orderAddDiscount ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                          )}
-                                        >
-                                          <span className={cn(
-                                            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                            orderAddDiscount ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                          )} />
-                                        </button>
-                                        <span className="text-xs font-bold text-foreground">
-                                          {lang === 'ar' ? 'إضافة الخصم كبند مستقل' : 'Add Discount as Line Item'}
-                                        </span>
-                                      </div>
-                                      {orderAddDiscount && (
-                                        <div className="space-y-3 pt-2">
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'منتج الخصم في أودو' : 'Odoo Discount Product'}
-                                            </label>
-                                            <SearchableSelect
-                                              options={productOptions}
-                                              value={orderDiscountProductId}
-                                              onChange={setOrderDiscountProductId}
-                                              placeholder={lang === 'ar' ? '— اختر منتج الخصم —' : '— Select Discount Product —'}
-                                              disabled={isLoadingProducts}
-                                            />
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'رمز منتج الخصم المرجعي (SKU)' : 'Discount Product SKU Fallback'}
-                                            </label>
-                                            <input
-                                              type="text"
-                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground placeholder:text-muted-foreground/40 focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                              value={orderDiscountProductSku}
-                                              onChange={e => setOrderDiscountProductSku(e.target.value)}
-                                              placeholder={lang === 'ar' ? 'مثال: discount-product' : 'e.g. discount-product'}
-                                            />
-                                          </div>
-                                          <div className="space-y-1.5">
-                                            <label className="block text-[11px] font-semibold text-muted-foreground">
-                                              {lang === 'ar' ? 'طريقة الخصم' : 'Discount Mode'}
-                                            </label>
-                                            <select
-                                              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                              value={orderDiscountMode}
-                                              onChange={e => setOrderDiscountMode(e.target.value)}
-                                            >
-                                              <option value="fixed">{lang === 'ar' ? 'قيمة ثابتة سالبة' : 'Negative Fixed Value'}</option>
-                                              <option value="percent">{lang === 'ar' ? 'نسبة مئوية' : 'Percentage'}</option>
-                                            </select>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ═══ 4.5 Order Status Custom Field in Odoo (per store tab) ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                    <div>
-                                      <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                        <Activity className="h-4 w-4 text-primary" />
-                                        <span>{lang === 'ar' ? `تحديث حالة طلب ${statusStoreNameAr} داخل أودو (حقل مخصص)` : `Sync ${statusStoreNameEn} Order Status to Odoo (Custom Field)`}</span>
-                                      </h3>
-                                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                                        {lang === 'ar'
-                                          ? `إنشاء خانة من نوع Selection في أودو على أمر المبيعات (sale.order) تحتوي على حالات طلبات ${statusStoreNameAr} ويتم تحديثها تلقائياً عند تغير الحالة في ${statusStoreNameAr}.`
-                                          : `Create a Selection field on sale.order in Odoo containing ${statusStoreNameEn} order statuses, automatically updated when the order status changes in ${statusStoreNameEn}.`}
-                                      </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 shrink-0">
-                                      <button
-                                        type="button"
-                                        role="switch"
-                                        dir="ltr"
-                                        aria-checked={orderUpdateCustomStatus}
-                                        onClick={() => setOrderUpdateCustomStatus(!orderUpdateCustomStatus)}
-                                        className={cn(
-                                          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                          orderUpdateCustomStatus ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                        )}
-                                      >
-                                        <span className={cn(
-                                          'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                          orderUpdateCustomStatus ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                        )} />
-                                      </button>
-                                      <span className="text-xs font-semibold text-foreground">
-                                        {lang === 'ar' ? 'تفعيل الخيار' : 'Enable Option'}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {orderUpdateCustomStatus && (
-                                    <div className="mt-4 p-4 rounded-xl border border-border bg-muted/10 space-y-4">
-                                      {statusFieldExists ? (
-                                        <div className="space-y-3">
-                                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300">
-                                            <div className="flex items-center gap-2">
-                                              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                                                <span className="text-xs font-semibold">
-                                                  {lang === 'ar'
-                                                    ? `الخانة متوفرة في أودو: ${orderStatusCustomField || statusFieldDefaultName} (نوع Selection)`
-                                                    : `Field exists in Odoo: ${orderStatusCustomField || statusFieldDefaultName} (Selection)`}
-                                                </span>
-                                            </div>
-                                            <Button
-                                              type="button"
-                                              variant="outline"
-                                              size="sm"
-                                              onClick={handleCreateStatusField}
-                                              disabled={isCreatingStatusField}
-                                              className="h-7 text-[11px] gap-1 border-emerald-500/30 hover:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 self-start sm:self-auto"
-                                            >
-                                              <RefreshCw className={cn("h-3 w-3", isCreatingStatusField && "animate-spin")} />
-                                              {lang === 'ar' ? `تحديث خيارات الحالات من ${statusStoreNameAr}` : `Update Options from ${statusStoreNameEn}`}
-                                            </Button>
-                                          </div>
-
-                                          <div className="space-y-1.5">
-                                            <div className="flex items-center justify-between">
-                                              <label className="block text-xs font-semibold text-foreground">
-                                                {lang === 'ar' ? 'حقل أودو المستهدف على أمر المبيعات (sale.order)' : 'Target Odoo Field on sale.order'}
-                                              </label>
-                                              <button
-                                                type="button"
-                                                onClick={() => fetchOdooOrderFields(true)}
-                                                disabled={isLoadingOrderFields}
-                                                className="text-muted-foreground hover:text-foreground text-[11px] flex items-center gap-1 transition-colors"
-                                              >
-                                                <RefreshCw className={cn("h-3 w-3", isLoadingOrderFields && "animate-spin")} />
-                                                <span>{lang === 'ar' ? 'تحديث قائمة الحقول' : 'Refresh Fields'}</span>
-                                              </button>
-                                            </div>
-                                              <SearchableSelect
-                                              options={odooOrderFields}
-                                              value={orderStatusCustomField || statusFieldDefaultName}
-                                              onChange={setOrderStatusCustomField}
-                                              placeholder={lang === 'ar' ? '— اختر حقل أودو —' : '— Select Odoo Field —'}
-                                              disabled={isLoadingOrderFields}
-                                            />
-                                          </div>
-
-                                          <div className="space-y-1.5 pt-2">
-                                              <label className="block text-xs font-semibold text-muted-foreground">
-                                                {lang === 'ar' ? `الخيارات وحالات ${statusStoreNameAr} المربوطة داخل الخانة:` : `Linked ${statusStoreNameEn} Status Options in Selection:`}
-                                              </label>
-                                            <div className="flex flex-wrap gap-1.5">
-                                              {statusFieldOptions.map((opt) => (
-                                                <span
-                                                  key={opt.key}
-                                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-background border border-border text-foreground shadow-sm"
-                                                >
-                                                  <span className="font-semibold text-primary mx-1">{opt.key}:</span>
-                                                  {opt.label}
-                                                </span>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-dashed border-primary/30 bg-primary/5">
-                                          <div className="space-y-1">
-                                            <div className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                                              <Wand2 className="h-4 w-4 text-primary" />
-                                              <span>{lang === 'ar' ? `إنشاء خانة حالة طلب ${statusStoreNameAr} في أودو` : `Create ${statusStoreNameEn} Order Status Field in Odoo`}</span>
-                                            </div>
-                                              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                {lang === 'ar'
-                                                  ? `سيتم إنشاء حقل جديد تلقائياً باسم (${statusFieldDefaultName}) من نوع Selection داخل أمر المبيعات (sale.order) في أودو وإدراج كافة حالات طلبات ${statusStoreNameAr} كخيارات بداخله، وتحديثه تلقائياً فورياً مع كل تحديث لحالة الطلب.`
-                                                  : `A new selection field (${statusFieldDefaultName}) will be created on sale.order in Odoo with all ${statusStoreNameEn} order statuses as options, and updated automatically on every status update.`}
-                                              </p>
-                                          </div>
-                                          <Button
-                                            type="button"
-                                            onClick={handleCreateStatusField}
-                                            disabled={isCreatingStatusField || !hasOdooConnection}
-                                            className="shrink-0 bg-primary text-primary-foreground gap-1.5 font-semibold rounded-lg h-9 text-xs px-4"
-                                          >
-                                            {isCreatingStatusField ? (
-                                              <>
-                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                                <span>{lang === 'ar' ? 'جاري الإنشاء في أودو...' : 'Creating in Odoo...'}</span>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <Plus className="h-3.5 w-3.5" />
-                                                <span>{lang === 'ar' ? 'إنشاء الخانة في أودو الآن' : 'Create Field in Odoo Now'}</span>
-                                              </>
-                                            )}
-                                          </Button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* ═══ 5. Order Status Mapping ═══ */}
-                                <div className="border-t border-border/80 pt-5">
-                                  <h3 className="text-sm font-bold text-foreground">
-                                    {lang === 'ar' ? 'ربط حالات الطلب' : 'Order Status Mapping'}
-                                  </h3>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5 mb-4">
-                                    {lang === 'ar'
-                                      ? 'مواءمة وتحديد الحالة المقابلة in Odoo لكل حالة من حالات الطلب في المتجر الإلكتروني'
-                                      : 'Align and specify the corresponding Odoo state for each store order status'}
-                                  </p>
-                                  <div className="rounded-xl border border-border overflow-hidden">
-                                    <table className="w-full text-xs text-left border-collapse" dir={dir}>
-                                      <thead>
-                                        <tr className="bg-muted/40 text-muted-foreground border-b border-border/60">
-                                          <th className="px-4 py-2.5 font-bold">
-                                            {lang === 'ar' ? 'حالة الطلب في المتجر' : 'Store Order Status'}
-                                          </th>
-                                          <th className="px-4 py-2.5 font-bold">
-                                            {lang === 'ar' ? 'الحالة المقابلة في أودو' : 'Odoo Target State'}
-                                          </th>
-                                          <th className="px-4 py-2.5 font-bold w-20 text-center">
-                                            {lang === 'ar' ? 'تفعيل' : 'Enabled'}
-                                          </th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-border/40">
-                                        {getOrderPlatformStatuses().map((status) => {
-                                          const odooStates = [
-                                            { value: 'draft', label: lang === 'ar' ? 'مسودة (Quotation)' : 'Quotation (Draft)' },
-                                            { value: 'sent', label: lang === 'ar' ? 'تم إرسال العرض (Sent)' : 'Quotation Sent (Sent)' },
-                                            { value: 'sale', label: lang === 'ar' ? 'طلب مبيعات مؤكد (Sales Order)' : 'Sales Order (Sale)' },
-                                            { value: 'done', label: lang === 'ar' ? 'مغلق (Locked)' : 'Locked (Done)' },
-                                            { value: 'cancel', label: lang === 'ar' ? 'ملغي (Cancelled)' : 'Cancelled (Cancel)' },
-                                          ]
-                                          return (
-                                            <tr key={status.key} className="hover:bg-muted/10">
-                                              <td className="px-4 py-2 font-semibold text-foreground">
-                                                {lang === 'ar' ? status.labelAr : status.labelEn}
-                                                <span className="text-[9px] text-muted-foreground/60 block font-normal">
-                                                  key: {status.key}
-                                                </span>
-                                              </td>
-                                              <td className="px-4 py-2">
-                                                <select
-                                                  className="w-full h-8 px-2 rounded-md border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all"
-                                                  value={orderStateMapping[status.key]?.state || ''}
-                                                  onChange={(e) => {
-                                                    const val = e.target.value
-                                                    setOrderStateMapping(prev => ({
-                                                      ...prev,
-                                                      [status.key]: { state: val, enabled: prev[status.key]?.enabled ?? true },
-                                                    }))
-                                                  }}
-                                                >
-                                                  <option value="">
-                                                    {lang === 'ar' ? '— استخدم الافتراضي —' : '— Use Default —'}
-                                                  </option>
-                                                  {odooStates.map((st) => (
-                                                    <option key={st.value} value={st.value}>
-                                                      {st.label}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </td>
-                                              <td className="px-4 py-2 text-center">
-                                                <button
-                                                  type="button"
-                                                  role="switch"
-                                          dir="ltr"
-                                                  aria-checked={orderStateMapping[status.key]?.enabled ?? true}
-                                                  title={lang === 'ar' ? 'تفعيل/تعطيل هذه الحالة — المعطلة لا تؤثر في أودو' : 'Enable/disable this status — disabled statuses leave Odoo untouched'}
-                                                  onClick={() => {
-                                                    const cur = orderStateMapping[status.key]
-                                                    setOrderStateMapping(prev => ({
-                                                      ...prev,
-                                                      [status.key]: { state: cur?.state || '', enabled: !(cur?.enabled ?? true) },
-                                                    }))
-                                                  }}
-                                                  className={cn(
-                                                    'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50',
-                                                    (orderStateMapping[status.key]?.enabled ?? true) ? 'border-transparent bg-emerald-500 shadow-sm' : 'border-border bg-muted-foreground/25'
-                                                  )}
-                                                >
-                                                  <span className={cn(
-                                                    'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition-transform duration-200',
-                                                    (orderStateMapping[status.key]?.enabled ?? true) ? 'translate-x-[20px]' : 'translate-x-[2px]'
-                                                  )} />
-                                                </button>
-                                              </td>
-                                            </tr>
-                                          )
-                                        })}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-
-                                {/* ── Save & Log Buttons ───────────────── */}
-                                <div className="border-t border-border/80 pt-5 flex items-center gap-2">
-                                  <Button
-                                    onClick={handleSaveOrders}
-                                    disabled={isSavingOrders}
-                                    className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-9 text-xs px-6"
-                                  >
-                                    {isSavingOrders ? (
-                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                      <>{lang === 'ar' ? 'حفظ إعدادات الطلبات' : 'Save Order Settings'}</>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={() => setIsOrderLogOpen(true)}
-                                    className="gap-1.5 rounded-lg h-9 text-xs px-4"
-                                  >
-                                    <History className="h-3.5 w-3.5" />
-                                    {lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
-                                  </Button>
-                                </div>
-                              </div>
-                            )
-                          ) : (
-                            <div className="space-y-3 text-center">
-                              <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mx-auto">
-                                <SlidersHorizontal className="h-6 w-6 text-muted-foreground/50" />
-                              </div>
-                              <div className="text-center">
-                                <p className="text-sm font-bold text-foreground">
-                                  {lang === 'ar'
-                                    ? 'لا يوجد متجر متصل لإعداد الربط'
-                                    : 'No connected store to configure'}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground mt-1.5 leading-relaxed max-w-xs mx-auto">
-                                  {lang === 'ar'
-                                    ? 'لتفعيل إعدادات الربط لهذا المتجر، يرجى ربط المتجر أولاً من صفحة إعدادات الاتصال.'
-                                    : 'To configure mapping for this store, please connect it first from the connection settings page.'}
-                                </p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </motion.div>
-                  </AnimatePresence>
+                      <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />
+                      <span dir="auto">{store.name}</span>
+                      <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-mono font-normal text-muted-foreground">
+                        {platformLabel(store.platform)}
+                      </span>
+                    </button>
+                  )
+                })
+              ) : (
+                <Link
+                  href="/app/connect-store"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-background/50 transition-colors"
+                >
+                  <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 bg-muted-foreground/40" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'لا يوجد متجر متصل — اربط متجراً أولاً'
+                      : 'No store connected — connect a store first'}
+                  </span>
+                </Link>
+              )}
             </div>
-        </motion.div>
-      {/* Other sections (custom / add-field / values) now live on their own routes */}
+          </div>
+        </div>
 
-      <SyncLogModal 
+        {/* ── Active Store Content ────────────────────── */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`${standardSubTab}-${standardStoreTab}-${standardStoreId}`}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.15 }}
+          >
+            {activeStoreTab ? (
+              standardSubTab === 'categories' ? (
+                <CategorySettingsTab
+                  lang={lang}
+                  dir={dir}
+                  costMethod={costMethod}
+                  setCostMethod={setCostMethod}
+                  isLoadingOdooOpts={isLoadingOdooOpts}
+                  costMethodOptions={costMethodOptions}
+                  inventoryValuation={inventoryValuation}
+                  setInventoryValuation={setInventoryValuation}
+                  valuationOptions={valuationOptions}
+                  categoryCompanyId={categoryCompanyId}
+                  setCategoryCompanyId={setCategoryCompanyId}
+                  categoryLinkCompany={categoryLinkCompany}
+                  setCategoryLinkCompany={setCategoryLinkCompany}
+                  isLoadingCompanies={isLoadingCompanies}
+                  companyOptions={companyOptions}
+                  onDeleteAction={onDeleteAction}
+                  setOnDeleteAction={setOnDeleteAction}
+                  matchZidField={matchZidField}
+                  setMatchZidField={setMatchZidField}
+                  matchOdooField={matchOdooField}
+                  setMatchOdooField={setMatchOdooField}
+                  categoryFields={categoryFields}
+                  odooCategoryFields={odooCategoryFields}
+                  isLoadingOdooFields={isLoadingOdooFields}
+                  fetchOdooCategoryFields={fetchOdooCategoryFields}
+                  enabledActions={enabledActions}
+                  setEnabledActions={setEnabledActions}
+                  disabled={disabled}
+                  setDisabled={setDisabled}
+                  isSaving={isSaving}
+                  handleSave={handleSave}
+                  setIsCategoryMappingOpen={setIsCategoryMappingOpen}
+                  setIsCategoryLogOpen={setIsCategoryLogOpen}
+                />
+              ) : standardSubTab === 'products' ? (
+                <ProductSettingsTab
+                  lang={lang}
+                  dir={dir}
+                  standardStoreTab={standardStoreTab}
+                  invSyncStoreNameAr={invSyncStoreNameAr}
+                  invSyncStoreNameEn={invSyncStoreNameEn}
+                  isSallaInvSync={isSallaInvSync}
+                  productType={productType}
+                  setProductType={setProductType}
+                  productTypeOptions={productTypeOptions}
+                  isLoadingProductOpts={isLoadingProductOpts}
+                  trackInventory={trackInventory}
+                  setTrackInventory={setTrackInventory}
+                  trackingMethod={trackingMethod}
+                  setTrackingMethod={setTrackingMethod}
+                  trackingOptions={trackingOptions}
+                  productCompanyId={productCompanyId}
+                  setProductCompanyId={setProductCompanyId}
+                  productLinkCompany={productLinkCompany}
+                  setProductLinkCompany={setProductLinkCompany}
+                  companyOptions={companyOptions}
+                  isLoadingCompanies={isLoadingCompanies}
+                  fetchCompanies={fetchCompanies}
+                  markupPercent={markupPercent}
+                  setMarkupPercent={setMarkupPercent}
+                  costSource={costSource}
+                  setCostSource={setCostSource}
+                  priceSource={priceSource}
+                  setPriceSource={setPriceSource}
+                  rounding={rounding}
+                  setRounding={setRounding}
+                  decimalPlaces={decimalPlaces}
+                  setDecimalPlaces={setDecimalPlaces}
+                  nameLanguage={nameLanguage}
+                  setNameLanguage={setNameLanguage}
+                  nameFallback={nameFallback}
+                  setNameFallback={setNameFallback}
+                  descLanguage={descLanguage}
+                  setDescLanguage={setDescLanguage}
+                  descFallback={descFallback}
+                  setDescFallback={setDescFallback}
+                  descCustomText={descCustomText}
+                  setDescCustomText={setDescCustomText}
+                  productVariantSyncMode={productVariantSyncMode}
+                  setProductVariantSyncMode={setProductVariantSyncMode}
+                  bomEnabled={bomEnabled}
+                  setBomEnabled={setBomEnabled}
+                  bomType={bomType}
+                  setBomType={setBomType}
+                  imageSyncMode={imageSyncMode}
+                  setImageSyncMode={setImageSyncMode}
+                  categorySyncMode={categorySyncMode}
+                  setCategorySyncMode={setCategorySyncMode}
+                  uomAutoCreate={uomAutoCreate}
+                  setUomAutoCreate={setUomAutoCreate}
+                  taxSyncMode={taxSyncMode}
+                  setTaxSyncMode={setTaxSyncMode}
+                  defaultTaxIds={defaultTaxIds}
+                  setDefaultTaxIds={setDefaultTaxIds}
+                  taxOptions={taxOptions}
+                  isLoadingTaxOpts={isLoadingTaxOpts}
+                  productOnDelete={productOnDelete}
+                  setProductOnDelete={setProductOnDelete}
+                  invSyncEnabled={invSyncEnabled}
+                  setInvSyncEnabled={setInvSyncEnabled}
+                  invSyncMode={invSyncMode}
+                  setInvSyncMode={setInvSyncMode}
+                  odooStockWebhook={odooStockWebhook}
+                  handleCreateOdooWebhook={handleCreateOdooWebhook}
+                  handleDeleteOdooWebhook={handleDeleteOdooWebhook}
+                  isSyncingWebhook={isSyncingWebhook}
+                  invSyncWebhookError={invSyncWebhookError}
+                  isLoadingInvSync={isLoadingInvSync}
+                  invSyncPairs={invSyncPairs}
+                  handlePairChange={handlePairChange}
+                  handleRemovePair={handleRemovePair}
+                  handleAddPair={handleAddPair}
+                  handleSavePairs={handleSavePairs}
+                  isSavingPairs={isSavingPairs}
+                  handleRefreshInvLocations={handleRefreshInvLocations}
+                  isRefreshingInvLocations={isRefreshingInvLocations}
+                  usedPairSources={usedPairSources}
+                  allPairSourcesTaken={allPairSourcesTaken}
+                  zidLocations={zidLocations}
+                  sallaLocations={sallaLocations}
+                  odooLocations={odooLocations}
+                  productFields={productFields}
+                  productMatchZidField={productMatchZidField}
+                  setProductMatchZidField={setProductMatchZidField}
+                  productMatchOdooField={productMatchOdooField}
+                  setProductMatchOdooField={setProductMatchOdooField}
+                  productOdooFields={productOdooFields}
+                  isLoadingProductFields={isLoadingProductFields}
+                  fetchOdooProductFields={fetchOdooProductFields}
+                  productEnabledActions={productEnabledActions}
+                  setProductEnabledActions={setProductEnabledActions}
+                  productDisabled={productDisabled}
+                  setProductDisabled={setProductDisabled}
+                  isSavingProducts={isSavingProducts}
+                  handleSaveProducts={handleSaveProducts}
+                  setIsProductMappingOpen={setIsProductMappingOpen}
+                  setIsProductLogOpen={setIsProductLogOpen}
+                />
+              ) : standardSubTab === 'customers' ? (
+                <CustomerSettingsTab
+                  lang={lang}
+                  dir={dir}
+                  customerDefaultType={customerDefaultType}
+                  setCustomerDefaultType={setCustomerDefaultType}
+                  receivableAccountId={receivableAccountId}
+                  setReceivableAccountId={setReceivableAccountId}
+                  payableAccountId={payableAccountId}
+                  setPayableAccountId={setPayableAccountId}
+                  receivableAccountOptions={receivableAccountOptions}
+                  payableAccountOptions={payableAccountOptions}
+                  isLoadingAccounts={isLoadingAccounts}
+                  customerCompanyId={customerCompanyId}
+                  setCustomerCompanyId={setCustomerCompanyId}
+                  customerLinkCompany={customerLinkCompany}
+                  setCustomerLinkCompany={setCustomerLinkCompany}
+                  isLoadingCompanies={isLoadingCompanies}
+                  companyOptions={companyOptions}
+                  customerOnDelete={customerOnDelete}
+                  setCustomerOnDelete={setCustomerOnDelete}
+                  customerMatchZidField={customerMatchZidField}
+                  setCustomerMatchZidField={setCustomerMatchZidField}
+                  customerMatchOdooField={customerMatchOdooField}
+                  setCustomerMatchOdooField={setCustomerMatchOdooField}
+                  customerFields={customerFields}
+                  odooCustomerFields={odooCustomerFields}
+                  isLoadingCustomerFields={isLoadingCustomerFields}
+                  fetchOdooCustomerFields={fetchOdooCustomerFields}
+                  customerEnabledActions={customerEnabledActions}
+                  setCustomerEnabledActions={setCustomerEnabledActions}
+                  customerDisabled={customerDisabled}
+                  setCustomerDisabled={setCustomerDisabled}
+                  isSavingCustomers={isSavingCustomers}
+                  handleSaveCustomers={handleSaveCustomers}
+                  setIsLogOpen={setIsLogOpen}
+                />
+              ) : (
+                <OrderSettingsTab
+                  lang={lang}
+                  dir={dir}
+                  standardStoreTab={standardStoreTab}
+                  statusStoreNameAr={statusStoreNameAr}
+                  statusStoreNameEn={statusStoreNameEn}
+                  statusFieldDefaultName={statusFieldDefaultName}
+                  orderDisabled={orderDisabled}
+                  setOrderDisabled={setOrderDisabled}
+                  orderEnabledActions={orderEnabledActions}
+                  setOrderEnabledActions={setOrderEnabledActions}
+                  orderMatchZidField={orderMatchZidField}
+                  setOrderMatchZidField={setOrderMatchZidField}
+                  orderMatchOdooField={orderMatchOdooField}
+                  setOrderMatchOdooField={setOrderMatchOdooField}
+                  orderFields={orderFields}
+                  odooOrderFields={odooOrderFields}
+                  isLoadingOrderFields={isLoadingOrderFields}
+                  fetchOdooOrderFields={fetchOdooOrderFields}
+                  orderCustomerFallbackPolicy={orderCustomerFallbackPolicy}
+                  setOrderCustomerFallbackPolicy={setOrderCustomerFallbackPolicy}
+                  orderDefaultCustomerId={orderDefaultCustomerId}
+                  setOrderDefaultCustomerId={setOrderDefaultCustomerId}
+                  customerOptions={customerOptions}
+                  isLoadingCustomers={isLoadingCustomers}
+                  handleRefreshCustomers={handleRefreshCustomers}
+                  orderProductFallbackPolicy={orderProductFallbackPolicy}
+                  setOrderProductFallbackPolicy={setOrderProductFallbackPolicy}
+                  orderDefaultProductId={orderDefaultProductId}
+                  setOrderDefaultProductId={setOrderDefaultProductId}
+                  productOptions={productOptions}
+                  isLoadingProducts={isLoadingProducts}
+                  handleRefreshProducts={handleRefreshProducts}
+                  orderWarehouseId={orderWarehouseId}
+                  setOrderWarehouseId={setOrderWarehouseId}
+                  warehouseOptions={warehouseOptions}
+                  isLoadingWarehouses={isLoadingWarehouses}
+                  orderPricelistId={orderPricelistId}
+                  setOrderPricelistId={setOrderPricelistId}
+                  pricelistOptions={pricelistOptions}
+                  isLoadingPricelists={isLoadingPricelists}
+                  orderPaymentTermId={orderPaymentTermId}
+                  setOrderPaymentTermId={setOrderPaymentTermId}
+                  paymentTermOptions={paymentTermOptions}
+                  isLoadingPaymentTerms={isLoadingPaymentTerms}
+                  orderCompanyId={orderCompanyId}
+                  setOrderCompanyId={setOrderCompanyId}
+                  orderLinkCompany={orderLinkCompany}
+                  setOrderLinkCompany={setOrderLinkCompany}
+                  companyOptions={companyOptions}
+                  isLoadingCompanies={isLoadingCompanies}
+                  orderAutoConfirm={orderAutoConfirm}
+                  setOrderAutoConfirm={setOrderAutoConfirm}
+                  orderAutoInvoice={orderAutoInvoice}
+                  setOrderAutoInvoice={setOrderAutoInvoice}
+                  orderPartialFulfillment={orderPartialFulfillment}
+                  setOrderPartialFulfillment={setOrderPartialFulfillment}
+                  orderReturnsMode={orderReturnsMode}
+                  setOrderReturnsMode={setOrderReturnsMode}
+                  orderReturnsCreditNote={orderReturnsCreditNote}
+                  setOrderReturnsCreditNote={setOrderReturnsCreditNote}
+                  orderReturnsJournalId={orderReturnsJournalId}
+                  setOrderReturnsJournalId={setOrderReturnsJournalId}
+                  orderReturnsFallback={orderReturnsFallback}
+                  setOrderReturnsFallback={setOrderReturnsFallback}
+                  orderReturnsReason={orderReturnsReason}
+                  setOrderReturnsReason={setOrderReturnsReason}
+                  storeWarehouseRules={storeWarehouseRules}
+                  handleWarehouseRuleChange={handleWarehouseRuleChange}
+                  handleRemoveWarehouseRule={handleRemoveWarehouseRule}
+                  handleAddWarehouseRule={handleAddWarehouseRule}
+                  handleRefreshOrderWarehouses={handleRefreshOrderWarehouses}
+                  isRefreshingOrderWarehouses={isRefreshingOrderWarehouses}
+                  sallaOrderLocationOptions={sallaOrderLocationOptions}
+                  zidLocationOptions={zidLocationOptions}
+                  orderAnalyticEnabled={orderAnalyticEnabled}
+                  setOrderAnalyticEnabled={setOrderAnalyticEnabled}
+                  orderAnalyticRules={orderAnalyticRules}
+                  handleAnalyticRuleChange={handleAnalyticRuleChange}
+                  handleRemoveAnalyticRule={handleRemoveAnalyticRule}
+                  handleAddAnalyticRule={handleAddAnalyticRule}
+                  handleRefreshAnalyticOptions={handleRefreshAnalyticOptions}
+                  isLoadingAnalyticOptions={isLoadingAnalyticOptions}
+                  analyticAccountOptions={analyticAccountOptions}
+                  paymentMethodOptions={paymentMethodOptions}
+                  analyticOptionsError={analyticOptionsError}
+                  orderEnableVat={orderEnableVat}
+                  setOrderEnableVat={setOrderEnableVat}
+                  orderVatSaudiTaxId={orderVatSaudiTaxId}
+                  setOrderVatSaudiTaxId={setOrderVatSaudiTaxId}
+                  orderVatNonSaudiTaxId={orderVatNonSaudiTaxId}
+                  setOrderVatNonSaudiTaxId={setOrderVatNonSaudiTaxId}
+                  orderTaxOptions={orderTaxOptions}
+                  isLoadingOrderTaxes={isLoadingOrderTaxes}
+                  orderAddShipping={orderAddShipping}
+                  setOrderAddShipping={setOrderAddShipping}
+                  orderShippingProductId={orderShippingProductId}
+                  setOrderShippingProductId={setOrderShippingProductId}
+                  orderShippingProductSku={orderShippingProductSku}
+                  setOrderShippingProductSku={setOrderShippingProductSku}
+                  orderAddCod={orderAddCod}
+                  setOrderAddCod={setOrderAddCod}
+                  orderCodProductId={orderCodProductId}
+                  setOrderCodProductId={setOrderCodProductId}
+                  orderCodProductSku={orderCodProductSku}
+                  setOrderCodProductSku={setOrderCodProductSku}
+                  orderCodAmount={orderCodAmount}
+                  setOrderCodAmount={setOrderCodAmount}
+                  orderAddDiscount={orderAddDiscount}
+                  setOrderAddDiscount={setOrderAddDiscount}
+                  orderDiscountProductId={orderDiscountProductId}
+                  setOrderDiscountProductId={setOrderDiscountProductId}
+                  orderDiscountProductSku={orderDiscountProductSku}
+                  setOrderDiscountProductSku={setOrderDiscountProductSku}
+                  orderDiscountMode={orderDiscountMode}
+                  setOrderDiscountMode={setOrderDiscountMode}
+                  orderUpdateCustomStatus={orderUpdateCustomStatus}
+                  setOrderUpdateCustomStatus={setOrderUpdateCustomStatus}
+                  statusFieldExists={statusFieldExists}
+                  orderStatusCustomField={orderStatusCustomField}
+                  setOrderStatusCustomField={setOrderStatusCustomField}
+                  statusFieldOptions={statusFieldOptions}
+                  handleCreateStatusField={handleCreateStatusField}
+                  isCreatingStatusField={isCreatingStatusField}
+                  hasOdooConnection={hasOdooConnection}
+                  orderStateMapping={orderStateMapping}
+                  setOrderStateMapping={setOrderStateMapping}
+                  getOrderPlatformStatuses={getOrderPlatformStatuses}
+                  isSavingOrders={isSavingOrders}
+                  handleSaveOrders={handleSaveOrders}
+                  setIsOrderLogOpen={setIsOrderLogOpen}
+                />
+              )
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border p-12 text-center bg-card/40 space-y-3">
+                <div className="h-12 w-12 rounded-2xl bg-muted/60 border border-border/80 flex items-center justify-center mx-auto text-muted-foreground">
+                  <SlidersHorizontal className="h-6 w-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-foreground">
+                    {lang === 'ar' ? 'لا يوجد متجر متصل لإعداد الربط' : 'No connected store to configure'}
+                  </h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-sm mx-auto">
+                    {lang === 'ar'
+                      ? 'لتفعيل إعدادات الربط لهذا المتجر، يرجى ربط المتجر أولاً من صفحة إعدادات الاتصال.'
+                      : 'To configure mapping for this store, please connect it first from the store settings.'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+            <SyncLogModal 
         isOpen={isLogOpen}
         onClose={() => setIsLogOpen(false)}
         mappingId={undefined}
@@ -5161,7 +2334,6 @@ export default function StandardMappingClient({
         mappingsList={mappings.filter(m => m.odoo_model === 'sale.order').map(m => ({ id: m.id, name: m.name }))}
         eventFilter="order"
       />
-    </div>
     </>
   )
 }

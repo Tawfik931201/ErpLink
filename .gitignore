@@ -51,6 +51,7 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sln
+opencode.json
 
 # ─── Testing ─────────────────────────────────────────────────────
 coverage/

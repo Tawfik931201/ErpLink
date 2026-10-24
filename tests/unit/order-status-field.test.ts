@@ -53,9 +53,11 @@ describe('status catalogues stay platform-true', () => {
 })
 
 describe('status field UI follows the store tab', () => {
-  const client = readStripped(
-    'src/app/(app)/app/mapping-center/standard-mapping-client.tsx'
-  )
+  const client =
+    readStripped('src/app/(app)/app/mapping-center/standard-mapping-client.tsx') +
+    readStripped(
+      'src/app/(app)/app/mapping-center/standard-components/order-settings-tab.tsx'
+    )
   const action = readStripped('src/app/actions/order-custom-status.ts')
 
   it('section title/description read the active store, not hardcoded زد', () => {
