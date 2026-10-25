@@ -17,6 +17,7 @@ import {
   ChevronDown,
   SlidersHorizontal,
   Puzzle,
+  Inbox,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -42,6 +43,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   logs: ScrollText,
   sliders: SlidersHorizontal,
   puzzle: Puzzle,
+  inbox: Inbox,
 }
 
 export interface NavItem {

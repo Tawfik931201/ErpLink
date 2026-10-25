@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import AdminNavLinks from '@/components/admin-nav-links'
 import { Logo } from '@/components/ui/logo'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
+import { countNewContactMessages } from '@/lib/contact-messages'
 import { resolveLanguage } from '@/lib/translations'
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -14,6 +15,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
+
+  // Unread contact messages drive the nav badge. `countNewContactMessages`
+  // swallows its own errors (a missing table returns 0), so a deployment
+  // without migration 20261025 still renders the admin panel.
+  const newMessages = await countNewContactMessages()
 
   return (
     <div className="min-h-screen bg-background" dir={dir}>
@@ -33,7 +39,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               {lang === 'ar' ? 'لوحة الإدارة' : 'Admin Panel'}
             </span>
           </div>
-          <AdminNavLinks lang={lang} />
+          <AdminNavLinks lang={lang} newMessages={newMessages} />
         </div>
       </header>
       <main className="max-w-7xl mx-auto p-6 md:p-8">{children}</main>

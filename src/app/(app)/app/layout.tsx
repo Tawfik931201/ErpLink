@@ -207,6 +207,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         { href: '/admin', icon: 'admin', label: lang === 'ar' ? 'الإحصائيات' : 'Stats' },
         { href: '/admin/clients', icon: 'users', label: lang === 'ar' ? 'العملاء' : 'Clients' },
         { href: '/admin/subscriptions', icon: 'card', label: lang === 'ar' ? 'الاشتراكات' : 'Subscriptions' },
+        { href: '/admin/messages', icon: 'inbox', label: lang === 'ar' ? 'الرسائل' : 'Messages' },
       ],
     })
   }

@@ -4,6 +4,7 @@ import {
   BarChart3,
   CalendarCheck,
   Contact,
+  Inbox,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -15,9 +16,16 @@ const links: { href: string; icon: React.ComponentType<{ className?: string }>; 
   { href: '/admin', icon: BarChart3, labelAr: 'الإحصائيات', labelEn: 'Stats' },
   { href: '/admin/clients', icon: Contact, labelAr: 'العملاء', labelEn: 'Clients' },
   { href: '/admin/subscriptions', icon: CalendarCheck, labelAr: 'الاشتراكات', labelEn: 'Subscriptions' },
+  { href: '/admin/messages', icon: Inbox, labelAr: 'الرسائل', labelEn: 'Messages' },
 ]
 
-export default function AdminNavLinks({ lang }: { lang: Language }) {
+export default function AdminNavLinks({
+  lang,
+  newMessages = 0,
+}: {
+  lang: Language
+  newMessages?: number
+}) {
   const pathname = usePathname()
 
   return (
@@ -25,6 +33,9 @@ export default function AdminNavLinks({ lang }: { lang: Language }) {
       {links.map((link) => {
         const Icon = link.icon
         const isActive = pathname === link.href || pathname.startsWith(link.href + '/')
+        // Only the messages link carries a counter; anything else would need a
+        // polling mechanism the admin panel does not have.
+        const badge = link.href === '/admin/messages' && newMessages > 0 ? newMessages : 0
         return (
           <Link
             key={link.href}
@@ -38,6 +49,11 @@ export default function AdminNavLinks({ lang }: { lang: Language }) {
           >
             <Icon className="h-3.5 w-3.5 shrink-0" />
             <span>{lang === 'ar' ? link.labelAr : link.labelEn}</span>
+            {badge > 0 && (
+              <span className="ms-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-mono text-[9px] font-bold leading-none text-primary-foreground">
+                {badge > 99 ? '99+' : badge}
+              </span>
+            )}
           </Link>
         )
       })}

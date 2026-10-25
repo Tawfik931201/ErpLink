@@ -52,6 +52,7 @@
 | `src/app/(app)/admin/clients/[userId]/ClientStatementClient.tsx` | Statement: subscriptions/payments tables, register/extend/cancel/add-payment modals (no affiliate picker) |
 | `src/app/(app)/admin/subscriptions/page.tsx` | Subscription list, renders admin client (no affiliates fetch) |
 | `src/app/(app)/admin/subscriptions/AdminSubscriptionsClient.tsx` | Register/extend/cancel modals (manual payment only, no affiliate UI) |
+| `src/app/(app)/admin/messages/page.tsx` + `ContactMessagesClient.tsx` | Contact-form inbox: the durable copy of every `/contact` submission (`new`/`read`/`archived`, Odoo ticket id, "بلا تذكرة" warning, unread badge). Reads through `getContactMessages` — `force-dynamic`, never cached |
 
 ### API
 | File | Purpose |
@@ -66,6 +67,7 @@
 | `supabase/migrations/20260803_subscriptions.sql` | `subscriptions` table + RLS |
 | `supabase/migrations/20260922_sync_reliability.sql` | The canonical sync-reliability migration |
 | `supabase/migrations/20260922_sync_reliability_paste_ready.sql` | Statement-for-statement variant of the above for the Supabase SQL Editor (`public.`-qualified, `to_regclass` guard, wrapped in BEGIN/COMMIT). **Not** the source of truth |
+| `supabase/migrations/20261025_contact_messages.sql` | `contact_messages` — the durable copy of every `/contact` submission. **No `workspace_id`, on purpose**: a visitor may have no account, and a workspace cascade must never delete a stranger's message |
 
 ### Billing helpers
 | File | Purpose |
@@ -271,6 +273,18 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     pre-first-customer tooling: the pipeline self-test (real code path, cleans
     up after itself), the admin-alert thresholds (measured, not guessed), and
     the parallel claim keeping its per-row atomicity.
+  - `tests/unit/contact-email.test.ts` (7 tests, added 2026-10-25) — the
+    contact-form notification template: every submitted field lands in the
+    body, markup from the public form is escaped rather than injected, the
+    ticket id is printed when it exists, and the plain-text alternative is not
+    escaped (a literal `<` is data there)
+  - `tests/unit/contact-form-persistence.test.ts` (15 tests, added 2026-10-25) —
+    source pins for the DB-first rule: `insertContactMessage` runs before the
+    first `executeKw`, the rate limiter runs before the insert, failure is
+    reported only when both channels failed, email stays gated behind
+    `CONTACT_INBOX_EMAIL`, every exported admin action re-checks `requireAdmin`,
+    the list read stays bounded, and the table carries no `workspace_id`.
+    Includes a self-check that the ordering technique detects a wrong order
 - ⚠️ **A `'use server'` module may only export async functions.** Next fails
   the build with "Server actions must be async functions" otherwise — this
   happened when the subscription date helpers were briefly exported from
@@ -1025,6 +1039,55 @@ setting lives in the existing JSON blob as `order.returns` — **no migration**.
 | `ADMIN_ALERT_WORKSPACE_ID` | تنبيهات الأدمن: رسالة **واحدة مجمّعة** عند تجاوز أي حدّ، مُقيَّدة (نفس السبب مرة كل ساعة). اربط محادثتك بتليجرام في `/app/settings/notifications` لتلك المساحة |
 
 ---
+
+## Contact form inbox (added 2026-10-25) — database first, email optional
+
+The public `/contact` form used to have exactly one destination: an Odoo
+helpdesk ticket, created inside a single `try/catch`. If Odoo was down or
+`ODOO_*` was unset, the visitor saw "failed" and the message existed nowhere.
+Email was never part of the flow, and it still is not required.
+
+**Order of writes in `submitContact` (this order is pinned by
+`tests/unit/contact-form-persistence.test.ts`):**
+
+1. `contact_messages` (Supabase) — **first**, because it is the only destination
+   that cannot fail for an external reason.
+2. Odoo `res.partner` + `helpdesk.ticket` — best effort; the ticket id is
+   written back onto the saved row by `finalizeContactMessage`.
+3. Email — only when `CONTACT_INBOX_EMAIL` is set **and** SendGrid/SMTP works.
+   The customer's address is the `Reply-To`, so replying from the inbox answers
+   them directly.
+
+A submission returns success if the row was saved **or** the ticket was created.
+Only both failing returns `{ success: false }`, because that is the only case
+where the message exists nowhere.
+
+- **`contact_messages` carries no `workspace_id`, on purpose.** The sender is an
+  anonymous visitor who may have no account at all; adding the column would put
+  the table in the workspace-delete cascade, and a deleted workspace would take
+  a stranger's message with it.
+- `status` is `new` / `read` / `archived`. Archive is reversible; there is no
+  hard delete in the UI (spam removal is a manual SQL decision).
+- `odoo_ticket_id IS NULL` in the admin list means **the ticket was not
+  created**, not "unknown" — the UI shows a `بلا تذكرة` chip. Read it before
+  blaming the list for a missing ticket.
+- The admin page is `/admin/messages` (`force-dynamic`, never cached) and reads
+  through `getContactMessages`. Every write goes through
+  `src/app/actions/contact-messages.ts`, which re-checks `isAdmin` per action —
+  the `admin/layout.tsx` redirect protects rendering, not the action endpoints.
+- `src/lib/contact-messages.ts` is intentionally **auth-free**: the public action
+  writes to it. Do not export it from a `'use server'` module — that would make
+  the unauthenticated insert callable from a browser.
+- Email is **off by default**. `CONTACT_INBOX_EMAIL` unset (the current state)
+  means `sendEmail` is never called, so the placeholder `SENDGRID_API_KEY=SG...`
+  in `.env` is never exercised. Note that the same unset key still breaks the
+  subscription-activation email — that is a separate, pre-existing gap.
+- 10 submissions per 10 minutes per IP (`checkRateLimit`), checked **before** the
+  insert. It is what keeps a script from filling the admin inbox; it is not
+  authentication.
+- Requires migration `20261025_contact_messages.sql`. Until it is applied the
+  form still works (the Odoo ticket is the fallback) but nothing is stored, and
+  the admin page shows the error instead of an empty list.
 
 ## Sync Reliability (added 2026-09-26) — webhooks, no-loss, Hostinger
 

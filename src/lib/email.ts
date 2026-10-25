@@ -47,6 +47,12 @@ export interface SendEmailInput {
   subject: string
   html: string
   text?: string
+  /**
+   * Where a reply should go when it is not `to`. The contact form sets this to
+   * the customer's own address, so hitting Reply in the inbox answers them
+   * instead of the sending mailbox.
+   */
+  replyTo?: string
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; error?: string }> {
@@ -60,6 +66,7 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; e
         subject: input.subject,
         html: input.html,
         text: input.text,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       })
       return { ok: true }
     } catch (err: any) {
@@ -92,6 +99,7 @@ export async function sendEmail(input: SendEmailInput): Promise<{ ok: boolean; e
         subject: input.subject,
         html: input.html,
         text: input.text,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
       })
       return { ok: true }
     } catch (err: any) {
