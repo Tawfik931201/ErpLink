@@ -251,7 +251,7 @@ export default async function PrivacyPage() {
 
   return (
     <div
-      className="flex min-h-screen flex-col bg-background text-foreground font-sans overflow-x-hidden"
+      className="flex min-h-screen flex-col overflow-x-clip bg-background text-foreground font-sans"
       dir={dir}
     >
       <PublicSiteHeader lang={lang} />

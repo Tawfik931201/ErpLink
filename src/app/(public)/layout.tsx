@@ -2,6 +2,7 @@ import { cookies } from 'next/headers'
 import { ThemeProvider } from 'next-themes'
 
 import { LanguageProvider } from '@/components/language-provider'
+import { ScrollReveal } from '@/components/ui/scroll-reveal'
 import { resolveLanguage } from '@/lib/translations'
 
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
@@ -17,6 +18,7 @@ export default async function PublicLayout({ children }: { children: React.React
         disableTransitionOnChange
       >
         {children}
+        <ScrollReveal />
       </ThemeProvider>
     </LanguageProvider>
   )

@@ -1,149 +1,216 @@
 'use client'
 
-import { Mail, Phone, Building2, User, MessageSquare, Check, Send } from 'lucide-react'
+import {
+  Building2,
+  Check,
+  Loader2,
+  Mail,
+  MessageSquare,
+  Phone,
+  Send,
+  User,
+} from 'lucide-react'
 import { useState } from 'react'
 
 import { submitContact } from '@/app/actions/contact'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+const FIELD_CLASS =
+  'h-11 w-full rounded-xl border border-border bg-background/70 ps-10 pe-3.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/45 focus:bg-card focus:ring-2 focus:ring-primary/10'
+const ICON_CLASS = 'pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70'
+const LABEL_CLASS = 'mb-1.5 block text-[11px] font-semibold text-muted-foreground'
+
 export function ContactForm({ lang }: { lang: string }) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [errorCode, setErrorCode] = useState<string | null>(null)
+
+  const isAr = lang === 'ar'
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setStatus('loading')
+    setErrorCode(null)
 
     const formData = new FormData(e.currentTarget)
     const result = await submitContact(formData)
 
-    setStatus(result.success ? 'success' : 'error')
+    if (result.success) {
+      setStatus('success')
+      return
+    }
+
+    setErrorCode(result.error ?? null)
+    setStatus('error')
   }
 
   if (status === 'success') {
     return (
-      <div className="max-w-lg mx-auto text-center">
-        <div className="bg-card border border-border p-10">
-          <div className="flex justify-center mb-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-foreground text-background">
-              <Check className="h-6 w-6" />
-            </div>
-          </div>
-          <h2 className="text-xl font-bold text-foreground mb-2">
-            {lang === 'ar' ? 'تم استلام رسالتك!' : 'Message Received!'}
-          </h2>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {lang === 'ar'
-              ? 'شكراً لتواصلك معنا. سنقوم بمراجعة رسالتك والرد عليك في أقرب وقت.'
-              : 'Thank you for reaching out. We will review your message and get back to you shortly.'}
-          </p>
-        </div>
+      <div className="flex flex-col items-center px-2 py-8 text-center">
+        <span className="rise-in flex h-14 w-14 items-center justify-center rounded-full border border-primary/25 bg-primary/10 text-primary">
+          <Check className="h-6 w-6" />
+        </span>
+        <h2 className="rise-in mt-5 text-xl font-black tracking-tight" style={{ animationDelay: '60ms' }}>
+          {isAr ? 'وصلتنا رسالتك' : 'Message received'}
+        </h2>
+        <p
+          className="rise-in mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground"
+          style={{ animationDelay: '120ms' }}
+        >
+          {isAr
+            ? 'سنراجع رسالتك ونرد عليك على البريد الذي كتبته. لا حاجة لإرسالها مرة أخرى.'
+            : 'We will review your message and reply to the email you provided. No need to send it again.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => setStatus('idle')}
+          className="mt-6 text-xs font-semibold text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+        >
+          {isAr ? 'إرسال رسالة أخرى' : 'Send another message'}
+        </button>
       </div>
     )
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-lg mx-auto space-y-4">
-      <div>
-        <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-          {lang === 'ar' ? 'الاسم الكامل' : 'Full Name'} *
-        </label>
-        <div className="relative">
-          <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-          <input
-            type="text"
-            name="name"
-            required
-            className="w-full bg-card border border-border pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors"
-            placeholder={lang === 'ar' ? 'مثال: أحمد محمد' : 'e.g. John Doe'}
-          />
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="contact-name" className={LABEL_CLASS}>
+            {isAr ? 'الاسم الكامل' : 'Full name'}
+            <span className="ms-1 text-primary">*</span>
+          </label>
+          <div className="relative">
+            <User className={ICON_CLASS} />
+            <input
+              id="contact-name"
+              type="text"
+              name="name"
+              required
+              autoComplete="name"
+              className={FIELD_CLASS}
+              placeholder={isAr ? 'مثال: أحمد محمد' : 'e.g. John Doe'}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="contact-email" className={LABEL_CLASS}>
+            {isAr ? 'البريد الإلكتروني' : 'Email'}
+            <span className="ms-1 text-primary">*</span>
+          </label>
+          <div className="relative">
+            <Mail className={ICON_CLASS} />
+            <input
+              id="contact-email"
+              type="email"
+              name="email"
+              required
+              autoComplete="email"
+              dir="ltr"
+              className={cn(FIELD_CLASS, 'text-start')}
+              placeholder="name@company.com"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="contact-phone" className={LABEL_CLASS}>
+            {isAr ? 'رقم الجوال' : 'Phone'}
+            <span className="ms-1 text-primary">*</span>
+          </label>
+          <div className="relative">
+            <Phone className={ICON_CLASS} />
+            <input
+              id="contact-phone"
+              type="tel"
+              name="phone"
+              required
+              autoComplete="tel"
+              dir="ltr"
+              className={cn(FIELD_CLASS, 'text-start')}
+              placeholder={isAr ? '05xxxxxxxx' : '+966 5x xxx xxxx'}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="contact-company" className={LABEL_CLASS}>
+            {isAr ? 'الشركة / المتجر' : 'Company / store'}
+            <span className="ms-1 text-primary">*</span>
+          </label>
+          <div className="relative">
+            <Building2 className={ICON_CLASS} />
+            <input
+              id="contact-company"
+              type="text"
+              name="company"
+              required
+              autoComplete="organization"
+              className={FIELD_CLASS}
+              placeholder={isAr ? 'اسم الشركة' : 'Company name'}
+            />
+          </div>
         </div>
       </div>
 
       <div>
-        <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-          {lang === 'ar' ? 'البريد الإلكتروني' : 'Email'} *
+        <label htmlFor="contact-message" className={LABEL_CLASS}>
+          {isAr ? 'الرسالة' : 'Message'}
+          <span className="ms-1 text-primary">*</span>
         </label>
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-          <input
-            type="email"
-            name="email"
-            required
-            className="w-full bg-card border border-border pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors"
-            placeholder={lang === 'ar' ? 'مثال: Ahmed@example.com' : 'e.g. john@example.com'}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-          {lang === 'ar' ? 'رقم الجوال' : 'Phone Number'} *
-        </label>
-        <div className="relative">
-          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-          <input
-            type="tel"
-            name="phone"
-            required
-            className="w-full bg-card border border-border pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors"
-            placeholder={lang === 'ar' ? 'مثال: 0501234567' : 'e.g. +966 50 123 4567'}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-          {lang === 'ar' ? 'الشركة' : 'Company'} *
-        </label>
-        <div className="relative">
-          <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
-          <input
-            type="text"
-            name="company"
-            required
-            className="w-full bg-card border border-border pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors"
-            placeholder={lang === 'ar' ? 'اسم الشركة' : 'Company name'}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5">
-          {lang === 'ar' ? 'الرسالة' : 'Message'} *
-        </label>
-        <div className="relative">
-          <MessageSquare className="absolute left-3 top-3 h-4 w-4 text-muted-foreground/50" />
+          <MessageSquare className="pointer-events-none absolute start-3 top-3 h-4 w-4 text-muted-foreground/70" />
           <textarea
+            id="contact-message"
             name="message"
             required
-            rows={5}
-            className="w-full bg-card border border-border pl-10 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors resize-y"
-            placeholder={lang === 'ar' ? 'اكتب رسالتك هنا...' : 'Write your message here...'}
+            rows={6}
+            className={cn(FIELD_CLASS, 'h-auto resize-y py-2.5')}
+            placeholder={
+              isAr
+                ? 'اشرح طلبك بإيجاز — اذكر اسم المنصة أو رقم الطلب إن وُجد.'
+                : 'Briefly describe your request — mention the platform or order number if any.'
+            }
           />
         </div>
       </div>
 
       {status === 'error' && (
-        <div className="bg-card border border-border p-3 text-center">
-          <p className="text-[11px] text-foreground">
-            {lang === 'ar'
-              ? 'فشل في إرسال البيانات، حاول مرة أخرى لاحقاً'
-              : 'Failed to send your message, please try again later'}
-          </p>
+        <div
+          role="alert"
+          className="rounded-xl border border-destructive/30 bg-destructive/[0.06] px-3.5 py-2.5 text-xs font-medium text-destructive"
+        >
+          {errorCode === 'rate_limited'
+            ? isAr
+              ? 'أرسلت عدة رسائل في وقت قصير. انتظر عشر دقائق ثم أعد المحاولة.'
+              : 'You sent several messages in a short time. Please wait ten minutes and try again.'
+            : isAr
+              ? 'لم يتم إرسال الرسالة. تحقق من الاتصال وحاول مرة أخرى.'
+              : 'Your message was not sent. Check your connection and try again.'}
         </div>
       )}
 
-      <Button
-        type="submit"
-        disabled={status === 'loading'}
-        className="w-full bg-foreground text-background hover:bg-foreground/90 h-10 text-xs font-bold px-5 disabled:opacity-50"
-      >
-        <Send className={cn('h-3.5 w-3.5', lang === 'ar' ? 'ml-1.5' : 'mr-1.5')} />
-        {status === 'loading'
-          ? (lang === 'ar' ? 'جاري الإرسال...' : 'Sending...')
-          : (lang === 'ar' ? 'إرسال' : 'Send Message')}
-      </Button>
+      <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          {isAr
+            ? 'تُستخدم بياناتك للرد على رسالتك فقط.'
+            : 'Your details are only used to reply to this message.'}
+        </p>
+        <Button
+          type="submit"
+          variant="brand"
+          disabled={status === 'loading'}
+          className="h-11 rounded-xl px-6 text-sm font-bold sm:min-w-[150px]"
+        >
+          {status === 'loading' ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className={cn('h-4 w-4', isAr && '-scale-x-100')} />
+          )}
+          {status === 'loading' ? (isAr ? 'جاري الإرسال...' : 'Sending...') : isAr ? 'إرسال الرسالة' : 'Send message'}
+        </Button>
+      </div>
     </form>
   )
 }

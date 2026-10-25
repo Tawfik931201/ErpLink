@@ -89,7 +89,7 @@ export default async function HomePage() {
 
   return (
     <div
-      className="flex min-h-screen flex-col overflow-x-hidden bg-background font-sans text-foreground"
+      className="flex min-h-screen flex-col overflow-x-clip bg-background font-sans text-foreground"
       dir={dir}
     >
       <PublicSiteHeader lang={lang} />
@@ -102,7 +102,7 @@ export default async function HomePage() {
           <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-14 px-6 pb-20 pt-14 md:px-12 md:pb-28 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
             {/* Copy */}
             <div>
-              <div className="mb-8 flex flex-wrap items-center gap-3">
+              <div className="rise-in mb-8 flex flex-wrap items-center gap-3">
                 <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
                   <Zap className="h-3 w-3" />
                   {isAr ? '٧ أيام تجربة مجانية' : '7-day free trial'}
@@ -110,7 +110,10 @@ export default async function HomePage() {
                 <span className={EYEBROW}>erp-link / sync-layer</span>
               </div>
 
-              <h1 className="text-[2.5rem] font-black leading-[1.1] tracking-tight md:text-6xl md:leading-[1.02]">
+              <h1
+                className="rise-in text-[2.5rem] font-black leading-[1.1] tracking-tight md:text-6xl md:leading-[1.02]"
+                style={{ animationDelay: '70ms' }}
+              >
                 {isAr ? (
                   <>
                     اربط متجرك بالـ ERP
@@ -126,11 +129,17 @@ export default async function HomePage() {
                 )}
               </h1>
 
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg">
+              <p
+                className="rise-in mt-6 max-w-xl text-base leading-relaxed text-muted-foreground md:text-lg"
+                style={{ animationDelay: '140ms' }}
+              >
                 {t('landing.heroSubtitle')}
               </p>
 
-              <div className="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+              <div
+                className="rise-in mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center"
+                style={{ animationDelay: '210ms' }}
+              >
                 <Button asChild size="lg" variant="brand" className="h-12 rounded-xl px-7 text-sm font-bold">
                   <Link href="/sign-up" className="inline-flex items-center gap-2">
                     {t('landing.btnStart')}
@@ -145,7 +154,10 @@ export default async function HomePage() {
                 </Button>
               </div>
 
-              <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-semibold text-muted-foreground">
+              <div
+                className="rise-in mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] font-semibold text-muted-foreground"
+                style={{ animationDelay: '280ms' }}
+              >
                 {[t('landing.bullet1'), t('landing.bullet2'), t('landing.bullet3')].map((item) => (
                   <span key={item} className="flex items-center gap-1.5">
                     <Check className="h-3.5 w-3.5 text-primary" />
@@ -156,7 +168,7 @@ export default async function HomePage() {
             </div>
 
             {/* Sync schematic */}
-            <div className="relative">
+            <div className="rise-in relative" style={{ animationDelay: '180ms' }}>
               <div className="relative rounded-2xl border border-border bg-card p-5 shadow-[0_30px_80px_-60px_hsl(var(--primary)/0.6)] md:p-6">
                 <div className="mb-5 flex items-center justify-between border-b border-border pb-4">
                   <span className="flex items-center gap-2 text-xs font-bold">
@@ -233,8 +245,12 @@ export default async function HomePage() {
                 </div>
 
                 <div className="mt-5 space-y-1.5 border-t border-border pt-4 font-mono text-[10.5px] leading-relaxed">
-                  {flowLog.map((row) => (
-                    <div key={row.from} className="flex items-center gap-2">
+                  {flowLog.map((row, idx) => (
+                    <div
+                      key={row.from}
+                      className="rise-in flex items-center gap-2"
+                      style={{ animationDelay: `${320 + idx * 80}ms` }}
+                    >
                       <span className="w-12 shrink-0 text-muted-foreground">{row.time}</span>
                       <span className="truncate text-muted-foreground">{row.from}</span>
                       <span className="text-primary">→</span>
@@ -258,8 +274,12 @@ export default async function HomePage() {
                 { value: '99.9%', label: t('landing.stats1') },
                 { value: '<2s', label: t('landing.stats2') },
                 { value: '24/7', label: isAr ? 'دعم فني' : 'Support' },
-              ].map((s) => (
-                <div key={s.label} className="px-3 py-6 text-center">
+              ].map((s, idx) => (
+                <div
+                  key={s.label}
+                  className="reveal px-3 py-6 text-center"
+                  style={{ animationDelay: `${idx * 90}ms` }}
+                >
                   <div className="font-mono text-2xl font-black tabular-nums tracking-tight md:text-3xl">
                     {s.value}
                   </div>
@@ -272,13 +292,13 @@ export default async function HomePage() {
 
         {/* ── Platforms strip ─────────────────────────────────── */}
         <section className="border-b border-border">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-5 md:px-12">
+          <div className="reveal mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-8 gap-y-3 px-6 py-5 md:px-12">
             <span className={EYEBROW}>{t('landing.trustedBy')}</span>
             <div className="flex flex-wrap items-center gap-x-6 gap-y-2 md:gap-x-10">
               {platforms.map((p) => (
                 <span
                   key={p}
-                  className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-foreground/65"
+                  className="font-mono text-[11px] font-bold uppercase tracking-[0.18em] text-foreground/65 transition-colors duration-300 hover:text-primary"
                 >
                   {p}
                 </span>
@@ -290,7 +310,7 @@ export default async function HomePage() {
         {/* ── 01 · Before / After ─────────────────────────────── */}
         <section className="px-6 py-20 md:px-12 md:py-28">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+            <div className="reveal mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
               <div className={cn(EYEBROW, 'md:pt-2')}>01 — {isAr ? 'الفارق' : 'the delta'}</div>
               <h2 className="text-3xl font-black leading-tight tracking-tight md:text-5xl">
                 {isAr ? (
@@ -310,7 +330,7 @@ export default async function HomePage() {
             </div>
 
             <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-2">
-              <div className="bg-card p-6 md:p-8">
+              <div className="reveal bg-card p-6 md:p-8">
                 <p className={cn(EYEBROW, 'mb-5')}>{isAr ? 'قبل' : 'before'}</p>
                 <ul className="space-y-3">
                   {before.map((item) => (
@@ -324,7 +344,10 @@ export default async function HomePage() {
                 </ul>
               </div>
 
-              <div className="bg-card p-6 md:p-8">
+              <div
+                className="reveal bg-card p-6 md:p-8"
+                style={{ animationDelay: '110ms' }}
+              >
                 <p className={cn(EYEBROW, 'mb-5 text-primary')}>{isAr ? 'بعد' : 'after'}</p>
                 <ul className="space-y-3">
                   {after.map((item) => (
@@ -347,7 +370,7 @@ export default async function HomePage() {
           className="scroll-mt-14 border-y border-border bg-secondary/20 px-6 py-20 md:scroll-mt-16 md:px-12 md:py-28"
         >
           <div className="mx-auto max-w-6xl">
-            <div className="mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+            <div className="reveal mb-10 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
               <div className={cn(EYEBROW, 'md:pt-2')}>02 — {isAr ? 'القدرات' : 'capabilities'}</div>
               <div className="space-y-4">
                 <h2 className="text-3xl font-black tracking-tight md:text-5xl">
@@ -363,13 +386,14 @@ export default async function HomePage() {
               {features.map(({ icon: Icon, title, desc }, idx) => (
                 <div
                   key={title}
-                  className="group grid grid-cols-[32px_1fr] items-start gap-x-4 gap-y-2 border-b border-border py-6 transition-colors hover:bg-card md:grid-cols-[56px_250px_1fr] md:items-center md:gap-6 md:px-3"
+                  className="reveal group grid grid-cols-[32px_1fr] items-start gap-x-4 gap-y-2 border-b border-border py-6 transition-colors hover:bg-card md:grid-cols-[56px_250px_1fr] md:items-center md:gap-6 md:px-3"
+                  style={{ animationDelay: `${Math.min(idx, 5) * 70}ms` }}
                 >
                   <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
                     {String(idx + 1).padStart(2, '0')}
                   </span>
                   <div className="flex items-center gap-3">
-                    <Icon className="h-4 w-4 shrink-0 text-primary" />
+                    <Icon className="h-4 w-4 shrink-0 text-primary transition-transform duration-300 group-hover:scale-110" />
                     <h3 className="text-sm font-bold md:text-base">{title}</h3>
                   </div>
                   <p className="col-start-2 text-sm leading-relaxed text-muted-foreground md:col-start-3">
@@ -387,7 +411,7 @@ export default async function HomePage() {
           className="scroll-mt-14 px-6 py-20 md:scroll-mt-16 md:px-12 md:py-28"
         >
           <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 lg:grid-cols-[1fr_0.9fr] lg:gap-16">
-            <div>
+            <div className="reveal">
               <div className={cn(EYEBROW, 'mb-5')}>03 — {isAr ? 'الربط المخصص' : 'custom mapping'}</div>
               <h2 className="text-3xl font-black leading-tight tracking-tight md:text-5xl">
                 {isAr ? (
@@ -437,7 +461,10 @@ export default async function HomePage() {
               </Button>
             </div>
 
-            <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <div
+              className="reveal overflow-hidden rounded-xl border border-border bg-card"
+              style={{ animationDelay: '120ms' }}
+            >
               <div className="flex items-center justify-between border-b border-border px-4 py-3">
                 <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                   routes.json
@@ -451,7 +478,7 @@ export default async function HomePage() {
                   <div
                     key={row.event}
                     className={cn(
-                      'grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 font-mono text-[11px]',
+                      'grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-4 py-3 font-mono text-[11px] transition-colors hover:bg-secondary/50',
                       row.custom && 'bg-primary/[0.04]'
                     )}
                   >
@@ -476,7 +503,7 @@ export default async function HomePage() {
           className="scroll-mt-16 border-y border-border bg-secondary/20 px-6 py-20 md:scroll-mt-20 md:px-12 md:py-28"
         >
           <div className="mx-auto max-w-6xl">
-            <div className="mb-12 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+            <div className="reveal mb-12 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
               <div className={cn(EYEBROW, 'md:pt-2')}>04 — {isAr ? 'الخطوات' : 'the steps'}</div>
               <div className="space-y-3">
                 <h2 className="text-3xl font-black tracking-tight md:text-5xl">{t('how.title')}</h2>
@@ -486,7 +513,11 @@ export default async function HomePage() {
 
             <div className="grid gap-10 md:grid-cols-3 md:gap-8">
               {steps.map(({ icon: Icon, title, desc }, idx) => (
-                <div key={title} className="relative">
+                <div
+                  key={title}
+                  className="reveal relative"
+                  style={{ animationDelay: `${idx * 110}ms` }}
+                >
                   <div className="mb-5 flex items-center gap-3">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-primary/30 bg-primary/10 font-mono text-[11px] font-bold text-primary">
                       {String(idx + 1).padStart(2, '0')}
@@ -512,7 +543,7 @@ export default async function HomePage() {
         {/* ── 05 · One plan ───────────────────────────────────── */}
         <section className="px-6 py-20 md:px-12 md:py-24">
           <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1fr_auto] lg:gap-16">
-            <div>
+            <div className="reveal">
               <div className="mb-5 flex items-center gap-2">
                 <div className={EYEBROW}>05 — {isAr ? 'الخطة' : 'the plan'}</div>
                 <Shield className="h-3.5 w-3.5 text-primary" />
@@ -539,7 +570,10 @@ export default async function HomePage() {
               </ul>
             </div>
 
-            <div className="w-full rounded-2xl border border-border bg-card p-8 lg:w-[340px]">
+            <div
+              className="reveal w-full rounded-2xl border border-border bg-card p-8 shadow-[0_24px_60px_-48px_hsl(var(--primary)/0.55)] lg:w-[340px]"
+              style={{ animationDelay: '120ms' }}
+            >
               <div className="flex items-center justify-between">
                 <p className={EYEBROW}>{t('pricing.business.name')}</p>
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
@@ -571,14 +605,18 @@ export default async function HomePage() {
         {/* ── FAQ ─────────────────────────────────────────────── */}
         <section className="border-t border-border px-6 py-20 md:px-12 md:py-28">
           <div className="mx-auto max-w-4xl">
-            <div className="mb-8 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
+            <div className="reveal mb-8 grid items-start gap-5 md:grid-cols-[180px_1fr] md:gap-10">
               <div className={cn(EYEBROW, 'md:pt-2')}>{t('landing.faqBadge')}</div>
               <h2 className="text-3xl font-black tracking-tight md:text-4xl">{t('landing.faqTitle')}</h2>
             </div>
 
             <div className="border-t border-border">
               {faqs.map((faq, idx) => (
-                <details key={idx} className="group border-b border-border">
+                <details
+                  key={idx}
+                  className="reveal group border-b border-border"
+                  style={{ animationDelay: `${idx * 70}ms` }}
+                >
                   <summary className="flex cursor-pointer list-none items-start gap-4 py-5">
                     <span className="pt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
                       {String(idx + 1).padStart(2, '0')}
@@ -597,9 +635,12 @@ export default async function HomePage() {
 
         {/* ── CTA ──────────────────────────────────────────────── */}
         <section className="px-6 pb-20 md:px-12 md:pb-28">
-          <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-border bg-card">
+          <div className="reveal relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-border bg-card">
             <div className="blueprint-grid pointer-events-none absolute inset-0 opacity-70" aria-hidden />
-            <div className="pointer-events-none absolute -end-16 -top-16 h-56 w-56 rounded-full bg-primary/10 blur-3xl" aria-hidden />
+            <div
+              className="float-slow pointer-events-none absolute -end-16 -top-16 h-56 w-56 rounded-full bg-primary/10 blur-3xl"
+              aria-hidden
+            />
 
             <div className="relative px-6 py-14 text-center md:px-14 md:py-20">
               <span className={cn(EYEBROW, 'inline-flex items-center gap-2')}>

@@ -26,7 +26,7 @@ export default async function PricingPage() {
 
   return (
     <div
-      className="flex min-h-screen flex-col bg-background text-foreground font-sans overflow-x-hidden"
+      className="flex min-h-screen flex-col overflow-x-clip bg-background text-foreground font-sans"
       dir={dir}
     >
       <PublicSiteHeader lang={lang} />
@@ -38,16 +38,22 @@ export default async function PricingPage() {
           <div className="absolute bottom-[-80px] left-[-80px] w-[350px] h-[350px] rounded-full bg-foreground/[0.02] blur-3xl pointer-events-none" />
 
           <div className="max-w-5xl mx-auto flex flex-col items-center text-center gap-8 relative">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-semibold">
+            <div className="rise-in inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-semibold">
               <BarChart3 className="h-3.5 w-3.5" />
               <span>{t(lang, 'pricing.badge')}</span>
             </div>
 
-            <h1 className="text-4xl md:text-6xl font-black text-foreground leading-[1.15] tracking-tight max-w-4xl">
+            <h1
+              className="rise-in text-4xl md:text-6xl font-black text-foreground leading-[1.15] tracking-tight max-w-4xl"
+              style={{ animationDelay: '80ms' }}
+            >
               {t(lang, 'pricing.pageTitle')}
             </h1>
 
-            <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-3xl">
+            <p
+              className="rise-in text-lg md:text-xl text-muted-foreground leading-relaxed max-w-3xl"
+              style={{ animationDelay: '160ms' }}
+            >
               {t(lang, 'pricing.pageSubtitle')}
             </p>
           </div>
@@ -63,7 +69,7 @@ export default async function PricingPage() {
         {/* ── CTA Banner ───────────────────────────────────────── */}
         <section className="py-20 px-6 md:px-12">
           <div className="max-w-4xl mx-auto text-center">
-            <div className="rounded-3xl bg-card border border-border p-12 md:p-16 relative overflow-hidden shadow-sm">
+            <div className="reveal relative overflow-hidden rounded-3xl border border-border bg-card p-12 shadow-sm md:p-16">
               <div className="absolute inset-0 bg-muted/20" />
 
               <div className="relative space-y-6">

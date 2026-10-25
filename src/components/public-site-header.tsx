@@ -12,6 +12,12 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
   const isSignedIn = !!userId
 
   return (
+    // `sticky` only works if no ancestor creates a scroll container. The public
+    // page wrappers therefore use `overflow-x-clip`, NOT `overflow-x-hidden`:
+    // `hidden` on one axis forces the other to `auto`, which silently turns the
+    // wrapper into a scrollport and pins this header to it (it scrolls away).
+    // Verified 2026-10-25: with `overflow-x-hidden` the header sat at
+    // `top: -900` after 900px of scrolling.
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/65">
       <div className="flex h-14 items-center justify-between px-6 md:px-12 max-w-7xl mx-auto">
         <Link href="/" className="flex items-center select-none" aria-label="ErpLink Home">

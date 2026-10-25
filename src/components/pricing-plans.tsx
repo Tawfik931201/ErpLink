@@ -58,7 +58,7 @@ export function PricingPlans() {
       {/* ── Plan Hero: text + tilted card ───────────── */}
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
         {/* Text side */}
-        <div className="space-y-6">
+        <div className="reveal space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
             <Sparkles className="h-3 w-3" />
             <span>{t('pricing.hero.badge')}</span>
@@ -104,7 +104,7 @@ export function PricingPlans() {
         </div>
 
         {/* Tilted card side */}
-        <div className="flex justify-center lg:justify-end">
+        <div className="reveal flex justify-center lg:justify-end" style={{ animationDelay: '140ms' }}>
           <div className="relative w-full max-w-sm rotate-[-3deg] transition-transform duration-300 hover:rotate-0">
             <div className="absolute inset-0 translate-x-3 translate-y-3 rounded-3xl border border-border bg-secondary/60" />
 
@@ -144,7 +144,7 @@ export function PricingPlans() {
               </div>
 
               <div className="flex items-baseline gap-1.5 mb-2">
-                <span className="text-5xl font-black text-foreground">
+                <span key={price} className="price-pop text-5xl font-black text-foreground">
                   <span className="text-2xl font-black text-foreground/60 align-top">$</span>
                   {price}
                 </span>
@@ -152,7 +152,7 @@ export function PricingPlans() {
               </div>
 
               {billing === 'yearly' && (
-                <span className="inline-block mb-2 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[10px] font-black">
+                <span className="animate-scale-in inline-block mb-2 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-[10px] font-black">
                   {t('pricing.yearlySave')}
                 </span>
               )}
@@ -180,7 +180,7 @@ export function PricingPlans() {
       {/* ── All Features ─────────────────────────────── */}
       <section className="py-20 px-2 md:px-0">
         <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-12 space-y-3">
+          <div className="reveal text-center mb-12 space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
               <Sparkles className="h-3 w-3" />
               <span>{t('pricing.featuresTitle')}</span>
@@ -194,13 +194,14 @@ export function PricingPlans() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {ALL_FEATURES.map((key) => (
+            {ALL_FEATURES.map((key, idx) => (
               <div
                 key={key}
-                className="rounded-2xl border border-border bg-card p-5 shadow-sm"
+                className="reveal group rounded-2xl border border-border bg-card p-5 shadow-sm transition-shadow duration-300 hover:shadow-card-hover"
+                style={{ animationDelay: `${Math.min(idx, 5) * 60}ms` }}
               >
                 <div className="flex items-center gap-2.5 mb-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted text-foreground shrink-0">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-muted text-foreground shrink-0 transition-transform duration-300 group-hover:scale-110">
                     <Check className="h-3.5 w-3.5" />
                   </span>
                   <h3 className="text-sm font-bold text-foreground">
@@ -218,7 +219,7 @@ export function PricingPlans() {
 
       {/* ── Free Trial ───────────────────────────────── */}
       <section className="pb-4">
-        <div className="max-w-4xl mx-auto rounded-3xl border border-border bg-secondary/40 p-8 md:p-12">
+        <div className="reveal max-w-4xl mx-auto rounded-3xl border border-border bg-secondary/40 p-8 md:p-12">
           <div className="flex flex-col md:flex-row md:items-center gap-8">
             <div className="flex-1 space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
@@ -250,7 +251,7 @@ export function PricingPlans() {
       {/* ── FAQ ─────────────────────────────────────── */}
       <section className="py-20 px-2 md:px-0">
         <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-12 space-y-3">
+          <div className="reveal text-center mb-12 space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold">
               <ChevronDown className="h-3 w-3" />
               <span>{t('pricing.faqTitle')}</span>
@@ -264,7 +265,8 @@ export function PricingPlans() {
             {faqs.map((faq, idx) => (
               <details
                 key={idx}
-                className="group rounded-2xl border border-border bg-card overflow-hidden shadow-sm"
+                className="reveal group rounded-2xl border border-border bg-card overflow-hidden shadow-sm transition-shadow duration-300 hover:shadow-card-hover"
+                style={{ animationDelay: `${idx * 60}ms` }}
               >
                 <summary className="flex items-center justify-between gap-4 px-6 py-4 cursor-pointer list-none">
                   <span className="font-bold text-sm">{faq.q}</span>
