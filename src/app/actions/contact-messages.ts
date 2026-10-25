@@ -6,6 +6,7 @@ import { recordAudit } from '@/lib/audit-logs'
 import { getActiveUserId, isAdmin } from '@/lib/auth'
 import {
   countNewContactMessages as countNewContactMessagesUnsafe,
+  getContactMessageById as fetchContactMessage,
   listContactMessages,
   setContactMessageStatus,
   type ContactMessageStatus,
@@ -74,6 +75,28 @@ export async function getNewContactMessageCount() {
   }
 }
 
+/**
+ * One record for `/admin/messages/<id>`. The list never ships the message body,
+ * so opening a row is a read of its own.
+ */
+export async function getContactMessage(id: string) {
+  try {
+    await requireAdmin()
+    const result = await fetchContactMessage(id)
+    return {
+      success: result.ok,
+      row: result.row,
+      error: result.error,
+    }
+  } catch (err) {
+    return {
+      success: false,
+      row: null,
+      error: err instanceof Error ? err.message : 'unexpected_error',
+    }
+  }
+}
+
 export async function updateContactMessageStatus(id: string, status: ContactMessageStatus) {
   try {
     const adminId = await requireAdmin()
@@ -96,6 +119,7 @@ export async function updateContactMessageStatus(id: string, status: ContactMess
     })
 
     revalidatePath('/admin/messages')
+    revalidatePath('/admin/messages/[id]', 'page')
     revalidatePath('/admin')
     return { success: true }
   } catch (err) {

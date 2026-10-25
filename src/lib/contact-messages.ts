@@ -25,24 +25,39 @@ export interface ContactMessageInput {
   message: string
 }
 
-export interface ContactMessageRow {
+/**
+ * The list is a table with basic columns only, so the message body is NOT part
+ * of this shape. The body is a free-text field of unbounded length; selecting it
+ * for 50 rows makes every page load carry 50 letters nobody is reading yet.
+ * Do not add `message` here — use `ContactMessageRow` on the record page.
+ */
+export interface ContactMessageListRow {
   id: string
   name: string
+  company: string
   email: string
   phone: string
-  company: string
-  message: string
   status: ContactMessageStatus
   is_new_customer: boolean | null
   odoo_ticket_id: number | null
-  email_delivered: boolean
   created_at: string
   read_at: string | null
+}
+
+/** The record page (`/admin/messages/<id>`) — the only reader of the body. */
+export interface ContactMessageRow extends ContactMessageListRow {
+  message: string
+  email_delivered: boolean
   read_by: string | null
 }
 
-const SELECT_COLUMNS =
-  'id, name, email, phone, company, message, status, is_new_customer, odoo_ticket_id, email_delivered, created_at, read_at, read_by'
+const LIST_COLUMNS =
+  'id, name, company, email, phone, status, is_new_customer, odoo_ticket_id, created_at, read_at'
+
+const RECORD_COLUMNS = `${LIST_COLUMNS}, message, email_delivered, read_by`
+
+/** Cheap shape check, so a hand-typed URL is a 404 instead of a Postgres 400. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * PostgREST answers a missing table with `42P01` (Postgres) or `PGRST205`
@@ -134,7 +149,7 @@ export interface ListContactMessagesParams {
 /** Bounded read — the admin list is a page, never a full-table dump. */
 export async function listContactMessages(params: ListContactMessagesParams = {}): Promise<{
   ok: boolean
-  rows: ContactMessageRow[]
+  rows: ContactMessageListRow[]
   total: number
   error?: string
 }> {
@@ -144,7 +159,7 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
   try {
     let query = supabase
       .from('contact_messages')
-      .select(SELECT_COLUMNS, { count: 'exact' })
+      .select(LIST_COLUMNS, { count: 'exact' })
 
     if (params.status && params.status !== 'all') {
       query = query.eq('status', params.status)
@@ -164,7 +179,7 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
       }
     }
 
-    return { ok: true, rows: (data ?? []) as ContactMessageRow[], total: count ?? 0 }
+    return { ok: true, rows: (data ?? []) as ContactMessageListRow[], total: count ?? 0 }
   } catch (err) {
     console.error('[contact] failed to list messages:', err)
     return {
@@ -172,6 +187,45 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
       rows: [],
       total: 0,
       error: err instanceof Error ? err.message : 'list_failed',
+    }
+  }
+}
+
+/**
+ * One record, body included. The list never calls this: the row in the table
+ * carries the id, and the id is the URL segment of `/admin/messages/<id>`.
+ */
+export async function getContactMessageById(id: string): Promise<{
+  ok: boolean
+  row: ContactMessageRow | null
+  error?: string
+}> {
+  if (!UUID_RE.test(id)) return { ok: false, row: null, error: 'not_found' }
+
+  try {
+    const { data, error } = await supabase
+      .from('contact_messages')
+      .select(RECORD_COLUMNS)
+      .eq('id', id)
+      .maybeSingle()
+
+    if (error) {
+      console.error('[contact] failed to read message:', error.message)
+      return {
+        ok: false,
+        row: null,
+        error: isMissingTableError(error.message) ? 'migration_missing' : error.message,
+      }
+    }
+
+    if (!data) return { ok: false, row: null, error: 'not_found' }
+    return { ok: true, row: data as ContactMessageRow }
+  } catch (err) {
+    console.error('[contact] failed to read message:', err)
+    return {
+      ok: false,
+      row: null,
+      error: err instanceof Error ? err.message : 'read_failed',
     }
   }
 }

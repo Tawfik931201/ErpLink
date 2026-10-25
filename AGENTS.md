@@ -52,7 +52,9 @@
 | `src/app/(app)/admin/clients/[userId]/ClientStatementClient.tsx` | Statement: subscriptions/payments tables, register/extend/cancel/add-payment modals (no affiliate picker) |
 | `src/app/(app)/admin/subscriptions/page.tsx` | Subscription list, renders admin client (no affiliates fetch) |
 | `src/app/(app)/admin/subscriptions/AdminSubscriptionsClient.tsx` | Register/extend/cancel modals (manual payment only, no affiliate UI) |
-| `src/app/(app)/admin/messages/page.tsx` + `ContactMessagesClient.tsx` | Contact-form inbox: the durable copy of every `/contact` submission (`new`/`read`/`archived`, Odoo ticket id, "بلا تذكرة" warning, unread badge). Reads through `getContactMessages` — `force-dynamic`, never cached |
+| `src/app/(app)/admin/messages/page.tsx` + `ContactMessagesClient.tsx` | Contact-form inbox as an Odoo-style list: header row + clickable rows, **basic columns only** (name, company, email, status, Odoo ticket, date), and a per-row `⋯` menu with read/unread/archive/restore. Reads through `getContactMessages` — `force-dynamic`, never cached |
+| `src/app/(app)/admin/messages/[id]/page.tsx` + `message-detail-client.tsx` | Per-message record at `/admin/messages/<id>` (id is the URL segment): full body, contact links, Odoo ticket id, read stamp, status actions. The only reader of `message`/`read_by`/`email_delivered` |
+| `src/app/(app)/admin/messages/message-ui.ts` | Shared status label/colour and Gregorian date format for the list and the record page |
 
 ### API
 | File | Purpose |
@@ -1075,6 +1077,18 @@ where the message exists nowhere.
   through `getContactMessages`. Every write goes through
   `src/app/actions/contact-messages.ts`, which re-checks `isAdmin` per action —
   the `admin/layout.tsx` redirect protects rendering, not the action endpoints.
+- **The inbox is an Odoo-style list, and that split is load-bearing.** The table
+  shows basic columns only (name, company, email, status, Odoo ticket, date) and
+  each row is a link to its own record page at `/admin/messages/<id>` — the id is
+  the URL segment, same shape as `/app/logs/<id>`. Consequence in the data layer:
+  **`listContactMessages` does not select `message` at all** (only
+  `getContactMessageById` does), because the body is unbounded free text and
+  shipping 50 of them into a table that shows none of them is pure payload.
+  `tests/unit/contact-form-persistence.test.ts` pins both selects plus the fact
+  that the list never renders `row.message`.
+- Row actions are a `⋯` menu (open / mark read / mark unread / archive /
+  restore). It calls `event.stopPropagation()` on every item: the row itself
+  navigates, so an action must never be a navigation too.
 - `src/lib/contact-messages.ts` is intentionally **auth-free**: the public action
   writes to it. Do not export it from a `'use server'` module — that would make
   the unauthenticated insert callable from a browser.

@@ -125,3 +125,64 @@ describe('ordering assertions are not vacuous', () => {
     )
   })
 })
+
+/**
+ * The inbox is an Odoo-style list: a header row and basic columns. The message
+ * body is a free-text field with no length limit, so it must not ride along with
+ * 50 rows that nobody has opened yet — it belongs to the record page.
+ */
+describe('the list carries basic columns, the body belongs to the record page', () => {
+  const listClient = read('src', 'app', '(app)', 'admin', 'messages', 'ContactMessagesClient.tsx')
+  const detailClient = read(
+    'src',
+    'app',
+    '(app)',
+    'admin',
+    'messages',
+    '[id]',
+    'message-detail-client.tsx',
+  )
+
+  const listSelect = store.slice(
+    store.indexOf('const LIST_COLUMNS'),
+    store.indexOf('const RECORD_COLUMNS'),
+  )
+  const recordSelect = store.slice(
+    store.indexOf('const RECORD_COLUMNS'),
+    store.indexOf('const RECORD_COLUMNS') + 160,
+  )
+
+  it('does not select the message body for the list', () => {
+    expect(listSelect).not.toContain('message')
+  })
+
+  it('does select the message body for a single record', () => {
+    expect(recordSelect).toContain('message')
+  })
+
+  it('renders the body on the record page only', () => {
+    expect(listClient).not.toContain('row.message')
+    expect(detailClient).toContain('row.message')
+  })
+
+  it('opens a record by id, so the id is the URL segment', () => {
+    expect(listClient).toContain('router.push(`/admin/messages/${id}`)')
+  })
+
+  it('has a per-row action menu with read and archive, and it never navigates', () => {
+    expect(listClient).toContain('function RowActions(')
+    expect(listClient).toContain('event.stopPropagation()')
+    expect(listClient).toContain("onStatus('read')")
+    expect(listClient).toContain("onStatus('archived')")
+  })
+
+  it('rejects a non-uuid before it can reach the database', () => {
+    expect(store).toContain("if (!UUID_RE.test(id)) return { ok: false, row: null, error: 'not_found' }")
+  })
+
+  it('the substring checks above would catch a body leaking into the list', () => {
+    const bad = "const LIST_COLUMNS = 'id, name, message'"
+    expect(bad).toContain('message')
+    expect(listSelect).not.toContain('message')
+  })
+})
