@@ -325,7 +325,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
 
                   return (
                     <tr
-                      key={row.workspace_id}
+                      key={row.id || row.workspace_id}
                       tabIndex={hasRecord ? 0 : undefined}
                       role={hasRecord ? 'button' : undefined}
                       onClick={() => openRecord(row)}
