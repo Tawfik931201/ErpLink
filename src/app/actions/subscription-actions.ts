@@ -821,68 +821,64 @@ export async function getAllSubscriptions() {
       }
     }
 
-    // 5. Construct rows
-    const rows: AdminSubscriptionRow[] = wsList.map((ws) => {
+    // 5. Construct rows (Flattened: one row per subscription)
+    const rows: AdminSubscriptionRow[] = []
+
+    for (const ws of wsList) {
       const user = ws.user_id ? userMap.get(ws.user_id) : null
       const wsSubs = subMap.get(ws.id) ?? []
       const activeSubCount = wsSubs.filter(
         (s) => s.status === 'active' && !isSubscriptionExpired(s),
       ).length
 
-      // Active first, otherwise latest
-      let activeSub = wsSubs.find((s) => s.status === 'active' && !isSubscriptionExpired(s))
-      if (!activeSub) {
-        activeSub = wsSubs.find((s) => s.status === 'active')
-      }
-      if (!activeSub && wsSubs.length > 0) {
-        activeSub = wsSubs[0]
-      }
-
-      if (activeSub) {
-        return {
-          id: activeSub.id,
+      if (wsSubs.length > 0) {
+        // If there are subscriptions, add each one as an independent row
+        for (const sub of wsSubs) {
+          rows.push({
+            id: sub.id,
+            workspace_id: ws.id,
+            user_id: ws.user_id || '',
+            start_date: sub.start_date,
+            months_paid: sub.months_paid,
+            end_date: sub.end_date,
+            amount_paid: sub.amount_paid,
+            currency: sub.currency,
+            status: sub.status,
+            notes: sub.notes,
+            created_at: sub.created_at,
+            isExpired: isSubscriptionExpired(sub),
+            daysRemaining: daysUntilExpiry(sub.end_date),
+            workspace_name: ws.name,
+            client_name: user?.name ?? null,
+            client_email: user?.email ?? null,
+            subscription_number: ws.subscription_number || null,
+            active_sub_count: activeSubCount,
+          })
+        }
+      } else {
+        // Workspace with no subscription, add one empty row
+        rows.push({
+          id: '',
           workspace_id: ws.id,
           user_id: ws.user_id || '',
-          start_date: activeSub.start_date,
-          months_paid: activeSub.months_paid,
-          end_date: activeSub.end_date,
-          amount_paid: activeSub.amount_paid,
-          currency: activeSub.currency,
-          status: activeSub.status,
-          notes: activeSub.notes,
-          created_at: activeSub.created_at,
-          isExpired: isSubscriptionExpired(activeSub),
-          daysRemaining: daysUntilExpiry(activeSub.end_date),
+          start_date: '',
+          months_paid: 0,
+          end_date: '',
+          amount_paid: 0,
+          currency: 'USD',
+          status: 'none',
+          notes: null,
+          created_at: ws.created_at,
+          isExpired: true,
+          daysRemaining: 0,
           workspace_name: ws.name,
           client_name: user?.name ?? null,
           client_email: user?.email ?? null,
           subscription_number: ws.subscription_number || null,
-          active_sub_count: activeSubCount,
-        }
+          active_sub_count: 0,
+        })
       }
-
-      // Workspace with no subscription
-      return {
-        id: '',
-        workspace_id: ws.id,
-        user_id: ws.user_id || '',
-        start_date: '',
-        months_paid: 0,
-        end_date: '',
-        amount_paid: 0,
-        currency: 'USD',
-        status: 'none',
-        notes: null,
-        created_at: ws.created_at,
-        isExpired: true,
-        daysRemaining: 0,
-        workspace_name: ws.name,
-        client_name: user?.name ?? null,
-        client_email: user?.email ?? null,
-        subscription_number: ws.subscription_number || null,
-        active_sub_count: activeSubCount,
-      }
-    })
+    }
 
     return { success: true as const, rows }
   } catch (err) {
