@@ -500,7 +500,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
           <div className="lg:col-span-2 rounded-xl border bg-card p-5 flex flex-col justify-between">
 
             <div>
-              <div className="flex items-center justify-between pb-3.5 border-b border-border mb-5">
+              <div className="flex flex-wrap items-start justify-between gap-3 pb-5 border-b border-border mb-5">
                 <div className="flex items-center gap-3">
                   <Button
                     type="button"
@@ -538,7 +538,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
                 )}
               </div>
 
-              <form onSubmit={handleTestAndSave} className="space-y-5">
+              <form onSubmit={handleTestAndSave} className="space-y-6">
                 {/* Auto connection name (P0): derived from DB/hostname, override under Advanced */}
                 <div className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
                   <span className="font-semibold text-foreground">{finalConnectionName}</span>
