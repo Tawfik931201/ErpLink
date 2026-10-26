@@ -782,11 +782,12 @@ export async function getAllSubscriptions() {
 
     // 1. Fetch all subscriptions directly as the primary source (up to 10000)
     // This ensures no subscription is ever omitted due to workspace pagination/ordering.
+    // `select('*')` on purpose, not an explicit column list: `archived_at` only
+    // exists once migration 20260805 is applied, and naming a missing column
+    // fails the whole query with "column subscriptions.archived_at does not exist".
     const { data: subs, error: subErr } = await supabase
       .from('subscriptions')
-      .select(
-        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_at, archived_at',
-      )
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(10000)
 
@@ -975,9 +976,7 @@ export async function getSubscriptionDetail(subscriptionId: string) {
 
     const { data: sub, error: subErr } = await supabase
       .from('subscriptions')
-      .select(
-        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_by, created_at, updated_at, archived_at',
-      )
+      .select('*')
       .eq('id', subscriptionId)
       .maybeSingle()
 
@@ -987,7 +986,7 @@ export async function getSubscriptionDetail(subscriptionId: string) {
     const [wsRes, userRes, payRes, historyRes] = await Promise.all([
       supabase
         .from('workspaces')
-        .select('id, name, subscription_number, created_at, archived_at')
+        .select('*')
         .eq('id', sub.workspace_id)
         .maybeSingle(),
       sub.user_id
@@ -1000,7 +999,7 @@ export async function getSubscriptionDetail(subscriptionId: string) {
         .order('paid_at', { ascending: false }),
       supabase
         .from('subscriptions')
-        .select('id, start_date, end_date, months_paid, amount_paid, currency, status, archived_at')
+        .select('*')
         .eq('workspace_id', sub.workspace_id)
         .order('created_at', { ascending: false }),
     ])
@@ -1257,7 +1256,7 @@ export async function getAllClients(params?: { limit?: number; offset?: number }
     const wsIds = (workspaces ?? []).map((w) => w.id)
     const { data: subs } = await supabase
       .from('subscriptions')
-      .select('id,workspace_id,amount_paid,status,archived_at,start_date,end_date,months_paid')
+      .select('*')
       .in('workspace_id', wsIds.length ? wsIds : ['__none__'])
       .limit(2000)
 
