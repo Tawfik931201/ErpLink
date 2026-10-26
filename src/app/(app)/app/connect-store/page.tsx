@@ -37,26 +37,14 @@ export default async function ConnectZidPage() {
         <div className="mb-1 flex items-center gap-2">
           <div className="h-6 w-1 rounded-full bg-primary" />
           <h1 className="text-xl font-bold tracking-tight text-foreground">
-            {t('zid.title')}
+            {lang === 'ar' ? 'المتجر' : 'Stores'}
           </h1>
         </div>
         <p className="text-[11px] text-muted-foreground leading-relaxed">
-          {t('zid.desc')}
+          {lang === 'ar'
+            ? 'إدارة وتوصيل متجرك الإلكتروني وقنوات البيع.'
+            : 'Manage and connect your online store and sales channels.'}
         </p>
-        <ol className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <li>
-            <span className="me-1 font-mono text-[10px] font-semibold text-primary">01</span>
-            {lang === 'ar' ? 'اختر منصتك' : 'Pick your platform'}
-          </li>
-          <li>
-            <span className="me-1 font-mono text-[10px] font-semibold text-primary">02</span>
-            {lang === 'ar' ? 'وافق على الصلاحيات' : 'Approve permissions'}
-          </li>
-          <li>
-            <span className="me-1 font-mono text-[10px] font-semibold text-primary">03</span>
-            {lang === 'ar' ? 'المزامنة تعمل تلقائياً' : 'Sync runs automatically'}
-          </li>
-        </ol>
       </div>
 
       <Suspense fallback={<div className="animate-pulse h-48 rounded-xl bg-muted/40" />}>

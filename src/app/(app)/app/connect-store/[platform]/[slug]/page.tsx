@@ -44,16 +44,9 @@ export default async function ConnectStoreDetailPage({ params }: DetailPageProps
   return (
     <div className="max-w-4xl mx-auto space-y-4 animate-in fade-in duration-300" dir={dir}>
       <div>
-        <div className="mb-1 flex items-center gap-2 text-xl font-bold tracking-tight">
+        <div className="mb-1 flex items-center gap-2">
           <div className="h-6 w-1 rounded-full bg-primary" />
-          <Link
-            href="/app/connect-store"
-            className="text-muted-foreground/70 hover:text-foreground transition-colors"
-          >
-            {lang === 'ar' ? 'المتجر' : 'Stores'}
-          </Link>
-          <span className="text-muted-foreground/40 font-normal" aria-hidden="true">/</span>
-          <h1 className="text-foreground">
+          <h1 className="text-xl font-bold tracking-tight text-foreground">
             {lang === 'ar' ? 'تفاصيل المتجر' : 'Store details'}
           </h1>
         </div>

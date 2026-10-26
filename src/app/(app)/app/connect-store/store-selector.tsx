@@ -1,15 +1,31 @@
 'use client'
 
 import {
-  Store, ExternalLink, Mail, Calendar, Hash, RefreshCw,
-  User, AlertCircle, Globe, CheckCircle2, Wrench,
-  Plus, ChevronLeft, ChevronRight
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  ExternalLink,
+  Globe,
+  Hash,
+  Mail,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  Store,
+  Trash2,
+  User,
+  Wrench,
 } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { getZidWebhookHealth, recoverZidBrokenWebhooks } from '@/app/actions/workspaces'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { useToast } from '@/hooks/use-toast'
 import type { Language } from '@/lib/translations'
 import { translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
@@ -30,7 +46,7 @@ const ZidLogo = () => (
 const SallaLogo = () => (
   <svg className="h-4 w-4" viewBox="0 0 100 100" fill="currentColor">
     <path d="M15,40 L85,40 Q90,65 80,85 L20,85 Q10,65 15,40 Z" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M30,40 L30,20 Q50,5 70,20 L70,40" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M30,40 L30,20 Q50,5 70,20 L70,40" fill="none" stroke="currentColor" strokeWidth="8" strokeLinecap="round" opacity="0.9" />
     <line x1="50" y1="40" x2="50" y2="85" stroke="currentColor" strokeWidth="8" strokeLinecap="round" />
   </svg>
 )
@@ -51,8 +67,6 @@ interface StoreSelectorProps {
   sallaInstallUrl?: string
   lang: Language
   dir: 'rtl' | 'ltr'
-  // Detail route (/app/connect-store/<platform>/<slug>): the store is opened
-  // as its own page instead of a view toggled inside the list.
   initialPlatform?: string
   initialSlug?: string
 }
@@ -68,11 +82,6 @@ interface ConnectedRow {
 const storeKeyFor = (platform: string, tk: any): string =>
   platform === 'shopify' ? String(tk?.shop_domain ?? '') : String(tk?.merchant_id ?? '')
 
-// URL slug for a store key. Zid/Salla merchant ids are already URL-safe; a
-// Shopify shop domain contains dots, and a path segment ending in ".com" would
-// be skipped by the middleware matcher (it excludes static-file paths), so
-// dots become dashes. "a.b.myshopify.com" is never a real shop domain, so the
-// mapping stays collision-free in practice.
 const storeSlugFor = (platform: string, key: string): string =>
   platform === 'shopify' ? key.replace(/\./g, '-') : key
 
@@ -82,51 +91,177 @@ const storeSlugMatches = (platform: string, tk: any, slug: string): boolean =>
 const storeDetailHref = (platform: string, key: string): string =>
   `/app/connect-store/${platform}/${encodeURIComponent(storeSlugFor(platform, key))}`
 
-export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopifyTokens = [], installUrl, sallaInstallUrl, lang, dir, initialPlatform, initialSlug }: StoreSelectorProps) {
+function InfoField({
+  label,
+  children,
+  mono = false,
+  wide = false,
+}: {
+  label: string
+  children: React.ReactNode
+  mono?: boolean
+  wide?: boolean
+}) {
+  return (
+    <div className={cn('min-w-0', wide && 'sm:col-span-2')}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <div className={cn('mt-1 break-all text-xs text-foreground', mono && 'font-mono')}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function RowActions({
+  row,
+  isAr,
+  onOpen,
+  onReconnect,
+}: {
+  row: ConnectedRow
+  isAr: boolean
+  onOpen: () => void
+  onReconnect: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const onDocumentClick = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    document.addEventListener('mousedown', onDocumentClick)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('mousedown', onDocumentClick)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [open])
+
+  return (
+    <div className="relative flex justify-end" ref={ref}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={isAr ? 'إجراءات' : 'Actions'}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen((prev) => !prev)
+        }}
+        className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+          className="absolute end-0 top-full z-50 mt-1 w-44 border border-border bg-card py-1 shadow-card"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onOpen()
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-start text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Store className="h-3.5 w-3.5" />
+            <span className="truncate">{isAr ? 'عرض التفاصيل' : 'View Details'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onReconnect()
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-start text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span className="truncate">{isAr ? 'إعادة الاتصال' : 'Reconnect'}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function StoreSelector({
+  zidTokens = [],
+  sallaTokens = [],
+  shopifyTokens = [],
+  installUrl,
+  sallaInstallUrl,
+  lang,
+  dir,
+  initialPlatform,
+  initialSlug,
+}: StoreSelectorProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { toast } = useToast()
+  const ar = lang === 'ar'
+
   const error = searchParams.get('error')
   const errorDescription = searchParams.get('description')
   const success = searchParams.get('success')
-  // Odoo-style single screen: only one of list / connect-form / details is
-  // visible at a time — never stacked together.
+
   const isDetailRoute = Boolean(initialPlatform && initialSlug)
   const [view, setView] = useState<'list' | 'connect' | 'details'>(isDetailRoute ? 'details' : 'list')
-  // On a detail route the opened store comes from the URL, so it survives a
-  // refresh, a shared link and the browser's own history.
   const detail = isDetailRoute ? { platform: initialPlatform as string, slug: initialSlug as string } : null
   const [connectPlatform, setConnectPlatform] = useState<string>('zid')
+  const [copiedId, setCopiedId] = useState(false)
 
   const getSuccessMessage = (s: string) => {
-    const platformName = s === 'salla_connected' ? (lang === 'ar' ? 'سلة' : 'Salla')
-      : s === 'shopify_connected' ? (lang === 'ar' ? 'شوبيفاي' : 'Shopify')
-      : (lang === 'ar' ? 'زد' : 'Zid')
-    return lang === 'ar'
-      ? `تم ربط متجر ${platformName} بنجاح!`
-      : `${platformName} store connected successfully!`
+    const platformName =
+      s === 'salla_connected'
+        ? ar
+          ? 'سلة'
+          : 'Salla'
+        : s === 'shopify_connected'
+          ? ar
+            ? 'شوبيفاي'
+            : 'Shopify'
+          : ar
+            ? 'زد'
+            : 'Zid'
+    return ar ? `تم ربط متجر ${platformName} بنجاح!` : `${platformName} store connected successfully!`
   }
 
   const getErrorMessage = (err: string) => {
     switch (err) {
       case 'access_denied':
       case 'salla_denied':
-        return lang === 'ar'
+        return ar
           ? 'تم رفض الصلاحيات من قبل المستخدم أو متجر سلة. يرجى الموافقة على الصلاحيات لتتمكن من الربط.'
           : 'Authorization was denied by the user or Salla store. Please approve the permissions to connect.'
       case 'invalid_client':
-        return lang === 'ar'
+        return ar
           ? 'بيانات اعتماد التطبيق غير صالحة (Client ID/Secret).'
           : 'Invalid client credentials (Client ID/Secret).'
       case 'redirect_uri_mismatch':
-        return lang === 'ar'
+        return ar
           ? 'رابط إعادة التوجيه المسجل في سلة لا يطابق هذا الرابط.'
           : 'Redirect URI mismatch on Salla Developer Portal.'
       case 'invalid_scope':
-        return lang === 'ar'
+        return ar
           ? 'الصلاحيات المطلوبة غير صالحة أو غير مصرح بها لهذا التطبيق.'
           : 'Requested scopes are invalid or unauthorized for this app.'
       default:
-        return errorDescription || (lang === 'ar' ? `حدث خطأ أثناء الربط: ${err}` : `An error occurred during connection: ${err}`)
+        return (
+          errorDescription ||
+          (ar ? `حدث خطأ أثناء الربط: ${err}` : `An error occurred during connection: ${err}`)
+        )
     }
   }
 
@@ -135,35 +270,52 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
   }
 
   const formatDate = (dateStr: string | Date) => {
+    if (!dateStr) return '—'
     try {
-      return new Date(dateStr).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
-        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      const date = new Date(dateStr)
+      if (Number.isNaN(date.getTime())) return '—'
+      return date.toLocaleString(ar ? 'ar-EG' : 'en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
       })
-    } catch { return String(dateStr) }
+    } catch {
+      return String(dateStr)
+    }
   }
 
   const stores = [
-    { id: 'zid', name: lang === 'ar' ? 'زد' : 'Zid', logo: ZidLogo, isActive: true },
-    { id: 'salla', name: lang === 'ar' ? 'سلة' : 'Salla', logo: SallaLogo, isActive: true },
-    { id: 'shopify', name: lang === 'ar' ? 'شوبيفاي' : 'Shopify', logo: ShopifyLogo, isActive: true },
+    { id: 'zid', name: ar ? 'زد (Zid)' : 'Zid', logo: ZidLogo },
+    { id: 'salla', name: ar ? 'سلة (Salla)' : 'Salla', logo: SallaLogo },
+    { id: 'shopify', name: ar ? 'شوبيفاي (Shopify)' : 'Shopify', logo: ShopifyLogo },
   ]
 
-  const selectedPlatform = stores.find(s => s.id === connectPlatform)
+  const selectedPlatform = stores.find((s) => s.id === connectPlatform)
 
   const tokensFor = (platform: string): any[] =>
     platform === 'zid' ? zidTokens : platform === 'salla' ? sallaTokens : shopifyTokens
 
-  // Basic row data: store name + merchant code, e.g. Demo(403476178).
   const displayFor = (platform: string, tk: any): { name: string; code: string } => {
-    if (platform === 'zid') return { name: tk?.name || (lang === 'ar' ? 'زد' : 'Zid'), code: tk?.merchant_id ? String(tk.merchant_id) : '' }
-    if (platform === 'salla') return { name: tk?.store_name || tk?.name || (lang === 'ar' ? 'سلة' : 'Salla'), code: tk?.merchant_id ? String(tk.merchant_id) : '' }
-    return { name: tk?.name || (lang === 'ar' ? 'شوبيفاي' : 'Shopify'), code: tk?.shop_domain || '' }
+    if (platform === 'zid')
+      return {
+        name: tk?.name || (ar ? 'متجر زد' : 'Zid Store'),
+        code: tk?.merchant_id ? String(tk.merchant_id) : '',
+      }
+    if (platform === 'salla')
+      return {
+        name: tk?.store_name || tk?.name || (ar ? 'متجر سلة' : 'Salla Store'),
+        code: tk?.merchant_id ? String(tk.merchant_id) : '',
+      }
+    return {
+      name: tk?.name || (ar ? 'متجر شوبيفاي' : 'Shopify Store'),
+      code: tk?.shop_domain || '',
+    }
   }
 
-  // Multi-store: one row per connected STORE (a platform may appear several
-  // times). Lists arrive newest-first from the server.
-  const connectedRows: ConnectedRow[] = stores.flatMap(store =>
-    tokensFor(store.id).map(tk => {
+  const connectedRows: ConnectedRow[] = stores.flatMap((store) =>
+    tokensFor(store.id).map((tk) => {
       const { name, code } = displayFor(store.id, tk)
       return { platform: store.id, key: storeKeyFor(store.id, tk), token: tk, name, code }
     })
@@ -173,12 +325,12 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
     router.push(storeDetailHref(platform, key))
   }
 
-  const detailToken = detail?.platform && stores.some(s => s.id === detail.platform)
-    ? tokensFor(detail.platform).find(tk => storeSlugMatches(detail.platform, tk, detail.slug)) ?? null
-    : null
+  const detailToken =
+    detail?.platform && stores.some((s) => s.id === detail.platform)
+      ? tokensFor(detail.platform).find((tk) => storeSlugMatches(detail.platform, tk, detail.slug)) ??
+        null
+      : null
 
-  // After an OAuth redirect (?success=salla_connected …) jump straight to
-  // that platform's newest store instead of leaving the user on the list.
   useEffect(() => {
     if (!success) return
     const id = success === 'salla_connected' ? 'salla' : success === 'shopify_connected' ? 'shopify' : 'zid'
@@ -189,333 +341,544 @@ export default function StoreSelector({ zidTokens = [], sallaTokens = [], shopif
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [success])
 
-  const BackButton = (
-    <button
-      type="button"
-      onClick={() => (isDetailRoute ? router.push('/app/connect-store') : setView('list'))}
-      className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors"
-    >
-      {dir === 'rtl' ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-      <span>{lang === 'ar' ? 'رجوع' : 'Back'}</span>
-    </button>
-  )
+  const copyStoreId = async (idText: string) => {
+    try {
+      await navigator.clipboard.writeText(idText)
+      setCopiedId(true)
+      setTimeout(() => setCopiedId(false), 1500)
+    } catch {
+      toast({
+        title: ar ? 'تعذر النسخ' : 'Copy failed',
+        description: ar ? 'المتصفح منع الوصول إلى الحافظة.' : 'The browser blocked clipboard access.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleReconnect = (platform: string) => {
+    const url =
+      platform === 'salla'
+        ? '/api/salla/connect'
+        : platform === 'shopify'
+          ? '/app/connect-store'
+          : '/api/zid/connect'
+    router.push(url)
+  }
+
+  const BackIcon = dir === 'rtl' ? ChevronRight : ChevronLeft
 
   return (
     <div className="space-y-5" dir={dir}>
       {error && (
-        <div className="flex items-start gap-3 border border-destructive/25 bg-destructive/[0.05] p-3">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+        <div className="flex items-start gap-3 border border-destructive/25 bg-destructive/[0.05] p-3 text-xs text-destructive">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-medium text-xs text-foreground">
-              {lang === 'ar' ? 'فشل الاتصال بالمنصة' : 'Connection Failed'}
+            <p className="font-bold text-foreground">
+              {ar ? 'فشل الاتصال بالمنصة' : 'Connection Failed'}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              {getErrorMessage(error)}
-            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{getErrorMessage(error)}</p>
           </div>
         </div>
       )}
 
       {success && (
-        <div className="flex items-start gap-3 border border-primary/25 bg-primary/[0.06] p-3">
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <div className="flex items-start gap-3 border border-primary/25 bg-primary/[0.06] p-3 text-xs text-primary">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            <p className="font-medium text-xs text-primary">
-              {lang === 'ar' ? 'تم ربط المتجر بنجاح' : 'Store Connected'}
-            </p>
-            <p className="text-[11px] text-primary/80 mt-0.5">
-              {getSuccessMessage(success)}
-            </p>
+            <p className="font-bold text-primary">{ar ? 'تم ربط المتجر بنجاح' : 'Store Connected'}</p>
+            <p className="text-[11px] text-primary/80 mt-0.5">{getSuccessMessage(success)}</p>
           </div>
         </div>
       )}
 
-      {/* ── List View: connected stores ─────────────────────────── */}
+      {/* ── List View: Odoo-style list with header row + clean records ── */}
       {view === 'list' && (
-      <div className="border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-muted/30">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-medium text-foreground">{t('connect.selectStore')}</span>
-            <span className="text-[11px] text-muted-foreground">
-              {lang === 'ar' ? `${connectedRows.length} متاجر متصلة` : `${connectedRows.length} connected stores`}
-            </span>
-          </div>
-          <Button
-            type="button"
-            variant="brand"
-            size="sm"
-            onClick={() => setView('connect')}
-            className="h-7 text-[11px] gap-1"
-          >
-            <Plus className="h-3 w-3" />
-            <span>{lang === 'ar' ? 'إضافة متجر' : 'Add store'}</span>
-          </Button>
-        </div>
-
-        {connectedRows.length > 0 ? (
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="border-b border-border text-muted-foreground">
-              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'المتجر' : 'Store'}</th>
-              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'معرف التاجر' : 'Merchant ID'}</th>
-              <th className="px-3 py-2 text-start font-medium">{lang === 'ar' ? 'الحالة' : 'Status'}</th>
-              <th className="px-3 py-2 text-end font-medium w-10" />
-            </tr>
-          </thead>
-          <tbody>
-            {connectedRows.map((row) => {
-              const StoreIcon = stores.find(s => s.id === row.platform)?.logo ?? Store
-
-              return (
-                <tr
-                  key={`${row.platform}:${row.key}`}
-                  onClick={() => openDetails(row.platform, row.key)}
-                  className="border-b border-border/50 last:border-b-0 cursor-pointer transition-colors hover:bg-muted/30"
-                >
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <StoreIcon />
-                      <span className="text-foreground" dir="auto">{row.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className="font-mono text-muted-foreground" dir="ltr">{row.code || '—'}</span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                      <span className="text-foreground">{t('connect.connected')}</span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-end">
-                    <span className="inline-flex text-muted-foreground">
-                      {dir === 'rtl' ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        ) : (
-        <div className="p-5 flex flex-col sm:flex-row items-start gap-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-primary/25 bg-primary/5 text-primary">
-            <Store className="h-5 w-5" />
-          </div>
-          <div className="flex-1 space-y-3">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-foreground">{lang === 'ar' ? 'لا يوجد متجر متصل' : 'No store connected'}</h2>
-              <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">
-                {lang === 'ar'
-                  ? 'اضغط على إضافة متجر واختر منصتك لإتمام الربط — المزامنة تعمل تلقائياً بعد الموافقة.'
-                  : 'Click Add store, pick your platform and approve — sync runs automatically afterwards.'}
+              <h2 className="text-base font-bold text-foreground">
+                {ar ? 'المتاجر المتصلة' : 'Connected Stores'}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {ar
+                  ? `إجمالي المتاجر المرتبطة بمساحة العمل الحالية: ${connectedRows.length}`
+                  : `Total connected stores in current workspace: ${connectedRows.length}`}
               </p>
             </div>
-            <Button type="button" variant="brand" size="sm" onClick={() => setView('connect')} className="h-8 text-[11px] gap-1.5">
-              <Plus className="h-3 w-3" />
-              <span>{lang === 'ar' ? 'إضافة متجر' : 'Add store'}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setView('connect')}
+              className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{ar ? 'إضافة متجر' : 'Add Store'}</span>
             </Button>
           </div>
+
+          <div className="overflow-x-auto border border-border bg-card">
+            <table className="w-full border-collapse text-[11px]">
+              <thead>
+                <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
+                  <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                    {ar ? 'الحالة' : 'Status'}
+                  </th>
+                  <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                    {ar ? 'المتجر' : 'Store'}
+                  </th>
+                  <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                    {ar ? 'المنصة' : 'Platform'}
+                  </th>
+                  <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                    {ar ? 'معرف التاجر / النطاق' : 'Merchant ID / Domain'}
+                  </th>
+                  <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                    {ar ? 'آخر تحديث' : 'Last Updated'}
+                  </th>
+                  <th className="px-2 py-2.5 text-end font-bold whitespace-nowrap w-12" />
+                </tr>
+              </thead>
+              <tbody>
+                {connectedRows.length > 0 ? (
+                  connectedRows.map((row) => {
+                    const storeMeta = stores.find((s) => s.id === row.platform)
+                    const StoreIcon = storeMeta?.logo ?? Store
+                    const platformName = storeMeta?.name || row.platform
+
+                    return (
+                      <tr
+                        key={`${row.platform}:${row.key}`}
+                        tabIndex={0}
+                        role="button"
+                        onClick={() => openDetails(row.platform, row.key)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            openDetails(row.platform, row.key)
+                          }
+                        }}
+                        className="cursor-pointer transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none border-b border-border/40 last:border-b-0"
+                      >
+                        <td className="px-2 py-2.5 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 border border-primary/20 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-bold text-primary">
+                            <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                            {ar ? 'متصل' : 'Connected'}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2 font-bold text-foreground">
+                            <StoreIcon />
+                            <span dir="auto">{row.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground font-medium">
+                          {platformName}
+                        </td>
+                        <td className="px-2 py-2.5 whitespace-nowrap font-mono text-foreground">
+                          {row.code || '—'}
+                        </td>
+                        <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                          {formatDate(row.token?.updated_at)}
+                        </td>
+                        <td className="px-2 py-2.5 text-end">
+                          <RowActions
+                            row={row}
+                            isAr={ar}
+                            onOpen={() => openDetails(row.platform, row.key)}
+                            onReconnect={() => handleReconnect(row.platform)}
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center">
+                      <div className="flex flex-col items-center justify-center">
+                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mb-3">
+                          <Store className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <p className="text-xs font-bold text-muted-foreground">
+                          {ar ? 'لا يوجد أي متجر متصل حالياً' : 'No stores connected currently'}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
+                          {ar
+                            ? 'قم بإضافة متجرك الإلكتروني (زد، سلة، أو شوبيفاي) لبدء مزامنة المنتجات والطلبات والمخزون مع نظام أودو.'
+                            : 'Add your online store (Zid, Salla, or Shopify) to begin syncing products, orders, and stock with Odoo.'}
+                        </p>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setView('connect')}
+                          className="mt-4 h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>{ar ? 'إضافة متجر جديد' : 'Add New Store'}</span>
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        )}
-      </div>
       )}
 
-      {/* ── Connect View: pick a platform + connect ─────────────── */}
+      {/* ── Connect View: Pick a platform + Connect ────────────────── */}
       {view === 'connect' && (
-      <div className="border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2.5 bg-muted/30">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-foreground">
-            <Store className="h-3.5 w-3.5 text-muted-foreground" />
-            {lang === 'ar' ? 'إضافة متجر' : 'Add store'}
-          </div>
-          {BackButton}
-        </div>
-
-        <div className="p-4 space-y-4 max-w-xl">
-          <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-muted-foreground">
-              {lang === 'ar' ? 'اختر المتجر' : 'Choose store'}
-            </label>
-            <select
-              value={connectPlatform}
-              onChange={e => setConnectPlatform(e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-primary/60 focus:ring-1 focus:ring-primary/25 outline-none transition-all"
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setView('list')}
+              className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
             >
-              {stores.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name}{tokensFor(s.id).length > 0 ? (lang === 'ar' ? ` (متصل: ${tokensFor(s.id).length})` : ` (connected: ${tokensFor(s.id).length})`) : ''}
-                </option>
-              ))}
-            </select>
+              <BackIcon className="h-3.5 w-3.5" />
+              {ar ? 'العودة للمتاجر' : 'Back to Stores'}
+            </button>
+            <span className="text-muted-foreground/30">/</span>
+            <span className="font-mono text-foreground/70">{ar ? 'إضافة متجر' : 'Add Store'}</span>
           </div>
 
-          {connectPlatform === 'shopify' ? (
-            <div className="space-y-3">
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {lang === 'ar'
-                  ? 'أدخل نطاق متجرك على شوبيفاي ثم اضغط ربط للموافقة على الصلاحيات.'
-                  : 'Enter your Shopify shop domain, then click Connect to approve permissions.'}
+          <div className="border border-border bg-card p-4 space-y-4 max-w-xl">
+            <div className="border-b border-border pb-3">
+              <h1 className="text-base font-bold text-foreground">
+                {ar ? 'ربط متجر جديد' : 'Connect New Store'}
+              </h1>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {ar ? 'اختر المنصة لبدء عملية الربط التلقائي' : 'Select platform to start automatic connection'}
               </p>
-              <form action="/api/shopify/connect" method="GET" className="flex flex-col sm:flex-row gap-2">
-                <input type="text" name="shop" placeholder="store-name.myshopify.com" required
-                  className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-                <Button type="submit" variant="outline" size="sm" className="h-9 text-[11px] gap-1.5 shrink-0">
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{lang === 'ar' ? 'اتصال' : 'Connect'}</span>
-                </Button>
-              </form>
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                {selectedPlatform && <selectedPlatform.logo />}
-                <span className="text-sm font-semibold text-foreground">{selectedPlatform?.name}</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {lang === 'ar'
-                  ? `اربط متجرك على ${selectedPlatform?.name} لتتمكن من مزامنة المنتجات، المخزون، والطلبات تلقائياً مع نظام ERP. بعد الضغط على الاتصال يتم تلقائياً: تسجيل التنبيهات الأساسية + تفعيل المزامنة — بلا أي إعداد يدوي.`
-                  : `Connect your store on ${selectedPlatform?.name} to automatically sync products, stock, and orders with your ERP system. After clicking connect, everything is automatic: core webhooks + sync turn on with zero manual setup.`}
-              </p>
-              <div className="p-2.5 border border-border bg-muted/30">
-                <div className="text-[10px] text-muted-foreground mb-1">{t('zid.redirectUrl')}</div>
-                <code className="font-mono text-[10px] text-foreground/80 break-all">
-                  {connectPlatform === 'salla' ? sallaInstallUrl : installUrl}
-                </code>
-              </div>
-              <a href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
-                 className={cn(buttonVariants({ variant: 'brand' }), 'h-9 gap-1.5 px-3 text-[11px]')}>
-                <ExternalLink className="h-3 w-3" />
-                {lang === 'ar' ? 'اتصال' : 'Connect'}
-              </a>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {ar ? 'منصة المتجر' : 'Store Platform'}
+              </label>
+              <select
+                value={connectPlatform}
+                onChange={(e) => setConnectPlatform(e.target.value)}
+                className="w-full h-8 px-3 rounded-none border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {tokensFor(s.id).length > 0
+                      ? ar
+                        ? ` (متصل: ${tokensFor(s.id).length})`
+                        : ` (connected: ${tokensFor(s.id).length})`
+                      : ''}
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
+
+            {connectPlatform === 'shopify' ? (
+              <div className="space-y-3 pt-2">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {ar
+                    ? 'أدخل نطاق متجرك على شوبيفاي ثم اضغط اتصال للموافقة على الصلاحيات.'
+                    : 'Enter your Shopify shop domain, then click Connect to approve permissions.'}
+                </p>
+                <form action="/api/shopify/connect" method="GET" className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    name="shop"
+                    placeholder="store-name.myshopify.com"
+                    required
+                    className="flex h-8 w-full border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold shrink-0"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>{ar ? 'اتصال' : 'Connect'}</span>
+                  </Button>
+                </form>
+              </div>
+            ) : (
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center gap-2">
+                  {selectedPlatform && <selectedPlatform.logo />}
+                  <span className="text-sm font-bold text-foreground">{selectedPlatform?.name}</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {ar
+                    ? `اربط متجرك على ${selectedPlatform?.name} لتتمكن من مزامنة المنتجات، المخزون، والطلبات تلقائياً مع نظام ERP. بعد الضغط على الاتصال يتم تسجيل التنبيهات وتفعيل المزامنة تلقائياً.`
+                    : `Connect your store on ${selectedPlatform?.name} to automatically sync products, stock, and orders with your ERP system. After connecting, webhooks and sync run automatically.`}
+                </p>
+                <div className="p-2.5 border border-border bg-muted/40 font-mono text-[10px]">
+                  <div className="text-muted-foreground mb-1 font-sans">{t('zid.redirectUrl')}</div>
+                  <div className="text-foreground/80 break-all">
+                    {connectPlatform === 'salla' ? sallaInstallUrl : installUrl}
+                  </div>
+                </div>
+                <a
+                  href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'h-8 gap-1.5 rounded-none px-3 text-[10px] font-bold inline-flex'
+                  )}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>{ar ? 'اتصال الحساب' : 'Connect Account'}</span>
+                </a>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
       )}
 
-      {/* ── Details View: one connected store, standalone ──────────── */}
+      {/* ── Detail View: Odoo Record Style ──────────────────────────── */}
       {view === 'details' && detail && !detailToken && (
-      <div className="border border-border bg-card p-5">
-        <div className="flex items-start gap-3">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <div className="flex-1 space-y-1.5">
-            <h2 className="text-sm font-semibold text-foreground">
-              {lang === 'ar' ? 'المتجر غير متصل' : 'Store not connected'}
-            </h2>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              {lang === 'ar'
-                ? 'هذا المتجر غير مرتبط بمساحة العمل الحالية أو تم فصله. أعد ربطه للمتابعة.'
-                : 'This store is not linked to the current workspace or was disconnected. Reconnect it to continue.'}
-            </p>
-            <div className="pt-1">{BackButton}</div>
+        <div className="space-y-4">
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <Link
+              href="/app/connect-store"
+              className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <BackIcon className="h-3.5 w-3.5" />
+              {ar ? 'العودة للمتاجر' : 'Back to Stores'}
+            </Link>
+            <span className="text-muted-foreground/30">/</span>
+            <span className="font-mono text-foreground/70">{detail.slug}</span>
+          </div>
+
+          <div className="border border-border bg-card p-4">
+            <div className="flex items-start gap-3 text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <h2 className="text-sm font-bold">{ar ? 'المتجر غير متصل' : 'Store Not Connected'}</h2>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {ar
+                    ? 'هذا المتجر غير مرتبط بمساحة العمل الحالية أو تم فصله.'
+                    : 'This store is not linked to the current workspace or was disconnected.'}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
       )}
 
       {view === 'details' && detail && detailToken && (
-      <div className="border border-border bg-card overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5 bg-muted/30">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-foreground min-w-0">
-            {(() => {
-              const meta = stores.find(s => s.id === detail.platform)
-              const StoreIcon = meta?.logo ?? Store
-              const display = displayFor(detail.platform, detailToken)
-              return (
-                <>
-                  <StoreIcon />
-                  <span className="truncate" dir="auto">{display.name}</span>
-                  {display.code && <span className="font-mono text-[10px] text-muted-foreground" dir="ltr">({display.code})</span>}
-                  <span className="inline-flex items-center gap-1 text-[10px] text-foreground/70 shrink-0">
-                    <span className="h-1 w-1 rounded-full bg-primary" />
-                    {t('connect.connected')}
-                  </span>
-                </>
-              )
-            })()}
+        <div className="space-y-5">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <Link
+              href="/app/connect-store"
+              className="inline-flex items-center gap-1 font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <BackIcon className="h-3.5 w-3.5" />
+              {ar ? 'العودة للمتاجر' : 'Back to Stores'}
+            </Link>
+            <span className="text-muted-foreground/30">/</span>
+            <span className="font-mono text-foreground/70">
+              {displayFor(detail.platform, detailToken).name}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-1 shrink-0">
-            <WebhookStatusPill
-              platform={detail.platform}
-              merchantId={detail.platform === 'zid' ? String(detailToken.merchant_id ?? '') : ''}
-              reconnectHref={detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
-              lang={lang}
-            />
-            {BackButton}
-            {detail.platform === 'zid' && (
-              <>
-                <a href="/api/zid/connect"
-                   className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors">
-                  <RefreshCw className="h-3 w-3" />
-                  {t('zid.reconnect')}
-                </a>
+
+          {/* Record Header */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base font-bold text-foreground">
+                  {displayFor(detail.platform, detailToken).name}
+                </h1>
+                <span className="inline-flex items-center border border-primary/20 bg-primary/[0.06] px-2 py-0.5 text-[10px] font-bold text-primary">
+                  <span className="me-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                  {ar ? 'متصل' : 'Connected'}
+                </span>
+              </div>
+
+              <div className="mt-1 flex items-center gap-1.5">
+                <span className="break-all font-mono text-[11px] text-muted-foreground">
+                  {displayFor(detail.platform, detailToken).code || detailToken.merchant_id || detailToken.shop_domain}
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    copyStoreId(
+                      String(
+                        displayFor(detail.platform, detailToken).code ||
+                          detailToken.merchant_id ||
+                          detailToken.shop_domain
+                      )
+                    )
+                  }
+                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={ar ? 'نسخ المعرّف' : 'Copy ID'}
+                >
+                  {copiedId ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Header Action Buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <WebhookStatusPill
+                platform={detail.platform}
+                merchantId={detail.platform === 'zid' ? String(detailToken.merchant_id ?? '') : ''}
+                reconnectHref={detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+                lang={lang}
+              />
+
+              {(detail.platform === 'zid' || detail.platform === 'salla') && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    router.push(detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect')
+                  }
+                  className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>{ar ? 'إعادة الاتصال' : 'Reconnect'}</span>
+                </Button>
+              )}
+
+              {detail.platform === 'zid' && (
                 <DisconnectButton
                   merchantId={String(detailToken.merchant_id)}
                   confirmText={t('zid.disconnectConfirm')}
                   buttonText={t('zid.disconnect')}
                   onDone={() => router.push('/app/connect-store')}
                 />
-              </>
-            )}
-            {detail.platform === 'salla' && (
-              <>
-                <a href="/api/salla/connect"
-                   className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors">
-                  <RefreshCw className="h-3 w-3" />
-                  {t('zid.reconnect')}
-                </a>
+              )}
+              {detail.platform === 'salla' && (
                 <DisconnectButton
                   merchantId={String(detailToken.merchant_id)}
-                  confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر سلة؟' : 'Are you sure you want to disconnect Salla store?'}
+                  confirmText={
+                    ar
+                      ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر سلة؟'
+                      : 'Are you sure you want to disconnect Salla store?'
+                  }
                   buttonText={t('zid.disconnect')}
                   platform="salla"
                   onDone={() => router.push('/app/connect-store')}
                 />
-              </>
-            )}
-            {detail.platform === 'shopify' && (
-              <DisconnectButton
-                merchantId={detailToken.shop_domain}
-                confirmText={lang === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر شوبيفاي؟' : 'Are you sure you want to disconnect Shopify store?'}
-                buttonText={t('zid.disconnect')}
-                platform="shopify"
-                onDone={() => router.push('/app/connect-store')}
-              />
-            )}
+              )}
+              {detail.platform === 'shopify' && (
+                <DisconnectButton
+                  merchantId={detailToken.shop_domain}
+                  confirmText={
+                    ar
+                      ? 'هل أنت متأكد من رغبتك في إلغاء ربط متجر شوبيفاي؟'
+                      : 'Are you sure you want to disconnect Shopify store?'
+                  }
+                  buttonText={t('zid.disconnect')}
+                  platform="shopify"
+                  onDone={() => router.push('/app/connect-store')}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Odoo-style Information Grid Card */}
+          <div className="border border-border bg-card p-4">
+            <h2 className="text-[11px] font-bold text-foreground uppercase tracking-wide border-b border-border pb-2 mb-4">
+              {ar ? 'معلومات المتجر الأساسية' : 'Basic Store Information'}
+            </h2>
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {detail.platform === 'zid' && (
+                <>
+                  <InfoField label={ar ? 'معرف التاجر' : 'Merchant ID'} mono>
+                    {detailToken.merchant_id || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'معرف المتجر' : 'Store ID'} mono>
+                    {detailToken.store_id || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'بريد التاجر' : 'Merchant Email'}>
+                    {detailToken.email || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'اسم المستخدم' : 'Username'}>
+                    {detailToken.username || '—'}
+                  </InfoField>
+                </>
+              )}
+
+              {detail.platform === 'salla' && (
+                <>
+                  <InfoField label={ar ? 'معرف التاجر' : 'Merchant ID'} mono>
+                    {detailToken.merchant_id || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'اسم المتجر' : 'Store Username'}>
+                    {detailToken.username || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'اسم التاجر' : 'Merchant Name'}>
+                    {detailToken.name || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'البريد الإلكتروني' : 'Email'}>
+                    {detailToken.email || '—'}
+                  </InfoField>
+                </>
+              )}
+
+              {detail.platform === 'shopify' && (
+                <>
+                  <InfoField label={ar ? 'نطاق المتجر' : 'Shop Domain'} mono wide>
+                    {detailToken.shop_domain || '—'}
+                  </InfoField>
+                  <InfoField label={ar ? 'البريد الإلكتروني' : 'Email'}>
+                    {detailToken.email || '—'}
+                  </InfoField>
+                </>
+              )}
+
+              <InfoField label={ar ? 'آخر تحديث' : 'Last Updated'}>
+                {formatDate(detailToken.updated_at)}
+              </InfoField>
+              <InfoField label={ar ? 'حالة المزامنة' : 'Sync Status'}>
+                <span className="inline-flex items-center gap-1 font-bold text-primary text-xs">
+                  <Check className="h-3.5 w-3.5" />
+                  {ar ? 'نشطة تلقائياً' : 'Active Automatically'}
+                </span>
+              </InfoField>
+            </div>
+          </div>
+
+          {/* Sync Settings Section */}
+          <div className="border border-border bg-card p-4 space-y-3">
+            <div>
+              <h2 className="text-[11px] font-bold text-foreground uppercase tracking-wide">
+                {ar ? 'إعدادات المزامنة المتقدمة' : 'Advanced Sync Settings'}
+              </h2>
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {t('sync.coreOn')}
+              </p>
+            </div>
+            <div className="pt-2 border-t border-border/50">
+              {detail.platform === 'zid' && (
+                <SyncSettingsTable
+                  merchantId={detailToken.merchant_id}
+                  initialSettings={detailToken.sync_settings}
+                />
+              )}
+              {detail.platform === 'salla' && (
+                <SallaSyncSettingsTable
+                  merchantId={detailToken.merchant_id}
+                  initialSettings={detailToken.sync_settings}
+                />
+              )}
+              {detail.platform === 'shopify' && (
+                <ShopifySyncSettingsTable
+                  shopDomain={detailToken.shop_domain}
+                  initialSettings={detailToken.sync_settings}
+                />
+              )}
+            </div>
           </div>
         </div>
-
-        {detail.platform === 'zid' && <ConnectedContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
-        {detail.platform === 'salla' && <ConnectedSallaContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
-        {detail.platform === 'shopify' && <ConnectedShopifyContent token={detailToken} lang={lang} t={t} formatDate={formatDate} />}
-      </div>
       )}
     </div>
   )
 }
 
-/* ─── Sub-components ─────────────────────────────────────────────── */
-
-function DetailRow({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-2.5 border-b border-border/40 last:border-b-0">
-      <div className="flex items-center gap-2">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-      </div>
-      <span className="font-mono text-[11px] text-foreground text-start break-all" dir="ltr">{value}</span>
-    </div>
-  )
-}
-
-/**
- * Inline webhook-health pill shown in the store-detail header, next to Back.
- * Quiet by design: a dot plus one short line. It only grows a control when
- * something is actually wrong — repair when webhooks are broken, reconnect
- * when the check itself fails (expired credential, API unreachable).
- * Non-blocking: a failed check never breaks the page.
- */
 function WebhookStatusPill({
   platform,
   merchantId,
@@ -530,9 +893,14 @@ function WebhookStatusPill({
   const isZid = platform === 'zid'
   const canCheck = isZid && Boolean(merchantId)
   const [state, setState] = useState<'loading' | 'ok' | 'broken' | 'error'>('loading')
-  const [counts, setCounts] = useState<{ healthy: number | null; broken: number; degraded: number }>({ healthy: null, broken: 0, degraded: 0 })
+  const [counts, setCounts] = useState<{ healthy: number | null; broken: number; degraded: number }>({
+    healthy: null,
+    broken: 0,
+    degraded: 0,
+  })
   const [reason, setReason] = useState<string | null>(null)
   const [repairing, setRepairing] = useState(false)
+  const ar = lang === 'ar'
 
   const check = useCallback(() => {
     if (!canCheck) return
@@ -570,12 +938,11 @@ function WebhookStatusPill({
     else setReason((res as any).error || null)
   }
 
-  // Salla/Shopify expose no health endpoint — state only what is actually known.
   if (!isZid) {
     return (
-      <span className="inline-flex items-center gap-1.5 border border-primary/20 bg-primary/[0.06] px-2 h-7 text-[10px] font-medium text-primary">
+      <span className="inline-flex items-center gap-1.5 border border-primary/20 bg-primary/[0.06] px-2 h-8 text-[10px] font-bold text-primary">
         <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-        {lang === 'ar' ? 'المتجر متصل' : 'Connected'}
+        {ar ? 'المتجر متصل' : 'Connected'}
       </span>
     )
   }
@@ -583,29 +950,29 @@ function WebhookStatusPill({
   if (!merchantId) {
     return (
       <span className="inline-flex items-center gap-1">
-        <span className="inline-flex items-center gap-1.5 border border-amber-500/30 bg-amber-500/[0.06] px-2 h-7 text-[10px] font-medium text-amber-600">
-          <AlertCircle className="h-3 w-3 shrink-0" />
-          <span>{lang === 'ar' ? 'بيانات المتجر غير مكتملة' : 'Store data incomplete'}</span>
+        <span className="inline-flex items-center gap-1.5 border border-amber-500/30 bg-amber-500/[0.06] px-2 h-8 text-[10px] font-bold text-amber-600">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{ar ? 'بيانات غير مكتملة' : 'Incomplete Data'}</span>
         </span>
         <a
           href={reconnectHref}
-          className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+          className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2 h-8 text-[10px] font-bold text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
         >
-          <RefreshCw className="h-3 w-3" />
-          <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>
+          <RefreshCw className="h-3.5 w-3.5" />
+          <span>{ar ? 'إعادة الاتصال' : 'Reconnect'}</span>
         </a>
       </span>
     )
   }
 
   const pillClass =
-    'inline-flex items-center gap-1.5 border px-2 h-7 text-[10px] font-medium max-w-[210px]'
+    'inline-flex items-center gap-1.5 border px-2.5 h-8 text-[10px] font-bold max-w-[210px]'
 
   if (state === 'loading') {
     return (
       <span className={cn(pillClass, 'border-border bg-muted/40 text-muted-foreground')}>
-        <RefreshCw className="h-3 w-3 shrink-0 animate-spin" />
-        <span className="truncate">{lang === 'ar' ? 'جارٍ فحص التنبيهات…' : 'Checking webhooks…'}</span>
+        <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+        <span className="truncate">{ar ? 'فحص التنبيهات…' : 'Checking…'}</span>
       </span>
     )
   }
@@ -617,38 +984,55 @@ function WebhookStatusPill({
         onClick={check}
         title={
           counts.healthy !== null
-            ? lang === 'ar'
+            ? ar
               ? `${counts.healthy} تنبيهات مفعّلة — اضغط لإعادة الفحص`
               : `${counts.healthy} active webhooks — click to re-check`
-            : lang === 'ar' ? 'اضغط لإعادة الفحص' : 'Click to re-check'
+            : ar
+              ? 'اضغط لإعادة الفحص'
+              : 'Click to re-check'
         }
-        className={cn(pillClass, 'border-primary/20 bg-primary/[0.06] text-primary hover:bg-primary/10 transition-colors')}
+        className={cn(
+          pillClass,
+          'border-primary/20 bg-primary/[0.06] text-primary hover:bg-primary/10 transition-colors'
+        )}
       >
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-        <span className="truncate">{lang === 'ar' ? 'التنبيهات تعمل' : 'Webhooks healthy'}</span>
+        <span className="truncate">{ar ? 'التنبيهات تعمل' : 'Webhooks healthy'}</span>
       </button>
     )
   }
 
   if (state === 'broken') {
-    const label = counts.broken > 0
-      ? lang === 'ar' ? `${counts.broken} تنبيهات معطّلة` : `${counts.broken} broken webhooks`
-      : lang === 'ar' ? `${counts.degraded} تنبيهات متأخرة` : `${counts.degraded} degraded webhooks`
+    const label =
+      counts.broken > 0
+        ? ar
+          ? `${counts.broken} تنبيهات معطّلة`
+          : `${counts.broken} broken webhooks`
+        : ar
+          ? `${counts.degraded} تنبيهات متأخرة`
+          : `${counts.degraded} degraded webhooks`
     return (
       <span className="inline-flex items-center gap-1">
-        <span className={cn(pillClass, 'border-destructive/25 bg-destructive/[0.05] text-destructive')} title={label}>
-          <AlertCircle className="h-3 w-3 shrink-0" />
+        <span
+          className={cn(pillClass, 'border-destructive/25 bg-destructive/[0.05] text-destructive')}
+          title={label}
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{label}</span>
         </span>
-        <button
+        <Button
           type="button"
+          size="sm"
+          variant="outline"
           onClick={handleRecover}
           disabled={repairing}
-          className="inline-flex items-center gap-1 border border-destructive/25 bg-background px-2 h-7 text-[10px] font-medium text-destructive hover:bg-destructive/[0.06] transition-colors disabled:opacity-50"
+          className="h-8 gap-1 rounded-none px-2.5 text-[10px] font-bold text-destructive"
         >
-          <Wrench className={cn('h-3 w-3', repairing && 'animate-pulse')} />
-          <span>{repairing ? (lang === 'ar' ? 'جارٍ الإصلاح…' : 'Repairing…') : (lang === 'ar' ? 'إصلاح' : 'Repair')}</span>
-        </button>
+          <Wrench className={cn('h-3.5 w-3.5', repairing && 'animate-pulse')} />
+          <span>
+            {repairing ? (ar ? 'جارٍ الإصلاح…' : 'Repairing…') : ar ? 'إصلاح التنبيهات' : 'Repair Webhooks'}
+          </span>
+        </Button>
       </span>
     )
   }
@@ -659,96 +1043,16 @@ function WebhookStatusPill({
         className={cn(pillClass, 'border-amber-500/30 bg-amber-500/[0.06] text-amber-600')}
         title={reason || undefined}
       >
-        <AlertCircle className="h-3 w-3 shrink-0" />
-        <span className="truncate">
-          {lang === 'ar' ? 'تعذّر التحقق من التنبيهات' : 'Webhook check failed'}
-        </span>
+        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">{ar ? 'تعذّر فحص التنبيهات' : 'Webhook check failed'}</span>
       </span>
       <a
         href={reconnectHref}
-        className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2 h-7 text-[10px] font-medium text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
+        className="inline-flex items-center gap-1 border border-amber-500/30 bg-background px-2.5 h-8 text-[10px] font-bold text-amber-600 hover:bg-amber-500/[0.06] transition-colors"
       >
-        <RefreshCw className="h-3 w-3" />
-        <span>{lang === 'ar' ? 'إعادة الاتصال' : 'Reconnect'}</span>
+        <RefreshCw className="h-3.5 w-3.5" />
+        <span>{ar ? 'إعادة الاتصال' : 'Reconnect'}</span>
       </a>
     </span>
   )
 }
-
-function ConnectedContent({ token, lang, t, formatDate }: any) {
-  return (
-    <div className="p-4">
-      <div className="text-xs font-medium text-foreground mb-3">
-        {lang === 'ar' ? 'معلومات المتجر' : 'Store Information'}
-      </div>
-      <DetailRow icon={Hash} label={t('zid.merchantId')} value={token.merchant_id} />
-      <DetailRow icon={Hash} label={t('zid.storeId')} value={token.store_id || '—'} />
-      <DetailRow icon={Mail} label={t('zid.merchantEmail')} value={token.email || '—'} />
-      <DetailRow icon={User} label={t('zid.merchantUsername')} value={token.username || '—'} />
-      <DetailRow icon={Calendar} label={t('zid.lastUpdated')} value={formatDate(token.updated_at)} />
-      <div className="mt-4 border-t border-border pt-3 text-[11px] text-muted-foreground leading-relaxed">
-        {t('sync.coreOn')}
-      </div>
-      <details className="mt-2 border border-border">
-        <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-foreground/80 hover:bg-muted/50">
-          {t('sync.advancedTitle')}
-        </summary>
-        <div className="border-t border-border p-3">
-          <SyncSettingsTable merchantId={token.merchant_id} initialSettings={token.sync_settings} />
-        </div>
-      </details>
-    </div>
-  )
-}
-
-function ConnectedSallaContent({ token, lang, t, formatDate }: any) {
-  return (
-    <div className="p-4">
-      <div className="text-xs font-medium text-foreground mb-3">
-        {lang === 'ar' ? 'معلومات المتجر' : 'Store Information'}
-      </div>
-      <DetailRow icon={Hash} label={lang === 'ar' ? 'معرف التاجر' : 'Merchant ID'} value={token.merchant_id} />
-      <DetailRow icon={Globe} label={lang === 'ar' ? 'اسم المستخدم للمتجر' : 'Store Username'} value={token.username || '—'} />
-      <DetailRow icon={User} label={lang === 'ar' ? 'اسم التاجر' : 'Merchant Name'} value={token.name || '—'} />
-      <DetailRow icon={Mail} label={t('zid.merchantEmail')} value={token.email || '—'} />
-      <DetailRow icon={Calendar} label={t('zid.lastUpdated')} value={formatDate(token.updated_at)} />
-      <div className="mt-4 border-t border-border pt-3 text-[11px] text-muted-foreground leading-relaxed">
-        {t('sync.coreOn')}
-      </div>
-      <details className="mt-2 border border-border">
-        <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-foreground/80 hover:bg-muted/50">
-          {t('sync.advancedTitle')}
-        </summary>
-        <div className="border-t border-border p-3">
-          <SallaSyncSettingsTable merchantId={token.merchant_id} initialSettings={token.sync_settings} />
-        </div>
-      </details>
-    </div>
-  )
-}
-
-function ConnectedShopifyContent({ token, lang, t, formatDate }: any) {
-  return (
-    <div className="p-4">
-      <div className="text-xs font-medium text-foreground mb-3">
-        {lang === 'ar' ? 'معلومات المتجر' : 'Store Information'}
-      </div>
-      <DetailRow icon={Hash} label={lang === 'ar' ? 'نطاق المتجر' : 'Shop Domain'} value={token.shop_domain} />
-      <DetailRow icon={Mail} label={t('zid.merchantEmail')} value={token.email || '—'} />
-      <DetailRow icon={Calendar} label={t('zid.lastUpdated')} value={formatDate(token.updated_at)} />
-      <div className="mt-4 border-t border-border pt-3 text-[11px] text-muted-foreground leading-relaxed">
-        {t('sync.coreOn')}
-      </div>
-      <details className="mt-2 border border-border">
-        <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-foreground/80 hover:bg-muted/50">
-          {t('sync.advancedTitle')}
-        </summary>
-        <div className="border-t border-border p-3">
-          <ShopifySyncSettingsTable shopDomain={token.shop_domain} initialSettings={token.sync_settings} />
-        </div>
-      </details>
-    </div>
-  )
-}
-
-
