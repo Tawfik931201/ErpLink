@@ -9,6 +9,8 @@ import AdminSubscriptionsClient from './AdminSubscriptionsClient'
 
 export const metadata = { title: 'Subscriptions — Admin' }
 
+export const dynamic = 'force-dynamic'
+
 export default async function AdminSubscriptionsPage() {
   const userId = await getActiveUserId()
   if (!userId || !isAdmin(userId)) redirect('/app/dashboard')

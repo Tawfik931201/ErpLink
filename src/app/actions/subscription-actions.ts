@@ -780,12 +780,12 @@ export async function getAllSubscriptions() {
   try {
     await requireAdmin()
 
-    // 1. Fetch all workspaces (up to 1000)
+    // 1. Fetch all workspaces (up to 5000)
     const { data: workspaces, error: wsErr } = await supabase
       .from('workspaces')
       .select('id, name, subscription_number, user_id, created_at')
       .order('created_at', { ascending: false })
-      .limit(1000)
+      .limit(5000)
 
     if (wsErr) return { success: false as const, error: wsErr.message, rows: [] }
 
@@ -809,7 +809,8 @@ export async function getAllSubscriptions() {
         'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_at, archived_at',
       )
       .in('workspace_id', wsIds)
-      .order('end_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(5000)
 
     const subMap = new Map<string, RawSubscription[]>()
     if (subs) {

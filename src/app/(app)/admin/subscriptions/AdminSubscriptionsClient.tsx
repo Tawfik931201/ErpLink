@@ -201,7 +201,10 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
 
   /** Only a real subscription has a record page; "no subscription" has no id. */
   const openRecord = (row: AdminSubscriptionRow) => {
-    if (!row.id) return
+    if (!row.id) {
+      openRegisterFor(row)
+      return
+    }
     router.push(`/admin/subscriptions/${row.id}`)
   }
 
@@ -326,22 +329,16 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
                   return (
                     <tr
                       key={row.id || row.workspace_id}
-                      tabIndex={hasRecord ? 0 : undefined}
-                      role={hasRecord ? 'button' : undefined}
+                      tabIndex={0}
+                      role="button"
                       onClick={() => openRecord(row)}
                       onKeyDown={(event) => {
-                        if (!hasRecord) return
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
                           openRecord(row)
                         }
                       }}
-                      className={cn(
-                        'transition-colors',
-                        hasRecord
-                          ? 'cursor-pointer hover:bg-muted/40 focus:bg-muted/40 focus:outline-none'
-                          : 'cursor-default',
-                      )}
+                      className="transition-colors cursor-pointer hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                     >
                       <td className="px-2 py-2.5">
                         <span className={cn('block h-1.5 w-1.5 rounded-full', st.dot)} aria-hidden />

@@ -105,9 +105,10 @@ describe('the list opens a record by id, and only when there is one', () => {
     expect(listClient).toContain('router.push(`/admin/subscriptions/${row.id}`)')
   })
 
-  it('a row with no subscription has no page to open', () => {
+  it('a row with no subscription opens the register modal', () => {
     const openRecord = listClient.slice(listClient.indexOf('const openRecord ='))
-    expect(openRecord.slice(0, 200)).toContain('if (!row.id) return')
+    expect(openRecord.slice(0, 200)).toContain('if (!row.id) {')
+    expect(openRecord.slice(0, 200)).toContain('openRegisterFor(row)')
   })
 
   it('has a per-row action menu that never navigates as a side effect', () => {
