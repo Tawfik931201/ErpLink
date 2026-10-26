@@ -7,12 +7,11 @@ import {
   Trash2,
   SlidersHorizontal,
   ArrowRight,
-  Database,
-  Layers,
   History,
   X,
   Search,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import React, { useState, useEffect } from 'react'
 
 import { getFieldMappings, deleteFieldMapping } from '@/app/actions/field-mappings'
@@ -38,11 +37,9 @@ interface CustomMappingClientProps {
   isZidConnected: boolean
   isSallaConnected: boolean
   isShopifyConnected: boolean
-  /** Multi-store: every linked store per platform (id = merchant_id / shop_domain). */
   zidStores?: { id: string; name: string | null }[]
   sallaStores?: { id: string; name: string | null }[]
   shopifyStores?: { id: string; name: string | null }[]
-  /** Store key passed to the create form (first connected store). */
   defaultStoreKey?: string
 }
 
@@ -60,30 +57,25 @@ export default function CustomMappingClient({
   shopifyStores = [],
   defaultStoreKey = '',
 }: CustomMappingClientProps) {
+  const router = useRouter()
   const [view, setView] = useState<'list' | 'create' | 'edit'>('list')
   const [mappings, setMappings] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedMapping, setSelectedMapping] = useState<any>(null)
   const { t, lang, dir } = useLanguage()
 
-  // Filter tab state: 'all' | 'zid' | 'salla'
   const [platformFilter, setPlatformFilter] = useState<string[]>([])
-
-  // Advanced Filter states
   const [searchQuery, setSearchQuery] = useState('')
   const [directionFilter, setDirectionFilter] = useState<string[]>([])
   const [operationFilter, setOperationFilter] = useState<string[]>([])
 
-  // Delete confirm state
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [, setIsDeleting] = useState(false)
 
-  // Logs state
   const [isLogOpen, setIsLogOpen] = useState(false)
   const [logMappingId, setLogMappingId] = useState<string | undefined>(undefined)
   const [logMappingName, setLogMappingName] = useState<string | undefined>(undefined)
 
-  // Load mappings on mount
   const loadMappings = async () => {
     setIsLoading(true)
     try {
@@ -122,7 +114,6 @@ export default function CustomMappingClient({
     return found ? formatFieldLabel(found.name, lang) : eventId
   }
 
-  // Detect if action belongs to Zid, Salla or Shopify
   const getPlatformSource = (action: string): 'zid' | 'salla' | 'shopify' => {
     if (action.includes('/') || action.startsWith('shopify:')) return 'shopify'
     if (SALLA_EVENTS.find(e => e.id === action)) return 'salla'
@@ -130,7 +121,6 @@ export default function CustomMappingClient({
     return 'zid'
   }
 
-  // Count total fields in all mappings nested object
   const countTotalMappedFields = (mappingsObj: any) => {
     if (!mappingsObj) return 0
     let total = 0
@@ -142,14 +132,11 @@ export default function CustomMappingClient({
     return total
   }
 
-  // Filtered mappings based on selected filters
   const filteredMappings = mappings.filter(item => {
-    // 1. Platform Filter (Store Filter)
     if (platformFilter.length > 0) {
       if (!platformFilter.includes(getPlatformSource(item.action))) return false
     }
 
-    // 2. Search Query (Name, Model, Event Name)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim()
       const nameMatch = (item.name || '').toLowerCase().includes(q)
@@ -158,7 +145,6 @@ export default function CustomMappingClient({
       if (!nameMatch && !modelMatch && !eventMatch) return false
     }
 
-    // 3. Direction Filter
     if (directionFilter.length > 0) {
       const dirs = (item.sync_direction || 'store_to_erp').split(',').map((s: string) => s.trim())
       const hasMatch = directionFilter.some(dir => {
@@ -170,14 +156,12 @@ export default function CustomMappingClient({
       if (!hasMatch) return false
     }
 
-    // 4. Operation Filter
     if (operationFilter.length > 0) {
       if (!operationFilter.includes(item.odoo_operation)) return false
     }
 
     return true
   })
-
 
   if (view === 'create') {
     return (
@@ -215,7 +199,6 @@ export default function CustomMappingClient({
   }
 
   if (view === 'edit' && selectedMapping) {
-    // Extract related models from mappings keys other than primary odoo_model
     const allModelKeys = Object.keys(selectedMapping.mappings || {}).filter(k => k !== '__settings')
     const primaryModel = selectedMapping.odoo_model
     const initialRelated = allModelKeys.filter(k => k !== primaryModel)
@@ -402,6 +385,7 @@ export default function CustomMappingClient({
               </button>
             )}
           </div>
+
           {/* Advanced Filter Bar */}
           <div className="card-base p-4 space-y-3">
             <div className="flex items-center gap-2">
@@ -411,7 +395,6 @@ export default function CustomMappingClient({
               </span>
             </div>
             <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-              {/* Search Input */}
               <div className="sm:col-span-2 md:col-span-1 relative">
                 <input
                   type="text"
@@ -430,7 +413,6 @@ export default function CustomMappingClient({
                 )}
               </div>
 
-              {/* Store Filter */}
               <div>
                 <SearchableSelect
                   multiple={true}
@@ -442,7 +424,6 @@ export default function CustomMappingClient({
                 />
               </div>
 
-              {/* Sync Direction Filter */}
               <div>
                 <SearchableSelect
                   multiple={true}
@@ -454,7 +435,6 @@ export default function CustomMappingClient({
                 />
               </div>
 
-              {/* Odoo Operation Filter */}
               <div>
                 <SearchableSelect
                   multiple={true}
@@ -468,171 +448,137 @@ export default function CustomMappingClient({
             </div>
           </div>
 
-          {/* Mappings List */}
+          {/* Odoo-style Borderless Table */}
           <AnimatePresence mode="popLayout">
-          <div className="card-base overflow-hidden divide-y divide-border/50">
-          {filteredMappings.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center min-h-[120px] p-8">
-              <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center mb-3">
-                <Search className="h-5 w-5 text-muted-foreground/50" />
+            <div className="card-base border border-border/70 rounded-lg shadow-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-start border-collapse">
+                  <thead>
+                    <tr className="bg-muted/50 border-b border-border/70 text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                      <th className="py-3.5 px-4 text-start">{lang === 'ar' ? 'اسم الربط / الحدث' : 'Mapping Name / Event'}</th>
+                      <th className="py-3.5 px-4 text-start">{lang === 'ar' ? 'نموذج أودوو' : 'Odoo Model'}</th>
+                      <th className="py-3.5 px-4 text-start">{lang === 'ar' ? 'الاتجاه' : 'Direction'}</th>
+                      <th className="py-3.5 px-4 text-start">{lang === 'ar' ? 'العملية' : 'Operation'}</th>
+                      <th className="py-3.5 px-4 text-center">{lang === 'ar' ? 'الحقول المربوطة' : 'Fields Mapped'}</th>
+                      <th className="py-3.5 px-4 text-end">{lang === 'ar' ? 'الإجراءات' : 'Actions'}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60 text-xs">
+                    {filteredMappings.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                          {lang === 'ar' ? 'لا توجد روابط تطابق التصفية' : 'No mappings match your filters'}
+                        </td>
+                      </tr>
+                    ) : filteredMappings.map((item) => {
+                      const totalFields = countTotalMappedFields(item.mappings)
+                      const platform = getPlatformSource(item.action)
+                      const platformColor = platform === 'shopify' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                        : platform === 'salla' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20'
+                        : 'bg-zid-500/10 text-zid-600 dark:text-zid-400 border-zid-500/20'
+                      const operationColor = item.odoo_operation === 'delete' ? 'bg-destructive/10 text-destructive border-destructive/20'
+                        : item.odoo_operation === 'update' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                      const directionColors: Record<string, string> = {
+                        'store_to_erp': 'bg-primary/10 text-primary border-primary/20',
+                        'erp_to_store': 'bg-secondary text-secondary-foreground border-border',
+                        'both': 'bg-accent text-accent-foreground border-primary/20',
+                      }
+
+                      return (
+                        <tr
+                          key={item.id}
+                          onClick={() => router.push(`/app/mapping-center/custom/${item.id}`)}
+                          className="hover:bg-muted/50 cursor-pointer transition-colors"
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-foreground">{item.name || (lang === 'ar' ? 'ربط حقول غير مسمى' : 'Unnamed field mapping')}</span>
+                              <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border', platformColor)}>
+                                {platform === 'shopify' ? (lang === 'ar' ? 'شوبيفاي' : 'Shopify') : platform === 'salla' ? (lang === 'ar' ? 'سلة' : 'Salla') : (lang === 'ar' ? 'زد' : 'Zid')}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5">{getEventName(item.action)}</div>
+                          </td>
+                          <td className="py-3.5 px-4 font-mono text-xs font-semibold text-foreground">{item.odoo_model}</td>
+                          <td className="py-3.5 px-4">
+                            <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold border", directionColors[item.sync_direction || 'store_to_erp'] || directionColors['store_to_erp'])}>
+                              {item.sync_direction === 'erp_to_store'
+                                ? (lang === 'ar' ? 'أودو ← المتجر' : 'Odoo → Store')
+                                : item.sync_direction === 'both'
+                                  ? (lang === 'ar' ? '↔ كلا الاتجاهين' : '↔ Both Ways')
+                                  : (lang === 'ar' ? 'المتجر → أودو' : 'Store → Odoo')}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold border", operationColor)}>
+                              {item.odoo_operation === 'delete'
+                                ? 'Delete'
+                                : item.odoo_operation === 'update'
+                                  ? 'Update'
+                                  : 'Create'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center font-bold text-foreground">{totalFields}</td>
+                          <td className="py-3.5 px-4 text-end" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => {
+                                  setLogMappingId(item.id)
+                                  setLogMappingName(item.name)
+                                  setIsLogOpen(true)
+                                }}
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-background transition-all"
+                                title={lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
+                              >
+                                <History className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => {
+                                  setSelectedMapping(item)
+                                  setView('edit')
+                                }}
+                                className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-background transition-all"
+                                title={t('ws.editBtn')}
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setDeleteConfirmId(item.id)}
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10 transition-all"
+                                title={t('ws.deleteBtn')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                            {deleteConfirmId === item.id && (
+                              <ConfirmDialog
+                                open={true}
+                                onOpenChange={(open) => { if (!open) setDeleteConfirmId(null) }}
+                                title={lang === 'ar' ? 'حذف الربط' : 'Delete Mapping'}
+                                description={lang === 'ar'
+                                  ? 'هل أنت متأكد من حذف هذا الربط؟ لا يمكن التراجع عن هذا الإجراء.'
+                                  : 'Are you sure you want to delete this mapping? This action cannot be undone.'}
+                                confirmText={lang === 'ar' ? 'حذف' : 'Delete'}
+                                cancelText={lang === 'ar' ? 'إلغاء' : 'Cancel'}
+                                variant="destructive"
+                                onConfirm={() => handleDelete(item.id)}
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <p className="text-xs font-medium text-muted-foreground">
-                {lang === 'ar' ? 'لا توجد روابط تطابق التصفية' : 'No mappings match your filters'}
-              </p>
             </div>
-          ) : filteredMappings.map((item, idx) => {
-            const totalFields = countTotalMappedFields(item.mappings)
-            const platform = getPlatformSource(item.action)
-            const platformColor = platform === 'shopify' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-              : platform === 'salla' ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20'
-              : 'bg-zid-500/10 text-zid-600 dark:text-zid-400 border-zid-500/20'
-            const operationColor = item.odoo_operation === 'delete' ? 'bg-destructive/10 text-destructive border-destructive/20'
-              : item.odoo_operation === 'update' ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-              : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-            const directionColors: Record<string, string> = {
-              'store_to_erp': 'bg-primary/10 text-primary border-primary/20',
-              'erp_to_store': 'bg-secondary text-secondary-foreground border-border',
-              'both': 'bg-accent text-accent-foreground border-primary/20',
-            }
-            return (
-              <motion.div
-                key={item.id}
-                layout
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.2, delay: idx * 0.02 }}
-                className="p-4 hover:bg-muted/10 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-              >
-                {/* Details */}
-                <div className="flex items-start gap-3.5 flex-1 min-w-0">
-                  <div className={cn(
-                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl transition-colors mt-0.5',
-                    platform === 'shopify' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                      : platform === 'salla' ? 'bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400'
-                      : 'bg-zid-50 dark:bg-zid-900/20 text-zid-600 dark:text-zid-400'
-                  )}>
-                    <SlidersHorizontal className="h-5 w-5" />
-                  </div>
-                  <div className="space-y-1.5 min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-bold text-sm text-foreground break-all">
-                        {item.name || (lang === 'ar' ? 'ربط حقول غير مسمى' : 'Unnamed field mapping')}
-                      </span>
-                      {/* Platform Source Badge */}
-                      <span className={cn(
-                        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold border',
-                        platformColor
-                      )}>
-                        <span className={cn(
-                          'inline-block w-1.5 h-1.5 rounded-full',
-                          platform === 'shopify' ? 'bg-emerald-500'
-                            : platform === 'salla' ? 'bg-orange-500'
-                            : 'bg-zid-500'
-                        )} />
-                        {platform === 'shopify' ? (lang === 'ar' ? 'شوبيفاي' : 'Shopify') : platform === 'salla' ? (lang === 'ar' ? 'سله' : 'Salla') : (lang === 'ar' ? 'زد' : 'Zid')}
-                      </span>
-                      <span className={cn(
-                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold border",
-                        operationColor
-                      )}>
-                        {item.odoo_operation === 'delete'
-                          ? t('map.operationDelete')
-                          : item.odoo_operation === 'update'
-                            ? t('map.operationUpdate')
-                            : t('map.operationCreate')}
-                      </span>
-                      {/* Sync Direction Badge */}
-                      {(item.sync_direction || 'store_to_erp').split(',').map((dir: string) => (
-                        <span key={dir} className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold border",
-                          directionColors[dir] || directionColors['store_to_erp']
-                        )}>
-                          {dir === 'erp_to_store'
-                            ? (lang === 'ar' ? '↔ من أودو للمتجر' : 'Odoo → Store')
-                            : dir === 'both'
-                              ? (lang === 'ar' ? '↔ كلا الاتجاهين' : '↔ Both Ways')
-                              : (lang === 'ar' ? '↔ من المتجر لأودو' : 'Store → Odoo')}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <Database className="h-3.5 w-3.5 text-muted-foreground/60" />
-                        <span>{lang === 'ar' ? `نموذج ${getErpFromLabel(erpType)}: ` : `${getErpFromLabel(erpType)} Model: `}<span className="font-mono text-foreground font-semibold">{item.odoo_model}</span></span>
-                      </span>
-                      {(item.odoo_operation === 'update' || item.odoo_operation === 'delete' || (item.sync_direction || '').split(',').includes('erp_to_store')) && (item.odoo_match_field || item.zid_match_field) && (
-                        <span className="flex items-center gap-1.5">
-                          <Layers className="h-3.5 w-3.5 text-muted-foreground/60" />
-                          <span>{lang === 'ar' ? 'مطابقة: ' : 'Matching: '}<span className="font-mono text-foreground font-semibold">{item.odoo_match_field || '-'} ⇄ {item.zid_match_field || '-'}</span></span>
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1.5">
-                        <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground/60" />
-                        <span>{lang === 'ar' ? 'الحقول المربوطة: ' : 'Mapped fields: '}<span className="font-semibold text-foreground">{totalFields}</span></span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Operations */}
-                <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
-                  <div className="flex items-center gap-0.5 bg-muted/40 dark:bg-card/40 border border-border/50 rounded-xl p-0.5">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => {
-                        setLogMappingId(item.id)
-                        setLogMappingName(item.name)
-                        setIsLogOpen(true)
-                      }}
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-background dark:hover:bg-card transition-all"
-                      title={lang === 'ar' ? 'سجل المزامنة' : 'Sync Log'}
-                    >
-                      <History className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => {
-                        setSelectedMapping(item)
-                        setView('edit')
-                      }}
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg hover:bg-background dark:hover:bg-card transition-all"
-                      title={t('ws.editBtn')}
-                    >
-                      <Edit className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => setDeleteConfirmId(item.id)}
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10 transition-all"
-                      title={t('ws.deleteBtn')}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                  {deleteConfirmId === item.id && (
-                    <ConfirmDialog
-                      open={true}
-                      onOpenChange={(open) => { if (!open) setDeleteConfirmId(null) }}
-                      title={lang === 'ar' ? 'حذف الربط' : 'Delete Mapping'}
-                      description={lang === 'ar'
-                        ? 'هل أنت متأكد من حذف هذا الربط؟ لا يمكن التراجع عن هذا الإجراء.'
-                        : 'Are you sure you want to delete this mapping? This action cannot be undone.'}
-                      confirmText={lang === 'ar' ? 'حذف' : 'Delete'}
-                      cancelText={lang === 'ar' ? 'إلغاء' : 'Cancel'}
-                      variant="destructive"
-                      onConfirm={() => handleDelete(item.id)}
-                    />
-                  )}
-                </div>
-              </motion.div>
-            )
-          })}
-          </div>
           </AnimatePresence>
         </div>
       )}

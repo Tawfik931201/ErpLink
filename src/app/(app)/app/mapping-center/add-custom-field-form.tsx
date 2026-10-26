@@ -31,6 +31,19 @@ import { cn } from '@/lib/utils'
 import SearchableSelect from './searchable-select'
 
 
+// Odoo-style section classes
+const sectionClassName = "bg-card border border-border/70 rounded-lg shadow-card p-6 space-y-4"
+const sectionHeader = "flex items-center justify-between pb-3 border-b border-border"
+const sectionTitle = "text-sm font-bold text-foreground uppercase tracking-wider"
+const formGroup = "grid grid-cols-1 sm:grid-cols-2 gap-5"
+const formRow = "space-y-1.5"
+const inputGroup = "rounded-xl border border-bg-muted p-1"
+const inputField = "w-full h-8 bg-transparent border-0 px-2 text-xs font-semibold placeholder:text-muted-foreground/60 focus:outline-none focus:ring-0 text-foreground transition-all"
+const labelStyle = "block text-[11px] font-bold text-muted-foreground"
+const settingToggle = "flex items-center gap-2 rounded-lg border border-border/70 bg-muted/50 py-2"
+const actionButton = "bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl h-10 px-6 text-xs shadow-sm gap-2 transition-all"
+
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SelectionOption { key: string; label: string }
@@ -492,11 +505,11 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
         </AnimatePresence>
 
         {/* Form card */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="bg-card border border-border rounded-xl p-6 space-y-6">
+          <form onSubmit={handleSubmit} className={sectionClassName}>
+            <div className="bg-card border border-border/70 rounded-lg shadow-card p-6 space-y-4">
 
             {/* Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="h-8 w-8 rounded-xl bg-muted flex items-center justify-center">
                   <Plus className="h-4 w-4 text-foreground" />
@@ -523,7 +536,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
             </div>
 
             {/* Row 1: Label + Technical */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div className="space-y-4">
               {/* Field Label */}
               <div className="space-y-1.5">
                 <label className="block text-[11px] font-bold text-muted-foreground">
@@ -612,7 +625,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 )}>
                   <select
                     value={fieldType} onChange={e => setFieldType(e.target.value)}
-                    className="w-full h-8 bg-transparent border-0 px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-0 appearance-none cursor-pointer disabled:text-muted-foreground/60"
+                    className="w-full h-8 rounded-lg border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     disabled={!!editingField}
                   >
                     {fieldTypesList.map(ft => (

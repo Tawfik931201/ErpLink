@@ -48,6 +48,7 @@ import { cn } from '@/lib/utils'
 
 import { CategorySettingsTab } from './standard-components/category-settings-tab'
 import { CustomerSettingsTab } from './standard-components/customer-settings-tab'
+// Third part: Odoo-style mapping - cards converted to borderless tables
 import { OrderSettingsTab } from './standard-components/order-settings-tab'
 import { ProductSettingsTab } from './standard-components/product-settings-tab'
 import SyncLogModal from './sync-log-modal'
@@ -134,7 +135,28 @@ export default function StandardMappingClient({
     setStandardStoreId(storeId)
   }
 
+  // ── Standard Mapping Table Classes (Odoo-style borderless) ──
+  const tableClassName = "w-full text-start border-collapse"
+  const theadClassName = "bg-muted/50 border-b border-border/70 text-[11px] font-bold text-muted-foreground uppercase tracking-wider"
+  const trClassName = "divide-y divide-border/60 text-xs"
+  const thClassName = "py-3.5 px-4 text-start"
+  const tdClassName = "py-3.5 px-4"
+
   // ── Category States ──
+  const [costMethodOptions, setCostMethodOptions] = useState<{ value: string; label: string }[]>([])
+  const [valuationOptions, setValuationOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingOdooOpts, setIsLoadingOdooOpts] = useState(false)
+
+  const [odooCategoryFields, setOdooCategoryFields] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingOdooFields, setIsLoadingOdooFields] = useState(false)
+  const [matchZidField, setMatchZidField] = useState('')
+  const [matchOdooField, setMatchOdooField] = useState('')
+  const [costMethod, setCostMethod] = useState('')
+  const [inventoryValuation, setInventoryValuation] = useState('')
+  const [onDeleteAction, setOnDeleteAction] = useState('nothing')
+  const [enabledActions, setEnabledActions] = useState<string[]>([])
+  const [disabled, setDisabled] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [costMethodOptions, setCostMethodOptions] = useState<{ value: string; label: string }[]>([])
   const [valuationOptions, setValuationOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingOdooOpts, setIsLoadingOdooOpts] = useState(false)

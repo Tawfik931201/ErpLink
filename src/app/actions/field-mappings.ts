@@ -40,6 +40,30 @@ export async function getFieldMappings() {
   }
 }
 
+export async function getFieldMappingById(id: string) {
+  try {
+    const user = await getOrCreateDbUser()
+    if (!user.active_workspace_id) {
+      return { success: false, error: 'No active workspace selected' }
+    }
+
+    const { data: mapping, error } = await supabase
+      .from('field_mappings')
+      .select('*')
+      .eq('id', id)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+
+    if (error) throw new Error('Failed to query field mapping: ' + error.message)
+    if (!mapping) return { success: false, error: 'Mapping not found' }
+
+    return { success: true, mapping }
+  } catch (error: any) {
+    console.error('[Field Mapping Action] getFieldMappingById failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch field mapping' }
+  }
+}
+
 export async function saveFieldMapping(data: {
   id?: string
   name: string
