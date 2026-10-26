@@ -50,8 +50,9 @@
 | `src/app/(app)/admin/clients/page.tsx` + `AdminClientsClient.tsx` | Client list |
 | `src/app/(app)/admin/clients/[userId]/page.tsx` | Client header + KPIs, renders statement client |
 | `src/app/(app)/admin/clients/[userId]/ClientStatementClient.tsx` | Statement: subscriptions/payments tables, register/extend/cancel/add-payment modals (no affiliate picker) |
-| `src/app/(app)/admin/subscriptions/page.tsx` | Subscription list, renders admin client (no affiliates fetch) |
-| `src/app/(app)/admin/subscriptions/AdminSubscriptionsClient.tsx` | Register/extend/cancel modals (manual payment only, no affiliate UI) |
+| `src/app/(app)/admin/subscriptions/page.tsx` + `AdminSubscriptionsClient.tsx` | Subscription list as Odoo-style table with clickable rows, RowActions menu (detail/extend/cancel), and register modal |
+| `src/app/(app)/admin/subscriptions/[id]/page.tsx` + `subscription-detail-client.tsx` | Per-subscription record page: status/workspace/client KPIs, inline extend form, confirm-cancel, payments ledger, sibling subscriptions table, and record id URL segment |
+| `src/app/(app)/admin/subscriptions/subscription-ui.ts` | Shared subscription status pill, date/money formatters |
 | `src/app/(app)/admin/messages/page.tsx` + `ContactMessagesClient.tsx` | Contact-form inbox as an Odoo-style list: header row + clickable rows, **basic columns only** (name, company, email, status, Odoo ticket, date), and a per-row `⋯` menu with read/unread/archive/restore. Reads through `getContactMessages` — `force-dynamic`, never cached |
 | `src/app/(app)/admin/messages/[id]/page.tsx` + `message-detail-client.tsx` | Per-message record at `/admin/messages/<id>` (id is the URL segment): full body, contact links, Odoo ticket id, read stamp, status actions. The only reader of `message`/`read_by`/`email_delivered` |
 | `src/app/(app)/admin/messages/message-ui.ts` | Shared status label/colour and Gregorian date format for the list and the record page |

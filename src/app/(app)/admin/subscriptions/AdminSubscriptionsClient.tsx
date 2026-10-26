@@ -7,9 +7,11 @@ import {
   Search,
   CheckCircle2,
   XCircle,
+  ExternalLink,
+  MoreHorizontal,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   registerSubscription,
@@ -21,6 +23,8 @@ import {
 } from '@/app/actions/subscription-actions'
 import PaginationControls from '@/components/PaginationControls'
 import { cn } from '@/lib/utils'
+
+import { formatMoney, formatSubDate, subscriptionStateMeta } from './subscription-ui'
 
 interface Props {
   rows: AdminSubscriptionRow[]
@@ -40,8 +44,6 @@ function today(): string {
 
 const inputCls =
   'w-full h-8 rounded border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
-const actionBtn =
-  'inline-flex items-center gap-1.5 rounded border border-border bg-background px-2 h-7 text-[11px] text-foreground/70 hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40'
 
 export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
   const router = useRouter()
@@ -181,46 +183,26 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
     setBusy(false)
   }
 
-  const formatDate = (d: string) => {
-    try {
-      if (!d) return '—'
-      const date = new Date(`${d}T00:00:00Z`)
-      if (Number.isNaN(date.getTime())) return d
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-      const monthsAr = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر']
+  const formatDate = (d: string) => formatSubDate(d, isAr)
 
-      const day = date.getUTCDate()
-      const month = date.getUTCMonth()
-      const year = date.getUTCFullYear()
-
-      if (isAr) {
-        return `${day} ${monthsAr[month]} ${year}`
-      }
-      return `${months[month]} ${day}, ${year}`
-    } catch {
-      return d
-    }
+  /** Pre-fills the register modal from a workspace row. */
+  const openRegisterFor = (row: AdminSubscriptionRow) => {
+    resetRegister()
+    setSelectedUser({
+      id: row.user_id,
+      email: row.client_email || '',
+      name: row.client_name,
+      active_workspace_id: row.workspace_id,
+      workspaces: [{ id: row.workspace_id, name: row.workspace_name || '' }],
+    })
+    setWorkspaceId(row.workspace_id)
+    setModal({ type: 'register' })
   }
 
-  const formatAmount = (amount: number | string) => {
-    const num = Number(amount) || 0
-    return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
-  }
-
-  const statusDisplay = (row: AdminSubscriptionRow) => {
-    if (row.status === 'none') {
-      return { dot: 'bg-muted-foreground/30', text: isAr ? 'بدون اشتراك' : 'No subscription', textCls: 'text-muted-foreground' }
-    }
-    if (row.status === 'cancelled') {
-      return { dot: 'bg-muted-foreground/50', text: isAr ? 'ملغى' : 'Cancelled', textCls: 'text-muted-foreground' }
-    }
-    if (row.isExpired) {
-      return { dot: 'bg-destructive/70', text: isAr ? 'منتهٍ' : 'Expired', textCls: 'text-destructive' }
-    }
-    if (row.daysRemaining <= 7) {
-      return { dot: 'bg-foreground/60', text: isAr ? `ينتهي بعد ${row.daysRemaining} يوم` : `Ends in ${row.daysRemaining}d`, textCls: 'text-foreground' }
-    }
-    return { dot: 'bg-foreground', text: isAr ? 'نشط' : 'Active', textCls: 'text-foreground' }
+  /** Only a real subscription has a record page; "no subscription" has no id. */
+  const openRecord = (row: AdminSubscriptionRow) => {
+    if (!row.id) return
+    router.push(`/admin/subscriptions/${row.id}`)
   }
 
   const filteredRows = rows.filter((row) => {
@@ -293,142 +275,160 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
         </div>
       )}
 
-      <div className="border border-border bg-card overflow-hidden">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-muted/30">
-          <span className="text-[11px] font-medium text-foreground">
+      <div className="border border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border bg-muted/60 px-4 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-foreground/70">
             {isAr ? 'سجل الاشتراكات' : 'Subscriptions List'}
           </span>
-          <span className="text-[11px] text-muted-foreground">{filteredRows.length}</span>
+          <span className="font-mono text-[10px] text-muted-foreground">{filteredRows.length}</span>
         </div>
 
-        {filteredRows.length === 0 ? (
-          <div className="px-6 py-16 text-center text-xs text-muted-foreground">
-            <CalendarPlus className="h-5 w-5 mx-auto mb-2 opacity-40" />
-            {isAr ? 'لا توجد نتائج بحث مطابقة' : 'No matching search results'}
-          </div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-            <table className="w-full text-[11px]">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground">
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'العميل' : 'Client'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'المساحة' : 'Workspace'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'البداية' : 'Start'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'النهاية' : 'End'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'الشهور' : 'Months'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'المبلغ' : 'Amount'}</th>
-                  <th className="px-3 py-2 text-start font-medium">{isAr ? 'الحالة' : 'Status'}</th>
-                  <th className="px-3 py-2 text-end font-medium w-10" />
+        {/* Odoo-style list: a header row and clean records, no cell borders. */}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[11px]">
+            <thead>
+              <tr className="border-b border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
+                <th className="w-6 px-2 py-2.5" />
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'العميل' : 'Client'}
+                </th>
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'المساحة' : 'Workspace'}
+                </th>
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'البداية' : 'Start'}
+                </th>
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'النهاية' : 'End'}
+                </th>
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'الحالة' : 'Status'}
+                </th>
+                <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {isAr ? 'المبلغ' : 'Amount'}
+                </th>
+                <th className="w-10 px-2 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {pagedRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-6 py-16 text-center text-xs text-muted-foreground">
+                    <CalendarPlus className="mx-auto mb-2 h-5 w-5 opacity-40" />
+                    {isAr ? 'لا توجد نتائج بحث مطابقة' : 'No matching search results'}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {pagedRows.map((row) => {
-                  const st = statusDisplay(row)
+              ) : (
+                pagedRows.map((row) => {
+                  const st = subscriptionStateMeta(row, isAr)
+                  const hasRecord = Boolean(row.id)
+
                   return (
-                    <tr key={row.workspace_id} className="border-b border-border/50 transition-colors hover:bg-muted/30">
-                      <td className="px-3 py-2.5">
-                        <p className="font-medium text-foreground">{row.client_name || '—'}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{row.client_email}</p>
+                    <tr
+                      key={row.workspace_id}
+                      tabIndex={hasRecord ? 0 : undefined}
+                      role={hasRecord ? 'button' : undefined}
+                      onClick={() => openRecord(row)}
+                      onKeyDown={(event) => {
+                        if (!hasRecord) return
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          openRecord(row)
+                        }
+                      }}
+                      className={cn(
+                        'transition-colors',
+                        hasRecord
+                          ? 'cursor-pointer hover:bg-muted/40 focus:bg-muted/40 focus:outline-none'
+                          : 'cursor-default',
+                      )}
+                    >
+                      <td className="px-2 py-2.5">
+                        <span className={cn('block h-1.5 w-1.5 rounded-full', st.dot)} aria-hidden />
                       </td>
-                      <td className="px-3 py-2.5">
-                        <p className="font-medium text-foreground">{row.workspace_name || '—'}</p>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <span className="block max-w-[180px] truncate font-medium text-foreground">
+                          {row.client_name || '—'}
+                        </span>
+                        {row.client_email && (
+                          <span
+                            dir="ltr"
+                            className="mt-0.5 block max-w-[180px] truncate font-mono text-[10px] text-muted-foreground"
+                          >
+                            {row.client_email}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <span className="block max-w-[170px] truncate font-medium text-foreground">
+                          {row.workspace_name || '—'}
+                        </span>
                         {row.subscription_number && (
-                          <p className="text-[10px] text-muted-foreground font-mono mt-0.5">{row.subscription_number}</p>
+                          <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                            {row.subscription_number}
+                          </span>
                         )}
                         {row.active_sub_count > 1 && (
-                          <p className="text-[10px] text-amber-600 font-medium mt-0.5">
+                          <span className="mt-0.5 block text-[10px] font-medium text-amber-600 dark:text-amber-400">
                             {isAr
                               ? `+${row.active_sub_count - 1} اشتراك نشط آخر`
                               : `+${row.active_sub_count - 1} more active sub(s)`}
-                          </p>
+                          </span>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{row.start_date ? formatDate(row.start_date) : '—'}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{row.end_date ? formatDate(row.end_date) : '—'}</td>
-                      <td className="px-3 py-2.5 text-muted-foreground">{row.status !== 'none' ? row.months_paid : '—'}</td>
-                      <td className="px-3 py-2.5 font-mono text-foreground">
+                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {row.start_date ? formatSubDate(row.start_date, isAr) : '—'}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
+                        {row.end_date ? formatSubDate(row.end_date, isAr) : '—'}
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <span
+                          className={cn(
+                            'inline-flex items-center border px-2 py-0.5 text-[10px] font-bold',
+                            st.pill,
+                          )}
+                        >
+                          {st.label}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 whitespace-nowrap font-mono text-foreground">
                         {row.status !== 'none'
-                          ? `${formatAmount(row.amount_paid)} ${row.currency}`
+                          ? `${formatMoney(row.amount_paid)} ${row.currency}`
                           : '—'}
                       </td>
-                      <td className="px-3 py-2.5">
-                        <div className={cn('flex items-center gap-1.5', st.textCls)}>
-                          <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} />
-                          <span>{st.text}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center gap-1.5">
-                          {row.status === 'none' || row.isExpired || row.status === 'cancelled' ? (
-                            <button
-                              onClick={() => {
-                                resetRegister()
-                                setSelectedUser({
-                                  id: row.user_id,
-                                  email: row.client_email || '',
-                                  name: row.client_name,
-                                  active_workspace_id: row.workspace_id,
-                                  workspaces: [
-                                    {
-                                      id: row.workspace_id,
-                                      name: row.workspace_name || '',
-                                    },
-                                  ],
-                                })
-                                setWorkspaceId(row.workspace_id)
-                                setModal({ type: 'register' })
-                              }}
-                              className={actionBtn}
-                            >
-                              <CalendarPlus className="h-3 w-3" />
-                              {isAr ? 'تسجيل' : 'Register'}
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => {
-                                  // Expired subscriptions can only be extended by
-                                  // days (the backend refuses months on an expired
-                                  // sub), so default to 0 months in that case.
-                                  setExtMonths(row.isExpired ? 0 : 1)
-                                  setExtDays(0)
-                                  setExtAmount('')
-                                  setExtNotes('')
-                                  setModalError(null)
-                                  setModal({ type: 'extend', row })
-                                }}
-                                disabled={row.status !== 'active'}
-                                title={isAr ? 'تمديد الاشتراك' : 'Extend'}
-                                className={actionBtn}
-                              >
-                                <CalendarPlus className="h-3 w-3" />
-                                {isAr ? 'تمديد' : 'Extend'}
-                              </button>
-                              {row.status === 'active' && (
-                                <button
-                                  onClick={() => {
-                                    setModalError(null)
-                                    setModal({ type: 'cancel', row })
-                                  }}
-                                  disabled={row.isExpired}
-                                  title={isAr ? 'إلغاء' : 'Cancel'}
-                                  className={actionBtn}
-                                >
-                                  <XCircle className="h-3 w-3" />
-                                  {isAr ? 'إلغاء' : 'Cancel'}
-                                </button>
-                              )}
-                            </>
-                          )}
-                        </div>
+                      <td className="px-2 py-2.5 text-end">
+                        <RowActions
+                          row={row}
+                          isAr={isAr}
+                          onOpen={() => openRecord(row)}
+                          onRegister={() => openRegisterFor(row)}
+                          onExtend={() => {
+                            // Expired subscriptions can only be extended by days
+                            // (the backend refuses months on an expired sub), so
+                            // default to 0 months in that case.
+                            setExtMonths(row.isExpired ? 0 : 1)
+                            setExtDays(0)
+                            setExtAmount('')
+                            setExtNotes('')
+                            setModalError(null)
+                            setModal({ type: 'extend', row })
+                          }}
+                          onCancel={() => {
+                            setModalError(null)
+                            setModal({ type: 'cancel', row })
+                          }}
+                        />
                       </td>
                     </tr>
                   )
-                })}
-              </tbody>
-            </table>
-          </div>
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {filteredRows.length > 0 && (
           <PaginationControls
             page={page}
             pageSize={PAGE_SIZE}
@@ -436,7 +436,6 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
             onPageChange={setPage}
             isAr={isAr}
           />
-          </>
         )}
       </div>
 
@@ -808,6 +807,102 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The per-row action menu. It stops the click from bubbling, because the whole
+ * row opens the record page: an action must never navigate as a side effect.
+ */
+function RowActions({
+  row,
+  isAr,
+  onOpen,
+  onRegister,
+  onExtend,
+  onCancel,
+}: {
+  row: AdminSubscriptionRow
+  isAr: boolean
+  onOpen: () => void
+  onRegister: () => void
+  onExtend: () => void
+  onCancel: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const onDocumentClick = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+
+    document.addEventListener('mousedown', onDocumentClick)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('mousedown', onDocumentClick)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [open])
+
+  const item = (onClick: () => void, icon: React.ReactNode, label: string) => (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={(event) => {
+        event.stopPropagation()
+        setOpen(false)
+        onClick()
+      }}
+      className="flex w-full items-center gap-2 px-3 py-2 text-start text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
+  )
+
+  const hasRecord = Boolean(row.id)
+  const canExtend = hasRecord && row.status === 'active'
+  const canCancel = hasRecord && row.status === 'active' && !row.isExpired
+  const needsRegister = !hasRecord || row.isExpired || row.status === 'cancelled'
+
+  return (
+    <div className="relative flex justify-end" ref={ref}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={isAr ? 'إجراءات' : 'Actions'}
+        onClick={(event) => {
+          event.stopPropagation()
+          setOpen((prev) => !prev)
+        }}
+        className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          onClick={(event) => event.stopPropagation()}
+          className="absolute end-0 top-full z-50 mt-1 w-44 border border-border bg-card py-1 shadow-card"
+        >
+          {hasRecord &&
+            item(onOpen, <ExternalLink className="h-3.5 w-3.5" />, isAr ? 'فتح التفاصيل' : 'Open details')}
+          {canExtend &&
+            item(onExtend, <CalendarPlus className="h-3.5 w-3.5" />, isAr ? 'تمديد' : 'Extend')}
+          {canCancel && item(onCancel, <XCircle className="h-3.5 w-3.5" />, isAr ? 'إلغاء' : 'Cancel')}
+          {needsRegister &&
+            item(onRegister, <CalendarPlus className="h-3.5 w-3.5" />, isAr ? 'تسجيل اشتراك' : 'Register')}
         </div>
       )}
     </div>

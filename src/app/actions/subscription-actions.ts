@@ -805,7 +805,9 @@ export async function getAllSubscriptions() {
     const wsIds = wsList.map((w) => w.id)
     const { data: subs } = await supabase
       .from('subscriptions')
-      .select('*')
+      .select(
+        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_at, archived_at',
+      )
       .in('workspace_id', wsIds)
       .order('end_date', { ascending: false })
 
@@ -888,9 +890,158 @@ export async function getAllSubscriptions() {
   }
 }
 
-/** Admin: search users by email (for the registration picker). */
-export async function searchUsersByEmail(email: string) {
+// ──────────────────────── Admin: one subscription record ────────────────────────
+
+export interface SubscriptionDetailSubscription {
+  id: string
+  workspace_id: string
+  user_id: string
+  start_date: string
+  months_paid: number
+  end_date: string
+  amount_paid: number | string
+  currency: string
+  status: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string | null
+  archived_at: string | null
+  isExpired: boolean
+  daysRemaining: number
+}
+
+export interface SubscriptionDetailPayment {
+  id: string
+  amount: number | string
+  currency: string
+  paid_at: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export interface SubscriptionHistoryRow {
+  id: string
+  start_date: string
+  end_date: string
+  months_paid: number
+  amount_paid: number | string
+  currency: string
+  status: string
+  archived_at: string | null
+  isExpired: boolean
+  daysRemaining: number
+}
+
+export interface SubscriptionDetail {
+  subscription: SubscriptionDetailSubscription
+  workspace: {
+    id: string
+    name: string
+    subscription_number: string | null
+    created_at: string
+    archived_at: string | null
+  } | null
+  client: { id: string; name: string | null; email: string | null } | null
+  payments: SubscriptionDetailPayment[]
+  /** Every other subscription on the same workspace, newest first. */
+  history: SubscriptionHistoryRow[]
+  totals: { paid: number; payments_count: number }
+}
+
+/** Cheap shape check, so a hand-typed URL is a 404 instead of a Postgres 400. */
+const SUBSCRIPTION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Admin: everything about one subscription, for `/admin/subscriptions/<id>`.
+ *
+ * The list is a table with basic columns; the record page is the only place that
+ * reads the payment ledger and the workspace's other subscriptions. `users.phone`
+ * is deliberately not selected — it is missing in environments where
+ * `20260805_client_phone_and_archive.sql` was never applied, and selecting it
+ * would fail the whole record read.
+ */
+export async function getSubscriptionDetail(subscriptionId: string) {
   try {
+    await requireAdmin()
+
+    if (!SUBSCRIPTION_UUID_RE.test(subscriptionId)) {
+      return { success: false as const, error: 'not_found', detail: null }
+    }
+
+    const { data: sub, error: subErr } = await supabase
+      .from('subscriptions')
+      .select(
+        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_by, created_at, updated_at, archived_at',
+      )
+      .eq('id', subscriptionId)
+      .maybeSingle()
+
+    if (subErr) return { success: false as const, error: subErr.message, detail: null }
+    if (!sub) return { success: false as const, error: 'not_found', detail: null }
+
+    const [wsRes, userRes, payRes, historyRes] = await Promise.all([
+      supabase
+        .from('workspaces')
+        .select('id, name, subscription_number, created_at, archived_at')
+        .eq('id', sub.workspace_id)
+        .maybeSingle(),
+      sub.user_id
+        ? supabase.from('users').select('id, name, email').eq('id', sub.user_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from('subscription_payments')
+        .select('id, amount, currency, paid_at, notes, created_by, created_at')
+        .eq('subscription_id', subscriptionId)
+        .order('paid_at', { ascending: false }),
+      supabase
+        .from('subscriptions')
+        .select('id, start_date, end_date, months_paid, amount_paid, currency, status, archived_at')
+        .eq('workspace_id', sub.workspace_id)
+        .order('created_at', { ascending: false }),
+    ])
+
+    const payments = (payRes.data ?? []) as SubscriptionDetailPayment[]
+    const paid = Math.round(payments.reduce((sum, p) => sum + Number(p.amount), 0) * 100) / 100
+
+    const history: SubscriptionHistoryRow[] = ((historyRes.data ?? []) as Omit<
+      SubscriptionHistoryRow,
+      'isExpired' | 'daysRemaining'
+    >[])
+      .filter((row) => row.id !== subscriptionId)
+      .map((row) => ({
+        ...row,
+        isExpired: isSubscriptionExpired(row),
+        daysRemaining: daysUntilExpiry(row.end_date),
+      }))
+
+    const detail: SubscriptionDetail = {
+      subscription: {
+        ...sub,
+        isExpired: isSubscriptionExpired(sub),
+        daysRemaining: daysUntilExpiry(sub.end_date),
+      },
+      workspace: wsRes.data ?? null,
+      client: userRes.data ?? null,
+      payments,
+      history,
+      totals: { paid, payments_count: payments.length },
+    }
+
+    return { success: true as const, error: undefined, detail }
+  } catch (err) {
+    return {
+      success: false as const,
+      error: err instanceof Error ? err.message : 'unexpected',
+      detail: null,
+    }
+  }
+}
+
+/** Admin: search users by email (for the registration picker). */
+export async function searchUsersByEmail(email: string) {  try {
     await requireAdmin()
 
     const { data, error } = await supabase
