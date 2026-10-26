@@ -780,20 +780,38 @@ export async function getAllSubscriptions() {
   try {
     await requireAdmin()
 
-    // 1. Fetch all workspaces (up to 5000)
+    // 1. Fetch all subscriptions directly as the primary source (up to 10000)
+    // This ensures no subscription is ever omitted due to workspace pagination/ordering.
+    const { data: subs, error: subErr } = await supabase
+      .from('subscriptions')
+      .select(
+        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_at, archived_at',
+      )
+      .order('created_at', { ascending: false })
+      .limit(10000)
+
+    if (subErr) return { success: false as const, error: subErr.message, rows: [] }
+    const subList = subs ?? []
+
+    // 2. Fetch all workspaces (up to 10000)
     const { data: workspaces, error: wsErr } = await supabase
       .from('workspaces')
       .select('id, name, subscription_number, user_id, created_at')
       .order('created_at', { ascending: false })
-      .limit(5000)
+      .limit(10000)
 
     if (wsErr) return { success: false as const, error: wsErr.message, rows: [] }
 
     const wsList = workspaces ?? []
-    if (wsList.length === 0) return { success: true as const, rows: [] }
+    const wsMap = new Map(wsList.map((w) => [w.id, w]))
 
-    // 2. Fetch users in bulk
-    const userIds = Array.from(new Set(wsList.map((w) => w.user_id).filter(Boolean)))
+    // 3. Fetch users in bulk
+    const userIds = Array.from(
+      new Set([
+        ...subList.map((s) => s.user_id).filter(Boolean),
+        ...wsList.map((w) => w.user_id).filter(Boolean),
+      ]),
+    )
     const { data: users } = await supabase
       .from('users')
       .select('id, name, email')
@@ -801,63 +819,50 @@ export async function getAllSubscriptions() {
 
     const userMap = new Map((users ?? []).map((u) => [u.id, u]))
 
-    // 3. Fetch subscriptions in bulk
-    const wsIds = wsList.map((w) => w.id)
-    const { data: subs } = await supabase
-      .from('subscriptions')
-      .select(
-        'id, workspace_id, user_id, start_date, months_paid, end_date, amount_paid, currency, status, notes, created_at, archived_at',
-      )
-      .in('workspace_id', wsIds)
-      .order('created_at', { ascending: false })
-      .limit(5000)
-
-    const subMap = new Map<string, RawSubscription[]>()
-    if (subs) {
-      for (const sub of subs) {
-        if (!subMap.has(sub.workspace_id)) {
-          subMap.set(sub.workspace_id, [])
-        }
-        subMap.get(sub.workspace_id)!.push(sub)
+    // Count active subs per workspace
+    const activeSubCountMap = new Map<string, number>()
+    for (const sub of subList) {
+      if (sub.status === 'active' && !isSubscriptionExpired(sub)) {
+        activeSubCountMap.set(sub.workspace_id, (activeSubCountMap.get(sub.workspace_id) || 0) + 1)
       }
     }
 
     // 5. Construct rows (Flattened: one row per subscription)
     const rows: AdminSubscriptionRow[] = []
+    const coveredWorkspaceIds = new Set<string>()
 
+    for (const sub of subList) {
+      const ws = wsMap.get(sub.workspace_id)
+      const userId = sub.user_id || ws?.user_id || ''
+      const user = userId ? userMap.get(userId) : null
+      coveredWorkspaceIds.add(sub.workspace_id)
+
+      rows.push({
+        id: sub.id,
+        workspace_id: sub.workspace_id,
+        user_id: userId,
+        start_date: sub.start_date,
+        months_paid: sub.months_paid,
+        end_date: sub.end_date,
+        amount_paid: sub.amount_paid,
+        currency: sub.currency,
+        status: sub.status,
+        notes: sub.notes,
+        created_at: sub.created_at,
+        isExpired: isSubscriptionExpired(sub),
+        daysRemaining: daysUntilExpiry(sub.end_date),
+        workspace_name: ws?.name ?? null,
+        client_name: user?.name ?? null,
+        client_email: user?.email ?? null,
+        subscription_number: ws?.subscription_number || null,
+        active_sub_count: activeSubCountMap.get(sub.workspace_id) || 0,
+      })
+    }
+
+    // Also include workspaces that have no subscriptions
     for (const ws of wsList) {
-      const user = ws.user_id ? userMap.get(ws.user_id) : null
-      const wsSubs = subMap.get(ws.id) ?? []
-      const activeSubCount = wsSubs.filter(
-        (s) => s.status === 'active' && !isSubscriptionExpired(s),
-      ).length
-
-      if (wsSubs.length > 0) {
-        // If there are subscriptions, add each one as an independent row
-        for (const sub of wsSubs) {
-          rows.push({
-            id: sub.id,
-            workspace_id: ws.id,
-            user_id: ws.user_id || '',
-            start_date: sub.start_date,
-            months_paid: sub.months_paid,
-            end_date: sub.end_date,
-            amount_paid: sub.amount_paid,
-            currency: sub.currency,
-            status: sub.status,
-            notes: sub.notes,
-            created_at: sub.created_at,
-            isExpired: isSubscriptionExpired(sub),
-            daysRemaining: daysUntilExpiry(sub.end_date),
-            workspace_name: ws.name,
-            client_name: user?.name ?? null,
-            client_email: user?.email ?? null,
-            subscription_number: ws.subscription_number || null,
-            active_sub_count: activeSubCount,
-          })
-        }
-      } else {
-        // Workspace with no subscription, add one empty row
+      if (!coveredWorkspaceIds.has(ws.id)) {
+        const user = ws.user_id ? userMap.get(ws.user_id) : null
         rows.push({
           id: '',
           workspace_id: ws.id,
