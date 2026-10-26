@@ -51,6 +51,23 @@ const erpOptions = [
   }
 ]
 
+function InfoField({
+  label,
+  children,
+  mono = false,
+}: {
+  label: string
+  children: React.ReactNode
+  mono?: boolean
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <div className={cn('mt-1 break-all text-xs text-foreground', mono && 'font-mono')}>{children}</div>
+    </div>
+  )
+}
+
 export default function OdooConnectionForm({ initialConnection }: OdooConnectionFormProps) {
   const { toast } = useToast()
   const { t, lang, dir } = useLanguage()
@@ -290,208 +307,143 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
   return (
     <><div className="space-y-4" dir={dir}>
       {connection && !isEditing ? (
-        // Connected View
-        <div className="space-y-4 animate-in fade-in-50 slide-in-from-top-4 duration-300">
-
-          {/* Status banner */}
-          <div className="flex items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.06] p-3 text-primary">
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-            <div className="flex-1 text-[11px] font-medium">
-              {lang === 'ar' ? 'تم ربط نظام أودو ERP بنجاح ببيئة العمل النشطة. يمكنك الآن مطابقة الحقول ومزامنة البيانات.' : 'Odoo ERP connection completed successfully. You can now configure field mappings and sync data.'}
-            </div>
-          </div>
-
-          {/* Details Card */}
-          <div className="rounded-xl border bg-card p-4 relative">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-border">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <Database className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                    {connection.connection_name || t('db.storeOdoo')}
-                    <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
-                      {t('db.connected')}
-                    </span>
-                  </h2>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    {lang === 'ar' ? 'إعدادات الربط وحالة الاتصال نشطة ومستقرة' : 'Integration settings and connection status are active and stable'}
-                  </p>
-                </div>
+        // Connected View - Odoo Record Style
+        <div className="space-y-5 animate-in fade-in-50 slide-in-from-top-4 duration-300">
+          {/* Header */}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base font-bold text-foreground">
+                  {connection.connection_name || t('db.storeOdoo')}
+                </h1>
+                <span className="inline-flex items-center gap-1 border border-success/25 bg-success/10 px-2 py-0.5 text-[10px] font-bold text-success">
+                  <CheckCircle2 className="h-3 w-3" />
+                  {t('db.connected')}
+                </span>
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  onClick={() => {
-                    setIsEditing(true)
-                    setTestStatus(null)
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="rounded-lg border-border/80 hover:bg-muted gap-1.5 h-8 text-xs"
-                >
-                  <Edit3 className="h-3.5 w-3.5" />
-                  {t('ws.editBtn')}
-                </Button>
-
-                <Button
-                  onClick={handleDisconnect}
-                  variant="destructive"
-                  size="sm"
-                  disabled={isDisconnecting}
-                  className="rounded-lg gap-1.5 h-8 text-xs hover:bg-destructive/90"
-                >
-                  {isDisconnecting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                  {t('zid.disconnect')}
-                </Button>
-              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {lang === 'ar' ? 'إعدادات الربط وحالة الاتصال نشطة ومستقرة' : 'Integration settings and connection status are active and stable'}
+              </p>
             </div>
 
-            <div className="divide-y divide-border/50 pt-4">
-              {/* ERP Program Type */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 first:pt-0 gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                    <Database className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-foreground">{lang === 'ar' ? 'نوع نظام الـ ERP' : 'ERP System Type'}</h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{lang === 'ar' ? 'نظام إدارة موارد المؤسسة المختار للربط' : 'Selected ERP system type connected to the workspace'}</p>
-                  </div>
-                </div>
-                <div className="sm:text-left text-xs font-semibold text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border capitalize">
-                  {getErpTypeName(connection.erp_type)}
-                </div>
-              </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => {
+                  setIsEditing(true)
+                  setTestStatus(null)
+                }}
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                {t('ws.editBtn')}
+              </Button>
 
-              {/* Odoo version — detected automatically from the server */}
-              {connection.erp_type === 'odoo' && (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                      <Server className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-bold text-foreground">{lang === 'ar' ? 'إصدار أودو' : 'Odoo Version'}</h3>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {lang === 'ar'
-                          ? 'الإصدار الذي تم اكتشافه تلقائياً من خادم أودو عند الاتصال'
-                          : 'Detected automatically from the Odoo server when connected'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="sm:text-left text-xs font-semibold text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border" dir="ltr">
-                    {odooVersion
-                      ? `Odoo ${odooVersion}`
-                      : isDetectingVersion
-                        ? (lang === 'ar' ? 'جارٍ الكشف…' : 'Detecting…')
-                        : '—'}
-                  </div>
-                </div>
-              )}
-
-              {/* Name */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                    <Tag className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-foreground">{t('odoo.connectionNameLabel')}</h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{lang === 'ar' ? 'الاسم المعرّف لقاعدة بيانات أودو المربوطة ببيئة العمل' : 'Display name for the connected Odoo database'}</p>
-                  </div>
-                </div>
-                <div className="sm:text-left text-xs font-semibold text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border break-all">
-                  {connection.connection_name}
-                </div>
-              </div>
-
-              {/* URL + IDs live behind Advanced details (P0: clean main view) */}
-              <details className="mt-3 border border-border rounded-lg">
-                <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-foreground/80 hover:bg-muted/50">
-                  {t('odoo.advancedDetails')}
-                </summary>
-                <div className="border-t border-border px-3 py-1">
-              {/* URL */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                    <Globe className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-foreground">{t('odoo.urlLabel')}</h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{lang === 'ar' ? 'العنوان أو النطاق المخصص للوصول إلى نظام الـ ERP' : 'The specific server endpoint or domain for the ERP'}</p>
-                  </div>
-                </div>
-                <div className="sm:text-left font-mono text-xs text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border break-all" dir="ltr">
-                  {connection.url}
-                </div>
-              </div>
-
-              {/* DB Name */}
-              {connection.erp_type === 'odoo' && (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                        <Hash className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <h3 className="text-xs font-bold text-foreground">{t('odoo.dbLabel')}</h3>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">{lang === 'ar' ? 'قاعدة البيانات النشطة والمحددة للاتصال بنظام الـ ERP' : 'The specific active database on your Odoo server'}</p>
-                      </div>
-                    </div>
-                    <div className="sm:text-left font-mono text-xs text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border break-all" dir="ltr">
-                    {connection.db_name || '—'}
-                  </div>
-                </div>
-              )}
-
-              {/* Username */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-3 last:pb-0 gap-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                    <User className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-foreground">{getConnectedUsernameLabel(connection.erp_type)}</h3>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {connection.erp_type === 'odoo'
-                        ? (lang === 'ar' ? 'حساب المسؤول أو المستخدم المخصص لإجراء عمليات الربط' : 'The admin or user email address used to authenticate')
-                        : (lang === 'ar' ? 'مفتاح واجهة البرمجة (API Key) المستخدم للمصادقة' : 'The API Key used to authenticate with ERPNext')}
-                    </p>
-                  </div>
-                </div>
-                <div className="sm:text-left font-mono text-xs text-foreground bg-muted/30 px-3 py-1.5 rounded-lg border border-border/40 break-all" dir="ltr">
-                  {connection.username}
-                </div>
-              </div>
-                </div>
-              </details>
-            </div>
-
-            {/* Live Connection Test Results */}
-            {testStatus && (
-              <div className={`mt-6 p-4 rounded-xl border text-sm flex items-start gap-3 ${testStatus.success
-                  ? 'bg-muted border-border text-foreground'
-                  : 'bg-destructive/10 border-destructive/20 text-destructive'
-                }`}>
-                {testStatus.success ? (
-                  <CheckCircle2 className="h-5 w-5 shrink-0 mt-0.5" />
+              <Button
+                onClick={handleDisconnect}
+                variant="outline"
+                size="sm"
+                disabled={isDisconnecting}
+                className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold text-destructive hover:bg-destructive/10 hover:text-destructive border-destructive/20"
+              >
+                {isDisconnecting ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
                 ) : (
-                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 )}
-                <div>
-                  <p className="font-semibold">{testStatus.success ? (lang === 'ar' ? 'نجح فحص الاتصال' : 'Connection Test Succeeded') : (lang === 'ar' ? 'فشل فحص الاتصال' : 'Connection Test Failed')}</p>
-                  <p className="mt-1 text-xs opacity-90">{testStatus.message}</p>
+                {t('zid.disconnect')}
+              </Button>
+            </div>
+          </div>
+
+          {/* Basic record data */}
+          <div className="border border-border bg-card p-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <InfoField label={lang === 'ar' ? 'نوع النظام' : 'System Type'}>
+                {getErpTypeName(connection.erp_type)}
+              </InfoField>
+              {connection.erp_type === 'odoo' && (
+                <InfoField label={lang === 'ar' ? 'إصدار أودو' : 'Odoo Version'} mono>
+                  {odooVersion
+                    ? `Odoo ${odooVersion}`
+                    : isDetectingVersion
+                      ? (lang === 'ar' ? 'جارٍ الكشف…' : 'Detecting…')
+                      : '—'}
+                </InfoField>
+              )}
+              <InfoField label={t('odoo.connectionNameLabel')}>
+                {connection.connection_name || '—'}
+              </InfoField>
+              <InfoField label={t('odoo.urlLabel')} mono>
+                {connection.url || '—'}
+              </InfoField>
+              {connection.erp_type === 'odoo' && (
+                <InfoField label={t('odoo.dbLabel')} mono>
+                  {connection.db_name || '—'}
+                </InfoField>
+              )}
+              <InfoField label={getConnectedUsernameLabel(connection.erp_type)} mono>
+                {connection.username || '—'}
+              </InfoField>
+              <InfoField label={lang === 'ar' ? 'معرف المزامنة' : 'Sync ID'} mono>
+                {connection.id || '—'}
+              </InfoField>
+              <InfoField label={lang === 'ar' ? 'حالة الربط' : 'Status'}>
+                <span className="text-emerald-600 font-semibold">{t('db.connected')}</span>
+              </InfoField>
+            </div>
+          </div>
+
+          {/* Status Details Card */}
+          <div className="overflow-hidden border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
+              <span className="text-[10px] font-bold text-muted-foreground">
+                {lang === 'ar' ? 'تفاصيل المزامنة والربط' : 'Sync & Integration Details'}
+              </span>
+              <span className="text-[9px] font-mono text-muted-foreground">
+                {connection.erp_type === 'odoo' ? 'Odoo ERP' : 'ERPNext'}
+              </span>
+            </div>
+            <div className="p-4 space-y-3 text-xs leading-relaxed">
+              <div className="flex items-center gap-2 text-primary font-medium">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                <span>
+                  {lang === 'ar'
+                    ? 'تم ربط نظام أودو ERP بنجاح ببيئة العمل النشطة. يمكنك الآن مطابقة الحقول ومزامنة البيانات.'
+                    : 'Odoo ERP connection completed successfully. You can now configure field mappings and sync data.'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Connection Test Results */}
+          {testStatus && (
+            <div
+              className={cn(
+                'flex items-start gap-2 border p-3 text-xs',
+                testStatus.success
+                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  : 'border-destructive/15 bg-destructive/5 text-destructive'
+              )}
+            >
+              {testStatus.success ? (
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+              ) : (
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              )}
+              <div className="space-y-0.5">
+                <div className="font-bold">
+                  {testStatus.success
+                    ? (lang === 'ar' ? 'نجح فحص الاتصال' : 'Connection Test Succeeded')
+                    : (lang === 'ar' ? 'فشل فحص الاتصال' : 'Connection Test Failed')}
+                </div>
+                <div className="break-all font-mono text-[11px] leading-relaxed opacity-90">
+                  {testStatus.message}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       ) : selectedErp === null ? (
         // ERP Selection View

@@ -28,19 +28,7 @@ export default async function ConnectOdooPage() {
   const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5 animate-in fade-in duration-300" dir={dir}>
-      <div>
-        <div className="mb-1 flex items-center gap-2">
-          <div className="h-6 w-1 rounded-full bg-primary" />
-          <h1 className="text-xl font-bold tracking-tight text-foreground">
-            {t('odoo.title')}
-          </h1>
-        </div>
-        <p className="text-[11px] text-muted-foreground leading-relaxed">
-          {t('odoo.desc')}
-        </p>
-      </div>
-
+    <div className="space-y-5 animate-in fade-in duration-300" dir={dir}>
       <OdooConnectionForm initialConnection={connection} />
     </div>
   )
