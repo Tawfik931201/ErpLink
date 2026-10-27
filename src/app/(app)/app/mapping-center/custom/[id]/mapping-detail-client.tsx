@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils'
 import FieldMappingForm from '../../field-mapping-form'
 import SyncLogModal from '../../sync-log-modal'
 
+import { MappingFieldsCard } from './mapping-fields-card'
+
 interface DetailProps {
   mapping: any
   initialModels: Array<{ model: string; name: string }>
@@ -59,22 +61,6 @@ function InfoField({
   )
 }
 
-function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    } catch {
-      return value
-    }
-  }
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
 export default function MappingDetailClient({
   mapping,
   initialModels,
@@ -98,7 +84,6 @@ export default function MappingDetailClient({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [isLogOpen, setIsLogOpen] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
-  const [copiedJson, setCopiedJson] = useState(false)
 
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft
 
@@ -134,7 +119,6 @@ export default function MappingDetailClient({
   const modelKeys = Object.keys(mapping.mappings || {}).filter(k => k !== '__settings')
   const primaryModel = mapping.odoo_model
   const initialRelated = modelKeys.filter(k => k !== primaryModel)
-  const jsonText = prettyJson(mapping.mappings)
   const mappedFieldCount = modelKeys.reduce((total, key) => {
     const arr = (mapping.mappings || {})[key]
     return total + (Array.isArray(arr) ? arr.length : 0)
@@ -153,16 +137,11 @@ export default function MappingDetailClient({
     })
   }
 
-  const copy = async (value: string, kind: 'id' | 'json') => {
+  const copyId = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
-      if (kind === 'id') {
-        setCopiedId(true)
-        setTimeout(() => setCopiedId(false), 1500)
-      } else {
-        setCopiedJson(true)
-        setTimeout(() => setCopiedJson(false), 1500)
-      }
+      setCopiedId(true)
+      setTimeout(() => setCopiedId(false), 1500)
     } catch {
       toast({
         title: ar ? 'تعذر النسخ' : 'Copy failed',
@@ -278,7 +257,7 @@ export default function MappingDetailClient({
             <span className="break-all font-mono text-[11px] text-muted-foreground">{mapping.id}</span>
             <button
               type="button"
-              onClick={() => copy(String(mapping.id), 'id')}
+              onClick={() => copyId(String(mapping.id))}
               className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title={ar ? 'نسخ المعرّف' : 'Copy id'}
             >
@@ -362,34 +341,8 @@ export default function MappingDetailClient({
         </div>
       )}
 
-      {/* Mappings JSON — rendered only on this record page, never in the list. */}
-      <div className="overflow-hidden border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
-          <span className="text-[10px] font-bold text-muted-foreground">{ar ? 'مخطط الحقول' : 'Field map'}</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] font-mono text-muted-foreground">JSON</span>
-            {jsonText && (
-              <button
-                type="button"
-                onClick={() => copy(jsonText, 'json')}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
-              >
-                {copiedJson ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                {copiedJson ? (ar ? 'تم النسخ' : 'Copied') : (ar ? 'نسخ' : 'Copy')}
-              </button>
-            )}
-          </div>
-        </div>
-        {jsonText ? (
-          <pre className="max-h-[520px] overflow-auto bg-card p-3 text-[10px] font-mono leading-relaxed text-foreground">
-            {jsonText}
-          </pre>
-        ) : (
-          <div className="py-6 text-center text-[11px] text-muted-foreground">
-            {ar ? 'لا توجد حقول مربوطة بعد.' : 'No mapped fields yet.'}
-          </div>
-        )}
-      </div>
+      {/* Saved field map as ordinary fields — never as raw JSON. */}
+      <MappingFieldsCard mappings={mapping.mappings} ar={ar} />
 
       <ConfirmDialog
         open={confirmOpen}
