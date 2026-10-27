@@ -26,6 +26,8 @@ interface SearchableSelectProps {
   className?: string
   disabled?: boolean
   variant?: 'default' | 'cell'
+  /** Tighter, monospace cell rendering used by the Odoo-style mapping table. */
+  compact?: boolean
   multiple?: boolean
   collapseTags?: boolean
 }
@@ -38,6 +40,7 @@ export default function SearchableSelect({
   className,
   disabled = false,
   variant = 'default',
+  compact = false,
   multiple = false,
   collapseTags = false,
 }: SearchableSelectProps) {
@@ -262,6 +265,8 @@ export default function SearchableSelect({
             ? 'border border-transparent bg-transparent hover:bg-muted/30 hover:border-input'
             : 'border border-input bg-inputBg',
           multiple && !collapseTags ? 'min-h-[36px] flex-wrap p-1.5 gap-1.5' : 'h-9 pl-3 pr-2',
+          compact && !multiple && 'h-7 pl-2 pr-1 text-[11px]',
+          compact && multiple && 'min-h-[28px] p-1 text-[11px]',
           isOpen && 'border-foreground ring-1 ring-foreground bg-inputBg',
           disabled && 'cursor-not-allowed opacity-50 bg-muted/40'
         )}
@@ -315,7 +320,10 @@ export default function SearchableSelect({
               }
             }}
             onKeyDown={handleKeyDown}
-            className="flex-1 min-w-[60px] bg-transparent outline-none border-0 p-0 text-sm focus:ring-0 focus:border-0 placeholder:text-muted-foreground text-foreground"
+            className={cn(
+              'flex-1 min-w-[60px] bg-transparent outline-none border-0 p-0 text-sm focus:ring-0 focus:border-0 placeholder:text-muted-foreground text-foreground',
+              compact && 'text-[11px] font-mono'
+            )}
           />
         </div>
 
@@ -345,7 +353,7 @@ export default function SearchableSelect({
             }}
             className="text-muted-foreground/60 hover:text-foreground rounded-none p-1"
           >
-            <ChevronsUpDown className="h-4 w-4 shrink-0" />
+            <ChevronsUpDown className={cn('shrink-0', compact ? 'h-3 w-3' : 'h-4 w-4')} />
           </button>
         </div>
       </div>

@@ -10,6 +10,7 @@ import {
   RotateCcw,
   HelpCircle,
   ArrowRightLeft,
+  Layers,
   Loader2,
   X
 } from 'lucide-react'
@@ -367,6 +368,14 @@ export default function FieldMappingForm({
   })
 
   const [isColumnSettingsOpen, setIsColumnSettingsOpen] = useState(false)
+  // Which mapping row has its relational extras (inline match, creation
+  // mapping, multi-field match) expanded underneath it. One at a time keeps
+  // the table looking like the read-only view until it is actually needed.
+  const [expandedLineId, setExpandedLineId] = useState<string | null>(null)
+  // Switching model tabs must not leave a row of the previous model expanded.
+  useEffect(() => {
+    setExpandedLineId(null)
+  }, [activeTab])
   const columnSettingsRef = useRef<HTMLTableHeaderCellElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -1108,6 +1117,7 @@ export default function FieldMappingForm({
           ])]}
           placeholder={isLoadingStaticOptions[optionKey] ? 'Loading...' : 'Static value...'}
           variant="cell"
+          compact
           disabled={isStaticDisabled}
         />
       )
@@ -1121,6 +1131,7 @@ export default function FieldMappingForm({
           options={[EMPTY_SELECT_OPTION, ...options]}
           placeholder={isLoadingStaticOptions[optionKey] ? 'Loading...' : 'Static value...'}
           variant="cell"
+          compact
           disabled={isStaticDisabled}
         />
       )
@@ -1137,6 +1148,7 @@ export default function FieldMappingForm({
           options={[EMPTY_SELECT_OPTION, ...options]}
           placeholder={isLoadingStaticOptions[optionKey] ? 'Loading...' : 'Static values...'}
           variant="cell"
+          compact
           multiple
           disabled={isStaticDisabled}
         />
@@ -1151,7 +1163,7 @@ export default function FieldMappingForm({
           onChange={(e) => handleStaticValueChange(mapping.id, e.target.value)}
           disabled={isStaticDisabled}
           placeholder={lang === 'ar' ? 'رقم ثابت...' : 'Static number...'}
-          className="h-9 w-full rounded-none border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-7 w-full rounded-none border border-transparent bg-transparent px-2 font-mono text-[11px] outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
         />
       )
     }
@@ -1163,7 +1175,7 @@ export default function FieldMappingForm({
         onChange={(e) => handleStaticValueChange(mapping.id, e.target.value)}
         disabled={isStaticDisabled}
         placeholder={lang === 'ar' ? 'قيمة ثابتة...' : 'Static value...'}
-        className="h-9 w-full rounded-none border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-7 w-full rounded-none border border-transparent bg-transparent px-2 font-mono text-[11px] outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
     )
   }
@@ -1388,10 +1400,10 @@ export default function FieldMappingForm({
         <div className="flex items-center gap-1.5">
           <span className="text-[11px] font-semibold text-muted-foreground">{lang === 'ar' ? 'الحالة:' : 'Status:'}</span>
           <span className={cn(
-            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border",
+            "inline-flex items-center border px-1.5 py-0.5 text-[10px] font-bold",
             isSaved
-              ? "bg-muted text-foreground border-border"
-              : "bg-muted text-muted-foreground border-border"
+              ? "border-border bg-muted text-foreground"
+              : "border-border bg-muted text-muted-foreground"
           )}>
             {isSaved ? (lang === 'ar' ? 'تم الحفظ' : 'Saved') : (lang === 'ar' ? 'مسودة' : 'Draft')}
           </span>
@@ -1532,7 +1544,7 @@ export default function FieldMappingForm({
 
           {/* Sync Direction Block */}
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-muted-foreground">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {lang === 'ar' ? 'اتجاه المزامنة' : 'Sync Direction'}
             </label>
             <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1556,7 +1568,7 @@ export default function FieldMappingForm({
 
           {/* Core Sync Operation */}
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-muted-foreground">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t('map.operationLabel')}
             </label>
             <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1581,7 +1593,7 @@ export default function FieldMappingForm({
 
           {/* ERP Model & Store Event (side-by-side) */}
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-muted-foreground">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} Model`}
             </label>
             <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1613,7 +1625,7 @@ export default function FieldMappingForm({
           </div>
 
           <div className="space-y-1.5">
-            <label className="block text-[11px] font-bold text-muted-foreground">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {platform === 'salla' 
                 ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event') 
                 : (lang === 'ar' ? 'حدث زد' : 'Zid Event')}
@@ -1645,7 +1657,7 @@ export default function FieldMappingForm({
           {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
             <>
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-muted-foreground">
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي للمطابقة` : `${getErpNameEn(erpType)} Reference Field`}
                 </label>
                 <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1668,7 +1680,7 @@ export default function FieldMappingForm({
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold text-muted-foreground">
+                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   {platform === 'salla'
                     ? (lang === 'ar' ? 'حقل سلة المرجعي للمطابقة' : 'Salla Reference Field')
                     : (lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field')}
@@ -1723,7 +1735,7 @@ export default function FieldMappingForm({
           {/* Fallback Policy + Related Models (side-by-side on the same row, at the end) */}
           {(odooOperation === 'update' || odooOperation === 'delete') && (
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold text-muted-foreground">
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {lang === 'ar' ? 'السياسة البديلة (عند عدم وجود السجل)' : 'Fallback Policy (when record not found)'}
               </label>
               <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1753,7 +1765,7 @@ export default function FieldMappingForm({
 
           {/* Related Models & Mapping Tip (side-by-side) */}
           <div className={cn("space-y-1.5", (odooOperation !== 'update' && odooOperation !== 'delete') && "sm:col-span-2")}>
-            <label className="block text-[11px] font-bold text-muted-foreground">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} Models`}
             </label>
             <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
@@ -1807,17 +1819,18 @@ export default function FieldMappingForm({
           )}
         </div>
 
-        {/* Notebook / Tabs Selector */}
-        <div className="border-b border-border/80 flex items-center justify-between mb-3.5">
+        {/* Notebook / Tabs Selector — compact segments, same square
+            aesthetic as the mapping table underneath. */}
+        <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-2">
           <div className="flex gap-1 overflow-x-auto">
             {/* Primary Model Tab */}
             <button
               onClick={() => setActiveTab(odooModel)}
               className={cn(
-                "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
+                "whitespace-nowrap border px-2.5 py-1 text-[11px] font-semibold transition-colors",
                 activeTab === odooModel
-                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
-                  : "border-t-transparent text-muted-foreground hover:text-foreground"
+                  ? "border-foreground/25 bg-card text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               )}
             >
               {lang === 'ar' ? 'تفاصيل الربط' : 'Mapping Details'} ({hasOdooConnection && initialModels.find(m => m.model === odooModel)?.name ? formatFieldLabel(initialModels.find(m => m.model === odooModel)!.name, lang) : ODOO_MODELS.find(m => m.id === odooModel)?.name ? formatFieldLabel(ODOO_MODELS.find(m => m.id === odooModel)!.name, lang) : odooModel})
@@ -1829,10 +1842,10 @@ export default function FieldMappingForm({
                 key={rel.model}
                 onClick={() => setActiveTab(rel.model)}
                 className={cn(
-                  "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
+                  "whitespace-nowrap border px-2.5 py-1 text-[11px] font-semibold transition-colors",
                   activeTab === rel.model
-                    ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
-                    : "border-t-transparent text-muted-foreground hover:text-foreground"
+                    ? "border-foreground/25 bg-card text-foreground"
+                    : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                 )}
               >
                 {formatFieldLabel(rel.label, lang)}
@@ -1843,10 +1856,10 @@ export default function FieldMappingForm({
             <button
               onClick={() => setActiveTab('settings')}
               className={cn(
-                "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
+                "whitespace-nowrap border px-2.5 py-1 text-[11px] font-semibold transition-colors",
                 activeTab === 'settings'
-                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
-                  : "border-t-transparent text-muted-foreground hover:text-foreground"
+                  ? "border-foreground/25 bg-card text-foreground"
+                  : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               )}
             >
               {lang === 'ar' ? 'الإعدادات المتقدمة' : 'Advanced Settings'}
@@ -1871,205 +1884,345 @@ export default function FieldMappingForm({
                 className="space-y-4"
               >
 
-                {/* Mapping Table */}
-                <div className="border border-border rounded-none overflow-x-auto bg-card relative z-10">
-                  <table className="w-full text-start border-separate border-spacing-0">
-                    <thead>
-                      <tr className="bg-muted/40 text-xs uppercase font-bold text-muted-foreground tracking-wider">
-                        {visibleColumns.erpField && (
-                          <th className="py-3 px-4 font-semibold text-start flex items-center gap-2 min-w-[200px] border-b border-border/85">
-                            {t('map.erpField')} ({currentModelKey})
-                            {isLoadingFields[currentModelKey] && <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground" />}
-                            {hasOdooConnection && !isLoadingFields[currentModelKey] && (
-                              <button
-                                type="button"
-                                onClick={handleRefreshFields}
-                                className="ml-auto p-1 rounded-none hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-colors"
-                                title={lang === 'ar' ? 'تحديث الحقول من أودو' : 'Refresh fields from Odoo'}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                              </button>
+                {/* Mapping table — exactly the read-only presentation, but every
+                    cell is editable and rows can be added or removed. */}
+                <div className="overflow-hidden border border-border bg-card">
+                  <div className="flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-1.5">
+                    <span className="flex items-center gap-1.5 text-[11px] font-bold text-foreground/80">
+                      <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                      {lang === 'ar' ? 'الحقول المربوطة' : 'Mapped fields'}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {lang === 'ar'
+                          ? `${currentModelMappings.length} حقل · ${currentModelKey}`
+                          : `${currentModelMappings.length} fields · ${currentModelKey}`}
+                      </span>
+                      {hasOdooConnection && (
+                        <button
+                          type="button"
+                          onClick={handleRefreshFields}
+                          disabled={isLoadingFields[currentModelKey]}
+                          className="p-0.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                          title={lang === 'ar' ? 'تحديث الحقول من أودو' : 'Refresh fields from Odoo'}
+                        >
+                          {isLoadingFields[currentModelKey]
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <RotateCcw className="h-3 w-3" />}
+                        </button>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] table-fixed text-xs">
+                      <thead>
+                        <tr className="border-b border-border/60 text-[10px] uppercase tracking-wide text-foreground/60">
+                          {visibleColumns.erpField && (
+                            <th className="w-[30%] px-3 py-1.5 text-start font-bold">
+                              {lang === 'ar' ? 'حقل ERP' : 'ERP field'}
+                            </th>
+                          )}
+                          {visibleColumns.zidField && (
+                            <th className="w-[27%] px-3 py-1.5 text-start font-bold">
+                              {lang === 'ar' ? 'حقل المتجر' : 'Store field'}
+                            </th>
+                          )}
+                          {visibleColumns.staticValue && (
+                            <th className="w-[18%] px-3 py-1.5 text-start font-bold">
+                              {lang === 'ar' ? 'قيمة ثابتة' : 'Static value'}
+                            </th>
+                          )}
+                          {visibleColumns.policy && (
+                            <th className="w-[20%] px-3 py-1.5 text-start font-bold">
+                              {lang === 'ar' ? 'السياسة' : 'Policy'}
+                            </th>
+                          )}
+                          <th
+                            ref={columnSettingsRef}
+                            className="w-[56px] px-2 py-1.5 text-end font-bold"
+                          >
+                            <button
+                              ref={buttonRef}
+                              type="button"
+                              onClick={() => setIsColumnSettingsOpen(!isColumnSettingsOpen)}
+                              className="inline-flex items-center justify-end p-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+                              title={lang === 'ar' ? 'إعدادات الأعمدة' : 'Column settings'}
+                            >
+                              <SlidersHorizontal className="h-3.5 w-3.5" />
+                            </button>
+
+                            {/* Column Settings Popover - Rendered via React Portal */}
+                            {typeof document !== 'undefined' && createPortal(
+                              <AnimatePresence>
+                                {isColumnSettingsOpen && (
+                                  <motion.div
+                                    ref={popoverRef}
+                                    initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                                    style={{
+                                      position: 'fixed',
+                                      top: popoverCoords?.top ?? 0,
+                                      left: popoverCoords?.left ?? 0,
+                                    }}
+                                    className="calm-ui z-[9999] min-w-[220px] bg-card border border-border rounded-none p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
+                                  >
+                                    <h4 className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/60">
+                                      {lang === 'ar' ? 'إعدادات الأعمدة' : 'Column Visibility'}
+                                    </h4>
+                                    <div className="space-y-2">
+                                      <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
+                                        <input
+                                          type="checkbox"
+                                          checked={visibleColumns.erpField}
+                                          onChange={() => toggleColumn('erpField')}
+                                          className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
+                                        />
+                                        <span>{lang === 'ar' ? 'حقل أودو (Odoo)' : 'Odoo Field'}</span>
+                                      </label>
+                                      <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
+                                        <input
+                                          type="checkbox"
+                                          checked={visibleColumns.zidField}
+                                          onChange={() => toggleColumn('zidField')}
+                                          className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
+                                        />
+                                        <span>
+                                          {platform === 'salla'
+                                            ? (lang === 'ar' ? 'حقل سلة (Salla)' : 'Salla Field')
+                                            : platform === 'shopify'
+                                              ? (lang === 'ar' ? 'حقل شوبيفاي (Shopify)' : 'Shopify Field')
+                                              : (lang === 'ar' ? 'حقل زد (Zid)' : 'Zid Field')
+                                          }
+                                        </span>
+                                      </label>
+                                      <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
+                                        <input
+                                          type="checkbox"
+                                          checked={visibleColumns.policy}
+                                          onChange={() => toggleColumn('policy')}
+                                          className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
+                                        />
+                                        <span>{lang === 'ar' ? 'سياسة المطابقة' : 'Match Policy'}</span>
+                                      </label>
+                                      <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
+                                        <input
+                                          type="checkbox"
+                                          checked={visibleColumns.staticValue}
+                                          onChange={() => toggleColumn('staticValue')}
+                                          className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
+                                        />
+                                        <span>{lang === 'ar' ? 'القيمة الثابتة' : 'Static Value'}</span>
+                                      </label>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>,
+                              document.body
                             )}
                           </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {currentModelMappings.length === 0 && (
+                          <tr>
+                            <td colSpan={totalColSpan} className="px-3 py-8 text-center text-[11px] text-muted-foreground">
+                              {t('map.noMappings')}
+                            </td>
+                          </tr>
                         )}
-                        {visibleColumns.zidField && (
-                          <th className="py-3 px-4 font-semibold text-start min-w-[200px] border-b border-border/85">
-                            {platform === 'salla' 
-                              ? (lang === 'ar' ? 'حقل سلة (Salla)' : 'Salla Field')
-                              : platform === 'shopify'
-                                ? (lang === 'ar' ? 'حقل شوبيفاي (Shopify)' : 'Shopify Field')
-                                : (lang === 'ar' ? 'حقل زد (Zid)' : 'Zid Field')
-                            }
-                          </th>
-                        )}
-                        {visibleColumns.policy && (
-                          <th className="py-3 px-4 font-semibold text-start min-w-[200px] border-b border-border/85">{lang === 'ar' ? 'المطابقة والسياسة البديلة' : 'Match & Fallback Policy'}</th>
-                        )}
-                        {visibleColumns.staticValue && (
-                          <th className="py-3 px-4 font-semibold text-start min-w-[150px] border-b border-border/85">{t('map.staticValue')}</th>
-                        )}
-                        <th 
-                          ref={columnSettingsRef}
-                          className={cn(
-                            "py-3 px-4 w-12 text-right sticky z-20 bg-muted/95 border-b border-border/80",
-                            lang === 'ar' ? "left-0 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.1)]" : "right-0 shadow-[-4px_0_8px_-3px_rgba(0,0,0,0.1)]"
-                          )}
-                        >
-                          <button
-                            ref={buttonRef}
-                            type="button"
-                            onClick={() => setIsColumnSettingsOpen(!isColumnSettingsOpen)}
-                            className="flex items-center justify-end w-full"
-                          >
-                            <SlidersHorizontal className="h-4 w-4 text-muted-foreground/60 hover:text-foreground transition-colors" />
-                          </button>
-                          
-                          {/* Column Settings Popover - Rendered via React Portal */}
-                          {typeof document !== 'undefined' && createPortal(
-                            <AnimatePresence>
-                              {isColumnSettingsOpen && (
-                                <motion.div
-                                  ref={popoverRef}
-                                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                                  style={{
-                                    position: 'fixed',
-                                    top: popoverCoords?.top ?? 0,
-                                    left: popoverCoords?.left ?? 0,
-                                  }}
-                                  className="calm-ui z-[9999] min-w-[220px] bg-card border border-border rounded-none p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
-                                >
-                                  <h4 className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/60">
-                                    {lang === 'ar' ? 'إعدادات الأعمدة' : 'Column Visibility'}
-                                  </h4>
-                                  <div className="space-y-2">
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
-                                      <input
-                                        type="checkbox"
-                                        checked={visibleColumns.erpField}
-                                        onChange={() => toggleColumn('erpField')}
-                                        className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
-                                      />
-                                      <span>{lang === 'ar' ? 'حقل أودو (Odoo)' : 'Odoo Field'}</span>
-                                    </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
-                                      <input
-                                        type="checkbox"
-                                        checked={visibleColumns.zidField}
-                                        onChange={() => toggleColumn('zidField')}
-                                        className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
-                                      />
-                                      <span>
-                                        {platform === 'salla' 
-                                          ? (lang === 'ar' ? 'حقل سلة (Salla)' : 'Salla Field')
-                                          : platform === 'shopify'
-                                            ? (lang === 'ar' ? 'حقل شوبيفاي (Shopify)' : 'Shopify Field')
-                                            : (lang === 'ar' ? 'حقل زد (Zid)' : 'Zid Field')
-                                      }
-                                      </span>
-                                    </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
-                                      <input
-                                        type="checkbox"
-                                        checked={visibleColumns.policy}
-                                        onChange={() => toggleColumn('policy')}
-                                        className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
-                                      />
-                                      <span>{lang === 'ar' ? 'سياسة المطابقة' : 'Match Policy'}</span>
-                                    </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
-                                      <input
-                                        type="checkbox"
-                                        checked={visibleColumns.staticValue}
-                                        onChange={() => toggleColumn('staticValue')}
-                                        className="rounded border-border text-foreground focus:ring-foreground h-3.5 w-3.5"
-                                      />
-                                      <span>{lang === 'ar' ? 'القيمة الثابتة' : 'Static Value'}</span>
-                                    </label>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>,
-                            document.body
-                          )}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60 text-sm">
-                      <AnimatePresence initial={false}>
+
                         {currentModelMappings.map((mapping) => {
                           const rowMeta = getFieldMeta(currentModelKey, mapping.erpField)
-                          const rowIsRelational = rowMeta?.type === 'many2one' || rowMeta?.type === 'many2many' || rowMeta?.type === 'one2many'
-                          return (
-                            <motion.tr
-                              key={mapping.id}
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="hover:bg-muted/20 group transition-all"
-                            >
-                              {/* ERP Field selection */}
-                              {visibleColumns.erpField && (
-                                <td className="py-1 px-4 text-start min-w-[200px] border-b border-border/40">
-                                  <SearchableSelect
-                                    value={mapping.erpField}
-                                    onChange={(val) => {
-                                      handleFieldChange(mapping.id, 'erpField', val)
-                                    }}
-                                    options={currentErpFields.map(opt => ({
-                                      ...opt,
-                                      label: formatFieldLabel(opt.label, lang)
-                                    }))}
-                                    placeholder={t('map.selectField')}
-                                    variant="cell"
-                                  />
-                                </td>
-                              )}
+                          const rowIsRelational =
+                            rowMeta?.type === 'many2one' ||
+                            rowMeta?.type === 'many2many' ||
+                            rowMeta?.type === 'one2many'
+                          const hasDetails = rowIsRelational && Boolean(
+                            mapping.inlineMatch?.erpField ||
+                            mapping.inlineMatch?.platformField ||
+                            (mapping.fuzzyMatchMappings && mapping.fuzzyMatchMappings.length > 0) ||
+                            mapping.createMappingId
+                          )
+                          const isExpanded = expandedLineId === mapping.id
 
-                              {/* Zid Field selection */}
-                              {visibleColumns.zidField && (
-                                <td className="py-1 px-4 text-start min-w-[200px] border-b border-border/40">
-                                  <div className="flex items-center gap-1">
+                          return (
+                            <React.Fragment key={mapping.id}>
+                              <tr className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                                {/* ERP field */}
+                                {visibleColumns.erpField && (
+                                  <td className="px-3 py-1 align-top">
                                     <SearchableSelect
-                                      value={mapping.zidField || ''}
+                                      value={mapping.erpField}
                                       onChange={(val) => {
-                                        handleFieldChange(mapping.id, 'zidField', val)
+                                        handleFieldChange(mapping.id, 'erpField', val)
                                       }}
-                                      options={[
-                                        { value: '', label: t('map.clear') },
-                                        ...currentZidFields.map(opt => ({
-                                          ...opt,
-                                          label: formatFieldLabel(opt.label, lang)
-                                        }))
-                                      ]}
+                                      options={currentErpFields.map(opt => ({
+                                        ...opt,
+                                        label: formatFieldLabel(opt.label, lang)
+                                      }))}
                                       placeholder={t('map.selectField')}
                                       variant="cell"
-                                      disabled={!rowIsRelational && hasStaticValue(mapping.staticValue)}
+                                      compact
                                     />
-                                    {mapping.zidField && (
+                                  </td>
+                                )}
+
+                                {/* Store field */}
+                                {visibleColumns.zidField && (
+                                  <td className="px-3 py-1 align-top">
+                                    <div className="flex items-center gap-0.5">
+                                      <SearchableSelect
+                                        value={mapping.zidField || ''}
+                                        onChange={(val) => {
+                                          handleFieldChange(mapping.id, 'zidField', val)
+                                        }}
+                                        options={[
+                                          { value: '', label: t('map.clear') },
+                                          ...currentZidFields.map(opt => ({
+                                            ...opt,
+                                            label: formatFieldLabel(opt.label, lang)
+                                          }))
+                                        ]}
+                                        placeholder={t('map.selectField')}
+                                        variant="cell"
+                                        compact
+                                        disabled={!rowIsRelational && hasStaticValue(mapping.staticValue)}
+                                      />
+                                      {mapping.zidField && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleFieldChange(mapping.id, 'zidField', '')}
+                                          className="shrink-0 p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                          title={lang === 'ar' ? 'إزالة حقل المتجر' : 'Clear store field'}
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                )}
+
+                                {/* Static value */}
+                                {visibleColumns.staticValue && (
+                                  <td className="px-3 py-1 align-top">
+                                    <div className="flex items-center gap-0.5">
+                                      {renderStaticValueInput(mapping)}
+                                      {hasStaticValue(mapping.staticValue) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStaticValueChange(mapping.id, Array.isArray(mapping.staticValue) ? [] : '')}
+                                          className="shrink-0 p-0.5 text-muted-foreground/60 transition-colors hover:text-foreground"
+                                          title={lang === 'ar' ? 'إزالة القيمة الثابتة' : 'Clear static value'}
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                )}
+
+                                {/* Policy */}
+                                {visibleColumns.policy && (
+                                  <td className="px-3 py-1 align-top">
+                                    {rowIsRelational ? (
+                                      <SearchableSelect
+                                        value={mapping.policy || ''}
+                                        onChange={(val) => {
+                                          const newPolicy = val as any
+                                          setMappings(prev => {
+                                            const currentList = prev[currentModelKey] || []
+                                            const updatedList = currentList.map(m => {
+                                              if (m.id === mapping.id) {
+                                                let newCreateMappingId = m.createMappingId
+                                                if (newPolicy === 'create') {
+                                                  newCreateMappingId = `internal:${rowMeta?.relation}`
+                                                } else {
+                                                  newCreateMappingId = undefined
+                                                }
+                                                return {
+                                                  ...m,
+                                                  policy: newPolicy,
+                                                  createMappingId: newCreateMappingId,
+                                                  staticValue: newPolicy === 'default' ? m.staticValue : ''
+                                                }
+                                              }
+                                              return m
+                                            })
+                                            return {
+                                              ...prev,
+                                              [currentModelKey]: updatedList
+                                            }
+                                          })
+
+                                          if (newPolicy === 'create' && rowMeta?.relation) {
+                                            // Add relation model to relatedOdooModels if not present
+                                            if (!relatedOdooModels.includes(rowMeta.relation) && rowMeta.relation !== odooModel) {
+                                              handleRelatedModelsChange([...relatedOdooModels, rowMeta.relation])
+                                            } else {
+                                              setActiveTab(rowMeta.relation)
+                                            }
+                                          }
+
+                                          setIsSaved(false)
+                                        }}
+                                        options={[
+                                          { value: 'create', label: lang === 'ar' ? 'إنشاء سجل جديد' : 'Create new' },
+                                          { value: 'default', label: lang === 'ar' ? 'قيمة افتراضية' : 'Default value' },
+                                          { value: 'block', label: lang === 'ar' ? 'إيقاف/تعليق' : 'Block/Skip' },
+                                          { value: 'none', label: lang === 'ar' ? 'تجاهل صامت' : 'Silent skip' }
+                                        ]}
+                                        placeholder={lang === 'ar' ? 'اختر السياسة...' : 'Select policy...'}
+                                        variant="cell"
+                                        compact
+                                      />
+                                    ) : (
+                                      <span className="px-1 text-[11px] text-muted-foreground">—</span>
+                                    )}
+                                  </td>
+                                )}
+
+                                {/* Row actions */}
+                                <td className="px-2 py-1 align-top">
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    {rowIsRelational && (
                                       <button
                                         type="button"
-                                        onClick={() => handleFieldChange(mapping.id, 'zidField', '')}
-                                        className="rounded-none p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-                                        title={lang === 'ar' ? 'إزالة حقل المتجر' : 'Clear store field'}
+                                        onClick={() => setExpandedLineId(isExpanded ? null : mapping.id)}
+                                        className={cn(
+                                          'p-1 transition-colors hover:bg-muted',
+                                          hasDetails ? 'text-foreground' : 'text-muted-foreground/60 hover:text-foreground'
+                                        )}
+                                        title={lang === 'ar' ? 'تفاصيل المطابقة' : 'Match details'}
+                                        aria-expanded={isExpanded}
                                       >
-                                        <X className="h-3.5 w-3.5" />
+                                        <SlidersHorizontal className="h-3.5 w-3.5" />
                                       </button>
                                     )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveLine(mapping.id)}
+                                      className="p-1 text-muted-foreground/60 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                                      title={lang === 'ar' ? 'حذف حقل الربط' : 'Remove Mapping Rule'}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
                                   </div>
                                 </td>
-                              )}
+                              </tr>
 
-                              {/* Resolution & Fallback Policy selection */}
-                              {visibleColumns.policy && (() => {
-                                const meta = getFieldMeta(currentModelKey, mapping.erpField)
-                                const isRelational = meta?.type === 'many2one' || meta?.type === 'many2many' || meta?.type === 'one2many'
-                                return (
-                                  <td className="py-1 px-4 text-start min-w-[200px] border-b border-border/40">
-                                    {isRelational ? (
-                                      <div className="space-y-2 py-1">
-                                        {/* Inline single-field match */}
+                              {/* Expanded row: the relational extras that would
+                                  otherwise make the table unreadable. */}
+                              {rowIsRelational && isExpanded && (
+                                <tr className="border-b border-border/40 bg-muted/20">
+                                  <td colSpan={totalColSpan} className="px-3 py-2.5">
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                      {/* Inline match */}
+                                      <div className="space-y-1">
+                                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                          {lang === 'ar' ? 'مطابقة السجل المرتبط' : 'Linked record match'}
+                                        </span>
                                         <div className="grid grid-cols-2 gap-2">
                                           <SearchableSelect
                                             value={mapping.inlineMatch?.erpField || ''}
@@ -2088,10 +2241,11 @@ export default function FieldMappingForm({
                                             }}
                                             options={[
                                               { value: '', label: lang === 'ar' ? 'حقل المطابقة...' : 'Match field...' },
-                                              ...(modelFields[meta?.relation || ''] || ODOO_FIELDS[meta?.relation || ''] || []).map(f => ({ value: f.value, label: formatFieldLabel(f.label, lang) }))
+                                              ...(modelFields[rowMeta?.relation || ''] || ODOO_FIELDS[rowMeta?.relation || ''] || []).map(f => ({ value: f.value, label: formatFieldLabel(f.label, lang) }))
                                             ]}
                                             placeholder={lang === 'ar' ? 'حقل أودو...' : 'Odoo field...'}
                                             variant="cell"
+                                            compact
                                           />
                                           <SearchableSelect
                                             value={mapping.inlineMatch?.platformField || ''}
@@ -2114,92 +2268,23 @@ export default function FieldMappingForm({
                                             ]}
                                             placeholder={lang === 'ar' ? 'حقل المتجر...' : 'Store field...'}
                                             variant="cell"
+                                            compact
                                           />
                                         </div>
+                                      </div>
 
-                                        {/* Advanced link */}
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            setActiveFuzzyLine(mapping)
-                                            setFuzzyModalMappings(mapping.fuzzyMatchMappings || [])
-                                          }}
-                                          className="text-[10px] font-semibold text-muted-foreground hover:text-foreground underline-offset-2 hover:underline flex items-center gap-1"
-                                        >
-                                          <span>⚙️</span>
-                                          {mapping.fuzzyMatchMappings && mapping.fuzzyMatchMappings.length > 0
-                                            ? (lang === 'ar' ? `متقدم (${mapping.fuzzyMatchMappings.length} حقول)` : `Advanced (${mapping.fuzzyMatchMappings.length} fields)`)
-                                            : (lang === 'ar' ? 'متقدم (متعدد الحقول)...' : 'Advanced (multi-field)...')}
-                                        </button>
-
-                                        {/* Fallback policy selector (forced selection) */}
-                                        <div className="space-y-1">
-                                          <label className="text-[10px] text-muted-foreground block font-bold text-start">
-                                            {lang === 'ar' ? 'إذا لم يعثر على تطابق:' : 'If no match found:'}
-                                          </label>
-                                          <SearchableSelect
-                                            value={mapping.policy || ''}
-                                            onChange={(val) => {
-                                              const newPolicy = val as any
-                                              setMappings(prev => {
-                                                const currentList = prev[currentModelKey] || []
-                                                const updatedList = currentList.map(m => {
-                                                  if (m.id === mapping.id) {
-                                                    let newCreateMappingId = m.createMappingId
-                                                    if (newPolicy === 'create') {
-                                                      newCreateMappingId = `internal:${meta?.relation}`
-                                                    } else {
-                                                      newCreateMappingId = undefined
-                                                    }
-                                                    return { 
-                                                      ...m, 
-                                                      policy: newPolicy,
-                                                      createMappingId: newCreateMappingId,
-                                                      staticValue: newPolicy === 'default' ? m.staticValue : '' 
-                                                    }
-                                                  }
-                                                  return m
-                                                })
-                                                return {
-                                                  ...prev,
-                                                  [currentModelKey]: updatedList
-                                                }
-                                              })
-
-                                              if (newPolicy === 'create' && meta?.relation) {
-                                                // Add relation model to relatedOdooModels if not present
-                                                if (!relatedOdooModels.includes(meta.relation) && meta.relation !== odooModel) {
-                                                  handleRelatedModelsChange([...relatedOdooModels, meta.relation])
-                                                } else {
-                                                  setActiveTab(meta.relation)
-                                                }
-                                              }
-
-                                              setIsSaved(false)
-                                            }}
-                                            options={[
-                                              { value: 'create', label: lang === 'ar' ? 'إنشاء سجل جديد' : 'Create new' },
-                                              { value: 'default', label: lang === 'ar' ? 'قيمة افتراضية' : 'Default value' },
-                                              { value: 'block', label: lang === 'ar' ? 'إيقاف/تعليق' : 'Block/Skip' },
-                                              { value: 'none', label: lang === 'ar' ? 'تجاهل صامت' : 'Silent skip' }
-                                            ]}
-                                            placeholder={lang === 'ar' ? 'اختر السياسة...' : 'Select policy...'}
-                                            variant="cell"
-                                          />
-                                        </div>
-                                      
-                                      {/* Sub-mapping selection for 'create' policy */}
+                                      {/* Creation mapping (create policy only) */}
                                       {mapping.policy === 'create' && (
-                                        <div className="space-y-1 pt-1">
-                                          <label className="text-[10px] text-muted-foreground block font-bold text-start">
-                                            {lang === 'ar' ? 'ماب الإنشاء (داخلي أو خارجي):' : 'Creation Mapping (Internal or External):'}
-                                          </label>
+                                        <div className="space-y-1">
+                                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                            {lang === 'ar' ? 'ماب الإنشاء (داخلي أو خارجي)' : 'Creation mapping (internal or external)'}
+                                          </span>
                                           <SearchableSelect
                                             value={mapping.createMappingId || ''}
                                             onChange={(val) => {
                                               setMappings(prev => ({
                                                 ...prev,
-                                                [currentModelKey]: (prev[currentModelKey] || []).map(m => 
+                                                [currentModelKey]: (prev[currentModelKey] || []).map(m =>
                                                   m.id === mapping.id ? { ...m, createMappingId: val } : m
                                                 )
                                               }))
@@ -2222,75 +2307,54 @@ export default function FieldMappingForm({
                                             ]}
                                             placeholder={lang === 'ar' ? 'اختر ماب الإنشاء...' : 'Select creation mapping...'}
                                             variant="cell"
+                                            compact
                                           />
                                         </div>
                                       )}
+
+                                      {/* Multi-field match designer */}
+                                      <div className="space-y-1 md:col-span-2">
+                                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                          {lang === 'ar' ? 'مطابقة متقدمة (متعدد الحقول)' : 'Advanced match (multi-field)'}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActiveFuzzyLine(mapping)
+                                            setFuzzyModalMappings(mapping.fuzzyMatchMappings || [])
+                                          }}
+                                          className="flex items-center gap-1.5 border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+                                        >
+                                          <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
+                                          {mapping.fuzzyMatchMappings && mapping.fuzzyMatchMappings.length > 0
+                                            ? (lang === 'ar' ? `${mapping.fuzzyMatchMappings.length} حقل مطابقة` : `${mapping.fuzzyMatchMappings.length} match fields`)
+                                            : (lang === 'ar' ? 'إعداد المطابقة' : 'Configure match')}
+                                        </button>
+                                      </div>
                                     </div>
-                                  ) : (
-                                    <span className="text-muted-foreground/30 px-3">—</span>
-                                  )}
-                                </td>
-                              )
-                            })()}
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          )
+                        })}
 
-                            {/* Static Value selection/input */}
-                            {visibleColumns.staticValue && (
-                              <td className="py-1 px-4 text-start min-w-[150px] border-b border-border/40">
-                                <div className="flex items-center gap-1">
-                                  {renderStaticValueInput(mapping)}
-                                  {hasStaticValue(mapping.staticValue) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleStaticValueChange(mapping.id, Array.isArray(mapping.staticValue) ? [] : '')}
-                                      className="rounded-none p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
-                                      title={lang === 'ar' ? 'إزالة القيمة الثابتة' : 'Clear static value'}
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            )}
-
-                            {/* Actions Column (Delete) - Sticky */}
-                            <td className={cn(
-                              "py-2.5 px-4 text-right sticky z-10 border-b border-border/40 transition-colors bg-card group-hover:bg-muted/50 dark:group-hover:bg-muted/20",
-                              lang === 'ar' ? "left-0 shadow-[4px_0_8px_-3px_rgba(0,0,0,0.1)]" : "right-0 shadow-[-4px_0_8px_-3px_rgba(0,0,0,0.1)]"
-                            )}>
-                              <button
-                                onClick={() => handleRemoveLine(mapping.id)}
-                                className="text-muted-foreground/60 hover:text-destructive p-1 rounded-none hover:bg-destructive/10 transition-all"
-                                title={lang === 'ar' ? 'حذف حقل الربط' : 'Remove Mapping Rule'}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
-                          </motion.tr>
-                        )})}
-                      </AnimatePresence>
-
-                      {currentModelMappings.length === 0 && (
-                        <tr>
-                          <td colSpan={totalColSpan} className="py-8 text-center text-muted-foreground/80 italic">
-                            {t('map.noMappings')}
+                        {/* Add a line */}
+                        <tr className="border-t border-border/40 bg-muted/30">
+                          <td colSpan={totalColSpan} className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={handleAddLine}
+                              className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80 transition-colors hover:text-foreground"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              {t('map.addFieldBtn')}
+                            </button>
                           </td>
                         </tr>
-                      )}
-
-                      {/* Add a Line Row */}
-                      <tr>
-                        <td colSpan={totalColSpan} className="py-3 px-4">
-                          <button
-                            onClick={handleAddLine}
-                            className="text-foreground hover:text-foreground/80 font-semibold flex items-center gap-1.5 transition-all hover:translate-x-0.5 text-sm"
-                          >
-                            <Plus className="h-4 w-4" />
-                            {t('map.addFieldBtn')}
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </motion.div>
             ) : activeTab === 'settings' ? (
@@ -2483,7 +2547,7 @@ export default function FieldMappingForm({
                         {variantSyncMode === 'AS_VARIANTS' && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3.5 border-t border-border/40 animate-in fade-in slide-in-from-top-1 duration-200">
                             <div className="space-y-1.5">
-                              <label className="text-[11px] font-bold text-muted-foreground block">
+                              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
                                 {lang === 'ar' ? '🔍 حقل مطابقة المتغير في Odoo:' : '🔍 Odoo Variant Match Field:'}
                               </label>
                               <div className="rounded-none border border-border bg-card p-0.5">
@@ -2511,7 +2575,7 @@ export default function FieldMappingForm({
                             </div>
 
                             <div className="space-y-1.5">
-                              <label className="text-[11px] font-bold text-muted-foreground block">
+                              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
                                 {lang === 'ar' ? '🔍 حقل المطابقة في المتجر:' : '🔍 Store Variant Match Field:'}
                               </label>
                               <div className="rounded-none border border-border bg-card p-0.5">
