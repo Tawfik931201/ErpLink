@@ -179,7 +179,10 @@ export async function GET(request: NextRequest) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'unauthorized', message: 'Sign in before connecting a store' }, { status: 401 })
     }
-    return redirectToConnectZid(request, { error: 'unauthorized' })
+    const signInUrl = new URL('/sign-in', request.url)
+    const returnUrl = request.nextUrl.pathname + request.nextUrl.search
+    signInUrl.searchParams.set('redirect_url', returnUrl)
+    return NextResponse.redirect(signInUrl)
   }
 
   const { data: userDb, error: userDbErr } = await supabase
@@ -193,7 +196,12 @@ export async function GET(request: NextRequest) {
     return redirectToConnectZid(request, { error: 'workspace_lookup_failed' })
   }
 
-  const workspaceId: string | null = userDb?.active_workspace_id ?? null
+  let workspaceId: string | null = userDb?.active_workspace_id ?? null
+  if (!workspaceId) {
+    const { ensureDefaultWorkspace } = await import('@/lib/workspace-defaults')
+    workspaceId = await ensureDefaultWorkspace(userId)
+  }
+
   if (!workspaceId) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'no_workspace', message: 'Select a workspace before connecting a store' }, { status: 400 })

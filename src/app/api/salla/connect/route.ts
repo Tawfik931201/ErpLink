@@ -1,11 +1,19 @@
 import crypto from 'crypto'
 
-import { NextResponse } from 'next/server'
+import { auth } from '@clerk/nextjs/server'
+import { type NextRequest, NextResponse } from 'next/server'
 
 import { SALLA_OAUTH_SCOPES } from '@/lib/salla-client'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { userId } = await auth()
+    if (!userId) {
+      const signInUrl = new URL('/sign-in', req.url)
+      const returnUrl = req.nextUrl.pathname + req.nextUrl.search
+      signInUrl.searchParams.set('redirect_url', returnUrl)
+      return NextResponse.redirect(signInUrl)
+    }
     const clientId = process.env.SALLA_CLIENT_ID
     const redirectUri = process.env.SALLA_REDIRECT_URI
 

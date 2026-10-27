@@ -105,7 +105,10 @@ export async function GET(request: NextRequest) {
   // token endpoint for nothing. Failing here makes that impossible.
   const { userId } = await auth()
   if (!userId) {
-    return redirectToConnectStore(request, { error: 'unauthorized', description: AR.unauthorized })
+    const signInUrl = new URL('/sign-in', request.url)
+    const returnUrl = request.nextUrl.pathname + request.nextUrl.search
+    signInUrl.searchParams.set('redirect_url', returnUrl)
+    return NextResponse.redirect(signInUrl)
   }
 
   const { data: userDb, error: userDbErr } = await supabase
@@ -119,7 +122,12 @@ export async function GET(request: NextRequest) {
     return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
   }
 
-  const workspaceId: string | null = userDb?.active_workspace_id ?? null
+  let workspaceId: string | null = userDb?.active_workspace_id ?? null
+  if (!workspaceId) {
+    const { ensureDefaultWorkspace } = await import('@/lib/workspace-defaults')
+    workspaceId = await ensureDefaultWorkspace(userId)
+  }
+
   if (!workspaceId) {
     return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
   }
