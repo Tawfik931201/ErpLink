@@ -31,8 +31,8 @@ export default function MappingCenterNotice({
   }
 
   return (
-    <div className="flex flex-col sm:flex-row items-start gap-3 rounded-xl border border-primary/15 bg-primary/5 p-4" dir={dir}>
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+    <div className="flex flex-col sm:flex-row items-start gap-3 rounded-none border border-primary/15 bg-primary/5 p-4" dir={dir}>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-none bg-primary/10 text-primary">
         <AlertCircle className="h-4 w-4" />
       </span>
       <div className="space-y-1.5 flex-1">

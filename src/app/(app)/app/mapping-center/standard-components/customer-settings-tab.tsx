@@ -118,7 +118,7 @@ export function CustomerSettingsTab({
             {lang === 'ar' ? 'طبيعة حساب العميل' : 'Customer Account Type'}
           </label>
           <select
-            className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+            className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
             value={customerDefaultType}
             onChange={(e) => setCustomerDefaultType(e.target.value)}
           >
@@ -147,7 +147,7 @@ export function CustomerSettingsTab({
               {lang === 'ar' ? 'حساب المدينين (Account Receivable)' : 'Account Receivable'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={receivableAccountId}
               onChange={(e) => setReceivableAccountId(e.target.value)}
               disabled={isLoadingAccounts}
@@ -168,7 +168,7 @@ export function CustomerSettingsTab({
               {lang === 'ar' ? 'حساب الدائنين (Account Payable)' : 'Account Payable'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={payableAccountId}
               onChange={(e) => setPayableAccountId(e.target.value)}
               disabled={isLoadingAccounts}
@@ -202,7 +202,7 @@ export function CustomerSettingsTab({
               {lang === 'ar' ? 'اختر الشركة' : 'Company'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={customerCompanyId}
               onChange={(e) => setCustomerCompanyId(e.target.value)}
               disabled={isLoadingCompanies}
@@ -250,7 +250,7 @@ export function CustomerSettingsTab({
             {lang === 'ar' ? 'الإجراء في أودو' : 'Action in Odoo'}
           </label>
           <select
-            className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+            className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
             value={customerOnDelete}
             onChange={(e) => setCustomerOnDelete(e.target.value)}
           >
@@ -345,7 +345,7 @@ export function CustomerSettingsTab({
           />
 
           {customerDisabled && (
-            <div className="flex items-center gap-2 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-xs">
+            <div className="flex items-center gap-2 p-3 rounded-none border border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-xs">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
                 {lang === 'ar'
@@ -385,7 +385,7 @@ export function CustomerSettingsTab({
         <Button
           onClick={handleSaveCustomers}
           disabled={isSavingCustomers}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl h-10 px-6 text-xs shadow-sm gap-2 transition-all"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-none h-10 px-6 text-xs shadow-sm gap-2 transition-all"
         >
           {isSavingCustomers ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           <span>{lang === 'ar' ? 'حفظ إعدادات العملاء' : 'Save Customer Settings'}</span>
@@ -395,7 +395,7 @@ export function CustomerSettingsTab({
           type="button"
           variant="outline"
           onClick={() => setIsLogOpen(true)}
-          className="rounded-xl h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
+          className="rounded-none h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
         >
           <History className="h-3.5 w-3.5 text-muted-foreground" />
           <span>{lang === 'ar' ? 'سجل مزامنة العملاء' : 'Customer Sync Log'}</span>

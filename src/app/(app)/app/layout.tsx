@@ -93,10 +93,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   const currentPath = (await headers()).get('x-pathname') || ''
-  // A detail page under /app/logs/<id> is not an exact key in the map (the id
-  // is a UUID), so resolve it to the same permission as the list page.
+  // Detail pages under /app/logs/<id> and /app/mapping-center/custom/<id> are not
+  // exact keys in the map (the id is a UUID), so resolve them to the same
+  // permission as their list page — otherwise a non-owner member with
+  // `mapping-center` would lose access the moment they open a record.
   const permissionKey = permissionMap[currentPath]
     ?? (currentPath.startsWith('/app/logs/') ? 'mapping-center' : undefined)
+    ?? (currentPath.startsWith('/app/mapping-center/custom/') ? 'mapping-center' : undefined)
     ?? (currentPath.startsWith('/app/connect-store/') ? 'connect-store' : undefined)
   const isPageRestricted = !isOwner
     && currentPath !== '/app/settings/workspace'

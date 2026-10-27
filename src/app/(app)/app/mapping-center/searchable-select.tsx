@@ -257,7 +257,7 @@ export default function SearchableSelect({
     <div ref={containerRef} className={cn('relative w-full', className)} dir={dir}>
       <div
         className={cn(
-          'flex w-full items-center justify-between rounded-md text-sm ring-offset-background transition-all',
+          'flex w-full items-center justify-between rounded-none text-sm ring-offset-background transition-all',
           variant === 'cell'
             ? 'border border-transparent bg-transparent hover:bg-muted/30 hover:border-input'
             : 'border border-input bg-inputBg',
@@ -277,7 +277,7 @@ export default function SearchableSelect({
             return (
               <span
                 key={val}
-                className="inline-flex items-center gap-1 bg-muted text-foreground text-xs font-semibold px-2 py-0.5 rounded-md border border-border animate-in zoom-in-95 duration-150 whitespace-normal break-words"
+                className="inline-flex items-center gap-1 bg-muted text-foreground text-xs font-semibold px-2 py-0.5 rounded-none border border-border animate-in zoom-in-95 duration-150 whitespace-normal break-words"
               >
                 {formatFieldLabel(opt.label, lang)}
                 <button
@@ -287,7 +287,7 @@ export default function SearchableSelect({
                     const newValues = (value as string[]).filter((v) => v !== val)
                     onChange(newValues)
                   }}
-                  className="hover:text-destructive text-muted-foreground/60 transition-colors rounded-md p-0.5"
+                  className="hover:text-destructive text-muted-foreground/60 transition-colors rounded-none p-0.5"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -327,7 +327,7 @@ export default function SearchableSelect({
                 setSearchQuery('')
                 inputRef.current?.focus()
               }}
-              className="text-muted-foreground/60 hover:text-foreground p-0.5 rounded-lg animate-in fade-in"
+              className="text-muted-foreground/60 hover:text-foreground p-0.5 rounded-none animate-in fade-in"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -343,7 +343,7 @@ export default function SearchableSelect({
                 inputRef.current?.focus()
               }
             }}
-            className="text-muted-foreground/60 hover:text-foreground rounded-md p-1"
+            className="text-muted-foreground/60 hover:text-foreground rounded-none p-1"
           >
             <ChevronsUpDown className="h-4 w-4 shrink-0" />
           </button>
@@ -369,7 +369,7 @@ export default function SearchableSelect({
                 width: dropdownCoords.width,
               }}
               className={cn(
-                "calm-ui z-[9999] rounded-md border border-border bg-popover text-popover-foreground outline-none shadow-lg",
+                "calm-ui z-[9999] rounded-none border border-border bg-popover text-popover-foreground outline-none shadow-lg",
                 dropdownDirection === 'up' ? "translate-y-[-4px]" : "translate-y-[4px]"
               )}
             >

@@ -449,7 +449,7 @@ export function OrderSettingsTab({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderCustomerFallbackPolicy === 'create_new'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -478,7 +478,7 @@ export function OrderSettingsTab({
 
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderCustomerFallbackPolicy === 'skip_order'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -507,7 +507,7 @@ export function OrderSettingsTab({
 
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderCustomerFallbackPolicy === 'default_customer'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -581,7 +581,7 @@ export function OrderSettingsTab({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderProductFallbackPolicy === 'create_new'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -610,7 +610,7 @@ export function OrderSettingsTab({
 
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderProductFallbackPolicy === 'skip_order'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -639,7 +639,7 @@ export function OrderSettingsTab({
 
           <label
             className={cn(
-              'flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all duration-200',
+              'flex items-start gap-3 p-4 rounded-none border cursor-pointer transition-all duration-200',
               orderProductFallbackPolicy === 'default_product'
                 ? 'bg-primary/5 border-primary text-foreground ring-1 ring-primary/30'
                 : 'bg-background/60 border-border/70 hover:border-border text-muted-foreground hover:text-foreground'
@@ -841,7 +841,7 @@ export function OrderSettingsTab({
           {storeWarehouseRules.map((rule) => (
             <div
               key={rule.rowKey}
-              className="flex items-center gap-2 p-2 rounded-xl border border-border/60 bg-background/60"
+              className="flex items-center gap-2 p-2 rounded-none border border-border/60 bg-background/60"
             >
               <SearchableSelect
                 className="flex-1 min-w-0"
@@ -875,7 +875,7 @@ export function OrderSettingsTab({
                 type="button"
                 onClick={() => handleRemoveWarehouseRule(rule.rowKey)}
                 title={lang === 'ar' ? 'حذف' : 'Remove'}
-                className="h-8 w-8 shrink-0 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                className="h-8 w-8 shrink-0 flex items-center justify-center rounded-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
               >
                 <Trash2 className="h-4 w-4" />
               </button>
@@ -883,7 +883,7 @@ export function OrderSettingsTab({
           ))}
 
           {storeWarehouseRules.length === 0 && (
-            <div className="p-3 text-center border border-dashed border-border/80 rounded-xl text-xs text-muted-foreground">
+            <div className="p-3 text-center border border-dashed border-border/80 rounded-none text-xs text-muted-foreground">
               {lang === 'ar'
                 ? 'لا توجد قواعد مخصصة — سيتم توجيه جميع الطلبات للمستودع الافتراضي.'
                 : 'No custom routing rules — all orders go to the default warehouse.'}
@@ -955,7 +955,7 @@ export function OrderSettingsTab({
                   return (
                     <div
                       key={rule.rowKey}
-                      className="grid grid-cols-1 sm:grid-cols-[1.1fr_1.3fr_1.5fr_90px_36px] items-center gap-2 p-2 rounded-xl border border-border/60 bg-background/60"
+                      className="grid grid-cols-1 sm:grid-cols-[1.1fr_1.3fr_1.5fr_90px_36px] items-center gap-2 p-2 rounded-none border border-border/60 bg-background/60"
                     >
                       <SearchableSelect
                         options={[
@@ -974,7 +974,7 @@ export function OrderSettingsTab({
                       />
 
                       {rule.condition === 'all' ? (
-                        <div className="flex h-9 items-center rounded-xl border border-dashed border-border px-3 text-xs text-muted-foreground bg-muted/20">
+                        <div className="flex h-9 items-center rounded-none border border-dashed border-border px-3 text-xs text-muted-foreground bg-muted/20">
                           {lang === 'ar' ? 'لكل الطلبات' : 'Applies to all'}
                         </div>
                       ) : (
@@ -1027,7 +1027,7 @@ export function OrderSettingsTab({
                           min="0.01"
                           max="100"
                           step="0.01"
-                          className="w-full h-9 px-2.5 pe-6 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                          className="w-full h-9 px-2.5 pe-6 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                           value={rule.percentage}
                           onChange={(e) =>
                             handleAnalyticRuleChange(rule.rowKey, { percentage: e.target.value })
@@ -1043,7 +1043,7 @@ export function OrderSettingsTab({
                         type="button"
                         onClick={() => handleRemoveAnalyticRule(rule.rowKey)}
                         title={lang === 'ar' ? 'حذف' : 'Remove'}
-                        className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        className="h-8 w-8 flex items-center justify-center rounded-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -1052,7 +1052,7 @@ export function OrderSettingsTab({
                 })}
 
                 {orderAnalyticRules.length === 0 && (
-                  <div className="p-3 text-center border border-dashed border-border/80 rounded-xl text-xs text-muted-foreground">
+                  <div className="p-3 text-center border border-dashed border-border/80 rounded-none text-xs text-muted-foreground">
                     {lang === 'ar'
                       ? 'لا توجد قواعد توزيع تحليلي بعد — اضغط "إضافة قاعدة" لتخصيص حساب تحليلي.'
                       : 'No analytic rules yet — click "Add Rule" to configure.'}
@@ -1154,7 +1154,7 @@ export function OrderSettingsTab({
       >
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Shipping */}
-          <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-3">
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
             <SettingToggle
               checked={orderAddShipping}
               onChange={setOrderAddShipping}
@@ -1183,7 +1183,7 @@ export function OrderSettingsTab({
                   </label>
                   <input
                     type="text"
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderShippingProductSku}
                     onChange={(e) => setOrderShippingProductSku(e.target.value)}
                     placeholder="shipping-product"
@@ -1194,7 +1194,7 @@ export function OrderSettingsTab({
           </div>
 
           {/* COD */}
-          <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-3">
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
             <SettingToggle
               checked={orderAddCod}
               onChange={setOrderAddCod}
@@ -1223,7 +1223,7 @@ export function OrderSettingsTab({
                   </label>
                   <input
                     type="text"
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderCodProductSku}
                     onChange={(e) => setOrderCodProductSku(e.target.value)}
                     placeholder="cod-fee-product"
@@ -1238,7 +1238,7 @@ export function OrderSettingsTab({
                     type="number"
                     min="0"
                     step="0.01"
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderCodAmount}
                     onChange={(e) => setOrderCodAmount(e.target.value)}
                     placeholder="10"
@@ -1249,7 +1249,7 @@ export function OrderSettingsTab({
           </div>
 
           {/* Discount */}
-          <div className="rounded-xl border border-border/80 bg-background/60 p-4 space-y-3">
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
             <SettingToggle
               checked={orderAddDiscount}
               onChange={setOrderAddDiscount}
@@ -1278,7 +1278,7 @@ export function OrderSettingsTab({
                   </label>
                   <input
                     type="text"
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderDiscountProductSku}
                     onChange={(e) => setOrderDiscountProductSku(e.target.value)}
                     placeholder="discount-product"
@@ -1290,7 +1290,7 @@ export function OrderSettingsTab({
                     {lang === 'ar' ? 'طريقة الخصم' : 'Discount Mode'}
                   </label>
                   <select
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderDiscountMode}
                     onChange={(e) => setOrderDiscountMode(e.target.value)}
                   >
@@ -1320,7 +1320,7 @@ export function OrderSettingsTab({
               {lang === 'ar' ? 'طريقة معالجة المرتجع في أودو' : 'Return Handling Mode'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={orderReturnsMode}
               onChange={(e) => setOrderReturnsMode(e.target.value as typeof orderReturnsMode)}
             >
@@ -1356,7 +1356,7 @@ export function OrderSettingsTab({
                     <input
                       type="number"
                       min={1}
-                      className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                      className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                       value={orderReturnsJournalId}
                       onChange={(e) => setOrderReturnsJournalId(e.target.value)}
                       placeholder={lang === 'ar' ? 'معرّف الدفتر في أودو' : 'Odoo Journal ID'}
@@ -1371,7 +1371,7 @@ export function OrderSettingsTab({
                     {lang === 'ar' ? 'إذا لم يوجد الأمر الأصلي في أودو' : 'If Original Order Missing'}
                   </label>
                   <select
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderReturnsFallback}
                     onChange={(e) => setOrderReturnsFallback(e.target.value as typeof orderReturnsFallback)}
                   >
@@ -1388,7 +1388,7 @@ export function OrderSettingsTab({
                   </label>
                   <input
                     type="text"
-                    className="w-full h-9 px-3 rounded-xl border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                     value={orderReturnsReason}
                     onChange={(e) => setOrderReturnsReason(e.target.value)}
                     placeholder={lang === 'ar' ? 'يُكتب على أمر المبيعات أو الإشعار' : 'Written on order/credit note'}
@@ -1429,7 +1429,7 @@ export function OrderSettingsTab({
           {orderUpdateCustomStatus && (
             <div className="space-y-4 pt-2 border-t border-border/60">
               {statusFieldExists ? (
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+                <div className="rounded-none border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-semibold">
                       <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -1485,7 +1485,7 @@ export function OrderSettingsTab({
                       {statusFieldOptions.map((opt) => (
                         <span
                           key={opt.key}
-                          className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-background border border-border/70 text-foreground"
+                          className="inline-flex items-center px-2 py-0.5 rounded-none text-[10px] font-medium bg-background border border-border/70 text-foreground"
                         >
                           <span className="font-semibold text-primary me-1">{opt.key}:</span>
                           {opt.label}
@@ -1495,7 +1495,7 @@ export function OrderSettingsTab({
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-dashed border-primary/30 bg-primary/5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-none border border-dashed border-primary/30 bg-primary/5">
                   <div className="space-y-1">
                     <div className="font-semibold text-xs text-foreground flex items-center gap-1.5">
                       <Wand2 className="h-4 w-4 text-primary" />
@@ -1516,7 +1516,7 @@ export function OrderSettingsTab({
                     type="button"
                     onClick={handleCreateStatusField}
                     disabled={isCreatingStatusField || !hasOdooConnection}
-                    className="shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl h-9 text-xs px-4 gap-1.5"
+                    className="shrink-0 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-none h-9 text-xs px-4 gap-1.5"
                   >
                     {isCreatingStatusField ? (
                       <>
@@ -1547,7 +1547,7 @@ export function OrderSettingsTab({
             : 'Map each store order status to its target lifecycle stage in Odoo'
         }
       >
-        <div className="rounded-xl border border-border/80 overflow-hidden bg-background">
+        <div className="rounded-none border border-border/80 overflow-hidden bg-background">
           <table className="w-full text-xs text-left border-collapse" dir={dir}>
             <thead>
               <tr className="bg-muted/40 text-muted-foreground border-b border-border/60">
@@ -1582,7 +1582,7 @@ export function OrderSettingsTab({
                     </td>
                     <td className="px-4 py-2.5">
                       <select
-                        className="w-full h-8 px-2.5 rounded-lg border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                        className="w-full h-8 px-2.5 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
                         value={orderStateMapping[status.key]?.state || ''}
                         disabled={!isEnabled}
                         onChange={(e) => {
@@ -1645,7 +1645,7 @@ export function OrderSettingsTab({
         <Button
           onClick={handleSaveOrders}
           disabled={isSavingOrders}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl h-10 px-6 text-xs shadow-sm gap-2 transition-all"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-none h-10 px-6 text-xs shadow-sm gap-2 transition-all"
         >
           {isSavingOrders ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           <span>{lang === 'ar' ? 'حفظ إعدادات الطلبات' : 'Save Order Settings'}</span>
@@ -1655,7 +1655,7 @@ export function OrderSettingsTab({
           type="button"
           variant="outline"
           onClick={() => setIsOrderLogOpen(true)}
-          className="rounded-xl h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
+          className="rounded-none h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
         >
           <History className="h-3.5 w-3.5 text-muted-foreground" />
           <span>{lang === 'ar' ? 'سجل مزامنة الطلبات' : 'Order Sync Log'}</span>

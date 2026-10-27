@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
+import { MappingCenterHeader } from '@/components/mapping-center/mapping-center-header'
 import { resolveLanguage } from '@/lib/translations'
 
 import { getMappingCenterConnection } from './mapping-center-data'
@@ -38,6 +39,14 @@ export default async function MappingCenterPage(
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}
+
+      <MappingCenterHeader
+        title={lang === 'ar' ? 'ستاندرد مابينج' : 'Standard Mapping'}
+        subtitle={lang === 'ar'
+          ? 'إعدادات ربط الحقول الافتراضية لكل نوع عنصر (تصنيفات، منتجات، عملاء، طلبات)'
+          : 'Default field-mapping settings per entity (categories, products, customers, orders)'}
+        dir={dir}
+      />
 
       <StandardMappingClient
         hasOdooConnection={hasErpConnection}

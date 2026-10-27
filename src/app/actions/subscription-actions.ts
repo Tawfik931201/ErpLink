@@ -23,22 +23,6 @@ import {
   trialEndMs,
 } from '@/lib/workspace-trial'
 
-/** Shape of a row fetched from the `subscriptions` table (via `select('*')`). */
-interface RawSubscription {
-  id: string
-  workspace_id: string
-  user_id: string
-  start_date: string
-  months_paid: number
-  end_date: string
-  amount_paid: number | string
-  currency: string
-  status: string
-  notes: string | null
-  created_at: string
-  archived_at: string | null
-}
-
 // ──────────────────────────── Helpers ────────────────────────────
 
 async function requireAdmin() {
@@ -1193,8 +1177,8 @@ export interface AdminClientRow {
 
 /**
  * Lean subscription row for the admin client list: exactly the columns the
- * merge below reads (see the scoped select in `getAllClients`). Separate from
- * `RawSubscription` (the full `select('*')` shape) on purpose.
+ * merge below reads (see the scoped select in `getAllClients`). Deliberately
+ * not a `select('*')` row — naming the columns is what keeps this readable.
  */
 interface RawClientSub {
   id: string

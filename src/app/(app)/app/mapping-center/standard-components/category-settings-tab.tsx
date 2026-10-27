@@ -117,7 +117,7 @@ export function CategorySettingsTab({
               {lang === 'ar' ? 'طريقة حساب التكلفة (Costing Method)' : 'Costing Method'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={costMethod}
               onChange={(e) => setCostMethod(e.target.value)}
             >
@@ -141,7 +141,7 @@ export function CategorySettingsTab({
               {lang === 'ar' ? 'تقييم المخزون (Inventory Valuation)' : 'Inventory Valuation'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={inventoryValuation}
               onChange={(e) => setInventoryValuation(e.target.value)}
             >
@@ -178,7 +178,7 @@ export function CategorySettingsTab({
               {lang === 'ar' ? 'اختر الشركة' : 'Company'}
             </label>
             <select
-              className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
               value={categoryCompanyId}
               onChange={(e) => setCategoryCompanyId(e.target.value)}
               disabled={isLoadingCompanies}
@@ -226,7 +226,7 @@ export function CategorySettingsTab({
             {lang === 'ar' ? 'الإجراء في أودو' : 'Action in Odoo'}
           </label>
           <select
-            className="w-full h-9 px-3 rounded-xl border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+            className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
             value={onDeleteAction}
             onChange={(e) => setOnDeleteAction(e.target.value)}
           >
@@ -321,7 +321,7 @@ export function CategorySettingsTab({
           />
 
           {disabled && (
-            <div className="flex items-center gap-2 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-xs">
+            <div className="flex items-center gap-2 p-3 rounded-none border border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-400 text-xs">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>
                 {lang === 'ar'
@@ -361,7 +361,7 @@ export function CategorySettingsTab({
         <Button
           onClick={handleSave}
           disabled={isSaving}
-          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-xl h-10 px-6 text-xs shadow-sm gap-2 transition-all"
+          className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold rounded-none h-10 px-6 text-xs shadow-sm gap-2 transition-all"
         >
           {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           <span>{lang === 'ar' ? 'حفظ إعدادات الكاتيجوري' : 'Save Category Settings'}</span>
@@ -371,7 +371,7 @@ export function CategorySettingsTab({
           type="button"
           variant="outline"
           onClick={() => setIsCategoryMappingOpen(true)}
-          className="rounded-xl h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
+          className="rounded-none h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
         >
           <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
           <span>{lang === 'ar' ? 'ربط يدوي للتصنيفات' : 'Manual Mapping'}</span>
@@ -381,7 +381,7 @@ export function CategorySettingsTab({
           type="button"
           variant="outline"
           onClick={() => setIsCategoryLogOpen(true)}
-          className="rounded-xl h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
+          className="rounded-none h-10 px-4 text-xs gap-2 border-border/80 hover:bg-muted/50"
         >
           <History className="h-3.5 w-3.5 text-muted-foreground" />
           <span>{lang === 'ar' ? 'سجل مزامنة الكاتيجوري' : 'Category Sync Log'}</span>

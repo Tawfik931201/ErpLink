@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
-import { resolveLanguage, translations } from '@/lib/translations'
+import { resolveLanguage } from '@/lib/translations'
 
 import OdooConnectionForm from './odoo-form'
 
@@ -25,7 +25,6 @@ export default async function ConnectOdooPage() {
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
-  const t = (key: keyof typeof translations['ar']) => translations[lang][key] || translations['ar'][key]
 
   return (
     <div className="space-y-5 animate-in fade-in duration-300" dir={dir}>

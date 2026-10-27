@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
+import { MappingCenterHeader } from '@/components/mapping-center/mapping-center-header'
 import { resolveLanguage } from '@/lib/translations'
 
 import AddCustomFieldForm from '../add-custom-field-form'
@@ -34,20 +35,13 @@ export default async function AddFieldPage() {
       )}
 
       <div className="max-w-7xl mx-auto space-y-5" dir={dir}>
-        <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-xs font-semibold text-muted-foreground">
-              {lang === 'ar' ? 'مركز الربط' : 'Mapping Center'}
-            </span>
-            <span className="text-muted-foreground/30 text-xs">{'/'}</span>
-            <h1 className="text-xl font-extrabold tracking-tight text-foreground">
-              {lang === 'ar' ? 'إضافة حقل' : 'Add Field'}
-            </h1>
-          </div>
-          <p className="text-muted-foreground text-[11px]">
-            {lang === 'ar' ? 'إضافة حقل مخصص لنظام ERP' : 'Add a custom field to your ERP system'}
-          </p>
-        </div>
+        <MappingCenterHeader
+          title={lang === 'ar' ? 'إضافة حقل' : 'Add Field'}
+          subtitle={lang === 'ar'
+            ? 'إضافة حقل مخصص لنظام ERP'
+            : 'Add a custom field to your ERP system'}
+          dir={dir}
+        />
         <AddCustomFieldForm
           initialModels={[]}
           hasOdooConnection={hasErpConnection}

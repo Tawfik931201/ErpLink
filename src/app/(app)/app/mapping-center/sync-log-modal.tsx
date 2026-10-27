@@ -1,15 +1,14 @@
 'use client'
 
-import { 
-  X, 
-  RefreshCw, 
-  Eye, 
-  EyeOff, 
-  Filter, 
-  Calendar, 
-  Database, 
-  AlertCircle, 
-  CheckCircle2, 
+import {
+  X,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Filter,
+  Calendar,
+  Database,
+  AlertCircle,
   HelpCircle,
   Loader2,
   Tag,
@@ -17,7 +16,6 @@ import {
   Minimize2,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   Check,
   Clock
 } from 'lucide-react'
@@ -26,8 +24,15 @@ import React, { useState, useEffect, useRef } from 'react'
 import { getSyncLogs, retrySyncLog, resolveLogManually } from '@/app/actions/sync-logs'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
+import { CheckRow, FilterSelect } from '@/components/ui/filter-select'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+
+import {
+  getDeletionCountdown as formatDeletionCountdown,
+  SyncStatusBadge,
+  SyncTriggerBadge,
+} from '../logs/log-ui'
 
 interface SyncLogModalProps {
   isOpen: boolean
@@ -197,41 +202,10 @@ export default function SyncLogModal({
     }
   }
 
-  // Deletion countdown helper
-  const getDeletionCountdown = (createdAtStr: string, status: string) => {
-    const createdAt = new Date(createdAtStr).getTime()
-    const now = Date.now()
-    
-    // Success logs (or manually resolved ones) expire in 72 hours, other logs in 7 days
-    const duration = status === 'success' 
-      ? 72 * 60 * 60 * 1000 // 72 hours
-      : 7 * 24 * 60 * 60 * 1000 // 7 days
-      
-    const expiresAt = createdAt + duration
-    const remainingMs = expiresAt - now
-    
-    if (remainingMs <= 0) {
-      return lang === 'ar' ? 'جاري الحذف...' : 'Deleting soon...'
-    }
-    
-    const remainingHours = Math.floor(remainingMs / (60 * 60 * 1000))
-    if (remainingHours >= 24) {
-      const days = Math.floor(remainingHours / 24)
-      const hours = remainingHours % 24
-      if (lang === 'ar') {
-        return `الحذف بعد: ${days} يوم و ${hours} ساعة`
-      } else {
-        return `Deletes in: ${days}d ${hours}h`
-      }
-    } else {
-      const minutes = Math.floor((remainingMs % (60 * 60 * 1000)) / (60 * 1000))
-      if (lang === 'ar') {
-        return `الحذف بعد: ${remainingHours} ساعة و ${minutes} دقيقة`
-      } else {
-        return `Deletes in: ${remainingHours}h ${minutes}m`
-      }
-    }
-  }
+  // Deletion countdown — the exact same rule the /app/logs list and record
+  // page use (72h for success, 7 days otherwise), so the numbers can't drift.
+  const getDeletionCountdown = (createdAtStr: string, status: string) =>
+    formatDeletionCountdown(createdAtStr, status, lang === 'ar')
 
   // Page handlers
   const handlePrevPage = () => {
@@ -385,63 +359,12 @@ export default function SyncLogModal({
     })
   }
 
-  const getStatusBadge = (status: string, errorMessage?: string) => {
-    if (status === 'success' && errorMessage?.includes('Resolved manually')) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-          <CheckCircle2 className="h-3 w-3" />
-          {lang === 'ar' ? 'تم الحل يدويًا' : 'Resolved Manually'}
-        </span>
-      )
-    }
-
-    switch (status) {
-      case 'success':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            <CheckCircle2 className="h-3 w-3" />
-            {t('log.success')}
-          </span>
-        )
-      case 'failed':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-destructive/10 text-destructive border border-destructive/20">
-            <AlertCircle className="h-3 w-3" />
-            {t('log.failed')}
-          </span>
-        )
-      case 'skipped':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted text-muted-foreground border border-border/60">
-            <HelpCircle className="h-3 w-3" />
-            {t('log.skipped')}
-          </span>
-        )
-      case 'processing':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            {lang === 'ar' ? 'جاري المزامنة...' : 'Syncing...'}
-          </span>
-        )
-      default:
-        return null
-    }
-  }
-
-  const getTriggerBadge = (triggerType: string) => {
-    const isManual = triggerType === 'manual'
-    return (
-      <span className={cn(
-        "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border",
-        isManual 
-          ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20" 
-          : "bg-primary/10 text-primary border-primary/20"
-      )}>
-        {isManual ? t('log.manual') : t('log.automatic')}
-      </span>
-    )
-  }
+  // Platform labels shared by the filter trigger and the row.
+  const platformLabel = (p: string) =>
+    p === 'zid' ? (lang === 'ar' ? 'زد (Zid)' : 'Zid')
+      : p === 'salla' ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla')
+      : p === 'shopify' ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify')
+      : p
 
   const isFirstPage = offset === 0
   const isLastPage = offset + logs.length >= totalCount
@@ -450,58 +373,47 @@ export default function SyncLogModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div 
+      <div
         className={cn(
-          "bg-card border border-border rounded-xl w-full flex flex-col overflow-hidden transition-all duration-300",
-          isMaximized 
-            ? "max-w-[96vw] h-[92vh] max-h-[92vh]" 
+          "bg-card border border-border w-full flex flex-col overflow-hidden transition-all duration-300",
+          isMaximized
+            ? "max-w-[96vw] h-[92vh] max-h-[92vh]"
             : "max-w-4xl h-auto max-h-[85vh]",
           "animate-in zoom-in-95 duration-200"
         )}
         dir={dir}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-gradient-to-r from-muted to-muted/50">
-          <div>
-            <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-              <Database className="h-4.5 w-4.5 text-primary" />
-              {mappingName 
-                ? t('log.mappingTitle').replace('{name}', mappingName) 
-                : t('log.globalTitle')}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 border-b border-border bg-muted/60">
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              <span className="truncate">
+                {mappingName
+                  ? t('log.mappingTitle').replace('{name}', mappingName)
+                  : t('log.globalTitle')}
+              </span>
             </h2>
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              {lang === 'ar' 
-                ? 'استعرض تفاصيل عمليات المزامنة الحية، وشخّص الأخطاء، وأعد إرسال الطلبات يدوياً.' 
+              {lang === 'ar'
+                ? 'استعرض تفاصيل عمليات المزامنة الحية، وشخّص الأخطاء، وأعد إرسال الطلبات يدوياً.'
                 : 'Review live synchronization runs, diagnose errors, and resend payloads manually.'}
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {/* Summary badges */}
-            {totalCount > 0 && (
-              <div className="flex items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-bold">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  {t('log.success')}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 text-destructive border border-destructive/20 px-2 py-0.5 text-[10px] font-bold">
-                  <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-                  {t('log.failed')}
-                </span>
-              </div>
-            )}
+          <div className="flex items-center gap-2">
             {/* Pagination Controls */}
             {totalCount > 0 && (
-              <div className="flex items-center gap-2 border border-border bg-card rounded-xl p-1 text-xs font-medium shadow-sm">
+              <div className="flex items-center gap-2 border border-border bg-card p-1 text-xs font-medium">
                 <span className="px-2 text-muted-foreground select-none font-mono">
                   {offset + 1}-{Math.min(offset + logs.length, totalCount)} / {totalCount}
                 </span>
-                <div className="flex items-center gap-0.5 border-r border-border pr-1">
+                <div className="flex items-center gap-0.5 border-e border-border pe-1">
                   <Button
                     size="icon"
                     variant="ghost"
                     onClick={handlePrevPage}
                     disabled={isFirstPage || isLoading}
-                    className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-40"
+                    className="h-7 w-7 rounded-none hover:bg-muted text-muted-foreground disabled:opacity-40"
                     title={lang === 'ar' ? 'الصفحة السابقة' : 'Previous page'}
                   >
                     <PrevIcon className="h-4 w-4" />
@@ -511,7 +423,7 @@ export default function SyncLogModal({
                     variant="ghost"
                     onClick={handleNextPage}
                     disabled={isLastPage || isLoading}
-                    className="h-7 w-7 rounded-lg hover:bg-muted text-muted-foreground disabled:opacity-40"
+                    className="h-7 w-7 rounded-none hover:bg-muted text-muted-foreground disabled:opacity-40"
                     title={lang === 'ar' ? 'الصفحة التالية' : 'Next page'}
                   >
                     <NextIcon className="h-4 w-4" />
@@ -524,7 +436,7 @@ export default function SyncLogModal({
               size="icon"
               variant="ghost"
               onClick={() => setIsMaximized(!isMaximized)}
-              className="h-8 w-8 rounded-xl hover:bg-background dark:hover:bg-card text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 rounded-none hover:bg-muted text-muted-foreground hover:text-foreground"
               title={isMaximized ? (lang === 'ar' ? 'تصغير الشاشة' : 'Minimize') : (lang === 'ar' ? 'توسيع الشاشة' : 'Maximize')}
             >
               {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -533,284 +445,143 @@ export default function SyncLogModal({
               size="icon"
               variant="ghost"
               onClick={onClose}
-              className="h-8 w-8 rounded-xl hover:bg-background dark:hover:bg-card"
+              className="h-7 w-7 rounded-none hover:bg-muted"
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        {/* Modal Filters */}
-        <div className="px-6 py-3 border-b border-border bg-card flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-4">
-            
-            {/* Status Filter Multi-Select Dropdown */}
-            <div className="flex items-center gap-1.5 relative select-none" ref={statusDropdownRef}>
-              <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="text-[11px] font-bold text-muted-foreground mr-1 shrink-0">{t('log.status')}:</span>
-              
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
-                  className="text-xs bg-muted/60 hover:bg-muted border border-border/70 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/30 font-semibold flex items-center gap-2 select-none min-w-[120px] justify-between text-start transition-colors"
+        {/* Modal Filters — the same compact FilterSelect the list pages use. */}
+        <div className="px-6 py-2.5 border-b border-border bg-card flex flex-wrap items-center gap-3">
+          <FilterSelect
+            label={t('log.status')}
+            icon={<Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+            buttonRef={statusDropdownRef}
+            isOpen={isStatusDropdownOpen}
+            onToggle={() => setIsStatusDropdownOpen(!isStatusDropdownOpen)}
+            triggerText={
+              selectedStatuses.length === 4
+                ? t('log.all')
+                : selectedStatuses.length === 0
+                  ? (lang === 'ar' ? 'لا شيء' : 'None')
+                  : selectedStatuses.map(s => {
+                      if (s === 'success') return t('log.success')
+                      if (s === 'manual') return (lang === 'ar' ? 'حل يدوي' : 'Manual')
+                      if (s === 'failed') return t('log.failed')
+                      if (s === 'skipped') return t('log.skipped')
+                      return s
+                    }).join(', ')
+            }
+          >
+            <CheckRow checked={selectedStatuses.length === 4} onChange={toggleAllStatuses}>
+              <span className="font-bold">{t('log.all')}</span>
+            </CheckRow>
+            <div className="border-t border-border/50 mx-2 my-1" />
+            <CheckRow checked={selectedStatuses.includes('success')} onChange={() => toggleStatus('success')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {t('log.success')}
+            </CheckRow>
+            <CheckRow checked={selectedStatuses.includes('manual')} onChange={() => toggleStatus('manual')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              {lang === 'ar' ? 'حل يدوي' : 'Manual resolve'}
+            </CheckRow>
+            <CheckRow checked={selectedStatuses.includes('failed')} onChange={() => toggleStatus('failed')} danger>
+              <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
+              {t('log.failed')}
+            </CheckRow>
+            <CheckRow checked={selectedStatuses.includes('skipped')} onChange={() => toggleStatus('skipped')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+              {t('log.skipped')}
+            </CheckRow>
+          </FilterSelect>
+
+          <FilterSelect
+            label={lang === 'ar' ? 'المنصة' : 'Platform'}
+            buttonRef={platformDropdownRef}
+            isOpen={isPlatformDropdownOpen}
+            onToggle={() => setIsPlatformDropdownOpen(!isPlatformDropdownOpen)}
+            triggerText={
+              selectedPlatforms.length === 3
+                ? (lang === 'ar' ? 'الكل' : 'All')
+                : selectedPlatforms.length === 0
+                  ? (lang === 'ar' ? 'لا شيء' : 'None')
+                  : selectedPlatforms.map(p => platformLabel(p)).join(', ')
+            }
+          >
+            <CheckRow checked={selectedPlatforms.length === 3} onChange={toggleAllPlatforms}>
+              <span className="font-bold">{lang === 'ar' ? 'الكل' : 'All'}</span>
+            </CheckRow>
+            <div className="border-t border-border/50 mx-2 my-1" />
+            <CheckRow checked={selectedPlatforms.includes('zid')} onChange={() => togglePlatform('zid')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-zid-500" />
+              {platformLabel('zid')}
+            </CheckRow>
+            <CheckRow checked={selectedPlatforms.includes('salla')} onChange={() => togglePlatform('salla')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+              {platformLabel('salla')}
+            </CheckRow>
+            <CheckRow checked={selectedPlatforms.includes('shopify')} onChange={() => togglePlatform('shopify')}>
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              {platformLabel('shopify')}
+            </CheckRow>
+          </FilterSelect>
+
+          {/* Global mode only: which mapping the log belongs to. */}
+          {!mappingId && (
+            <FilterSelect
+              label={lang === 'ar' ? 'الربط' : 'Mapping'}
+              icon={<Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+              buttonRef={mappingDropdownRef}
+              isOpen={isMappingDropdownOpen}
+              onToggle={() => setIsMappingDropdownOpen(!isMappingDropdownOpen)}
+              triggerText={
+                selectedMappingIds.length === mappingsList.length
+                  ? (lang === 'ar' ? 'جميع عمليات الربط' : 'All mappings')
+                  : selectedMappingIds.length === 0
+                    ? (lang === 'ar' ? 'لا شيء' : 'None')
+                    : selectedMappingIds.map(id => mappingsList.find(m => m.id === id)?.name || id).join(', ')
+              }
+            >
+              <CheckRow checked={selectedMappingIds.length === mappingsList.length} onChange={toggleAllMappings}>
+                <span className="font-bold">{lang === 'ar' ? 'جميع عمليات الربط' : 'All mappings'}</span>
+              </CheckRow>
+              <div className="border-t border-border/50 mx-2 my-1" />
+              {mappingsList.map(m => (
+                <CheckRow
+                  key={m.id}
+                  checked={selectedMappingIds.includes(m.id)}
+                  onChange={() => toggleMapping(m.id)}
                 >
-                  <span className="truncate max-w-[150px]">
-                    {selectedStatuses.length === 4
-                      ? t('log.all')
-                      : selectedStatuses.length === 0
-                        ? (lang === 'ar' ? 'لا شيء' : 'None')
-                        : selectedStatuses.map(s => {
-                            if (s === 'success') return t('log.success')
-                            if (s === 'manual') return (lang === 'ar' ? 'حل يدوي' : 'Manual')
-                            if (s === 'failed') return t('log.failed')
-                            if (s === 'skipped') return t('log.skipped')
-                            return s
-                          }).join(', ')
-                    }
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                </button>
-
-                {isStatusDropdownOpen && (
-                  <div className="absolute z-50 mt-1.5 w-52 bg-card border border-border/70 rounded-xl py-1.5 shadow-card animate-in fade-in scale-in duration-150">
-                    {/* All option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-bold cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedStatuses.length === 4}
-                        onChange={toggleAllStatuses}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span>{t('log.all')}</span>
-                    </label>
-                    <div className="border-t border-border/50 mx-2 my-1" />
-
-                    {/* Success option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedStatuses.includes('success')}
-                        onChange={() => toggleStatus('success')}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        {t('log.success')}
-                      </span>
-                    </label>
-
-                    {/* Manual option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedStatuses.includes('manual')}
-                        onChange={() => toggleStatus('manual')}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                        {lang === 'ar' ? 'حل يدوي' : 'Manual Resolve'}
-                      </span>
-                    </label>
-
-                    {/* Failed option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedStatuses.includes('failed')}
-                        onChange={() => toggleStatus('failed')}
-                        className="rounded border-border/70 text-destructive focus:ring-destructive/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-                        {t('log.failed')}
-                      </span>
-                    </label>
-
-                    {/* Skipped option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedStatuses.includes('skipped')}
-                        onChange={() => toggleStatus('skipped')}
-                        className="rounded border-border/70 text-muted-foreground focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-                        {t('log.skipped')}
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Store Platform Filter Dropdown */}
-            <div className="flex items-center gap-1.5 relative select-none" ref={platformDropdownRef}>
-              <span className="text-[11px] font-bold text-muted-foreground mr-1 shrink-0">{lang === 'ar' ? 'المنصة:' : 'Platform:'}</span>
-              
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsPlatformDropdownOpen(!isPlatformDropdownOpen)}
-                  className="text-xs bg-muted/60 hover:bg-muted border border-border/70 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/30 font-semibold flex items-center gap-2 select-none min-w-[120px] justify-between text-start transition-colors"
-                >
-                  <span className="truncate max-w-[150px]">
-                    {selectedPlatforms.length === 3
-                      ? (lang === 'ar' ? 'الكل' : 'All')
-                      : selectedPlatforms.length === 0
-                        ? (lang === 'ar' ? 'لا شيء' : 'None')
-                        : selectedPlatforms.map(p => {
-                            if (p === 'zid') return (lang === 'ar' ? 'زد (Zid)' : 'Zid')
-                            if (p === 'salla') return (lang === 'ar' ? 'سلة (Salla)' : 'Salla')
-                            if (p === 'shopify') return (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify')
-                            return p
-                          }).join(', ')
-                    }
-                  </span>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                </button>
-
-                {isPlatformDropdownOpen && (
-                  <div className="absolute z-50 mt-1.5 w-48 bg-card border border-border/70 rounded-xl py-1.5 shadow-card animate-in fade-in scale-in duration-150">
-                    {/* All option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-bold cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedPlatforms.length === 3}
-                        onChange={toggleAllPlatforms}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span>{lang === 'ar' ? 'الكل' : 'All'}</span>
-                    </label>
-                    <div className="border-t border-border/50 mx-2 my-1" />
-
-                    {/* Zid option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedPlatforms.includes('zid')}
-                        onChange={() => togglePlatform('zid')}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-zid-500" />
-                        {lang === 'ar' ? 'زد (Zid)' : 'Zid'}
-                      </span>
-                    </label>
-
-                    {/* Salla option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedPlatforms.includes('salla')}
-                        onChange={() => togglePlatform('salla')}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
-                        {lang === 'ar' ? 'سلة (Salla)' : 'Salla'}
-                      </span>
-                    </label>
-
-                    {/* Shopify option */}
-                    <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                      <input
-                        type="checkbox"
-                        checked={selectedPlatforms.includes('shopify')}
-                        onChange={() => togglePlatform('shopify')}
-                        className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                      />
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        {lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify'}
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Global Mode: Mapping selector Multi-Select Dropdown */}
-            {!mappingId && (
-              <div className="flex items-center gap-1.5 relative select-none" ref={mappingDropdownRef}>
-                <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-[11px] font-bold text-muted-foreground mr-1 shrink-0">{lang === 'ar' ? 'الربط:' : 'Mapping:'}</span>
-                
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsMappingDropdownOpen(!isMappingDropdownOpen)}
-                    className="text-xs bg-muted/60 hover:bg-muted border border-border/70 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary/30 font-semibold flex items-center gap-2 select-none min-w-[140px] justify-between text-start transition-colors"
-                  >
-                    <span className="truncate max-w-[150px]">
-                      {selectedMappingIds.length === mappingsList.length
-                        ? (lang === 'ar' ? 'جميع عمليات الربط' : 'All Mappings')
-                        : selectedMappingIds.length === 0
-                          ? (lang === 'ar' ? 'لا شيء' : 'None')
-                          : selectedMappingIds.map(id => mappingsList.find(m => m.id === id)?.name || id).join(', ')
-                      }
-                    </span>
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                  </button>
-
-                  {isMappingDropdownOpen && (
-                    <div className="absolute z-50 mt-1.5 w-56 bg-card border border-border/70 rounded-xl py-1.5 shadow-card animate-in fade-in scale-in duration-150 max-h-60 overflow-y-auto">
-                      {/* All option */}
-                      <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-bold cursor-pointer text-muted-foreground select-none transition-colors">
-                        <input
-                          type="checkbox"
-                          checked={selectedMappingIds.length === mappingsList.length}
-                          onChange={toggleAllMappings}
-                          className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                        />
-                        <span>{lang === 'ar' ? 'جميع عمليات الربط' : 'All Mappings'}</span>
-                      </label>
-                      <div className="border-t border-border/50 mx-2 my-1" />
-
-                      {/* Mapping options */}
-                      {mappingsList.map(m => (
-                        <label key={m.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-medium cursor-pointer text-muted-foreground select-none transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={selectedMappingIds.includes(m.id)}
-                            onChange={() => toggleMapping(m.id)}
-                            className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-                          />
-                          <span className="truncate font-medium" title={m.name}>{m.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+                  <span className="truncate" title={m.name}>{m.name}</span>
+                </CheckRow>
+              ))}
+            </FilterSelect>
+          )}
 
           <Button
             size="sm"
             variant="outline"
             onClick={() => fetchLogs()}
             disabled={isLoading}
-            className="h-7 text-[10px] font-bold rounded-xl shrink-0 border-border/70 hover:bg-muted transition-colors"
+            className="ms-auto h-7 rounded-none px-2.5 text-[10px] font-bold"
           >
-            <RefreshCw className={cn("h-3 w-3 mr-1", isLoading && "animate-spin")} />
+            <RefreshCw className={cn("h-3 w-3 me-1", isLoading && "animate-spin")} />
             {lang === 'ar' ? 'تحديث' : 'Refresh'}
           </Button>
         </div>
 
-        {/* Logs List Area */}
-        <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-muted/50 to-muted/30">
+        {/* Logs List Area — same Odoo-style row list as /app/logs. */}
+        <div className="flex-1 overflow-y-auto">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 text-foreground animate-spin mb-2" />
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="h-6 w-6 text-muted-foreground animate-spin mb-2" />
               <p className="text-xs text-muted-foreground font-medium">
                 {lang === 'ar' ? 'جاري تحميل السجلات...' : 'Loading logs...'}
               </p>
             </div>
           ) : logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="flex flex-col items-center justify-center py-16 text-center">
               <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mb-3">
                 <AlertCircle className="h-5 w-5 text-muted-foreground" />
               </div>
@@ -818,14 +589,21 @@ export default function SyncLogModal({
                 {t('log.noLogs')}
               </p>
               <p className="text-[10px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
-                {lang === 'ar' 
-                  ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.' 
+                {lang === 'ar'
+                  ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.'
                   : 'No sync operations match the selected filters.'}
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {logs.map((log) => {
+            <div>
+              <div className="flex items-center gap-3 border-y border-border bg-muted/60 px-3 py-2 text-[10px] uppercase tracking-wide text-foreground/70">
+                <span className="w-[130px] shrink-0 font-bold">{t('log.status')}</span>
+                <span className="min-w-0 flex-1 font-bold">{lang === 'ar' ? 'الحدث' : 'Event'}</span>
+                <span className="hidden w-[130px] shrink-0 font-bold md:block">{lang === 'ar' ? 'التاريخ' : 'Date'}</span>
+                <span className="w-[110px] shrink-0 text-end font-bold">{lang === 'ar' ? 'إجراءات' : 'Actions'}</span>
+              </div>
+
+              {logs.map(log => {
                 const isExpanded = expandedPayloadIds.has(log.id)
                 const dateFormatted = log.created_at
                   ? new Date(log.created_at).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US', {
@@ -837,140 +615,136 @@ export default function SyncLogModal({
                     })
                   : '-'
                 const isResolvedManually = log.status === 'success' && log.error_message?.includes('Resolved manually')
+                const canAct = log.status === 'failed' || log.status === 'skipped'
 
                 return (
-                  <div 
-                    key={log.id} 
-                    className={cn(
-                      "bg-card border border-border/80 rounded-xl p-4 transition-all duration-200 hover:border-border hover:shadow-sm",
-                      log.status === 'failed' && "border-l-[3px] border-l-destructive",
-                      log.status === 'success' && (
-                        isResolvedManually
-                          ? "border-l-[3px] border-l-amber-500/60" 
-                          : "border-l-[3px] border-l-emerald-500/60"
-                      ),
-                      log.status === 'processing' && "border-l-[3px] border-l-primary/50"
-                    )}
-                  >
-                    {/* Log Row Info */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div className="space-y-1.5">
+                  <div key={log.id} className="border-b border-border/60">
+                    <div className="flex flex-wrap items-center gap-3 px-3 py-2 transition-colors hover:bg-muted/30">
+                      <div className="flex w-[130px] shrink-0 flex-wrap items-center gap-1">
+                        <SyncStatusBadge status={log.status} resolvedManually={isResolvedManually} />
+                      </div>
+
+                      <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          {getStatusBadge(log.status, log.error_message)}
-                          {getTriggerBadge(log.trigger_type)}
-                          <span className="text-xs font-bold font-mono bg-muted/60 px-2.5 py-1 rounded-lg text-foreground border border-border/50">
+                          <span className="font-mono text-[11px] font-bold text-foreground break-all">
                             {log.event}
                           </span>
+                          <SyncTriggerBadge triggerType={log.trigger_type} />
                           {!mappingId && log.field_mappings?.name && (
-                            <span className="text-[10px] font-bold text-foreground/70 max-w-[150px] truncate border-l border-border/50 pl-2" title={log.field_mappings.name}>
+                            <span
+                              className="max-w-[160px] truncate border-s border-border/60 ps-2 text-[10px] font-semibold text-muted-foreground"
+                              title={log.field_mappings.name}
+                            >
                               {log.field_mappings.name}
                             </span>
                           )}
                         </div>
-
-                        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-muted-foreground font-medium items-center">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3 text-muted-foreground/60" />
-                            <span>{dateFormatted}</span>
-                          </span>
-                          <span className="flex items-center gap-1.5 bg-muted/40 text-muted-foreground font-semibold px-2 py-0.5 rounded-lg border border-border/50">
-                            <Clock className="h-3 w-3 text-muted-foreground/60" />
-                            <span>{getDeletionCountdown(log.created_at, log.status)}</span>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1 md:hidden">
+                            <Calendar className="h-3 w-3 opacity-60" />
+                            {dateFormatted}
                           </span>
                           <span className="flex items-center gap-1">
-                            <Database className="h-3 w-3 text-muted-foreground/60" />
-                            <span>{t('log.model')}: <span className="font-mono text-foreground font-semibold">{log.odoo_model}</span></span>
+                            {t('log.model')}: <span className="font-mono text-foreground">{log.odoo_model}</span>
                           </span>
                           {log.zid_entity_id && (
-                            <span>{t('log.entityId')}: <span className="font-mono text-foreground font-semibold">{log.zid_entity_id}</span></span>
+                            <span className="flex items-center gap-1">
+                              {t('log.entityId')}: <span className="font-mono text-foreground">{log.zid_entity_id}</span>
+                            </span>
                           )}
                           {log.odoo_record_id && (
-                            <span>{t('log.recordId')}: <span className="font-mono text-foreground font-semibold">#{log.odoo_record_id}</span></span>
+                            <span className="flex items-center gap-1">
+                              {t('log.recordId')}: <span className="font-mono text-foreground">#{log.odoo_record_id}</span>
+                            </span>
                           )}
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3 opacity-60" />
+                            {getDeletionCountdown(log.created_at, log.status)}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Log Action Buttons */}
-                      <div className="flex items-center gap-2 self-end md:self-center shrink-0">
-                        {/* Payload Toggle Button */}
+                      <span className="hidden w-[130px] shrink-0 text-[10px] text-muted-foreground md:block">
+                        {dateFormatted}
+                      </span>
+
+                      <div className="flex w-[110px] shrink-0 items-center justify-end gap-0.5">
                         <Button
-                          size="sm"
+                          size="icon"
                           variant="ghost"
                           onClick={() => togglePayload(log.id)}
-                          className="h-8 text-[10px] font-semibold gap-1 rounded-lg px-2.5 hover:bg-muted text-muted-foreground hover:text-foreground"
+                          className="h-7 w-7 rounded-none text-muted-foreground hover:text-foreground"
+                          title={t('log.viewPayload')}
                         >
                           {isExpanded ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          {t('log.viewPayload')}
                         </Button>
 
-                        {/* Resolve Manually Button */}
-                        {(log.status === 'failed' || log.status === 'skipped') && (
+                        {canAct && (
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="icon"
+                            variant="ghost"
                             onClick={() => handleResolveManually(log.id)}
                             disabled={isResolvingId === log.id}
-                            className="h-8 text-[10px] font-bold border-border text-foreground hover:bg-muted rounded-lg px-3 transition-transform duration-200 gap-1"
+                            className="h-7 w-7 rounded-none text-muted-foreground hover:text-foreground"
+                            title={lang === 'ar' ? 'حل يدوي' : 'Resolve manually'}
                           >
                             {isResolvingId === log.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin text-foreground" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
-                              <Check className="h-3.5 w-3.5 text-foreground" />
+                              <Check className="h-3.5 w-3.5" />
                             )}
-                            {lang === 'ar' ? 'حل يدوي' : 'Resolve Manually'}
                           </Button>
                         )}
 
-                        {/* Retry Button */}
-                        {(log.status === 'failed' || log.status === 'skipped') && (
+                        {canAct && (
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="icon"
+                            variant="ghost"
                             onClick={() => handleResend(log.id)}
                             disabled={isRetryingId === log.id}
-                            className="h-8 text-[10px] font-bold border-border text-foreground hover:bg-muted rounded-lg px-3 transition-transform duration-200 gap-1"
+                            className="h-7 w-7 rounded-none text-muted-foreground hover:text-foreground"
+                            title={t('log.resend')}
                           >
                             {isRetryingId === log.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin text-foreground" />
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
                             ) : (
-                              <RefreshCw className="h-3 w-3" />
+                              <RefreshCw className="h-3.5 w-3.5" />
                             )}
-                            {t('log.resend')}
                           </Button>
                         )}
                       </div>
                     </div>
 
-                    {/* Diagnostics: Display Error details if status is Failed or Skipped */}
-                    {((log.status === 'failed' || log.status === 'skipped') && log.error_message) && (
+                    {/* Diagnostics: error / skip details */}
+                    {canAct && log.error_message && (
                       <div className={cn(
-                        "mt-3 border rounded-lg p-3 flex items-start gap-2 text-xs",
-                        log.status === 'failed' 
-                          ? "bg-destructive/5 border-destructive/15 text-destructive" 
-                          : "bg-muted border-border text-muted-foreground"
+                        "mx-3 mb-2 flex items-start gap-2 border p-2 text-[11px]",
+                        log.status === 'failed'
+                          ? "border-destructive/20 bg-destructive/5 text-destructive"
+                          : "border-border bg-muted text-muted-foreground"
                       )}>
                         {log.status === 'failed' ? (
-                          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
+                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
                         ) : (
-                          <HelpCircle className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
+                          <HelpCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         )}
                         <div className="space-y-0.5">
                           <div className="font-bold">
-                            {log.status === 'failed' ? t('log.errorMessage') : (lang === 'ar' ? 'سبب التخطي / التفاصيل' : 'Skip Reason / Details')}
+                            {log.status === 'failed' ? t('log.errorMessage') : (lang === 'ar' ? 'سبب التخطي / التفاصيل' : 'Skip reason / details')}
                           </div>
-                          <div className="font-mono break-all leading-relaxed text-[11px] opacity-90">{log.error_message}</div>
+                          <div className="font-mono break-all leading-relaxed opacity-90">{log.error_message}</div>
                         </div>
                       </div>
                     )}
 
-                    {/* Expandable Zid Payload display */}
+                    {/* Expandable payload — on demand only, never in the list row */}
                     {isExpanded && (
-                      <div className="mt-3 border border-border rounded-lg overflow-hidden animate-in slide-in-from-top-2 duration-200">
-                        <div className="bg-muted border-b border-border px-3 py-1.5 flex items-center justify-between">
+                      <div className="mx-3 mb-2 overflow-hidden border border-border animate-in slide-in-from-top-2 duration-200">
+                        <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
                           <span className="text-[10px] font-bold text-muted-foreground">{t('log.payloadTitle')}</span>
-                          <span className="text-[9px] font-mono text-muted-foreground">JSON Format</span>
+                          <span className="text-[9px] font-mono text-muted-foreground">JSON</span>
                         </div>
-                        <pre className="p-3 bg-card text-foreground text-[10px] font-mono overflow-x-auto max-h-[250px] leading-relaxed">
+                        <pre className="max-h-[250px] overflow-x-auto bg-card p-3 text-[10px] font-mono leading-relaxed text-foreground">
                           {JSON.stringify(log.payload || {}, null, 2)}
                         </pre>
                       </div>
@@ -978,27 +752,20 @@ export default function SyncLogModal({
                   </div>
                 )
               })}
-
-              {/* End of logs list indicator if empty */}
-              {logs.length === 0 && !isLoading && (
-                <div className="text-center py-8 text-sm text-muted-foreground">
-                  {lang === 'ar' ? 'لا توجد سجلات مطابقة للفلاتر المحددة.' : 'No logs matching the selected filters.'}
-                </div>
-              )}
             </div>
           )}
         </div>
 
         {/* Modal Footer */}
-        <div className="px-6 py-4 border-t border-border bg-muted flex justify-between items-center">
-          <div className="text-[10px] text-muted-foreground font-semibold">
-            {lang === 'ar' 
-              ? `إجمالي السجلات: ${totalCount}` 
+        <div className="flex items-center justify-between border-t border-border bg-muted/60 px-4 py-2">
+          <div className="text-[10px] font-semibold text-muted-foreground">
+            {lang === 'ar'
+              ? `إجمالي السجلات: ${totalCount}`
               : `Total logs: ${totalCount}`}
           </div>
-          <Button 
-            onClick={onClose} 
-            className="h-8.5 rounded-lg text-xs font-semibold px-4"
+          <Button
+            onClick={onClose}
+            className="h-7 rounded-none px-3 text-[10px] font-bold"
           >
             {t('log.close')}
           </Button>

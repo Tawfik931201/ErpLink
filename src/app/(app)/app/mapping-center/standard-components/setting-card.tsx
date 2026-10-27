@@ -4,6 +4,16 @@ import React from 'react'
 
 import { cn } from '@/lib/utils'
 
+/**
+ * Section container for the Standard Mapping tabs.
+ *
+ * Deliberately the same visual language as `/app/logs`: a square card with a
+ * flat `bg-muted/60` header strip (uppercase tracking-wide title) and no
+ * shadow / blur / rounded corners. The four entity tabs (categories,
+ * products, customers, orders) all render through this component, so this is
+ * the one place the Odoo-style chrome is defined — do not re-add `rounded-*`
+ * or `shadow-*` on an individual tab.
+ */
 interface SettingCardProps {
   icon?: React.ReactNode
   title: string
@@ -26,32 +36,25 @@ export function SettingCard({
   headerAction,
 }: SettingCardProps) {
   return (
-    <div
-      className={cn(
-        'rounded-2xl border border-border/80 bg-card/95 shadow-[0_1px_3px_0_rgba(0,0,0,0.03)] backdrop-blur-sm transition-all duration-200 hover:border-border hover:shadow-[0_4px_12px_0_rgba(0,0,0,0.05)] overflow-hidden',
-        className
-      )}
-    >
-      <div className="px-5 py-4 border-b border-border/60 bg-muted/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-start gap-3">
+    <div className={cn('overflow-hidden border border-border bg-card', className)}>
+      <div className="flex flex-col justify-between gap-2 border-b border-border bg-muted/60 px-3 py-2 sm:flex-row sm:items-center">
+        <div className="flex items-start gap-2">
           {icon && (
-            <div className="h-9 w-9 rounded-xl bg-background border border-border/70 shadow-xs flex items-center justify-center shrink-0 text-foreground/80 mt-0.5 sm:mt-0">
-              {icon}
-            </div>
+            <span className="mt-0.5 flex shrink-0 items-center text-muted-foreground">{icon}</span>
           )}
           <div className="space-y-0.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold tracking-tight text-foreground">{title}</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-foreground/80">{title}</h3>
               {badge}
             </div>
             {description && (
-              <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">{description}</p>
             )}
           </div>
         </div>
-        {headerAction && <div className="shrink-0 flex items-center gap-2">{headerAction}</div>}
+        {headerAction && <div className="flex shrink-0 items-center gap-2">{headerAction}</div>}
       </div>
-      <div className={cn('p-5 space-y-4', contentClassName)}>{children}</div>
+      <div className={cn('space-y-3 p-3', contentClassName)}>{children}</div>
     </div>
   )
 }
@@ -76,14 +79,14 @@ export function SettingToggle({
   return (
     <div
       className={cn(
-        'flex items-center justify-between gap-4 p-3.5 rounded-xl border border-border/70 bg-background/50 hover:bg-background transition-colors',
-        disabled && 'opacity-60 cursor-not-allowed',
+        'flex items-center justify-between gap-4 border border-border bg-card px-3 py-2 transition-colors hover:bg-muted/40',
+        disabled && 'cursor-not-allowed opacity-60',
         className
       )}
     >
       <div className="space-y-0.5">
-        <span className="text-xs font-medium text-foreground block">{label}</span>
-        {description && <span className="text-[11px] text-muted-foreground block">{description}</span>}
+        <span className="block text-xs font-medium text-foreground">{label}</span>
+        {description && <span className="block text-[10px] text-muted-foreground">{description}</span>}
       </div>
       <button
         type="button"
@@ -93,14 +96,14 @@ export function SettingToggle({
         disabled={disabled}
         onClick={() => !disabled && onChange(!checked)}
         className={cn(
-          'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 disabled:cursor-not-allowed',
-          checked ? 'border-transparent bg-primary shadow-xs' : 'border-border bg-muted-foreground/25'
+          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1 disabled:cursor-not-allowed',
+          checked ? 'border-transparent bg-primary' : 'border-border bg-muted-foreground/25'
         )}
       >
         <span
           className={cn(
-            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200',
-            checked ? 'translate-x-[20px]' : 'translate-x-[2px]'
+            'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition-transform duration-200',
+            checked ? 'translate-x-[18px]' : 'translate-x-[2px]'
           )}
         />
       </button>

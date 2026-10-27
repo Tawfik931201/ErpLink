@@ -8,15 +8,10 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
-  Globe,
-  Hash,
-  Mail,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Store,
-  Trash2,
-  User,
   Wrench,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -115,12 +110,10 @@ function InfoField({
 }
 
 function RowActions({
-  row,
   isAr,
   onOpen,
   onReconnect,
 }: {
-  row: ConnectedRow
   isAr: boolean
   onOpen: () => void
   onReconnect: () => void
@@ -483,7 +476,6 @@ export default function StoreSelector({
                         </td>
                         <td className="px-2 py-2.5 text-end">
                           <RowActions
-                            row={row}
                             isAr={ar}
                             onOpen={() => openDetails(row.platform, row.key)}
                             onReconnect={() => handleReconnect(row.platform)}

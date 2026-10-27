@@ -432,7 +432,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
         <Button
           variant="ghost"
           onClick={goToList}
-          className="gap-2 text-muted-foreground hover:text-foreground text-sm font-semibold rounded-lg"
+          className="gap-2 text-muted-foreground hover:text-foreground text-sm font-semibold rounded-none"
         >
           <ArrowRight className={cn('h-4 w-4', lang === 'ar' ? 'rotate-0' : 'rotate-180')} />
           {lang === 'ar' ? 'العودة للقائمة' : 'Back to List'}
@@ -440,7 +440,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
 
         {/* Connection warning */}
         {!hasOdooConnection && (
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-muted p-3.5">
+          <div className="flex items-start gap-3 rounded-none border border-border bg-muted p-3.5">
             <AlertTriangle className="h-4 w-4 text-foreground shrink-0 mt-0.5" />
             <p className="text-xs text-foreground font-medium">
               {lang === 'ar'
@@ -457,7 +457,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
-              className="rounded-xl border border-border bg-muted p-4 space-y-2"
+              className="rounded-none border border-border bg-muted p-4 space-y-2"
             >
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
@@ -482,7 +482,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 </div>
               </div>
               {!editingField && viewWarning && (
-                <div className="flex items-start gap-2 rounded-lg bg-muted border border-border p-2.5 mt-1">
+                <div className="flex items-start gap-2 rounded-none bg-muted border border-border p-2.5 mt-1">
                   <AlertTriangle className="h-3.5 w-3.5 text-foreground shrink-0 mt-0.5" />
                   <p className="text-[10px] text-foreground font-medium">{viewWarning}</p>
                 </div>
@@ -493,12 +493,12 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
 
         {/* Form card */}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="bg-card border border-border rounded-xl p-6 space-y-6">
+          <div className="bg-card border border-border rounded-none p-6 space-y-6">
 
             {/* Header */}
             <div className="flex items-center justify-between pb-4 border-b border-border">
               <div className="flex items-center gap-2.5">
-                <div className="h-8 w-8 rounded-xl bg-muted flex items-center justify-center">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
                   <Plus className="h-4 w-4 text-foreground" />
                 </div>
                 <div>
@@ -530,7 +530,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   {lang === 'ar' ? 'اسم الحقل للعرض' : 'Display Label'}
                   <span className="text-destructive ms-0.5">*</span>
                 </label>
-                <div className="rounded-xl border border-border bg-muted p-1">
+                <div className="rounded-none border border-border bg-muted p-1">
                   <input
                     type="text" value={fieldLabel}
                     onChange={e => setFieldLabel(e.target.value)}
@@ -570,7 +570,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   )}
                 </div>
                 <div className={cn(
-                  "rounded-xl border bg-muted p-1 transition-all",
+                  "rounded-none border bg-muted p-1 transition-all",
                   techNameError ? 'border-destructive' : 'border-border',
                   editingField && 'opacity-65 cursor-not-allowed'
                 )}>
@@ -607,7 +607,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
               <div className="space-y-1.5">
                 <label className="block text-[11px] font-bold text-muted-foreground">{lang === 'ar' ? 'نوع الحقل' : 'Field Type'}</label>
                 <div className={cn(
-                  "rounded-xl border border-border bg-muted p-1 relative",
+                  "rounded-none border border-border bg-muted p-1 relative",
                   editingField && 'opacity-65 cursor-not-allowed'
                 )}>
                   <select
@@ -641,13 +641,13 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     onClick={loadModels}
                     disabled={isLoadingModels || !hasOdooConnection}
                     title={lang === 'ar' ? 'تحديث قائمة الموديلات' : 'Refresh model list'}
-                    className="flex items-center justify-center h-6 w-6 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center h-6 w-6 rounded-none hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <RefreshCw className={cn('h-3.5 w-3.5', isLoadingModels && 'animate-spin')} />
                   </button>
                 </div>
                 <div className={cn(
-                  "rounded-xl border border-border bg-muted p-0.5",
+                  "rounded-none border border-border bg-muted p-0.5",
                   editingField && 'opacity-65 cursor-not-allowed'
                 )}>
                   <SearchableSelect
@@ -689,7 +689,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
               {/* View */}
               <div className="space-y-1.5 opacity-80">
                 <label className="block text-[11px] font-bold text-muted-foreground">{lang === 'ar' ? 'يظهر في الشاشة' : 'Appears in View'}</label>
-                <div className="rounded-xl border border-border bg-muted p-1 cursor-not-allowed">
+                <div className="rounded-none border border-border bg-muted p-1 cursor-not-allowed">
                   <div className="w-full h-8 flex items-center px-2 text-xs font-semibold text-muted-foreground">
                     {lang === 'ar' ? 'نموذج (Form View) فقط' : 'Form View only'}
                   </div>
@@ -711,7 +711,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     {lang === 'ar' ? (erpType === 'erpnext' ? 'المستند المرتبط (DocType)' : 'النموذج المرتبط') : (erpType === 'erpnext' ? 'Related DocType' : 'Related Model')}<span className="text-destructive ms-0.5">*</span>
                   </label>
                   <div className={cn(
-                    "rounded-xl border border-border bg-muted p-0.5",
+                    "rounded-none border border-border bg-muted p-0.5",
                     editingField && 'opacity-65 cursor-not-allowed'
                   )}>
                     <SearchableSelect
@@ -751,13 +751,13 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   <div className="space-y-2">
                     {selectionOpts.map((opt, i) => (
                       <div key={i} className="flex items-center gap-3">
-                        <div className="flex-1 rounded-xl border border-border bg-muted p-1">
+                        <div className="flex-1 rounded-none border border-border bg-muted p-1">
                           <input type="text" value={opt.key} onChange={e => updateSelectionOpt(i, 'key', e.target.value.toLowerCase().replace(/\s/g, '_'))} placeholder="key" className="w-full h-8 bg-transparent border-0 px-2 font-mono text-xs focus:outline-none focus:ring-0 text-foreground" />
                         </div>
-                        <div className="flex-1 rounded-xl border border-border bg-muted p-1">
+                        <div className="flex-1 rounded-none border border-border bg-muted p-1">
                           <input type="text" value={opt.label} onChange={e => updateSelectionOpt(i, 'label', e.target.value)} placeholder={lang === 'ar' ? 'العنوان' : 'Label'} className="w-full h-8 bg-transparent border-0 px-2 text-xs font-semibold focus:outline-none focus:ring-0 text-foreground" />
                         </div>
-                        <button type="button" onClick={() => removeSelectionOpt(i)} disabled={selectionOpts.length <= 1} className="h-9 w-9 flex items-center justify-center rounded-xl border border-border bg-card hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-30 transition-colors">
+                        <button type="button" onClick={() => removeSelectionOpt(i)} disabled={selectionOpts.length <= 1} className="h-9 w-9 flex items-center justify-center rounded-none border border-border bg-card hover:bg-destructive/10 text-muted-foreground hover:text-destructive disabled:opacity-30 transition-colors">
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
@@ -786,7 +786,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   <label className="block text-[11px] font-bold text-muted-foreground flex items-center gap-1.5">
                     {lang === 'ar' ? 'صلاحيات المجموعات (Odoo Groups)' : 'Security Groups (Access Rights)'}
                   </label>
-                  <div className="rounded-xl border border-border bg-muted p-0.5">
+                  <div className="rounded-none border border-border bg-muted p-0.5">
                     <SearchableSelect
                       options={odooGroups.map(g => ({
                         value: String(g.id),
@@ -809,7 +809,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
             {/* Help */}
             <div className="space-y-1.5">
               <label className="block text-[11px] font-bold text-muted-foreground">{lang === 'ar' ? 'تلميح المساعدة (Help Text)' : 'Help Tooltip Text'}</label>
-              <div className="rounded-xl border border-border bg-muted p-1">
+              <div className="rounded-none border border-border bg-muted p-1">
                 <textarea
                   value={helpText} onChange={e => setHelpText(e.target.value)} rows={2}
                   placeholder={lang === 'ar' ? 'تلميح يظهر للمستخدم عند تمرير الفأرة فوق الحقل...' : 'Tooltip text shown to users when hovering over the field...'}
@@ -828,7 +828,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
           <AnimatePresence>
             {saveError && (
               <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="flex items-start gap-2 rounded-xl border border-destructive/20 bg-destructive/5 p-3.5">
+                className="flex items-start gap-2 rounded-none border border-destructive/20 bg-destructive/5 p-3.5">
                 <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
                 <p className="text-xs text-destructive font-semibold">{saveError}</p>
                 <button type="button" onClick={() => setSaveError(null)} className="ms-auto">
@@ -842,7 +842,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
           <Button
             type="submit"
             disabled={isSaving || !fieldLabel.trim() || !selectedModel || !techNameValid}
-            className="w-full bg-foreground text-background font-bold rounded-xl h-11 text-xs gap-2 transition-transform"
+            className="w-full bg-foreground text-background font-bold rounded-none h-11 text-xs gap-2 transition-transform"
           >
             {isSaving
               ? <><Loader2 className="h-4 w-4 animate-spin" />{lang === 'ar' ? 'جاري حفظ التغييرات...' : 'Saving changes...'}</>
@@ -880,14 +880,14 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={loadFields}
-            className="h-8 w-8 flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-border"
+            className="h-8 w-8 flex items-center justify-center rounded-none hover:bg-muted text-muted-foreground hover:text-foreground transition-colors border border-border"
             title={lang === 'ar' ? 'تحديث' : 'Refresh'}
           >
             <RefreshCw className={cn('h-3.5 w-3.5', isLoadingFields && 'animate-spin')} />
           </button>
           <Button
             onClick={goToForm}
-            className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-8 text-xs transition-transform"
+            className="bg-foreground text-background gap-1.5 font-semibold rounded-none h-8 text-xs transition-transform"
           >
             <Plus className="h-3.5 w-3.5" />
             {lang === 'ar' ? 'إضافة حقل جديد' : 'Add New Field'}
@@ -896,7 +896,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
       </div>
 
       {/* List card */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
+      <div className="bg-card border border-border rounded-none overflow-hidden">
         {isLoadingFields ? (
           <div className="flex items-center justify-center h-44">
             <Loader2 className="h-6 w-6 text-foreground animate-spin" />
@@ -917,7 +917,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 ? 'تحقق من اتصال السيرفر ثم أعد المحاولة'
                 : 'Check the server connection and try again'}
             </p>
-            <Button onClick={loadFields} className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-8 text-xs transition-transform">
+            <Button onClick={loadFields} className="bg-foreground text-background gap-1.5 font-semibold rounded-none h-8 text-xs transition-transform">
               <RefreshCw className="h-3.5 w-3.5" />
               {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </Button>
@@ -935,7 +935,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 ? `أضف حقولاً مخصصة إلى موديولات ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'} مع تزامن وتتبع تلقائي`
                 : `Add custom fields to ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'} models with automatic syncing & tracking`}
             </p>
-            <Button onClick={goToForm} className="bg-foreground text-background gap-1.5 font-semibold rounded-lg h-8 text-xs transition-transform">
+            <Button onClick={goToForm} className="bg-foreground text-background gap-1.5 font-semibold rounded-none h-8 text-xs transition-transform">
               <Plus className="h-3.5 w-3.5" />
               {lang === 'ar' ? 'إضافة أول حقل' : 'Add First Field'}
             </Button>
@@ -960,7 +960,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   >
                     {/* Details */}
                     <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground mt-0.5 animate-in zoom-in-50 duration-200">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-foreground mt-0.5 animate-in zoom-in-50 duration-200">
                         <Database className="h-4.5 w-4.5" />
                       </div>
                       <div className="space-y-1 min-w-0 flex-1">
@@ -1044,14 +1044,14 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     {/* Operations */}
                     <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
                       {isConfirming ? (
-                        <div className="flex items-center gap-1 bg-destructive/10 border border-destructive/20 rounded-lg p-1 animate-in fade-in zoom-in duration-200">
+                        <div className="flex items-center gap-1 bg-destructive/10 border border-destructive/20 rounded-none p-1 animate-in fade-in zoom-in duration-200">
                           <span className="text-[10px] font-semibold text-destructive px-1.5">{lang === 'ar' ? 'تأكيد؟' : 'Confirm?'}</span>
                           <Button 
                             size="sm" 
                             variant="destructive" 
                             disabled={isDeleting}
                             onClick={() => handleDelete(field)}
-                            className="h-6 px-2 text-xs font-semibold rounded-md"
+                            className="h-6 px-2 text-xs font-semibold rounded-none"
                           >
                             {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : (lang === 'ar' ? 'حذف' : 'Delete')}
                           </Button>
@@ -1059,7 +1059,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                             size="sm" 
                             variant="ghost" 
                             onClick={() => setDeleteConfirmId(null)}
-                            className="h-6 px-2 text-xs font-semibold text-muted-foreground rounded-md hover:bg-muted"
+                            className="h-6 px-2 text-xs font-semibold text-muted-foreground rounded-none hover:bg-muted"
                           >
                             {lang === 'ar' ? 'إلغاء' : 'Cancel'}
                           </Button>
@@ -1068,14 +1068,14 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                         <>
                           <button
                             onClick={() => startEditField(field)}
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            className="h-8 w-8 flex items-center justify-center rounded-none text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                             title={lang === 'ar' ? 'تعديل الحقل' : 'Edit Field'}
                           >
                             <Edit className="h-3.5 w-3.5" />
                           </button>
                           <button 
                             onClick={() => setDeleteConfirmId(fieldId)} 
-                            className="h-8 w-8 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            className="h-8 w-8 flex items-center justify-center rounded-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={lang === 'ar' ? 'حذف الحقل' : 'Delete Field'}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -1104,7 +1104,7 @@ function ToggleProp({ checked, onToggle, labelAr, labelEn, descAr, descEn, lang 
   return (
     <button type="button" onClick={onToggle}
       className={cn(
-        'flex flex-col items-start gap-1 p-3 rounded-xl border text-start transition-all duration-150 w-full',
+        'flex flex-col items-start gap-1 p-3 rounded-none border text-start transition-all duration-150 w-full',
         checked ? 'bg-muted border-border' : 'bg-muted border-border hover:border-border'
       )}>
       <div className="flex items-center justify-between w-full">

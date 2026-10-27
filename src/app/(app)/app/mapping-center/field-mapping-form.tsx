@@ -1151,7 +1151,7 @@ export default function FieldMappingForm({
           onChange={(e) => handleStaticValueChange(mapping.id, e.target.value)}
           disabled={isStaticDisabled}
           placeholder={lang === 'ar' ? 'رقم ثابت...' : 'Static number...'}
-          className="h-9 w-full rounded-md border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-9 w-full rounded-none border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
         />
       )
     }
@@ -1163,7 +1163,7 @@ export default function FieldMappingForm({
         onChange={(e) => handleStaticValueChange(mapping.id, e.target.value)}
         disabled={isStaticDisabled}
         placeholder={lang === 'ar' ? 'قيمة ثابتة...' : 'Static value...'}
-        className="h-9 w-full rounded-md border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-9 w-full rounded-none border border-transparent bg-transparent px-3 text-sm outline-none hover:border-input hover:bg-muted/30 focus:border-foreground focus:ring-1 focus:ring-foreground disabled:cursor-not-allowed disabled:opacity-50"
       />
     )
   }
@@ -1364,7 +1364,7 @@ export default function FieldMappingForm({
             onClick={handleSave}
             disabled={isSaving}
             variant="default"
-            className="bg-foreground text-background font-medium rounded-lg px-3.5 py-1.5 h-8.5 text-xs transition-transform duration-200"
+            className="bg-foreground text-background font-medium rounded-none px-3.5 py-1.5 h-8.5 text-xs transition-transform duration-200"
           >
             {isSaving ? (
               <Loader2 className={cn("h-3.5 w-3.5 animate-spin", lang === 'ar' ? "ml-1.5" : "mr-1.5")} />
@@ -1377,7 +1377,7 @@ export default function FieldMappingForm({
             onClick={handleDiscard}
             disabled={isSaving}
             variant="outline"
-            className="border-border hover:bg-muted font-medium rounded-lg px-3.5 py-1.5 h-8.5 text-xs text-muted-foreground transition-all"
+            className="border-border hover:bg-muted font-medium rounded-none px-3.5 py-1.5 h-8.5 text-xs text-muted-foreground transition-all"
           >
             <RotateCcw className={cn("h-3.5 w-3.5", lang === 'ar' ? "ml-1.5" : "mr-1.5")} />
             {lang === 'ar' ? 'إلغاء التغييرات' : 'Discard'}
@@ -1399,13 +1399,13 @@ export default function FieldMappingForm({
       </div>
 
       {errorMessage && (
-        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+        <div className="rounded-none border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
           {errorMessage}
         </div>
       )}
 
       {/* Main Odoo-style Form Sheet */}
-      <div className="bg-card rounded-xl border border-border overflow-hidden p-4 md:p-5">
+      <div className="bg-card rounded-none border border-border overflow-hidden p-4 md:p-5">
 
         {/* Name Input */}
         <div className="relative mb-5 group max-w-xl font-sans">
@@ -1436,7 +1436,7 @@ export default function FieldMappingForm({
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
-              <div className="flex gap-2 bg-muted p-1 rounded-xl border border-border max-w-sm">
+              <div className="flex gap-2 bg-muted p-1 rounded-none border border-border max-w-sm">
                 {isZidConnected && (
                   <Button
                     type="button"
@@ -1445,7 +1445,7 @@ export default function FieldMappingForm({
                       switchPlatform('zid', 'product.create')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
                       platform === 'zid' 
                         ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
@@ -1462,7 +1462,7 @@ export default function FieldMappingForm({
                       switchPlatform('salla', 'product.created')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
                       platform === 'salla' 
                         ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
@@ -1479,7 +1479,7 @@ export default function FieldMappingForm({
                       switchPlatform('shopify', 'products/create')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
                       platform === 'shopify' 
                         ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
@@ -1495,7 +1495,7 @@ export default function FieldMappingForm({
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
-              <div className="flex h-9 items-center px-3 rounded-lg border border-border bg-muted/50 text-xs font-semibold text-foreground capitalize dark:border-border dark:bg-card dark:text-foreground w-fit">
+              <div className="flex h-9 items-center px-3 rounded-none border border-border bg-muted/50 text-xs font-semibold text-foreground capitalize dark:border-border dark:bg-card dark:text-foreground w-fit">
                 {platform === 'salla' ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla') : platform === 'shopify' ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify') : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
               </div>
             </div>
@@ -1513,7 +1513,7 @@ export default function FieldMappingForm({
                   setStoreKey(e.target.value)
                   setIsSaved(false)
                 }}
-                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all max-w-sm"
+                className="w-full h-9 px-3 rounded-none border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all max-w-sm"
               >
                 {platformStores.map(s => (
                   <option key={s.id} value={s.id} dir="auto">
@@ -1535,7 +1535,7 @@ export default function FieldMappingForm({
             <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? 'اتجاه المزامنة' : 'Sync Direction'}
             </label>
-            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 multiple={true}
                 value={syncDirection ? syncDirection.split(',').filter(Boolean) : []}
@@ -1559,7 +1559,7 @@ export default function FieldMappingForm({
             <label className="block text-[11px] font-bold text-muted-foreground">
               {t('map.operationLabel')}
             </label>
-            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={odooOperation}
                 onChange={(val) => {
@@ -1584,7 +1584,7 @@ export default function FieldMappingForm({
             <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} Model`}
             </label>
-            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={odooModel}
                 onChange={(val) => {
@@ -1618,7 +1618,7 @@ export default function FieldMappingForm({
                 ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event') 
                 : (lang === 'ar' ? 'حدث زد' : 'Zid Event')}
             </label>
-            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={zidEvent}
                 onChange={(val) => {
@@ -1648,7 +1648,7 @@ export default function FieldMappingForm({
                 <label className="block text-[11px] font-bold text-muted-foreground">
                   {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي للمطابقة` : `${getErpNameEn(erpType)} Reference Field`}
                 </label>
-                <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+                <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
                   <SearchableSelect
                     value={odooMatchField}
                     onChange={(val) => {
@@ -1673,7 +1673,7 @@ export default function FieldMappingForm({
                     ? (lang === 'ar' ? 'حقل سلة المرجعي للمطابقة' : 'Salla Reference Field')
                     : (lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field')}
                 </label>
-                <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+                <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
                   <SearchableSelect
                     value={zidMatchField}
                     onChange={(val) => {
@@ -1726,7 +1726,7 @@ export default function FieldMappingForm({
               <label className="block text-[11px] font-bold text-muted-foreground">
                 {lang === 'ar' ? 'السياسة البديلة (عند عدم وجود السجل)' : 'Fallback Policy (when record not found)'}
               </label>
-              <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+              <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
                 <SearchableSelect
                   value={odooFallbackPolicy}
                   onChange={(val) => {
@@ -1756,7 +1756,7 @@ export default function FieldMappingForm({
             <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} Models`}
             </label>
-            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={relatedOdooModels}
                 onChange={handleRelatedModelsChange}
@@ -1816,7 +1816,7 @@ export default function FieldMappingForm({
               className={cn(
                 "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
                 activeTab === odooModel
-                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-md"
+                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
                   : "border-t-transparent text-muted-foreground hover:text-foreground"
               )}
             >
@@ -1831,7 +1831,7 @@ export default function FieldMappingForm({
                 className={cn(
                   "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
                   activeTab === rel.model
-                    ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-md"
+                    ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
                     : "border-t-transparent text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -1845,7 +1845,7 @@ export default function FieldMappingForm({
               className={cn(
                 "px-3 py-2 font-medium text-xs transition-all relative border-t-2 whitespace-nowrap",
                 activeTab === 'settings'
-                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-md"
+                  ? "border-t-primary bg-card text-foreground font-semibold border-x border-b border-b-card -mb-[1px] rounded-t-none"
                   : "border-t-transparent text-muted-foreground hover:text-foreground"
               )}
             >
@@ -1872,7 +1872,7 @@ export default function FieldMappingForm({
               >
 
                 {/* Mapping Table */}
-                <div className="border border-border rounded-lg overflow-x-auto bg-card relative z-10">
+                <div className="border border-border rounded-none overflow-x-auto bg-card relative z-10">
                   <table className="w-full text-start border-separate border-spacing-0">
                     <thead>
                       <tr className="bg-muted/40 text-xs uppercase font-bold text-muted-foreground tracking-wider">
@@ -1884,7 +1884,7 @@ export default function FieldMappingForm({
                               <button
                                 type="button"
                                 onClick={handleRefreshFields}
-                                className="ml-auto p-1 rounded-lg hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-colors"
+                                className="ml-auto p-1 rounded-none hover:bg-muted text-muted-foreground/60 hover:text-foreground transition-colors"
                                 title={lang === 'ar' ? 'تحديث الحقول من أودو' : 'Refresh fields from Odoo'}
                               >
                                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1938,13 +1938,13 @@ export default function FieldMappingForm({
                                     top: popoverCoords?.top ?? 0,
                                     left: popoverCoords?.left ?? 0,
                                   }}
-                                  className="calm-ui z-[9999] min-w-[220px] bg-card border border-border rounded-xl p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
+                                  className="calm-ui z-[9999] min-w-[220px] bg-card border border-border rounded-none p-3.5 space-y-2.5 text-start font-normal text-xs normal-case text-foreground"
                                 >
                                   <h4 className="font-bold text-[11px] text-muted-foreground uppercase tracking-wider pb-1 border-b border-border/60">
                                     {lang === 'ar' ? 'إعدادات الأعمدة' : 'Column Visibility'}
                                   </h4>
                                   <div className="space-y-2">
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-lg transition-colors">
+                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
                                       <input
                                         type="checkbox"
                                         checked={visibleColumns.erpField}
@@ -1953,7 +1953,7 @@ export default function FieldMappingForm({
                                       />
                                       <span>{lang === 'ar' ? 'حقل أودو (Odoo)' : 'Odoo Field'}</span>
                                     </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-lg transition-colors">
+                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
                                       <input
                                         type="checkbox"
                                         checked={visibleColumns.zidField}
@@ -1969,7 +1969,7 @@ export default function FieldMappingForm({
                                       }
                                       </span>
                                     </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-lg transition-colors">
+                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
                                       <input
                                         type="checkbox"
                                         checked={visibleColumns.policy}
@@ -1978,7 +1978,7 @@ export default function FieldMappingForm({
                                       />
                                       <span>{lang === 'ar' ? 'سياسة المطابقة' : 'Match Policy'}</span>
                                     </label>
-                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-lg transition-colors">
+                                    <label className="flex items-center gap-2.5 cursor-pointer hover:bg-muted/30 p-1.5 rounded-none transition-colors">
                                       <input
                                         type="checkbox"
                                         checked={visibleColumns.staticValue}
@@ -2051,7 +2051,7 @@ export default function FieldMappingForm({
                                       <button
                                         type="button"
                                         onClick={() => handleFieldChange(mapping.id, 'zidField', '')}
-                                        className="rounded-lg p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                                        className="rounded-none p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
                                         title={lang === 'ar' ? 'إزالة حقل المتجر' : 'Clear store field'}
                                       >
                                         <X className="h-3.5 w-3.5" />
@@ -2242,7 +2242,7 @@ export default function FieldMappingForm({
                                     <button
                                       type="button"
                                       onClick={() => handleStaticValueChange(mapping.id, Array.isArray(mapping.staticValue) ? [] : '')}
-                                      className="rounded-lg p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
+                                      className="rounded-none p-1 text-muted-foreground/60 hover:bg-muted hover:text-foreground"
                                       title={lang === 'ar' ? 'إزالة القيمة الثابتة' : 'Clear static value'}
                                     >
                                       <X className="h-3.5 w-3.5" />
@@ -2259,7 +2259,7 @@ export default function FieldMappingForm({
                             )}>
                               <button
                                 onClick={() => handleRemoveLine(mapping.id)}
-                                className="text-muted-foreground/60 hover:text-destructive p-1 rounded-lg hover:bg-destructive/10 transition-all"
+                                className="text-muted-foreground/60 hover:text-destructive p-1 rounded-none hover:bg-destructive/10 transition-all"
                                 title={lang === 'ar' ? 'حذف حقل الربط' : 'Remove Mapping Rule'}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -2300,7 +2300,7 @@ export default function FieldMappingForm({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
                 transition={{ duration: 0.15 }}
-                className="p-4 border border-border rounded-lg bg-muted/20 space-y-5 text-sm text-start"
+                className="p-4 border border-border rounded-none bg-muted/20 space-y-5 text-sm text-start"
               >
                 <h3 className="font-semibold text-muted-foreground flex items-center gap-2">
                   <HelpCircle className="h-4 w-4 text-foreground" />
@@ -2422,7 +2422,7 @@ export default function FieldMappingForm({
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                           <label className={cn(
-                            "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                            "flex items-start gap-3 p-3.5 rounded-none border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
                             variantSyncMode === 'AS_VARIANTS' 
                               ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
                               : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
@@ -2451,7 +2451,7 @@ export default function FieldMappingForm({
                           </label>
 
                           <label className={cn(
-                            "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
+                            "flex items-start gap-3 p-3.5 rounded-none border cursor-pointer transition-all duration-200 shadow-sm hover:shadow",
                             variantSyncMode === 'AS_SEPARATE_PRODUCTS' 
                               ? "bg-foreground/5 border-foreground text-foreground ring-1 ring-foreground/20" 
                               : "bg-background border-border hover:border-foreground/30 text-muted-foreground hover:text-foreground"
@@ -2486,7 +2486,7 @@ export default function FieldMappingForm({
                               <label className="text-[11px] font-bold text-muted-foreground block">
                                 {lang === 'ar' ? '🔍 حقل مطابقة المتغير في Odoo:' : '🔍 Odoo Variant Match Field:'}
                               </label>
-                              <div className="rounded-xl border border-border bg-card p-0.5">
+                              <div className="rounded-none border border-border bg-card p-0.5">
                                 <SearchableSelect
                                   value={variantOdooMatchField}
                                   onChange={(val) => {
@@ -2514,7 +2514,7 @@ export default function FieldMappingForm({
                               <label className="text-[11px] font-bold text-muted-foreground block">
                                 {lang === 'ar' ? '🔍 حقل المطابقة في المتجر:' : '🔍 Store Variant Match Field:'}
                               </label>
-                              <div className="rounded-xl border border-border bg-card p-0.5">
+                              <div className="rounded-none border border-border bg-card p-0.5">
                                 <SearchableSelect
                                   value={variantZidMatchField}
                                   onChange={(val) => {
@@ -2582,7 +2582,7 @@ export default function FieldMappingForm({
                                     setIsSaved(false)
                                   }}
                                   placeholder="e.g. 99"
-                                  className="h-8 w-full rounded-md border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
+                                  className="h-8 w-full rounded-none border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
                                 />
                               </div>
                               <div className="space-y-1">
@@ -2597,7 +2597,7 @@ export default function FieldMappingForm({
                                     setIsSaved(false)
                                   }}
                                   placeholder="e.g. SHIPPING"
-                                  className="h-8 w-full rounded-md border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
+                                  className="h-8 w-full rounded-none border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
                                 />
                               </div>
                             </div>
@@ -2646,7 +2646,7 @@ export default function FieldMappingForm({
                                     setIsSaved(false)
                                   }}
                                   placeholder="e.g. 999"
-                                  className="h-8 w-full rounded-md border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
+                                  className="h-8 w-full rounded-none border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
                                 />
                               </div>
                               <div className="space-y-1">
@@ -2661,7 +2661,7 @@ export default function FieldMappingForm({
                                     setIsSaved(false)
                                   }}
                                   placeholder="e.g. DISCOUNT"
-                                  className="h-8 w-full rounded-md border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
+                                  className="h-8 w-full rounded-none border border-input bg-inputBg px-3 text-xs outline-none focus:border-foreground transition-all"
                                 />
                               </div>
                               <div className="col-span-2 space-y-1">
@@ -2720,7 +2720,7 @@ export default function FieldMappingForm({
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-card text-foreground border border-border px-4 py-3.5 rounded-xl text-sm max-w-sm font-medium shadow-card"
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-card text-foreground border border-border px-4 py-3.5 rounded-none text-sm max-w-sm font-medium shadow-card"
           >
             <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-background text-foreground">
               <Check className="h-3 w-3 stroke-[3]" />
@@ -2743,7 +2743,7 @@ export default function FieldMappingForm({
                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="w-full max-w-2xl bg-card border border-border rounded-xl overflow-hidden flex flex-col max-h-[85vh] text-start"
+                className="w-full max-w-2xl bg-card border border-border rounded-none overflow-hidden flex flex-col max-h-[85vh] text-start"
               >
                 {/* Header */}
                 <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30">
@@ -2760,7 +2760,7 @@ export default function FieldMappingForm({
                   </div>
                   <button
                     onClick={() => setActiveFuzzyLine(null)}
-                    className="rounded-lg p-1.5 hover:bg-muted text-muted-foreground transition-all"
+                    className="rounded-none p-1.5 hover:bg-muted text-muted-foreground transition-all"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -2768,7 +2768,7 @@ export default function FieldMappingForm({
 
                 {/* Content */}
                 <div className="p-6 overflow-y-auto space-y-4 flex-1">
-                  <div className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-lg border border-border/60">
+                  <div className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-none border border-border/60">
                     💡 {lang === 'ar' 
                       ? 'سيبحث النظام بالمطابقة المختارة أولاً، ثم بحقل زد الرئيسي. إذا لم يُعثر على تطابق، سيلجأ للسياسة الاحتياطية المُحدّدة في الجدول.'
                       : 'The system searches using the match map below first, then the main Zid field. If no match is found, the fallback policy in the table applies.'}
@@ -2799,7 +2799,7 @@ export default function FieldMappingForm({
                               setIsSaved(false)
                             }}
                             className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all",
+                              "text-[10px] font-bold px-2 py-0.5 rounded-none border transition-all",
                               currentOperator === 'OR'
                                 ? "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"
                                 : "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300"
@@ -2826,7 +2826,7 @@ export default function FieldMappingForm({
 
                     <div className="space-y-2">
                       {fuzzyModalMappings.map((m, idx) => (
-                        <div key={idx} className="grid grid-cols-12 gap-3 items-center bg-muted/20 p-2.5 rounded-lg border border-border/40">
+                        <div key={idx} className="grid grid-cols-12 gap-3 items-center bg-muted/20 p-2.5 rounded-none border border-border/40">
                           {/* Odoo Field Selection */}
                           <div className="col-span-5">
                             <SearchableSelect
@@ -2866,7 +2866,7 @@ export default function FieldMappingForm({
                               onClick={() => {
                                 setFuzzyModalMappings(prev => prev.filter((_, i) => i !== idx))
                               }}
-                              className="text-muted-foreground/60 hover:text-destructive p-1 rounded-lg hover:bg-destructive/10 transition-all"
+                              className="text-muted-foreground/60 hover:text-destructive p-1 rounded-none hover:bg-destructive/10 transition-all"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -2875,7 +2875,7 @@ export default function FieldMappingForm({
                       ))}
 
                       {fuzzyModalMappings.length === 0 && (
-                        <div className="text-center py-6 text-xs text-muted-foreground italic border border-dashed border-border/80 rounded-xl">
+                        <div className="text-center py-6 text-xs text-muted-foreground italic border border-dashed border-border/80 rounded-none">
                           {lang === 'ar' ? 'لا توجد حقول مطابقة مخصصة مضافة حالياً. أضف حقولاً للبحث أو أغلق النافذة للاكتفاء بحقل زد الرئيسي.' : 'No custom match fields configured. Add fields to search, or close to use the main Zid field only.'}
                         </div>
                       )}
@@ -2963,7 +2963,7 @@ export default function FieldMappingForm({
                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                className="w-full max-w-xl bg-card border border-border rounded-xl overflow-hidden flex flex-col max-h-[85vh] text-start"
+                className="w-full max-w-xl bg-card border border-border rounded-none overflow-hidden flex flex-col max-h-[85vh] text-start"
               >
                 {/* Header */}
                 <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
@@ -2980,7 +2980,7 @@ export default function FieldMappingForm({
                   </div>
                   <button
                     onClick={() => setShowDryRunModal(false)}
-                    className="rounded-lg p-1 hover:bg-muted text-muted-foreground transition-all"
+                    className="rounded-none p-1 hover:bg-muted text-muted-foreground transition-all"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -2999,7 +2999,7 @@ export default function FieldMappingForm({
                         ? 'ألصق هنا عينة من بيانات webhook زد...\nمثال: {\n  "sku": "PROD-123",\n  "barcode": "123456",\n  "name": "منتج تجريبي"\n}'
                         : 'Paste a Zid webhook data sample...\nExample: {\n  "sku": "PROD-123",\n  "barcode": "123456",\n  "name": "Test Product"\n}'}
                       rows={6}
-                      className="w-full rounded-lg border border-input bg-inputBg p-3 text-xs outline-none focus:border-foreground focus:ring-1 focus:ring-foreground resize-none font-mono transition-all"
+                      className="w-full rounded-none border border-input bg-inputBg p-3 text-xs outline-none focus:border-foreground focus:ring-1 focus:ring-foreground resize-none font-mono transition-all"
                     />
                   </div>
 
@@ -3056,7 +3056,7 @@ export default function FieldMappingForm({
                   {/* Result display */}
                   {dryRunResult && (
                     <div className={cn(
-                      "rounded-lg border p-3 text-xs space-y-1",
+                      "rounded-none border p-3 text-xs space-y-1",
                       dryRunResult.phase === 'error' ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300" :
                       dryRunResult.phase === 'custom_map' || dryRunResult.phase === 'default_fallback' ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300" :
                       dryRunResult.phase === 'create' ? "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300" :

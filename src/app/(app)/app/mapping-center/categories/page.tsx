@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
+import { MappingCenterHeader } from '@/components/mapping-center/mapping-center-header'
 import { resolveLanguage } from '@/lib/translations'
 
 import { getMappingCenterConnection } from '../mapping-center-data'
@@ -25,6 +26,14 @@ export default async function CategoriesPage() {
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}
+
+      <MappingCenterHeader
+        title={lang === 'ar' ? 'ربط التصنيفات' : 'Category Mapping'}
+        subtitle={lang === 'ar'
+          ? 'كيف تُربط فئات المتجر بتصنيفات أودو، مع طريقة التكلفة والتقدير'
+          : 'How store categories map to Odoo categories, plus cost method and valuation'}
+        dir={dir}
+      />
 
       <StandardMappingClient
         hasOdooConnection={hasErpConnection}

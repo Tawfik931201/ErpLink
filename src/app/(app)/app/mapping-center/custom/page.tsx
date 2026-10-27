@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
+import { MappingCenterHeader } from '@/components/mapping-center/mapping-center-header'
 import { resolveLanguage } from '@/lib/translations'
 
 import CustomMappingClient from '../custom-mapping-client'
@@ -34,6 +35,14 @@ export default async function CustomMappingPage() {
       {!hasErpConnection && (
         <MappingCenterNotice lang={lang} dir={dir} erpType={erpType} />
       )}
+
+      <MappingCenterHeader
+        title={lang === 'ar' ? 'تخصيص الربط' : 'Custom Mapping'}
+        subtitle={lang === 'ar'
+          ? 'ربط الحقول المخصصة وروابط الأحداث المحددة بين متجرك ونظام ERP'
+          : 'Define custom field links and per-event rules between your store and the ERP'}
+        dir={dir}
+      />
 
       <CustomMappingClient
         initialModels={initialModels || []}

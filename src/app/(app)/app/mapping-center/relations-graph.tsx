@@ -325,7 +325,7 @@ export default function RelationsGraph({
           onMouseEnter={() => setHovered(primaryModel)}
           onMouseLeave={() => setHovered(null)}
           className={cn(
-            'rounded-lg border px-3 py-2 text-xs font-semibold cursor-pointer transition-colors truncate',
+            'rounded-none border px-3 py-2 text-xs font-semibold cursor-pointer transition-colors truncate',
             'bg-foreground text-background border-foreground font-bold',
           )}
         >
@@ -350,7 +350,7 @@ export default function RelationsGraph({
               onMouseEnter={() => setHovered(m.model)}
               onMouseLeave={() => setHovered(null)}
               className={cn(
-                'rounded-lg border px-3 py-2 text-xs font-semibold cursor-pointer transition-colors truncate',
+                'rounded-none border px-3 py-2 text-xs font-semibold cursor-pointer transition-colors truncate',
                 hi
                   ? 'border-foreground bg-muted text-foreground'
                   : 'border-border bg-card text-foreground hover:bg-muted',
