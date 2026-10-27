@@ -25,7 +25,7 @@ interface SearchableSelectProps {
   placeholder?: string
   className?: string
   disabled?: boolean
-  variant?: 'default' | 'cell'
+  variant?: 'default' | 'cell' | 'inline'
   /** Tighter, monospace cell rendering used by the Odoo-style mapping table. */
   compact?: boolean
   multiple?: boolean
@@ -261,10 +261,14 @@ export default function SearchableSelect({
       <div
         className={cn(
           'flex w-full items-center justify-between rounded-none text-sm ring-offset-background transition-all',
-          variant === 'cell'
-            ? 'border border-transparent bg-transparent hover:bg-muted/30 hover:border-input'
-            : 'border border-input bg-inputBg',
+          variant === 'inline'
+            ? 'h-6 border border-transparent bg-transparent px-0.5 text-xs font-mono hover:border-border hover:bg-muted/40'
+            : variant === 'cell'
+              ? 'border border-transparent bg-transparent hover:bg-muted/30 hover:border-input'
+              : 'border border-input bg-inputBg',
           multiple && !collapseTags ? 'min-h-[36px] flex-wrap p-1.5 gap-1.5' : 'h-9 pl-3 pr-2',
+          variant === 'inline' && !multiple && 'h-6 pl-0.5 pr-0',
+          variant === 'inline' && multiple && 'min-h-[24px] p-0',
           compact && !multiple && 'h-7 pl-2 pr-1 text-[11px]',
           compact && multiple && 'min-h-[28px] p-1 text-[11px]',
           isOpen && 'border-foreground ring-1 ring-foreground bg-inputBg',
@@ -322,6 +326,7 @@ export default function SearchableSelect({
             onKeyDown={handleKeyDown}
             className={cn(
               'flex-1 min-w-[60px] bg-transparent outline-none border-0 p-0 text-sm focus:ring-0 focus:border-0 placeholder:text-muted-foreground text-foreground',
+              variant === 'inline' && 'text-xs font-mono',
               compact && 'text-[11px] font-mono'
             )}
           />
@@ -353,7 +358,7 @@ export default function SearchableSelect({
             }}
             className="text-muted-foreground/60 hover:text-foreground rounded-none p-1"
           >
-            <ChevronsUpDown className={cn('shrink-0', compact ? 'h-3 w-3' : 'h-4 w-4')} />
+            <ChevronsUpDown className={cn('shrink-0', compact || variant === 'inline' ? 'h-3 w-3' : 'h-4 w-4')} />
           </button>
         </div>
       </div>

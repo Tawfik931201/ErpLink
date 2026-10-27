@@ -102,6 +102,29 @@ type MappingLine = {
   }
 }
 
+/**
+ * One labelled cell of the record header grid. It is deliberately identical to
+ * the read-only record page's InfoField (tiny uppercase caption + value), so the
+ * form and the display are the same sheet — only the value is a live control.
+ */
+function FormCell({
+  label,
+  children,
+  hint,
+}: {
+  label: string
+  children: React.ReactNode
+  hint?: React.ReactNode
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <div className="mt-1 break-all text-xs text-foreground">{children}</div>
+      {hint ? <div className="mt-1 space-y-0.5 empty:hidden">{hint}</div> : null}
+    </div>
+  )
+}
+
 
 
 
@@ -1416,187 +1439,48 @@ export default function FieldMappingForm({
         </div>
       )}
 
-      {/* Main Odoo-style Form Sheet */}
-      <div className="bg-card rounded-none border border-border overflow-hidden p-4 md:p-5">
+      {/* Main Odoo-style Form Sheet — the record page's header grid (tiny
+          uppercase caption + value), except every value is the live control. */}
+      <div className="space-y-4">
 
-        {/* Name Input */}
-        <div className="relative mb-5 group max-w-xl font-sans">
-          <div className="flex items-end justify-between border-b border-border focus-within:border-foreground transition-all pb-1">
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setIsSaved(false)
-              }}
-              placeholder={lang === 'ar' ? 'اسم إعداد الربط...' : 'Mapping name...'}
-              className="w-full bg-transparent text-lg font-bold outline-none placeholder:text-muted-foreground/40 text-foreground py-0.5 border-0 ring-0 focus:ring-0 focus:border-0"
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground font-medium mt-1">
-            {lang === 'ar' ? 'حدد اسماً توضيحياً لقاعدة مطابقة الحقول هذه (مثال: مطابقة المنتجات).' : 'Specify a descriptive identifier for this mapping ruleset (e.g. Products Mapping).'}
-          </p>
-        </div>
+        {/* Name — the record page's title, editable in place. */}
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            setIsSaved(false)
+          }}
+          placeholder={lang === 'ar' ? 'اسم إعداد الربط...' : 'Mapping name...'}
+          className="w-full max-w-xl border border-transparent bg-transparent px-0.5 py-0.5 text-base font-bold text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-foreground"
+        />
 
-        {/* Master Details Block */}
-        <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 max-w-5xl mb-6 text-xs">
-          
-          {/* Store Platform + Store picker — always on the same row */}
-          <div className="sm:col-span-2 grid grid-cols-2 gap-x-5 gap-y-4">
-          {((isZidConnected ? 1 : 0) + (isSallaConnected ? 1 : 0) + (isShopifyConnected ? 1 : 0) >= 2) && !editingId ? (
-            <div className="space-y-1.5 min-w-0">
-              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
-              </label>
-              <div className="flex gap-2 bg-muted p-1 rounded-none border border-border max-w-sm">
-                {isZidConnected && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      switchPlatform('zid', 'product.create')
-                    }}
-                    className={cn(
-                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
-                      platform === 'zid' 
-                        ? "bg-card text-foreground border border-border" 
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {lang === 'ar' ? 'زد (Zid)' : 'Zid'}
-                  </Button>
-                )}
-                {isSallaConnected && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      switchPlatform('salla', 'product.created')
-                    }}
-                    className={cn(
-                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
-                      platform === 'salla' 
-                        ? "bg-card text-foreground border border-border" 
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {lang === 'ar' ? 'سلة (Salla)' : 'Salla'}
-                  </Button>
-                )}
-                {isShopifyConnected && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      switchPlatform('shopify', 'products/create')
-                    }}
-                    className={cn(
-                      "flex-1 h-8 rounded-none text-xs font-semibold shadow-none transition-all",
-                      platform === 'shopify' 
-                        ? "bg-card text-foreground border border-border" 
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    {lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify'}
-                  </Button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className={cn("space-y-1.5 min-w-0", (!editingId && platformStores.length > 1) ? "" : "col-span-2")}>
-              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
-              </label>
-              <div className="flex h-9 items-center px-3 rounded-none border border-border bg-muted/50 text-xs font-semibold text-foreground capitalize dark:border-border dark:bg-card dark:text-foreground w-fit">
-                {platform === 'salla' ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla') : platform === 'shopify' ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify') : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
-              </div>
-            </div>
-          )}
+        <div className="border border-border bg-card p-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
 
-          {/* Store picker (create view, when the platform links several stores) */}
-          {!editingId && platformStores.length > 1 && (
-            <div className="space-y-1.5 min-w-0">
-              <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                {lang === 'ar' ? 'المتجر' : 'Store'}
-              </label>
-              <select
-                value={platformStores.some(s => s.id === storeKey) ? storeKey : (platformStores[0]?.id || '')}
-                onChange={e => {
-                  setStoreKey(e.target.value)
-                  setIsSaved(false)
-                }}
-                className="w-full h-9 px-3 rounded-none border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all max-w-sm"
-              >
-                {platformStores.map(s => (
-                  <option key={s.id} value={s.id} dir="auto">
-                    {(s.name || platform) + ` (${s.id})`}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-muted-foreground font-medium">
-                {lang === 'ar'
-                  ? 'سيُربط هذا الإعداد بالمتجر المحدد فقط.'
-                  : 'This mapping will attach to the selected store only.'}
-              </p>
-            </div>
-          )}
-          </div>
-
-          {/* Sync Direction Block */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {lang === 'ar' ? 'اتجاه المزامنة' : 'Sync Direction'}
-            </label>
-            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            {/* Event */}
+            <FormCell label={platform === 'salla'
+              ? (lang === 'ar' ? 'حدث سلة' : 'Salla event')
+              : platform === 'shopify'
+                ? (lang === 'ar' ? 'حدث شوبيفاي' : 'Shopify event')
+                : (lang === 'ar' ? 'حدث زد' : 'Zid event')}>
               <SearchableSelect
-                multiple={true}
-                value={syncDirection ? syncDirection.split(',').filter(Boolean) : []}
-                onChange={(vals: string[]) => {
-                  setSyncDirection(vals.join(','))
-                  setIsSaved(false)
-                }}
-                options={SYNC_DIRECTIONS}
-                placeholder={lang === 'ar' ? 'اختر اتجاه المزامنة...' : 'Select sync direction...'}
-              />
-            </div>
-            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-              {lang === 'ar'
-                ? 'حدد اتجاهات المزامنة المفعلة لقاعدة الربط هذه.'
-                : 'Determine the enabled synchronization directions for this mapping.'}
-            </p>
-          </div>
-
-          {/* Core Sync Operation */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {t('map.operationLabel')}
-            </label>
-            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
-              <SearchableSelect
-                value={odooOperation}
+                value={zidEvent}
                 onChange={(val) => {
-                  if (val === 'create' || val === 'update' || val === 'delete') {
-                    setOdooOperation(val)
-                    setIsSaved(false)
-                  }
+                  setZidEvent(val)
+                  setIsSaved(false)
                 }}
-                options={ODOO_OPERATIONS.map(opt => ({
-                  value: opt.value,
-                  label: formatFieldLabel(opt.label, lang)
+                options={(platform === 'salla' ? SALLA_EVENTS : platform === 'shopify' ? SHOPIFY_EVENTS : ZID_EVENTS).map(event => ({
+                  value: event.id,
+                  label: formatFieldLabel(event.name, lang),
                 }))}
                 placeholder={t('map.selectEventPlaceholder')}
+                variant="inline"
               />
-            </div>            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-              {lang === 'ar' ? `العملية التي ينفذها المحرك تلقائياً داخل ${getErpName(erpType)} لهذا الربط.` : `The operation executed automatically by the sync engine in ${getErpNameEn(erpType)} for this mapping.`}
-            </p>
-          </div>
+            </FormCell>
 
-          {/* ERP Model & Store Event (side-by-side) */}
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} Model`}
-            </label>
-            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            {/* ERP model */}
+            <FormCell label={lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} model`}>
               <SearchableSelect
                 value={odooModel}
                 onChange={(val) => {
@@ -1616,129 +1500,120 @@ export default function FieldMappingForm({
                       desc: model.desc
                     }))
                 }
-                placeholder={lang === 'ar' ? `ابحث أو اختر نموذج ${getErpName(erpType)}...` : `Search or select ${getErpNameEn(erpType)} model...`}
+                placeholder={lang === 'ar' ? 'اختر النموذج...' : 'Select model...'}
+                variant="inline"
               />
-            </div>
-            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-              {lang === 'ar' ? `النموذج الأساسي الذي يمثل البيانات في نظام ${getErpName(erpType)} ERP.` : `The primary model class representing data in ${getErpNameEn(erpType)} ERP.`}
-            </p>
-          </div>
+            </FormCell>
 
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {platform === 'salla' 
-                ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event') 
-                : (lang === 'ar' ? 'حدث زد' : 'Zid Event')}
-            </label>
-            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            {/* Operation */}
+            <FormCell label={lang === 'ar' ? 'العملية' : 'Operation'}>
               <SearchableSelect
-                value={zidEvent}
+                value={odooOperation}
                 onChange={(val) => {
-                  setZidEvent(val)
-                  setIsSaved(false)
+                  if (val === 'create' || val === 'update' || val === 'delete') {
+                    setOdooOperation(val)
+                    setIsSaved(false)
+                  }
                 }}
-                options={(platform === 'salla' ? SALLA_EVENTS : platform === 'shopify' ? SHOPIFY_EVENTS : ZID_EVENTS).map(event => ({
-                  value: event.id,
-                  label: formatFieldLabel(event.name, lang),
+                options={ODOO_OPERATIONS.map(opt => ({
+                  value: opt.value,
+                  label: formatFieldLabel(opt.label, lang)
                 }))}
                 placeholder={t('map.selectEventPlaceholder')}
+                variant="inline"
               />
-            </div>
-            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-              {platform === 'salla'
-                ? (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة سلة.' : 'The trigger event on Salla ecommerce platform.')
-                : platform === 'shopify'
-                  ? (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة شوبيفاي.' : 'The trigger event on Shopify ecommerce platform.')
-                  : (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة زد.' : 'The trigger event on Zid ecommerce platform.')}
-            </p>
-          </div>
+            </FormCell>
 
-          {/* Reference Field & Store Reference Field (conditional, side-by-side) */}
-          {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
-            <>
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي للمطابقة` : `${getErpNameEn(erpType)} Reference Field`}
-                </label>
-                <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
-                  <SearchableSelect
-                    value={odooMatchField}
-                    onChange={(val) => {
-                      setOdooMatchField(val)
-                      setIsSaved(false)
-                    }}
-                    options={primaryMatchErpFields.map(opt => ({
-                      ...opt,
-                      label: formatFieldLabel(opt.label, lang)
-                    }))}
-                    placeholder={t('map.selectField')}
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-                  {lang === 'ar' ? `الحقل الذي سيتم البحث به داخل نموذج ${getErpName(erpType)} المختار للمطابقة.` : `The field used to search and match records inside the selected ${getErpNameEn(erpType)} model.`}
-                </p>
-              </div>
+            {/* Direction */}
+            <FormCell label={lang === 'ar' ? 'الاتجاه' : 'Direction'}>
+              <SearchableSelect
+                multiple={true}
+                value={syncDirection ? syncDirection.split(',').filter(Boolean) : []}
+                onChange={(vals: string[]) => {
+                  setSyncDirection(vals.join(','))
+                  setIsSaved(false)
+                }}
+                options={SYNC_DIRECTIONS}
+                placeholder={lang === 'ar' ? 'اختر الاتجاه...' : 'Select direction...'}
+                variant="inline"
+              />
+            </FormCell>
 
-              <div className="space-y-1.5">
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {platform === 'salla'
-                    ? (lang === 'ar' ? 'حقل سلة المرجعي للمطابقة' : 'Salla Reference Field')
-                    : (lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field')}
-                </label>
-                <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
-                  <SearchableSelect
-                    value={zidMatchField}
-                    onChange={(val) => {
-                      setZidMatchField(val)
-                      setIsSaved(false)
-                    }}
-                    options={primaryMatchZidFields.map(opt => ({
-                      ...opt,
-                      label: formatFieldLabel(opt.label, lang)
-                    }))}
-                    placeholder={t('map.selectField')}
-                  />
-                </div>
-                <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-                  {platform === 'salla'
-                    ? (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بسلة ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Salla webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)
-                    : (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بزد ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Zid webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)}
-                </p>
-                {zidMatchField === STORED_ODOO_ID_LITERAL && (
-                  <p className="text-[10px] font-semibold text-foreground/80">
-                    {lang === 'ar'
-                      ? 'الحقل المحفوظ: سيُحل تلقائياً إلى رقم الأوردر داخل أودوو الذي سُجل عند الإنشاء — خاص بهذا المتجر فقط.'
-                      : 'Saved-ID field: resolves automatically to the Odoo order number recorded at creation — scoped to this store only.'}
-                  </p>
-                )}
-                {isLoadingLinkStats ? (
-                  <p className="text-[10px] text-muted-foreground">
-                    {lang === 'ar' ? 'جارٍ قراءة الروابط المحفوظة لهذا المتجر...' : 'Loading saved links for this store...'}
-                  </p>
-                ) : linkStats && linkStats.count > 0 && linkStats.last ? (
-                  <p className="text-[10px] text-muted-foreground">
-                    {lang === 'ar'
-                      ? `لهذا المتجر ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} طلب مربوط — آخرها طلب المتجر ${linkStats.last.storeEntityId} ← أودوو #${linkStats.last.odooRecordId}.`
-                      : `This store has ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} linked orders — latest: store order ${linkStats.last.storeEntityId} → Odoo #${linkStats.last.odooRecordId}.`}
-                  </p>
-                ) : linkStats && linkStats.count === 0 ? (
-                  <p className="text-[10px] text-muted-foreground">
-                    {lang === 'ar'
-                      ? 'لا روابط محفوظة بعد لهذا المتجر — نفّذ مزامنة إنشاء أولاً حتى يُحفظ رقم الأوردر.'
-                      : 'No saved links for this store yet — run a create sync first so the order number gets saved.'}
-                  </p>
-                ) : null}
-              </div>
-            </>
-          )}
+            {/* ERP match field */}
+            {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
+              <FormCell label={lang === 'ar' ? 'حقل المطابقة في ERP' : 'ERP match field'}>
+                <SearchableSelect
+                  value={odooMatchField}
+                  onChange={(val) => {
+                    setOdooMatchField(val)
+                    setIsSaved(false)
+                  }}
+                  options={primaryMatchErpFields.map(opt => ({
+                    ...opt,
+                    label: formatFieldLabel(opt.label, lang)
+                  }))}
+                  placeholder={t('map.selectField')}
+                  variant="inline"
+                />
+              </FormCell>
+            )}
 
-          {/* Fallback Policy + Related Models (side-by-side on the same row, at the end) */}
-          {(odooOperation === 'update' || odooOperation === 'delete') && (
-            <div className="space-y-1.5">
-              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {lang === 'ar' ? 'السياسة البديلة (عند عدم وجود السجل)' : 'Fallback Policy (when record not found)'}
-              </label>
-              <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            {/* Store match field */}
+            {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
+              <FormCell
+                label={platform === 'salla'
+                  ? (lang === 'ar' ? 'حقل المطابقة في سلة' : 'Salla match field')
+                  : platform === 'shopify'
+                    ? (lang === 'ar' ? 'حقل المطابقة في شوبيفاي' : 'Shopify match field')
+                    : (lang === 'ar' ? 'حقل المطابقة في زد' : 'Zid match field')}
+                hint={
+                  <>
+                    {zidMatchField === STORED_ODOO_ID_LITERAL && (
+                      <p className="text-[10px] font-semibold text-foreground/80">
+                        {lang === 'ar'
+                          ? 'الحقل المحفوظ: يُحل تلقائياً إلى رقم الأوردر في أودوو — خاص بهذا المتجر فقط.'
+                          : 'Saved-ID field: resolves automatically to the Odoo order number — scoped to this store only.'}
+                      </p>
+                    )}
+                    {isLoadingLinkStats ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {lang === 'ar' ? 'جارٍ قراءة الروابط المحفوظة...' : 'Loading saved links...'}
+                      </p>
+                    ) : linkStats && linkStats.count > 0 && linkStats.last ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {lang === 'ar'
+                          ? `${linkStats.count}${linkStats.count >= 50 ? '+' : ''} طلب مربوط — آخرها ${linkStats.last.storeEntityId} ← أودوو #${linkStats.last.odooRecordId}.`
+                          : `${linkStats.count}${linkStats.count >= 50 ? '+' : ''} linked orders — latest: ${linkStats.last.storeEntityId} → Odoo #${linkStats.last.odooRecordId}.`}
+                      </p>
+                    ) : linkStats && linkStats.count === 0 ? (
+                      <p className="text-[10px] text-muted-foreground">
+                        {lang === 'ar'
+                          ? 'لا روابط محفوظة بعد — نفّذ مزامنة إنشاء أولاً.'
+                          : 'No saved links yet — run a create sync first.'}
+                      </p>
+                    ) : null}
+                  </>
+                }
+              >
+                <SearchableSelect
+                  value={zidMatchField}
+                  onChange={(val) => {
+                    setZidMatchField(val)
+                    setIsSaved(false)
+                  }}
+                  options={primaryMatchZidFields.map(opt => ({
+                    ...opt,
+                    label: formatFieldLabel(opt.label, lang)
+                  }))}
+                  placeholder={t('map.selectField')}
+                  variant="inline"
+                />
+              </FormCell>
+            )}
+
+            {/* Fallback policy */}
+            {(odooOperation === 'update' || odooOperation === 'delete') && (
+              <FormCell label={lang === 'ar' ? 'سياسة الغياب' : 'Fallback policy'}>
                 <SearchableSelect
                   value={odooFallbackPolicy}
                   onChange={(val) => {
@@ -1748,27 +1623,18 @@ export default function FieldMappingForm({
                     }
                   }}
                   options={[
-                    { value: 'none', label: lang === 'ar' ? 'تجاهل (سكيب صامت)' : 'Skip silently (none)' },
-                    { value: 'create', label: lang === 'ar' ? 'إنشاء السجل تلقائياً' : 'Create record (upsert)' },
-                    { value: 'block', label: lang === 'ar' ? 'إيقاف المزامنة مع خطأ' : 'Block sync with error' },
+                    { value: 'none', label: lang === 'ar' ? 'تجاهل صامت' : 'Skip silently' },
+                    { value: 'create', label: lang === 'ar' ? 'إنشاء السجل' : 'Create record' },
+                    { value: 'block', label: lang === 'ar' ? 'إيقاف مع خطأ' : 'Block with error' },
                   ]}
-                  placeholder={lang === 'ar' ? 'اختر سياسة بديلة...' : 'Select fallback policy...'}
+                  placeholder={lang === 'ar' ? 'اختر السياسة...' : 'Select policy...'}
+                  variant="inline"
                 />
-              </div>
-              <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-                {lang === 'ar'
-                  ? `ما الذي يحدث عندما لا يجد المحرك السجل في ${getErpName(erpType)} أثناء تنفيذ عملية ${odooOperation === 'update' ? 'التحديث' : 'الحذف'}؟.`
-                  : `What happens when the sync engine can't find the record in ${getErpNameEn(erpType)} during a ${odooOperation} operation.`}
-              </p>
-            </div>
-          )}
+              </FormCell>
+            )}
 
-          {/* Related Models & Mapping Tip (side-by-side) */}
-          <div className={cn("space-y-1.5", (odooOperation !== 'update' && odooOperation !== 'delete') && "sm:col-span-2")}>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              {lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} Models`}
-            </label>
-            <div className="rounded-none border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
+            {/* Related models */}
+            <FormCell label={lang === 'ar' ? 'النماذج الفرعية المرتبطة' : `Related ${getErpNameEn(erpType)} models`}>
               <SearchableSelect
                 value={relatedOdooModels}
                 onChange={handleRelatedModelsChange}
@@ -1786,20 +1652,101 @@ export default function FieldMappingForm({
                       desc: model.desc
                     }))
                 }
-                placeholder={lang === 'ar' ? 'ابحث واختر نماذج فرعية مرتبطة...' : `Search and select related ${getErpNameEn(erpType)} models...`}
+                placeholder={lang === 'ar' ? 'ابحث واختر نماذج...' : 'Search and select models...'}
+                variant="inline"
               />
-            </div>
-            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
-              {lang === 'ar' ? 'يمكنك كتابة واختيار أكثر من نموذج فرعي مرتبط في نفس الوقت لربط البيانات المتداخلة كأجزاء من النموذج الرئيسي.' : 'You can search and select multiple related child models to map nested structures as parts of the primary model.'}
-            </p>
+            </FormCell>
+
+            {/* Store platform */}
+            <FormCell label={lang === 'ar' ? 'منصة المتجر' : 'Store platform'}>
+              {((isZidConnected ? 1 : 0) + (isSallaConnected ? 1 : 0) + (isShopifyConnected ? 1 : 0) >= 2) && !editingId ? (
+                <div className="flex flex-wrap gap-1">
+                  {isZidConnected && (
+                    <button
+                      type="button"
+                      onClick={() => switchPlatform('zid', 'product.create')}
+                      className={cn(
+                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
+                        platform === 'zid'
+                          ? 'border-border bg-muted text-foreground'
+                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      )}
+                    >
+                      {lang === 'ar' ? 'زد (Zid)' : 'Zid'}
+                    </button>
+                  )}
+                  {isSallaConnected && (
+                    <button
+                      type="button"
+                      onClick={() => switchPlatform('salla', 'product.created')}
+                      className={cn(
+                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
+                        platform === 'salla'
+                          ? 'border-border bg-muted text-foreground'
+                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      )}
+                    >
+                      {lang === 'ar' ? 'سلة (Salla)' : 'Salla'}
+                    </button>
+                  )}
+                  {isShopifyConnected && (
+                    <button
+                      type="button"
+                      onClick={() => switchPlatform('shopify', 'products/create')}
+                      className={cn(
+                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
+                        platform === 'shopify'
+                          ? 'border-border bg-muted text-foreground'
+                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      )}
+                    >
+                      {lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify'}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <span className="font-mono">
+                  {platform === 'salla'
+                    ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla')
+                    : platform === 'shopify'
+                      ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify')
+                      : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
+                </span>
+              )}
+            </FormCell>
+
+            {/* Store (create view, when the platform links several stores) */}
+            {!editingId && platformStores.length > 1 && (
+              <FormCell label={lang === 'ar' ? 'المتجر' : 'Store'}>
+                <select
+                  value={platformStores.some(s => s.id === storeKey) ? storeKey : (platformStores[0]?.id || '')}
+                  onChange={e => {
+                    setStoreKey(e.target.value)
+                    setIsSaved(false)
+                  }}
+                  className="h-6 w-full cursor-pointer border border-transparent bg-transparent px-0.5 font-mono text-xs text-foreground outline-none transition-colors hover:border-border hover:bg-muted/40 focus:border-foreground"
+                >
+                  {platformStores.map(s => (
+                    <option key={s.id} value={s.id} dir="auto">
+                      {(s.name || platform) + ` (${s.id})`}
+                    </option>
+                  ))}
+                </select>
+              </FormCell>
+            )}
           </div>
+        </div>
 
-
-          {activeRelatedModels.length > 0 && (
-            <div className="col-span-1 sm:col-span-2">
-              <label className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-1.5">
-                {lang === 'ar' ? 'مخطط العلاقات' : 'Relations Graph'}
-              </label>
+        {/* Relations graph — same card language, only when there are relations. */}
+        {activeRelatedModels.length > 0 && (
+          <div className="border border-border bg-card">
+            <div className="flex items-center gap-1.5 border-b border-border bg-muted px-3 py-1.5">
+              <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-[11px] font-bold text-foreground/80">
+                {lang === 'ar' ? 'مخطط العلاقات' : 'Relations graph'}
+              </span>
+            </div>
+            <div className="p-3">
               <RelationsGraph
                 primaryModel={odooModel}
                 relatedModels={activeRelatedModels.map(m => ({ model: m.model, label: m.label }))}
@@ -1816,8 +1763,8 @@ export default function FieldMappingForm({
                 className="w-full"
               />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Notebook / Tabs Selector — compact segments, same square
             aesthetic as the mapping table underneath. */}

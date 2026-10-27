@@ -53,7 +53,21 @@ const FORM_SRC = path.join(
   'field-mapping-form.tsx'
 )
 
-function renderForm() {
+const RECORD_SRC = path.join(
+  __dirname,
+  '..',
+  '..',
+  'src',
+  'app',
+  '(app)',
+  'app',
+  'mapping-center',
+  'custom',
+  '[id]',
+  'mapping-detail-client.tsx'
+)
+
+function renderForm(overrides: { initialOdooOperation?: 'create' | 'update' | 'delete' } = {}) {
   return render(
     <LanguageProvider initialLang="ar">
       <FieldMappingForm
@@ -67,7 +81,7 @@ function renderForm() {
         ]}
         initialName="Products mapping"
         initialOdooModel="product.template"
-        initialOdooOperation="create"
+        initialOdooOperation={overrides.initialOdooOperation ?? 'create'}
         initialMappings={{
           'product.template': [
             { id: 'a1', erpField: 'name', zidField: 'name' },
@@ -129,5 +143,64 @@ describe('FieldMappingForm — same presentation as the record view', () => {
     // No leftover bespoke table chrome.
     expect(src).not.toContain('border-separate border-spacing-0')
     expect(src).not.toContain('rounded-full px-2 py-0.5 text-[10px] font-medium border')
+  })
+})
+
+describe('FieldMappingForm — header is the record page header grid', () => {
+  it('renders the four-column caption grid with live controls in the cells', () => {
+    const { container } = renderForm()
+
+    // One card holding a 4-column grid, exactly like the record page.
+    const grid = container.querySelector('.grid.grid-cols-2.gap-4.md\\:grid-cols-4')
+    expect(grid).toBeInTheDocument()
+
+    // Every cell is a tiny uppercase caption over a value — never a label above
+    // a boxed input, which is what made the form look unlike the record page.
+    const cells = grid!.children
+    expect(cells.length).toBeGreaterThanOrEqual(6)
+    for (const cell of Array.from(cells)) {
+      const caption = cell.firstElementChild
+      expect(caption?.tagName).toBe('P')
+      expect(caption?.className).toContain('text-[10px]')
+      expect(caption?.className).toContain('uppercase')
+      expect(caption?.className).toContain('tracking-wider')
+      expect(caption?.className).toContain('text-muted-foreground')
+    }
+
+    // The cells are the record's own fields, and each one is editable.
+    expect(screen.getByText('حدث زد')).toBeInTheDocument()
+    expect(screen.getByText('نموذج أودو')).toBeInTheDocument()
+    expect(screen.getByText('العملية')).toBeInTheDocument()
+    expect(screen.getByText('الاتجاه')).toBeInTheDocument()
+    expect(screen.getByText('منصة المتجر')).toBeInTheDocument()
+    expect(grid!.querySelectorAll('input').length).toBeGreaterThan(3)
+  })
+
+  it('shows the match/fallback cells exactly as the record page does', () => {
+    // The record page always lists ERP match field / store match field /
+    // fallback policy, so the form must too once the operation needs them.
+    renderForm({ initialOdooOperation: 'update' })
+
+    expect(screen.getByText('حقل المطابقة في ERP')).toBeInTheDocument()
+    expect(screen.getByText('حقل المطابقة في زد')).toBeInTheDocument()
+    expect(screen.getByText('سياسة الغياب')).toBeInTheDocument()
+  })
+
+  it('keeps the form and the display on the same visual language (source pins)', () => {
+    const src = fs.readFileSync(FORM_SRC, 'utf8')
+    const recordSrc = fs.readFileSync(RECORD_SRC, 'utf8')
+
+    // One shared caption style, character for character.
+    const caption = 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'
+    expect(recordSrc).toContain(caption)
+    expect(src).toContain('function FormCell(')
+    expect(src).toContain(caption)
+    // Same card + grid geometry as the record page.
+    expect(recordSrc).toContain('border border-border bg-card p-4')
+    expect(src).toContain('<div className="border border-border bg-card p-4">')
+    expect(src).toContain('grid grid-cols-2 gap-4 md:grid-cols-4')
+    // The explanatory paragraphs the record page does not have are gone.
+    expect(src).not.toContain('النموذج الأساسي الذي يمثل البيانات')
+    expect(src).not.toContain('حدد اسماً توضيحياً لقاعدة مطابقة الحقول')
   })
 })
