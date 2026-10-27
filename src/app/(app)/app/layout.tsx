@@ -14,6 +14,7 @@ import { Logo } from '@/components/ui/logo'
 import UserMenu from '@/components/user-menu'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
 import { resolveLanguage, translations } from '@/lib/translations'
+import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
 
 export const metadata: Metadata = {
   title: 'لوحة التحكم',
@@ -27,7 +28,10 @@ async function ensureWorkspaceAccess() {
   const pathname = (await headers()).get('x-pathname') || ''
   if (pathname === '/app/settings/workspace') return
 
-  const activeId = await getActiveWorkspaceId()
+  let activeId = await getActiveWorkspaceId()
+  if (!activeId) {
+    activeId = await ensureDefaultWorkspace(userId)
+  }
   if (activeId) {
     return
   }

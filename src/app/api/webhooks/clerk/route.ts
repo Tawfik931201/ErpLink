@@ -82,36 +82,12 @@ async function syncUserForUserCreated(data: any) {
     console.error('[clerk-webhook] Failed to create user:', userErr)
   }
 
-  // Automatically create a default workspace named "Default" (or "ديفلت" in Arabic)
-  // and activate it for the new user.
+  // Automatically create a default workspace named "Default" and activate it for the new user.
   try {
-    await createDefaultWorkspace(userId, email, name)
+    const { ensureDefaultWorkspace } = await import('@/lib/workspace-defaults')
+    await ensureDefaultWorkspace(userId)
   } catch (createErr) {
     console.error('[clerk-webhook] Failed to create default workspace:', createErr)
-  }
-}
-
-/** Create a default workspace named "Default" and activate it for the user. */
-async function createDefaultWorkspace(userId: string, email: string, name: string) {
-  const { data: workspace, error: workspaceErr } = await supabase
-    .from('workspaces')
-    .insert([{ name: 'Default', user_id: userId }])
-    .select()
-    .single()
-
-  if (workspaceErr) {
-    console.error('[clerk-webhook] Failed to insert workspace:', workspaceErr)
-    return
-  }
-
-  // Activate the new workspace as the user's active workspace
-  const { error: activateErr } = await supabase
-    .from('users')
-    .update({ active_workspace_id: workspace.id })
-    .eq('id', userId)
-
-  if (activateErr) {
-    console.error('[clerk-webhook] Failed to activate workspace:', activateErr)
   }
 }
 

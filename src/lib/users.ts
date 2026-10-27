@@ -2,6 +2,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import { cache } from 'react'
 
 import { supabase } from '@/lib/supabase'
+import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
 
 export const getOrCreateDbUser = cache(async (userId: string) => {
   // Lean select: this lookup runs on EVERY server action (React-cache dedupes
@@ -21,7 +22,15 @@ export const getOrCreateDbUser = cache(async (userId: string) => {
     .eq('id', userId)
     .single()
 
-  if (dbUser) return dbUser
+  if (dbUser) {
+    if (!dbUser.active_workspace_id) {
+      const activeId = await ensureDefaultWorkspace(userId)
+      if (activeId) {
+        dbUser.active_workspace_id = activeId
+      }
+    }
+    return dbUser
+  }
 
   const clerkUser = await currentUser()
   const email = clerkUser?.emailAddresses[0]?.emailAddress ?? `${userId}@clerk.user`
@@ -74,6 +83,13 @@ export const getOrCreateDbUser = cache(async (userId: string) => {
       readError?.message ?? 'no row returned'
     )
     throw new Error('Could not create database user')
+  }
+
+  if (!createdUser.active_workspace_id) {
+    const activeId = await ensureDefaultWorkspace(userId)
+    if (activeId) {
+      createdUser.active_workspace_id = activeId
+    }
   }
 
   return createdUser

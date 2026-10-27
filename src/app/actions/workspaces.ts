@@ -214,6 +214,16 @@ export async function deleteWorkspace(id: string) {
         .eq('id', user.id)
     }
 
+    // Audit delete so default workspace is not auto-recreated if user intentionally clears all workspaces
+    const { recordAudit } = await import('@/lib/audit-logs')
+    await recordAudit({
+      actorId: user.id,
+      actorRole: 'user',
+      action: 'workspace.delete',
+      entityType: 'workspace',
+      entityId: id,
+    })
+
     revalidatePath('/app/settings/workspace')
     return {
       success: true,
