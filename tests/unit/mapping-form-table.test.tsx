@@ -172,8 +172,31 @@ describe('FieldMappingForm — header is the record page header grid', () => {
     expect(screen.getByText('نموذج أودو')).toBeInTheDocument()
     expect(screen.getByText('العملية')).toBeInTheDocument()
     expect(screen.getByText('الاتجاه')).toBeInTheDocument()
-    expect(screen.getByText('منصة المتجر')).toBeInTheDocument()
+    expect(screen.getByText('المتجر')).toBeInTheDocument()
     expect(grid!.querySelectorAll('input').length).toBeGreaterThan(3)
+  })
+
+  it('picks a connected STORE, not a platform chip', () => {
+    // The merchant recognises a store, not a platform: a mapping belongs to one
+    // store, and its platform follows from it. The old "Store platform" chip row
+    // (Zid / Salla / Shopify) is gone.
+    const src = fs.readFileSync(FORM_SRC, 'utf8')
+    expect(src).not.toContain('منصة المتجر')
+    expect(src).not.toContain('Store platform')
+    // Every linked store is offered, whichever platform owns it.
+    expect(src).toContain('const allStores')
+    expect(src).toContain("key: `zid:${s.id}`")
+    expect(src).toContain("key: `salla:${s.id}`")
+    expect(src).toContain("key: `shopify:${s.id}`")
+  })
+
+  it('has no relations-graph drawing left', () => {
+    // Removed on request: the graph duplicated what the "Related models" cell
+    // already lists. The relations themselves are still saved with the payload.
+    const src = fs.readFileSync(FORM_SRC, 'utf8')
+    expect(src).not.toContain('RelationsGraph')
+    expect(src).not.toContain('relations-graph')
+    expect(src).toContain('relations: cleanedRelations')
   })
 
   it('shows the match/fallback cells exactly as the record page does', () => {

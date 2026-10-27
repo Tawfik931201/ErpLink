@@ -37,7 +37,6 @@ import {
 import { formatFieldLabel } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
-import RelationsGraph from './relations-graph'
 import SearchableSelect from './searchable-select'
 
 
@@ -276,8 +275,29 @@ export default function FieldMappingForm({
   // Stores of a platform, for the create-view store picker.
   const storesOf = (p: string): { id: string; name: string | null }[] =>
     p === 'zid' ? (zidStores || []) : p === 'salla' ? (sallaStores || []) : (shopifyStores || [])
-  const platformStores = storesOf(platform)
   const firstStoreIdOf = (p: string): string => storesOf(p)[0]?.id || ''
+
+  const platformLabel = (p: string): string =>
+    p === 'salla'
+      ? (lang === 'ar' ? 'سلة' : 'Salla')
+      : p === 'shopify'
+        ? (lang === 'ar' ? 'شوبيفاي' : 'Shopify')
+        : (lang === 'ar' ? 'زد' : 'Zid')
+
+  // The event each platform defaults to when the merchant picks a store of
+  // that platform (a store switch can cross platforms).
+  const defaultEventFor = (p: string): string =>
+    p === 'salla' ? 'product.created' : p === 'shopify' ? 'products/create' : 'product.create'
+
+  // Every linked store across platforms. The header lets the merchant pick a
+  // STORE, not a platform: a mapping belongs to one store, and the platform is
+  // implied by it.
+  const allStores: Array<{ key: string; platform: 'zid' | 'salla' | 'shopify'; id: string; name: string | null }> = [
+    ...(zidStores || []).map(s => ({ key: `zid:${s.id}`, platform: 'zid' as const, id: s.id, name: s.name })),
+    ...(sallaStores || []).map(s => ({ key: `salla:${s.id}`, platform: 'salla' as const, id: s.id, name: s.name })),
+    ...(shopifyStores || []).map(s => ({ key: `shopify:${s.id}`, platform: 'shopify' as const, id: s.id, name: s.name })),
+  ]
+  const selectedStore = allStores.find(s => s.key === `${platform}:${storeKey}`)
 
   // Normalize once on mount: the incoming store key may belong to another
   // platform than the form's initial one — snap it to this platform so the
@@ -1657,114 +1677,45 @@ export default function FieldMappingForm({
               />
             </FormCell>
 
-            {/* Store platform */}
-            <FormCell label={lang === 'ar' ? 'منصة المتجر' : 'Store platform'}>
-              {((isZidConnected ? 1 : 0) + (isSallaConnected ? 1 : 0) + (isShopifyConnected ? 1 : 0) >= 2) && !editingId ? (
-                <div className="flex flex-wrap gap-1">
-                  {isZidConnected && (
-                    <button
-                      type="button"
-                      onClick={() => switchPlatform('zid', 'product.create')}
-                      className={cn(
-                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
-                        platform === 'zid'
-                          ? 'border-border bg-muted text-foreground'
-                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      )}
-                    >
-                      {lang === 'ar' ? 'زد (Zid)' : 'Zid'}
-                    </button>
-                  )}
-                  {isSallaConnected && (
-                    <button
-                      type="button"
-                      onClick={() => switchPlatform('salla', 'product.created')}
-                      className={cn(
-                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
-                        platform === 'salla'
-                          ? 'border-border bg-muted text-foreground'
-                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      )}
-                    >
-                      {lang === 'ar' ? 'سلة (Salla)' : 'Salla'}
-                    </button>
-                  )}
-                  {isShopifyConnected && (
-                    <button
-                      type="button"
-                      onClick={() => switchPlatform('shopify', 'products/create')}
-                      className={cn(
-                        'border px-2 py-0.5 text-[11px] font-bold transition-colors',
-                        platform === 'shopify'
-                          ? 'border-border bg-muted text-foreground'
-                          : 'border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      )}
-                    >
-                      {lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify'}
-                    </button>
-                  )}
-                </div>
+            {/* Store — every linked store, whichever platform it belongs to.
+                A mapping belongs to ONE store, so picking the store is what the
+                merchant actually recognises; the platform (and its event
+                family) follows from it. */}
+            <FormCell label={lang === 'ar' ? 'المتجر' : 'Store'}>
+              {!editingId && allStores.length > 0 ? (
+                <SearchableSelect
+                  value={allStores.some(s => s.key === `${platform}:${storeKey}`) ? `${platform}:${storeKey}` : allStores[0].key}
+                  onChange={(val: string) => {
+                    const store = allStores.find(s => s.key === val)
+                    if (!store) return
+                    if (store.platform !== platform) {
+                      // Each platform has its own event catalogue, so switching
+                      // store across platforms must reset the event with it.
+                      switchPlatform(store.platform, defaultEventFor(store.platform))
+                    }
+                    setStoreKey(store.id)
+                    setIsSaved(false)
+                  }}
+                  options={allStores.map(store => ({
+                    value: store.key,
+                    label: store.name || platformLabel(store.platform),
+                    desc: `${platformLabel(store.platform)} · ${store.id}`
+                  }))}
+                  placeholder={lang === 'ar' ? 'اختر المتجر...' : 'Select store...'}
+                  variant="inline"
+                />
               ) : (
                 <span className="font-mono">
-                  {platform === 'salla'
-                    ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla')
-                    : platform === 'shopify'
-                      ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify')
-                      : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
+                  {selectedStore
+                    ? `${selectedStore.name || platformLabel(selectedStore.platform)} · ${platformLabel(selectedStore.platform)}`
+                    : storeKey
+                      ? `${storeKey} · ${platformLabel(platform)}`
+                      : platformLabel(platform)}
                 </span>
               )}
             </FormCell>
-
-            {/* Store (create view, when the platform links several stores) */}
-            {!editingId && platformStores.length > 1 && (
-              <FormCell label={lang === 'ar' ? 'المتجر' : 'Store'}>
-                <select
-                  value={platformStores.some(s => s.id === storeKey) ? storeKey : (platformStores[0]?.id || '')}
-                  onChange={e => {
-                    setStoreKey(e.target.value)
-                    setIsSaved(false)
-                  }}
-                  className="h-6 w-full cursor-pointer border border-transparent bg-transparent px-0.5 font-mono text-xs text-foreground outline-none transition-colors hover:border-border hover:bg-muted/40 focus:border-foreground"
-                >
-                  {platformStores.map(s => (
-                    <option key={s.id} value={s.id} dir="auto">
-                      {(s.name || platform) + ` (${s.id})`}
-                    </option>
-                  ))}
-                </select>
-              </FormCell>
-            )}
           </div>
         </div>
-
-        {/* Relations graph — same card language, only when there are relations. */}
-        {activeRelatedModels.length > 0 && (
-          <div className="border border-border bg-card">
-            <div className="flex items-center gap-1.5 border-b border-border bg-muted px-3 py-1.5">
-              <ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-[11px] font-bold text-foreground/80">
-                {lang === 'ar' ? 'مخطط العلاقات' : 'Relations graph'}
-              </span>
-            </div>
-            <div className="p-3">
-              <RelationsGraph
-                primaryModel={odooModel}
-                relatedModels={activeRelatedModels.map(m => ({ model: m.model, label: m.label }))}
-                relations={relations.map(r => ({
-                  sourceModel: r.sourceModel,
-                  targetModel: r.targetModel,
-                  relationField: r.relationField,
-                  relationType: modelFields[r.sourceModel]?.find(f => f.value === r.relationField)?.type || 'one2many'
-                }))}
-                activeModel={activeTab}
-                onSelectModel={(m) => setActiveTab(m)}
-                lang={lang}
-                dir={dir}
-                className="w-full"
-              />
-            </div>
-          </div>
-        )}
 
         {/* Notebook / Tabs Selector — compact segments, same square
             aesthetic as the mapping table underneath. */}

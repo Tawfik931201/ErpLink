@@ -74,13 +74,22 @@ describe('MappingFieldsCard', () => {
     render(<MappingFieldsCard mappings={PAYLOAD} ar={false} />)
 
     expect(screen.getByText('Additional settings')).toBeInTheDocument()
-    expect(screen.getByText('On store deletion')).toBeInTheDocument()
-    expect(screen.getByText('Archive')).toBeInTheDocument()
-    expect(screen.getByText('Variant sync')).toBeInTheDocument()
     expect(screen.getByText('Model relations')).toBeInTheDocument()
     expect(screen.getByText('Payload paths')).toBeInTheDocument()
     expect(screen.getByText('DISC')).toBeInTheDocument()
     expect(screen.getByText('Percent')).toBeInTheDocument()
+  })
+
+  it('does not show the retired store-deletion and variant-mode rows', () => {
+    // Both were removed from the record view on request: the form owns those
+    // choices, and echoing them here only duplicated a setting the merchant
+    // reads as noise.
+    render(<MappingFieldsCard mappings={PAYLOAD} ar={false} />)
+
+    expect(screen.queryByText('On store deletion')).not.toBeInTheDocument()
+    expect(screen.queryByText('Archive')).not.toBeInTheDocument()
+    expect(screen.queryByText('Variant sync')).not.toBeInTheDocument()
+    expect(screen.queryByText('As variants')).not.toBeInTheDocument()
   })
 
   it('keeps the empty state when nothing is mapped', () => {

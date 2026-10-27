@@ -3,24 +3,20 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Trash2, Check, Loader2, AlertTriangle, ChevronDown,
-  Info, Wand2, X, RefreshCw, Database, ArrowRight, Calendar, Edit
+  Info, Wand2, X, RefreshCw, Database, ArrowRight, Calendar, ChevronRight
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 
 import {
   createCustomOdooField,
   getCustomOdooFields,
-  deleteCustomOdooField,
-  updateCustomOdooField,
   type CreateCustomFieldData,
   type CustomFieldView,
-  type UpdateCustomFieldData,
 } from '@/app/actions/custom-fields'
 import {
   createCustomErpNextField,
   getCustomErpNextFields,
-  deleteCustomErpNextField,
-  updateCustomErpNextField,
 } from '@/app/actions/custom-fields-erpnext'
 import { getOdooGroups, getOdooModels } from '@/app/actions/odoo'
 import { useLanguage } from '@/components/language-provider'
@@ -95,10 +91,10 @@ interface AddCustomFieldFormProps {
 
 export default function AddCustomFieldForm({ initialModels, hasOdooConnection, erpType = 'odoo' }: AddCustomFieldFormProps) {
   const { lang, dir } = useLanguage()
+  const router = useRouter()
 
   // 'list' | 'form'
   const [view, setView] = useState<'list' | 'form'>('list')
-  const [editingField, setEditingField] = useState<CreatedField | null>(null)
 
   const fieldTypesList = erpType === 'erpnext' ? [
     { value: 'char',      label: 'Data (Data)',           descAr: 'نص قصير (Data)',           descEn: 'Short text (Data)' },
@@ -145,8 +141,6 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
   // List
   const [createdFields, setCreatedFields] = useState<CreatedField[]>([])
   const [isLoadingFields, setIsLoadingFields] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // Auto-generate technical name from label
   useEffect(() => {
@@ -253,31 +247,16 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
     setRelationModel(''); setSelectionOpts([{ key: '', label: '' }])
     setSelectedGroups([])
     setSaveError(null)
-    setEditingField(null)
   }
 
   const goToList = () => { resetForm(); setView('list') }
   const goToForm = () => { resetForm(); modelsAutoTried.current = false; setView('form') }
 
-  const startEditField = (field: CreatedField) => {
-    setEditingField(field)
-    setFieldLabel(field.field_label)
-    setTechnicalName(field.field_name)
-    setTechNameManual(true)
-    setFieldType(field.field_type)
-    setSelectedModel(field.odoo_model)
-    // properties:
-    const props = field.properties || {}
-    setIsReadonly(props.readonly ?? false)
-    setIsRequired(props.required ?? false)
-    setIsCopy(props.copy ?? true)
-    setHelpText(props.help ?? '')
-    setRelationModel(props.relation ?? '')
-    setSelectionOpts(props.selection_options && props.selection_options.length > 0 ? props.selection_options : [{ key: '', label: '' }])
-    setSelectedGroups((props.group_ids || []).map(String))
-    setSaveError(null)
-    modelsAutoTried.current = false
-    setView('form')
+  // A row is a record: it opens its own page, keyed by its id. The list itself
+  // is read-only — creation lives behind "Add New Field".
+  const openField = (field: CreatedField) => {
+    const fieldId = String(field.id || field.field_name)
+    router.push(`/app/mapping-center/add-field/${encodeURIComponent(fieldId)}`)
   }
 
   // Validate
@@ -303,116 +282,38 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
     setSaveError(null)
     setIsSaving(true)
 
-    if (editingField) {
-      if (erpType === 'erpnext') {
-        if (!editingField.id) {
-          setSaveError('Field identifiers missing')
-          setIsSaving(false)
-          return
-        }
-
-        const payload = {
-          id: editingField.id,
-          fieldname: editingField.field_name,
-          docType: editingField.odoo_model,
-          fieldLabel: fieldLabel.trim(),
-          readonly: isReadonly,
-          required: isRequired,
-          help: helpText.trim(),
-          ...(fieldType === 'selection' ? { selectionOptions: selectionOpts.filter(o => o.key.trim() && o.label.trim()) } : {}),
-        }
-
-        const res = await updateCustomErpNextField(payload)
-        setIsSaving(false)
-
-        if (res.success) {
-          setShowSuccess(true)
-          setTimeout(() => { setShowSuccess(false); loadFields(); setView('list'); setEditingField(null) }, 2000)
-        } else {
-          setSaveError(res.error || 'Unknown error')
-        }
-      } else {
-        if (!editingField.id || !editingField.odoo_field_id) {
-          setSaveError('Field identifiers missing')
-          setIsSaving(false)
-          return
-        }
-
-        const payload: UpdateCustomFieldData = {
-          id: editingField.id,
-          odooFieldId: editingField.odoo_field_id,
-          fieldLabel: fieldLabel.trim(),
-          readonly: isReadonly,
-          required: isRequired,
-          copy: isCopy,
-          help: helpText.trim(),
-          ...(fieldType === 'selection' ? { selectionOptions: selectionOpts.filter(o => o.key.trim() && o.label.trim()) } : {}),
-          groupIds: selectedGroups.map(Number),
-        }
-
-        const res = await updateCustomOdooField(payload)
-        setIsSaving(false)
-
-        if (res.success) {
-          setShowSuccess(true)
-          setTimeout(() => { setShowSuccess(false); loadFields(); setView('list'); setEditingField(null) }, 2000)
-        } else {
-          setSaveError(res.error || 'Unknown error')
-        }
-      }
-    } else {
-      const payload: CreateCustomFieldData = {
-        fieldLabel: fieldLabel.trim(),
-        technicalName,
-        fieldType,
-        odooModel: selectedModel,
-        views: selectedView,
-        readonly: isReadonly,
-        required: isRequired,
-        copy: isCopy,
-        help: helpText.trim(),
-        ...(fieldType === 'many2one' && relationModel ? { relation: relationModel } : {}),
-        ...(fieldType === 'selection' ? { selectionOptions: selectionOpts.filter(o => o.key.trim() && o.label.trim()) } : {}),
-        groupIds: selectedGroups.map(Number),
-      }
-
-      const res = erpType === 'erpnext'
-        ? await createCustomErpNextField(payload)
-        : await createCustomOdooField(payload)
-      setIsSaving(false)
-
-      if (res.success) {
-        // Show which views were injected successfully
-        const successViews = erpType === 'erpnext'
-          ? [lang === 'ar' ? 'واجهات النظام تلقائياً' : 'System views automatically']
-          : (res.viewResults || []).filter((r: any) => r.viewId).map((r: any) => r.type)
-        setInjectedViews(successViews)
-        setViewWarning(res.viewWarning || null)
-        setShowSuccess(true)
-        setTimeout(() => { setShowSuccess(false); setViewWarning(null); setInjectedViews([]); loadFields(); setView('list') }, 3000)
-      } else {
-        setSaveError(res.error || 'Unknown error')
-      }
+    const payload: CreateCustomFieldData = {
+      fieldLabel: fieldLabel.trim(),
+      technicalName,
+      fieldType,
+      odooModel: selectedModel,
+      views: selectedView,
+      readonly: isReadonly,
+      required: isRequired,
+      copy: isCopy,
+      help: helpText.trim(),
+      ...(fieldType === 'many2one' && relationModel ? { relation: relationModel } : {}),
+      ...(fieldType === 'selection' ? { selectionOptions: selectionOpts.filter(o => o.key.trim() && o.label.trim()) } : {}),
+      groupIds: selectedGroups.map(Number),
     }
-  }
 
-  // Delete
-  const handleDelete = async (field: CreatedField) => {
-    if (erpType !== 'erpnext' && !field.odoo_field_id) return
-    const fid = field.id || field.field_name
-    setDeletingId(fid)
-    
-    if (erpType === 'erpnext') {
-      await deleteCustomErpNextField(field.field_name, field.odoo_model)
+    const res = erpType === 'erpnext'
+      ? await createCustomErpNextField(payload)
+      : await createCustomOdooField(payload)
+    setIsSaving(false)
+
+    if (res.success) {
+      // Show which views were injected successfully
+      const successViews = erpType === 'erpnext'
+        ? [lang === 'ar' ? 'واجهات النظام تلقائياً' : 'System views automatically']
+        : (res.viewResults || []).filter((r: any) => r.viewId).map((r: any) => r.type)
+      setInjectedViews(successViews)
+      setViewWarning(res.viewWarning || null)
+      setShowSuccess(true)
+      setTimeout(() => { setShowSuccess(false); setViewWarning(null); setInjectedViews([]); loadFields(); setView('list') }, 3000)
     } else {
-      if (field.odoo_field_id) {
-        await deleteCustomOdooField(field.odoo_field_id, field.id)
-      }
+      setSaveError(res.error || 'Unknown error')
     }
-    
-    setDeletingId(null)
-    setDeleteConfirmId(null)
-    loadFields()
   }
 
   // Selection helpers
@@ -465,11 +366,9 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 </div>
                 <div>
                   <p className="text-sm font-bold text-foreground">
-                    {editingField 
-                      ? (lang === 'ar' ? `تم تحديث الحقل بنجاح في ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'} ✓` : `Field updated successfully in ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'} ✓`)
-                      : (lang === 'ar' ? `تم إنشاء الحقل بنجاح في ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'} ✓` : `Field created successfully in ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'} ✓`)}
+                    {lang === 'ar' ? `تم إنشاء الحقل بنجاح في ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'} ✓` : `Field created successfully in ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'} ✓`}
                   </p>
-                  {!editingField && injectedViews.length > 0 && (
+                  {injectedViews.length > 0 && (
                     <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
                       {lang === 'ar'
                         ? `تم إضافته تلقائياً إلى: ${injectedViews.map(v => v === 'form' ? 'شاشة النموذج' : 'شاشة القائمة').join(' + ')}`
@@ -481,7 +380,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   </p>
                 </div>
               </div>
-              {!editingField && viewWarning && (
+              {viewWarning && (
                 <div className="flex items-start gap-2 rounded-none bg-muted border border-border p-2.5 mt-1">
                   <AlertTriangle className="h-3.5 w-3.5 text-foreground shrink-0 mt-0.5" />
                   <p className="text-[10px] text-foreground font-medium">{viewWarning}</p>
@@ -503,9 +402,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-foreground">
-                    {editingField 
-                      ? (lang === 'ar' ? 'تعديل الحقل المخصص' : 'Edit Custom Field')
-                      : (lang === 'ar' ? 'إنشاء حقل مخصص جديد' : 'Create New Custom Field')}
+                    {lang === 'ar' ? 'إنشاء حقل مخصص جديد' : 'Create New Custom Field'}
                   </h3>
                   <p className="text-[10px] text-muted-foreground font-medium mt-0.5">
                     {lang === 'ar' ? 'سيتم تفعيل store وتتبع التغييرات تلقائياً' : 'Auto-applies store=True and tracking=True'}
@@ -551,28 +448,25 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     {lang === 'ar' ? `الاسم التقني (${erpType === 'erpnext' ? 'ERPNext' : 'أودو'})` : 'Technical Name'}
                     <span className="text-destructive">*</span>
                   </label>
-                  {!editingField && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTechNameManual(false);
-                        setTechnicalName(
-                          erpType === 'erpnext'
-                            ? sanitizeTechnicalNameErpNext(fieldLabel)
-                            : sanitizeTechnicalName(fieldLabel)
-                        )
-                      }}
-                      className="flex items-center gap-1 text-[10px] text-foreground hover:underline font-semibold"
-                    >
-                      <Wand2 className="h-3 w-3" />
-                      {lang === 'ar' ? 'توليد تلقائي' : 'Auto-generate'}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTechNameManual(false);
+                      setTechnicalName(
+                        erpType === 'erpnext'
+                          ? sanitizeTechnicalNameErpNext(fieldLabel)
+                          : sanitizeTechnicalName(fieldLabel)
+                      )
+                    }}
+                    className="flex items-center gap-1 text-[10px] text-foreground hover:underline font-semibold"
+                  >
+                    <Wand2 className="h-3 w-3" />
+                    {lang === 'ar' ? 'توليد تلقائي' : 'Auto-generate'}
+                  </button>
                 </div>
                 <div className={cn(
                   "rounded-none border bg-muted p-1 transition-all",
-                  techNameError ? 'border-destructive' : 'border-border',
-                  editingField && 'opacity-65 cursor-not-allowed'
+                  techNameError ? 'border-destructive' : 'border-border'
                 )}>
                   <input
                     type="text" value={technicalName}
@@ -580,7 +474,6 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     placeholder={erpType === 'erpnext' ? "custom_field_name" : "x_field_name"}
                     className="w-full h-8 bg-transparent border-0 px-2 font-mono text-xs focus:outline-none focus:ring-0 text-foreground disabled:text-muted-foreground/60"
                     required
-                    disabled={!!editingField}
                   />
                 </div>
                 {techNameError ? (
@@ -606,14 +499,10 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
               {/* Field Type */}
               <div className="space-y-1.5">
                 <label className="block text-[11px] font-bold text-muted-foreground">{lang === 'ar' ? 'نوع الحقل' : 'Field Type'}</label>
-                <div className={cn(
-                  "rounded-none border border-border bg-muted p-1 relative",
-                  editingField && 'opacity-65 cursor-not-allowed'
-                )}>
+                <div className="rounded-none border border-border bg-muted p-1 relative">
                   <select
                     value={fieldType} onChange={e => setFieldType(e.target.value)}
                     className="w-full h-8 bg-transparent border-0 px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-0 appearance-none cursor-pointer disabled:text-muted-foreground/60"
-                    disabled={!!editingField}
                   >
                     {fieldTypesList.map(ft => (
                       <option key={ft.value} value={ft.value} className="bg-card text-foreground">
@@ -621,7 +510,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                       </option>
                     ))}
                   </select>
-                  {!editingField && <ChevronDown className="absolute end-3 top-3.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />}
+                  <ChevronDown className="absolute end-3 top-3.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                 </div>
                 {selectedTypeInfo && (
                   <p className="text-[10px] text-muted-foreground font-medium">
@@ -646,10 +535,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     <RefreshCw className={cn('h-3.5 w-3.5', isLoadingModels && 'animate-spin')} />
                   </button>
                 </div>
-                <div className={cn(
-                  "rounded-none border border-border bg-muted p-0.5",
-                  editingField && 'opacity-65 cursor-not-allowed'
-                )}>
+                <div className="rounded-none border border-border bg-muted p-0.5">
                   <SearchableSelect
                     options={models.map(m => ({
                       value: m.model,
@@ -661,7 +547,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     placeholder={isLoadingModels
                       ? (lang === 'ar' ? 'جاري تحميل الموديلات...' : 'Loading models...')
                       : (lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...'))}
-                    disabled={!!editingField || isLoadingModels}
+                    disabled={isLoadingModels}
                   />
                 </div>
                 {modelsError ? (
@@ -710,10 +596,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                   <label className="block text-[11px] font-bold text-muted-foreground">
                     {lang === 'ar' ? (erpType === 'erpnext' ? 'المستند المرتبط (DocType)' : 'النموذج المرتبط') : (erpType === 'erpnext' ? 'Related DocType' : 'Related Model')}<span className="text-destructive ms-0.5">*</span>
                   </label>
-                  <div className={cn(
-                    "rounded-none border border-border bg-muted p-0.5",
-                    editingField && 'opacity-65 cursor-not-allowed'
-                  )}>
+                  <div className="rounded-none border border-border bg-muted p-0.5">
                     <SearchableSelect
                       options={models.map(m => ({
                         value: m.model,
@@ -725,7 +608,7 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                       placeholder={isLoadingModels
                         ? (lang === 'ar' ? 'جاري تحميل الموديلات...' : 'Loading models...')
                         : (lang === 'ar' ? (erpType === 'erpnext' ? 'ابحث عن نوع مستند...' : 'ابحث عن موديول...') : (erpType === 'erpnext' ? 'Search DocType...' : 'Search model...'))}
-                      disabled={!!editingField || isLoadingModels}
+                      disabled={isLoadingModels}
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground font-medium">
@@ -845,10 +728,8 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
             className="w-full bg-foreground text-background font-bold rounded-none h-11 text-xs gap-2 transition-transform"
           >
             {isSaving
-              ? <><Loader2 className="h-4 w-4 animate-spin" />{lang === 'ar' ? 'جاري حفظ التغييرات...' : 'Saving changes...'}</>
-              : editingField 
-                ? <><Check className="h-4 w-4" />{lang === 'ar' ? 'حفظ التعديلات' : 'Save Changes'}</>
-                : <><Plus className="h-4 w-4" />{lang === 'ar' ? `إنشاء الحقل مدمجاً في ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'}` : `Create Custom Field in ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'}`}</>
+              ? <><Loader2 className="h-4 w-4 animate-spin" />{lang === 'ar' ? 'جاري الحفظ...' : 'Saving...'}</>
+              : <><Plus className="h-4 w-4" />{lang === 'ar' ? `إنشاء الحقل مدمجاً في ${erpType === 'erpnext' ? 'ERPNext' : 'أودو'}` : `Create Custom Field in ${erpType === 'erpnext' ? 'ERPNext' : 'Odoo'}`}</>
             }
           </Button>
         </form>
@@ -946,8 +827,6 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
             <AnimatePresence mode="popLayout">
               {createdFields.map((field) => {
                 const fieldId = field.id || field.field_name
-                const isDeleting = deletingId === fieldId
-                const isConfirming = deleteConfirmId === fieldId
                 return (
                   <motion.div
                     key={fieldId}
@@ -956,7 +835,16 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
                     transition={{ duration: 0.18 }}
-                    className="p-4 hover:bg-muted/5 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    role="link"
+                    tabIndex={0}
+                    onClick={() => openField(field)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        openField(field)
+                      }
+                    }}
+                    className="p-4 hover:bg-muted/5 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer"
                   >
                     {/* Details */}
                     <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -1041,47 +929,11 @@ export default function AddCustomFieldForm({ initialModels, hasOdooConnection, e
                       </div>
                     </div>
 
-                    {/* Operations */}
+                    {/* No edit/delete here: a row opens its own record page,
+                        keyed by its id. Actions belong to the record, not the
+                        list. */}
                     <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                      {isConfirming ? (
-                        <div className="flex items-center gap-1 bg-destructive/10 border border-destructive/20 rounded-none p-1 animate-in fade-in zoom-in duration-200">
-                          <span className="text-[10px] font-semibold text-destructive px-1.5">{lang === 'ar' ? 'تأكيد؟' : 'Confirm?'}</span>
-                          <Button 
-                            size="sm" 
-                            variant="destructive" 
-                            disabled={isDeleting}
-                            onClick={() => handleDelete(field)}
-                            className="h-6 px-2 text-xs font-semibold rounded-none"
-                          >
-                            {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : (lang === 'ar' ? 'حذف' : 'Delete')}
-                          </Button>
-                          <Button 
-                            size="sm" 
-                            variant="ghost" 
-                            onClick={() => setDeleteConfirmId(null)}
-                            className="h-6 px-2 text-xs font-semibold text-muted-foreground rounded-none hover:bg-muted"
-                          >
-                            {lang === 'ar' ? 'إلغاء' : 'Cancel'}
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => startEditField(field)}
-                            className="h-8 w-8 flex items-center justify-center rounded-none text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            title={lang === 'ar' ? 'تعديل الحقل' : 'Edit Field'}
-                          >
-                            <Edit className="h-3.5 w-3.5" />
-                          </button>
-                          <button 
-                            onClick={() => setDeleteConfirmId(fieldId)} 
-                            className="h-8 w-8 flex items-center justify-center rounded-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title={lang === 'ar' ? 'حذف الحقل' : 'Delete Field'}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </>
-                      )}
+                      <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" />
                     </div>
                   </motion.div>
                 )

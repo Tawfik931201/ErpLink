@@ -42,8 +42,6 @@ type MappingLine = {
 type MappingSettings = {
   relations?: Array<{ sourceModel?: string; targetModel?: string; relation?: string }>
   payloadPaths?: Record<string, string>
-  deleteBehavior?: string[] | string
-  variantSyncMode?: string
   variantOdooMatchField?: string
   variantZidMatchField?: string
   addShippingAsLine?: boolean
@@ -116,48 +114,10 @@ export function MappingFieldsCard({
   }))
   const totalFields = models.reduce((sum, m) => sum + m.lines.length, 0)
 
-  const deleteBehavior = Array.isArray(settings.deleteBehavior)
-    ? settings.deleteBehavior
-    : settings.deleteBehavior
-      ? [String(settings.deleteBehavior)]
-      : []
-
   const payloadPaths = Object.entries(settings.payloadPaths || {}).filter(([, path]) => !!path)
   const relations = (settings.relations || []).filter(r => r && (r.sourceModel || r.targetModel))
 
   const advanceRows: Array<{ label: string; value: React.ReactNode }> = []
-  if (deleteBehavior.length > 0) {
-    advanceRows.push({
-      label: ar ? 'عند الحذف في المتجر' : 'On store deletion',
-      value: (
-        <span className="inline-flex flex-wrap gap-1">
-          {deleteBehavior.map(behavior => (
-            <Chip key={behavior}>
-              {behavior === 'delete'
-                ? (ar ? 'حذف' : 'Delete')
-                : behavior === 'archive'
-                  ? (ar ? 'أرشفة' : 'Archive')
-                  : behavior}
-            </Chip>
-          ))}
-        </span>
-      ),
-    })
-  }
-  if (settings.variantSyncMode) {
-    advanceRows.push({
-      label: ar ? 'مزامنة المتغيّرات' : 'Variant sync',
-      value: (
-        <Chip>
-          {settings.variantSyncMode === 'AS_VARIANTS'
-            ? (ar ? 'كمنتجات مستقلة' : 'As variants')
-            : settings.variantSyncMode === 'AS_TEMPLATE'
-              ? (ar ? 'قالب واحد' : 'Single template')
-              : settings.variantSyncMode}
-        </Chip>
-      ),
-    })
-  }
   if (settings.variantOdooMatchField || settings.variantZidMatchField) {
     advanceRows.push({
       label: ar ? 'مطابقة المتغيّرات' : 'Variant match',

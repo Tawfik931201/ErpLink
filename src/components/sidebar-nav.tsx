@@ -14,7 +14,7 @@ import {
   ShoppingCart,
   CreditCard,
   ScrollText,
-  ChevronDown,
+  ChevronRight,
   SlidersHorizontal,
   Puzzle,
   Inbox,
@@ -203,12 +203,10 @@ export default function SidebarNav({ sections }: SidebarNavProps) {
                     )}
                   >
                     {content}
-                    <ChevronDown
-                      className={cn(
-                        "h-3.5 w-3.5 shrink-0 transition-transform duration-200 text-muted-foreground",
-                        isOpen && "-rotate-90"
-                      )}
-                    />
+                    {/* Points at the flyout panel, not down: the item opens a
+                        side menu, so a downward chevron read as "expands
+                        inline" and looked broken. Mirrored in RTL. */}
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground rtl:rotate-180" />
                   </button>
                 )
               }
