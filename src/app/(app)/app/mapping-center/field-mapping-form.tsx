@@ -1405,7 +1405,7 @@ export default function FieldMappingForm({
       )}
 
       {/* Main Odoo-style Form Sheet */}
-      <div className="card-base border border-border/70 overflow-hidden p-6 space-y-6">
+      <div className="bg-card rounded-xl border border-border overflow-hidden p-4 md:p-5">
 
         {/* Name Input */}
         <div className="relative mb-5 group max-w-xl font-sans">
@@ -1427,16 +1427,16 @@ export default function FieldMappingForm({
         </div>
 
         {/* Master Details Block */}
-        <div className="grid gap-x-6 gap-y-6 sm:grid-cols-2 max-w-5xl mb-6 text-sm">
-
+        <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2 max-w-5xl mb-6 text-xs">
+          
           {/* Store Platform + Store picker — always on the same row */}
-          <div className="sm:col-span-2 grid grid-cols-2 gap-x-6 gap-y-6">
+          <div className="sm:col-span-2 grid grid-cols-2 gap-x-5 gap-y-4">
           {((isZidConnected ? 1 : 0) + (isSallaConnected ? 1 : 0) + (isShopifyConnected ? 1 : 0) >= 2) && !editingId ? (
-            <div className="space-y-2 min-w-0">
+            <div className="space-y-1.5 min-w-0">
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
-              <div className="flex gap-2 bg-muted p-1 rounded-lg border border-border max-w-sm">
+              <div className="flex gap-2 bg-muted p-1 rounded-xl border border-border max-w-sm">
                 {isZidConnected && (
                   <Button
                     type="button"
@@ -1445,9 +1445,9 @@ export default function FieldMappingForm({
                       switchPlatform('zid', 'product.create')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-md text-xs font-semibold shadow-none transition-all",
-                      platform === 'zid'
-                        ? "bg-card text-foreground shadow-sm"
+                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      platform === 'zid' 
+                        ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
@@ -1462,9 +1462,9 @@ export default function FieldMappingForm({
                       switchPlatform('salla', 'product.created')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-md text-xs font-semibold shadow-none transition-all",
-                      platform === 'salla'
-                        ? "bg-card text-foreground shadow-sm"
+                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      platform === 'salla' 
+                        ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
@@ -1479,9 +1479,9 @@ export default function FieldMappingForm({
                       switchPlatform('shopify', 'products/create')
                     }}
                     className={cn(
-                      "flex-1 h-8 rounded-md text-xs font-semibold shadow-none transition-all",
-                      platform === 'shopify'
-                        ? "bg-card text-foreground shadow-sm"
+                      "flex-1 h-8 rounded-lg text-xs font-semibold shadow-none transition-all",
+                      platform === 'shopify' 
+                        ? "bg-card text-foreground border border-border" 
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
@@ -1491,11 +1491,11 @@ export default function FieldMappingForm({
               </div>
             </div>
           ) : (
-            <div className={cn("space-y-2 min-w-0", (!editingId && platformStores.length > 1) ? "" : "col-span-2")}>
+            <div className={cn("space-y-1.5 min-w-0", (!editingId && platformStores.length > 1) ? "" : "col-span-2")}>
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'منصة المتجر' : 'Store Platform'}
               </label>
-              <div className="flex h-9 items-center px-3 rounded-md border border-border bg-muted/50 text-xs font-semibold text-foreground capitalize dark:border-border dark:bg-card dark:text-foreground w-fit">
+              <div className="flex h-9 items-center px-3 rounded-lg border border-border bg-muted/50 text-xs font-semibold text-foreground capitalize dark:border-border dark:bg-card dark:text-foreground w-fit">
                 {platform === 'salla' ? (lang === 'ar' ? 'سلة (Salla)' : 'Salla') : platform === 'shopify' ? (lang === 'ar' ? 'شوبيفاي (Shopify)' : 'Shopify') : (lang === 'ar' ? 'زد (Zid)' : 'Zid')}
               </div>
             </div>
@@ -1503,7 +1503,7 @@ export default function FieldMappingForm({
 
           {/* Store picker (create view, when the platform links several stores) */}
           {!editingId && platformStores.length > 1 && (
-            <div className="space-y-2 min-w-0">
+            <div className="space-y-1.5 min-w-0">
               <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 {lang === 'ar' ? 'المتجر' : 'Store'}
               </label>
@@ -1513,7 +1513,7 @@ export default function FieldMappingForm({
                   setStoreKey(e.target.value)
                   setIsSaved(false)
                 }}
-                className="w-full h-9 px-3 rounded-md border border-border bg-card text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all max-w-sm"
+                className="w-full h-9 px-3 rounded-lg border border-input bg-inputBg text-xs text-foreground focus:border-foreground focus:ring-1 focus:ring-foreground outline-none transition-all max-w-sm"
               >
                 {platformStores.map(s => (
                   <option key={s.id} value={s.id} dir="auto">
@@ -1531,11 +1531,11 @@ export default function FieldMappingForm({
           </div>
 
           {/* Sync Direction Block */}
-          <div className="space-y-2">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? 'اتجاه المزامنة' : 'Sync Direction'}
             </label>
-            <div className="rounded-md border border-border bg-card">
+            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 multiple={true}
                 value={syncDirection ? syncDirection.split(',').filter(Boolean) : []}
@@ -1547,14 +1547,19 @@ export default function FieldMappingForm({
                 placeholder={lang === 'ar' ? 'اختر اتجاه المزامنة...' : 'Select sync direction...'}
               />
             </div>
+            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+              {lang === 'ar'
+                ? 'حدد اتجاهات المزامنة المفعلة لقاعدة الربط هذه.'
+                : 'Determine the enabled synchronization directions for this mapping.'}
+            </p>
           </div>
 
           {/* Core Sync Operation */}
-          <div className="space-y-2">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-muted-foreground">
               {t('map.operationLabel')}
             </label>
-            <div className="rounded-md border border-border bg-card">
+            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={odooOperation}
                 onChange={(val) => {
@@ -1569,15 +1574,17 @@ export default function FieldMappingForm({
                 }))}
                 placeholder={t('map.selectEventPlaceholder')}
               />
-            </div>
+            </div>            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+              {lang === 'ar' ? `العملية التي ينفذها المحرك تلقائياً داخل ${getErpName(erpType)} لهذا الربط.` : `The operation executed automatically by the sync engine in ${getErpNameEn(erpType)} for this mapping.`}
+            </p>
           </div>
 
           {/* ERP Model & Store Event (side-by-side) */}
-          <div className="space-y-2">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-muted-foreground">
               {lang === 'ar' ? `نموذج ${getErpName(erpType)}` : `${getErpNameEn(erpType)} Model`}
             </label>
-            <div className="rounded-md border border-border bg-card">
+            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={odooModel}
                 onChange={(val) => {
@@ -1600,15 +1607,18 @@ export default function FieldMappingForm({
                 placeholder={lang === 'ar' ? `ابحث أو اختر نموذج ${getErpName(erpType)}...` : `Search or select ${getErpNameEn(erpType)} model...`}
               />
             </div>
+            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+              {lang === 'ar' ? `النموذج الأساسي الذي يمثل البيانات في نظام ${getErpName(erpType)} ERP.` : `The primary model class representing data in ${getErpNameEn(erpType)} ERP.`}
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              {platform === 'salla'
-                ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event')
+          <div className="space-y-1.5">
+            <label className="block text-[11px] font-bold text-muted-foreground">
+              {platform === 'salla' 
+                ? (lang === 'ar' ? 'حدث سلة' : 'Salla Event') 
                 : (lang === 'ar' ? 'حدث زد' : 'Zid Event')}
             </label>
-            <div className="rounded-md border border-border bg-card">
+            <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
               <SearchableSelect
                 value={zidEvent}
                 onChange={(val) => {
@@ -1622,16 +1632,23 @@ export default function FieldMappingForm({
                 placeholder={t('map.selectEventPlaceholder')}
               />
             </div>
+            <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+              {platform === 'salla'
+                ? (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة سلة.' : 'The trigger event on Salla ecommerce platform.')
+                : platform === 'shopify'
+                  ? (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة شوبيفاي.' : 'The trigger event on Shopify ecommerce platform.')
+                  : (lang === 'ar' ? 'الحدث المفعل لعملية المزامنة من منصة زد.' : 'The trigger event on Zid ecommerce platform.')}
+            </p>
           </div>
 
           {/* Reference Field & Store Reference Field (conditional, side-by-side) */}
           {(odooOperation === 'update' || odooOperation === 'delete' || syncDirection.split(',').map(s => s.trim()).includes('erp_to_store')) && (
             <>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي` : `${getErpNameEn(erpType)} Reference Field`}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-muted-foreground">
+                  {lang === 'ar' ? `حقل ${getErpName(erpType)} المرجعي للمطابقة` : `${getErpNameEn(erpType)} Reference Field`}
                 </label>
-                <div className="rounded-md border border-border bg-card">
+                <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
                   <SearchableSelect
                     value={odooMatchField}
                     onChange={(val) => {
@@ -1645,15 +1662,18 @@ export default function FieldMappingForm({
                     placeholder={t('map.selectField')}
                   />
                 </div>
+                <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+                  {lang === 'ar' ? `الحقل الذي سيتم البحث به داخل نموذج ${getErpName(erpType)} المختار للمطابقة.` : `The field used to search and match records inside the selected ${getErpNameEn(erpType)} model.`}
+                </p>
               </div>
 
-              <div className="space-y-2">
-                <label className="block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-muted-foreground">
                   {platform === 'salla'
-                    ? (lang === 'ar' ? 'حقل سلة المرجعي' : 'Salla Reference Field')
-                    : (lang === 'ar' ? 'حقل زد المرجعي' : 'Zid Reference Field')}
+                    ? (lang === 'ar' ? 'حقل سلة المرجعي للمطابقة' : 'Salla Reference Field')
+                    : (lang === 'ar' ? 'حقل زد المرجعي للمطابقة' : 'Zid Reference Field')}
                 </label>
-                <div className="rounded-md border border-border bg-card">
+                <div className="rounded-xl border border-border dark:border-border bg-muted/50 dark:bg-muted/30 p-0.5">
                   <SearchableSelect
                     value={zidMatchField}
                     onChange={(val) => {
@@ -1667,25 +1687,30 @@ export default function FieldMappingForm({
                     placeholder={t('map.selectField')}
                   />
                 </div>
+                <p className="text-[10px] text-muted-foreground dark:text-muted-foreground font-medium">
+                  {platform === 'salla'
+                    ? (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بسلة ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Salla webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)
+                    : (lang === 'ar' ? `قيمة هذا الحقل من الويب هوك الخاص بزد ستُطابق حقل ${getErpName(erpType)} المرجعي.` : `The value from this Zid webhook field will be matched against the ${getErpNameEn(erpType)} reference field.`)}
+                </p>
                 {zidMatchField === STORED_ODOO_ID_LITERAL && (
-                  <p className="text-[10px] font-semibold text-foreground/80 mt-1">
+                  <p className="text-[10px] font-semibold text-foreground/80">
                     {lang === 'ar'
                       ? 'الحقل المحفوظ: سيُحل تلقائياً إلى رقم الأوردر داخل أودوو الذي سُجل عند الإنشاء — خاص بهذا المتجر فقط.'
                       : 'Saved-ID field: resolves automatically to the Odoo order number recorded at creation — scoped to this store only.'}
                   </p>
                 )}
                 {isLoadingLinkStats ? (
-                  <p className="text-[10px] text-muted-foreground mt-1">
+                  <p className="text-[10px] text-muted-foreground">
                     {lang === 'ar' ? 'جارٍ قراءة الروابط المحفوظة لهذا المتجر...' : 'Loading saved links for this store...'}
                   </p>
                 ) : linkStats && linkStats.count > 0 && linkStats.last ? (
-                  <p className="text-[10px] text-muted-foreground mt-1">
+                  <p className="text-[10px] text-muted-foreground">
                     {lang === 'ar'
                       ? `لهذا المتجر ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} طلب مربوط — آخرها طلب المتجر ${linkStats.last.storeEntityId} ← أودوو #${linkStats.last.odooRecordId}.`
                       : `This store has ${linkStats.count}${linkStats.count >= 50 ? '+' : ''} linked orders — latest: store order ${linkStats.last.storeEntityId} → Odoo #${linkStats.last.odooRecordId}.`}
                   </p>
                 ) : linkStats && linkStats.count === 0 ? (
-                  <p className="text-[10px] text-muted-foreground mt-1">
+                  <p className="text-[10px] text-muted-foreground">
                     {lang === 'ar'
                       ? 'لا روابط محفوظة بعد لهذا المتجر — نفّذ مزامنة إنشاء أولاً حتى يُحفظ رقم الأوردر.'
                       : 'No saved links for this store yet — run a create sync first so the order number gets saved.'}
