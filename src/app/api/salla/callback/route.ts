@@ -2,12 +2,11 @@ import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
+import { getAppBaseUrl } from '@/lib/app-url'
 import { supabase } from '@/lib/supabase'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
-    request.nextUrl.origin
+  const appUrl = getAppBaseUrl(request)
   const url = new URL('/app/connect-store', appUrl)
 
   Object.entries(params).forEach(([key, value]) => {
@@ -105,7 +104,7 @@ export async function GET(request: NextRequest) {
   // token endpoint for nothing. Failing here makes that impossible.
   const { userId } = await auth()
   if (!userId) {
-    const signInUrl = new URL('/sign-in', request.url)
+    const signInUrl = new URL('/sign-in', getAppBaseUrl(request))
     const returnUrl = request.nextUrl.pathname + request.nextUrl.search
     signInUrl.searchParams.set('redirect_url', returnUrl)
     return NextResponse.redirect(signInUrl)

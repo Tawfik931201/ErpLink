@@ -13,13 +13,13 @@ describe('OAuth unauthenticated ingress redirection', () => {
   describe('Zid OAuth routes', () => {
     it('redirects unauthenticated visitors to /sign-in in /api/zid/connect', () => {
       expect(zidConnect).toContain('const { userId } = await auth()')
-      expect(zidConnect).toContain("const signInUrl = new URL('/sign-in', req.url)")
+      expect(zidConnect).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(req))")
       expect(zidConnect).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
     })
 
     it('redirects unauthenticated visitors to /sign-in preserving callback params in /api/zid/callback', () => {
       expect(zidCallback).toContain('const { userId } = await auth()')
-      expect(zidCallback).toContain("const signInUrl = new URL('/sign-in', request.url)")
+      expect(zidCallback).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(request))")
       expect(zidCallback).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
       expect(zidCallback).not.toContain("return redirectToConnectZid(request, { error: 'unauthorized' })")
     })
@@ -33,13 +33,13 @@ describe('OAuth unauthenticated ingress redirection', () => {
   describe('Salla OAuth routes', () => {
     it('redirects unauthenticated visitors to /sign-in in /api/salla/connect', () => {
       expect(sallaConnect).toContain('const { userId } = await auth()')
-      expect(sallaConnect).toContain("const signInUrl = new URL('/sign-in', req.url)")
+      expect(sallaConnect).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(req))")
       expect(sallaConnect).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
     })
 
     it('redirects unauthenticated visitors to /sign-in preserving callback params in /api/salla/callback', () => {
       expect(sallaCallback).toContain('const { userId } = await auth()')
-      expect(sallaCallback).toContain("const signInUrl = new URL('/sign-in', request.url)")
+      expect(sallaCallback).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(request))")
       expect(sallaCallback).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
     })
 

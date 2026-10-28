@@ -13,16 +13,14 @@
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { getAppBaseUrl } from '@/lib/app-url'
 import { supabase } from '@/lib/supabase'
 import { getZidConfig } from '@/lib/zid/config'
 import { exchangeAuthorizationCodeForResponse, toStoredTokens } from '@/lib/zid/token'
 import { ZidOAuthError } from '@/lib/zid/types'
 
 function redirectToConnectZid(request: NextRequest, params: Record<string, string>) {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
-    process.env.NEXTAUTH_URL?.replace(/\/$/, '') ??
-    request.nextUrl.origin
+  const appUrl = getAppBaseUrl(request)
   const url = new URL('/app/connect-store', appUrl)
 
   Object.entries(params).forEach(([key, value]) => {
@@ -142,7 +140,7 @@ export async function GET(request: NextRequest) {
 
   // تثبيت من سوق زد: يصل التاجر دون code — نبدأ تدفق OAuth بدل كسر الربط.
   if (!code && !state) {
-    const connectUrl = new URL('/api/zid/connect', request.nextUrl.origin)
+    const connectUrl = new URL('/api/zid/connect', getAppBaseUrl(request))
     return NextResponse.redirect(connectUrl)
   }
 
@@ -179,7 +177,7 @@ export async function GET(request: NextRequest) {
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       return NextResponse.json({ error: 'unauthorized', message: 'Sign in before connecting a store' }, { status: 401 })
     }
-    const signInUrl = new URL('/sign-in', request.url)
+    const signInUrl = new URL('/sign-in', getAppBaseUrl(request))
     const returnUrl = request.nextUrl.pathname + request.nextUrl.search
     signInUrl.searchParams.set('redirect_url', returnUrl)
     return NextResponse.redirect(signInUrl)

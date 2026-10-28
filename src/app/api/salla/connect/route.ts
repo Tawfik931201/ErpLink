@@ -3,13 +3,14 @@ import crypto from 'crypto'
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { getAppBaseUrl } from '@/lib/app-url'
 import { SALLA_OAUTH_SCOPES } from '@/lib/salla-client'
 
 export async function GET(req: NextRequest) {
   try {
     const { userId } = await auth()
     if (!userId) {
-      const signInUrl = new URL('/sign-in', req.url)
+      const signInUrl = new URL('/sign-in', getAppBaseUrl(req))
       const returnUrl = req.nextUrl.pathname + req.nextUrl.search
       signInUrl.searchParams.set('redirect_url', returnUrl)
       return NextResponse.redirect(signInUrl)
