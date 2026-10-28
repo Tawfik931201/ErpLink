@@ -610,16 +610,39 @@ export default function StoreSelector({
                     {connectPlatform === 'salla' ? sallaInstallUrl : installUrl}
                   </div>
                 </div>
-                <a
-                  href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
-                  className={cn(
-                    buttonVariants({ variant: 'outline' }),
-                    'h-8 gap-1.5 rounded-none px-3 text-[10px] font-bold inline-flex'
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={connectPlatform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+                    className={cn(
+                      buttonVariants({ variant: 'outline' }),
+                      'h-8 gap-1.5 rounded-none px-3 text-[10px] font-bold inline-flex'
+                    )}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>{ar ? 'اتصال الحساب' : 'Connect Account'}</span>
+                  </a>
+                  {connectPlatform === 'zid' && (
+                    <a
+                      href={process.env.NEXT_PUBLIC_ZID_APP_MARKET_URL || 'https://apps.zid.sa/ar-sa/apps/6958'}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(
+                        buttonVariants({ variant: 'outline' }),
+                        'h-8 gap-1.5 rounded-none px-3 text-[10px] font-bold inline-flex'
+                      )}
+                    >
+                      <Store className="h-3.5 w-3.5" />
+                      <span>{ar ? 'فتح التطبيق في سوق زد' : 'Open in Zid App Market'}</span>
+                    </a>
                   )}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  <span>{ar ? 'اتصال الحساب' : 'Connect Account'}</span>
-                </a>
+                </div>
+                {connectPlatform === 'zid' && (
+                  <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
+                    {ar
+                      ? 'ملاحظة: إذا كان التطبيق مثبتاً بالفعل على متجرك في زد، سيتم توجيهك إلى الداشبورد. يمكنك إدارة التطبيق أو إلغاء تثبيته عبر لوحة تحكم متجرك في زد.'
+                      : 'Note: If the app is already installed on your Zid store, you will be redirected to the dashboard. You can manage or uninstall it from your Zid store dashboard.'}
+                  </p>
+                )}
               </div>
             )}
           </div>
