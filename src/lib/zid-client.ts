@@ -110,6 +110,8 @@ export interface ZidProduct {
   is_taxable: boolean
   images: ZidProductImage[]
   attributes: unknown[]
+  variants?: unknown[]
+  options?: unknown[]
   categories: unknown[]
   has_options: boolean
   has_fields: boolean

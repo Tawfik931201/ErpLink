@@ -811,7 +811,11 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
   if (!payload) return []
 
   // Locate the variants array (could be variants, options, or other variations)
-  let rawVariants = payload.variants || payload.options || []
+  // NOTE: For Zid, payload.options contains option definitions, not variant products,
+  // so Zid must strictly read payload.variants.
+  let rawVariants = Array.isArray(payload.variants) && payload.variants.length > 0
+    ? payload.variants
+    : (platform !== 'zid' && Array.isArray(payload.options) && payload.options.length > 0 ? payload.options : [])
 
   // Shopify options check
   if (platform === 'shopify' && !Array.isArray(rawVariants)) {
@@ -848,7 +852,7 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
       const rawAttrs = v.attributes || v.features || v.option_values || []
       if (Array.isArray(rawAttrs)) {
         rawAttrs.forEach((attr: any) => {
-          const attrName = toNameString(attr.name || attr.label || attr.option_name || attr.option_label)
+          const attrName = toNameString(attr.name || attr.label || attr.option_name || attr.option_label || attr.slug)
           const attrVal = toNameString(attr.value || attr.value_name || attr.option_value || attr.option_value_name || attr.val || attr.text)
           if (attrName && attrVal) {
             attributes[attrName] = attrVal
@@ -3580,6 +3584,11 @@ export async function processWebhookEvent(
           const productData = response.data?.product || response.data
           if (productData && (productData.id || productData.name)) {
             console.info(`[SyncEngine] Full Zid product data fetched for ID ${productId}. Class: ${productData.product_class}`)
+            const apiVariants = Array.isArray((productData as any).variants) && (productData as any).variants.length > 0 ? (productData as any).variants : null
+            const apiOptions = Array.isArray((productData as any).options) && (productData as any).options.length > 0 ? (productData as any).options : null
+            const apiAttributes = Array.isArray(productData.attributes) && productData.attributes.length > 0 ? productData.attributes : null
+            const apiStructure = productData.structure && productData.structure !== 'standalone' ? productData.structure : null
+            const apiHasOptions = productData.has_options === true
             //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
             data = isLegacyDelivery
               ? { ...data, ...productData }
@@ -3587,6 +3596,11 @@ export async function processWebhookEvent(
                   ...productData,
                   ...data,
                 }
+            if (apiVariants) data.variants = apiVariants
+            if (apiOptions) data.options = apiOptions
+            if (apiAttributes) data.attributes = apiAttributes
+            if (apiStructure) data.structure = apiStructure
+            if (apiHasOptions) data.has_options = true
           }
         }
       } catch (err: any) {
@@ -4817,9 +4831,14 @@ async function persistPlatformIdOnRecord(
   if (!idValue) return
   const [platformIdFieldName, legacyIdFieldName] = platformIdFieldNames(platform)
   try {
-    const meta = await fetchFieldMeta(client, model, [platformIdFieldName, legacyIdFieldName])
+    const candidateFields = [platformIdFieldName, legacyIdFieldName]
+    if (platform === 'zid') candidateFields.push('x_zid_id_product')
+    const meta = await fetchFieldMeta(client, model, candidateFields)
+    let idField = pickExistingIdField(meta, platform)
+    if (!idField && platform === 'zid' && meta.has('x_zid_id_product')) {
+      idField = 'x_zid_id_product'
+    }
     // Stage 1: current-then-legacy resolution, shared with the relation lookup.
-    const idField = pickExistingIdField(meta, platform)
     if (idField) {
       await client.write(model, [recordId], { [idField]: idValue })
       console.info(`[SyncEngine] ✅ Stored ${idField}="${idValue}" on ${model} #${recordId}`)
@@ -5022,6 +5041,15 @@ async function syncAsVariants(
     templateId = await client.create('product.template', odooValues)
     if (zidData.id) {
       await persistPlatformIdOnRecord(client, 'product.template', templateId, platform, String(zidData.id))
+    if (mapping.workspace_id && zidData.id) {
+      await upsertEntityLink({
+        workspaceId: mapping.workspace_id,
+        platform,
+        storeId,
+        odooModel: 'product.template',
+        storeEntityId: String(zidData.id),
+      }, templateId).catch(() => {})
+    }
     }
   }
 
@@ -5386,6 +5414,79 @@ async function syncChildVariantAsVariant(
       }
     }
   }
+  // Fallback 1: Resolve parent template via odoo_entity_links
+  if (parentIds.length === 0 && mapping.workspace_id) {
+    const linkedParentId = await resolveEntityLinkId({
+      workspaceId: mapping.workspace_id,
+      platform,
+      storeId,
+      odooModel: 'product.template',
+      storeEntityId: String(parentZidId),
+    })
+    if (linkedParentId) {
+      const confirmed = await client.search('product.template', [['id', '=', linkedParentId]], 1).catch(() => [])
+      if (confirmed && confirmed.length > 0) {
+        parentIds = [linkedParentId]
+        console.info(`[SyncEngine] Resolved parent template ID #${linkedParentId} via odoo_entity_links for Zid parent ${parentZidId}`)
+      }
+    }
+  }
+
+  // Fallback 2: Resolve parent template via sync_logs
+  if (parentIds.length === 0 && mapping.workspace_id) {
+    try {
+      const { data: logRows } = await supabaseAdmin
+        .from('sync_logs')
+        .select('odoo_record_id')
+        .eq('workspace_id', mapping.workspace_id)
+        .eq('zid_entity_id', String(parentZidId))
+        .eq('odoo_model', 'product.template')
+        .eq('status', 'success')
+        .not('odoo_record_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+
+      if (logRows && logRows.length > 0 && logRows[0].odoo_record_id) {
+        const loggedId = Number(logRows[0].odoo_record_id)
+        const confirmed = await client.search('product.template', [['id', '=', loggedId]], 1).catch(() => [])
+        if (confirmed && confirmed.length > 0) {
+          parentIds = [loggedId]
+          console.info(`[SyncEngine] Resolved parent template ID #${loggedId} via sync_logs for Zid parent ${parentZidId}`)
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
+  // Fallback 3: Check custom Odoo fields on product.template (e.g. x_zid_id_product)
+  if (parentIds.length === 0) {
+    try {
+      const meta = await fetchFieldMeta(client, 'product.template', ['x_zid_id_product', 'x_zid_id', 'zid_id'])
+      for (const fName of ['x_zid_id_product', 'x_zid_id', 'zid_id']) {
+        if (meta.has(fName)) {
+          const found = await client.search('product.template', [[fName, '=', String(parentZidId)]], 1).catch(() => [])
+          if (found && found.length > 0) {
+            parentIds = found
+            console.info(`[SyncEngine] Resolved parent template ID #${found[0]} via ${fName} for Zid parent ${parentZidId}`)
+            break
+          }
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
+  // Fallback 4: Check parent SKU if present on child data
+  if (parentIds.length === 0) {
+    const pSku = (zidData.parent as any)?.sku || (zidData.parent as any)?.code || (zidData as any).parent_sku
+    if (pSku) {
+      try {
+        const found = await client.search('product.template', [['default_code', '=', String(pSku)]], 1).catch(() => [])
+        if (found && found.length > 0) {
+          parentIds = found
+          console.info(`[SyncEngine] Resolved parent template ID #${found[0]} via parent SKU (${pSku}) for Zid parent ${parentZidId}`)
+        }
+      } catch { /* best-effort */ }
+    }
+  }
   if (parentIds.length === 0) {
     const skipMsg = `Parent product template (Zid ID: ${parentZidId}) not found in Odoo yet. Skipping child variant sync.`
     console.warn(`[SyncEngine] ${skipMsg}`)
@@ -5418,7 +5519,7 @@ async function syncChildVariantAsVariant(
   const attributes: Record<string, string> = {}
   if (Array.isArray(rawAttrs)) {
     rawAttrs.forEach((attr: any) => {
-      const attrName = toNameString(attr.name || attr.label || attr.option_name || attr.option_label)
+      const attrName = toNameString(attr.name || attr.label || attr.option_name || attr.option_label || attr.slug)
       const attrVal = toNameString(attr.value || attr.value_name || attr.option_value || attr.option_value_name || attr.val || attr.text)
       if (attrName && attrVal) {
         attributes[attrName] = attrVal
