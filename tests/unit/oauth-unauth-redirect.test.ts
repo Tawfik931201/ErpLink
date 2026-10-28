@@ -29,9 +29,8 @@ describe('OAuth unauthenticated ingress redirection', () => {
       expect(zidCallback).toContain('await ensureDefaultWorkspace(userId)')
     })
 
-    it('supports store-scoped dashboard redirection in /api/zid/connect', () => {
-      expect(zidConnect).toContain("req.nextUrl.searchParams.get('store_id')")
-      expect(zidConnect).toContain('buildAuthorizationUrl(state, storeId)')
+    it('redirects to buildAuthorizationUrl(state) in /api/zid/connect', () => {
+      expect(zidConnect).toContain('buildAuthorizationUrl(state)')
     })
   })
 
