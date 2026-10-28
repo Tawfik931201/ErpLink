@@ -23,6 +23,16 @@ export async function ensureDefaultWorkspace(userId: string): Promise<string | n
       .eq('id', userId)
       .maybeSingle()
 
+    if (!user) {
+      // Ensure user row exists in users table so active_workspace_id updates succeed
+      await supabase
+        .from('users')
+        .upsert(
+          [{ id: userId, email: `${userId}@clerk.user`, name: 'Merchant' }],
+          { onConflict: 'id', ignoreDuplicates: true }
+        )
+    }
+
     if (user?.active_workspace_id) {
       const { data: wsExists } = await supabase
         .from('workspaces')

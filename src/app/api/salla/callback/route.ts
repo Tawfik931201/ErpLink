@@ -1,8 +1,9 @@
 import { auth } from '@clerk/nextjs/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
 import { getAppBaseUrl } from '@/lib/app-url'
+import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
@@ -252,6 +253,12 @@ export async function GET(request: NextRequest) {
 
       if (insertError) throw insertError
     }
+
+    try {
+      revalidateTag('salla-token')
+      revalidatePath('/app/connect-store')
+      revalidatePath('/app/dashboard')
+    } catch {}
 
     // 5. Register webhooks automatically so event sync works out of the box
     // (capped parallelism inside registerSallaWebhooks; best-effort).

@@ -11,6 +11,7 @@
  * يسجّل الأحداث الأساسية فقط (ZID_CORE_EVENTS: الطلبات + المنتجات + العملاء + الكاتيجوري) — البقية opt-in من الإعدادات.
  */
 import { auth } from '@clerk/nextjs/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { getAppBaseUrl } from '@/lib/app-url'
@@ -381,6 +382,12 @@ export async function GET(request: NextRequest) {
         autoBootstrapWorkspace(workspaceId).catch(() => {})
       }).catch(() => {})
     }
+
+    try {
+      revalidateTag('zid-token')
+      revalidatePath('/app/connect-store')
+      revalidatePath('/app/dashboard')
+    } catch {}
 
     if (process.env.ZID_CALLBACK_RESPONSE === 'json') {
       // Debug shape only. `rawResponse` carried Zid's access_token and

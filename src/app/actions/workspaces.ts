@@ -293,7 +293,17 @@ export async function getActiveWorkspaceZidTokens(): Promise<{ success: true; to
       return { success: true, tokens: [] }
     }
 
-    const tokens = await getCachedZidTokens(user.active_workspace_id)
+    let tokens = await getCachedZidTokens(user.active_workspace_id)
+    if (!tokens || tokens.length === 0) {
+      const { data: freshTokens } = await supabase
+        .from('merchant_tokens')
+        .select('*')
+        .eq('workspace_id', user.active_workspace_id)
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      if (freshTokens && freshTokens.length > 0) {
+        tokens = freshTokens
+      }
+    }
     return { success: true, tokens }
   } catch (error: any) {
     console.error('Failed to get Zid tokens:', error)
@@ -385,7 +395,17 @@ export async function getActiveWorkspaceSallaTokens(): Promise<{ success: true; 
       return { success: true, tokens: [] }
     }
 
-    const tokens = await getCachedSallaTokens(user.active_workspace_id)
+    let tokens = await getCachedSallaTokens(user.active_workspace_id)
+    if (!tokens || tokens.length === 0) {
+      const { data: freshTokens } = await supabase
+        .from('salla_tokens')
+        .select('*')
+        .eq('workspace_id', user.active_workspace_id)
+        .order('updated_at', { ascending: false, nullsFirst: false })
+      if (freshTokens && freshTokens.length > 0) {
+        tokens = freshTokens
+      }
+    }
     return { success: true, tokens }
   } catch (error: any) {
     console.error('Failed to get Salla tokens:', error)

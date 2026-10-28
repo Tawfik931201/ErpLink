@@ -8,8 +8,10 @@
  */
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { getAppBaseUrl } from '@/lib/app-url'
+
 export async function GET(req: NextRequest) {
-  const target = new URL('/api/zid/callback', req.url)
+  const target = new URL('/api/zid/callback', getAppBaseUrl(req))
   req.nextUrl.searchParams.forEach((value, key) => {
     target.searchParams.set(key, value)
   })
