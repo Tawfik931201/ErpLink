@@ -54,6 +54,10 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    if (!storeId && process.env.ZID_DEBUG_STORE_ID) {
+      storeId = process.env.ZID_DEBUG_STORE_ID.trim()
+    }
+
     const random = crypto.randomBytes(16).toString('hex')
     const state = organizationId ? `${organizationId}:${random}` : random
     const response = NextResponse.redirect(buildAuthorizationUrl(state, storeId))
