@@ -16,7 +16,9 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@clerk/localizations": "^4.24.3",
     "@clerk/nextjs": "^6.39.7",
+    "@clerk/themes": "^2.4.57",
     "@radix-ui/react-dialog": "^1.1.1",
     "@radix-ui/react-label": "^2.1.0",
     "@radix-ui/react-popover": "^1.1.1",

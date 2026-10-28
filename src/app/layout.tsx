@@ -1,9 +1,11 @@
+import { arSA, enUS } from '@clerk/localizations'
 import { ClerkProvider } from '@clerk/nextjs'
 import type { Metadata } from 'next'
 import { Tajawal, JetBrains_Mono } from 'next/font/google'
 import { cookies } from 'next/headers'
 
 import AppProviders from '@/components/app-providers'
+import { getClerkAppearance } from '@/lib/clerk-appearance'
 import { resolveLanguage } from '@/lib/translations'
 
 import './globals.css'
@@ -51,9 +53,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const dir = lang === 'ar' ? 'rtl' : 'ltr'
+  const themeCookie = cookieStore.get('theme')?.value
+  const isDark = themeCookie === 'dark'
 
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      localization={lang === 'ar' ? arSA : enUS}
+      appearance={getClerkAppearance(isDark)}
+    >
       <html lang={lang} dir={dir} suppressHydrationWarning>
         <head>
           <link rel="icon" href="/favicon.ico?v=5" sizes="any" />

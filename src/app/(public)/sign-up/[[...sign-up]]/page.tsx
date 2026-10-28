@@ -1,4 +1,4 @@
-import { SignUp } from '@clerk/nextjs'
+import { SignUpClient } from './sign-up-client'
 
 export default async function SignUpPage(props: {
   searchParams: Promise<{ redirect_url?: string }>
@@ -10,7 +10,7 @@ export default async function SignUpPage(props: {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8">
-      <SignUp fallbackRedirectUrl="/app/dashboard" signInUrl={signInUrl} />
+      <SignUpClient signInUrl={signInUrl} />
     </div>
   )
 }
