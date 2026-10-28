@@ -9,8 +9,10 @@ const securityHeaders = [
   },
   // Prevent MIME-type sniffing
   { key: 'X-Content-Type-Options', value: 'nosniff' },
-  // Prevent clickjacking
-  { key: 'X-Frame-Options', value: 'DENY' },
+
+
+  // Prevent clickjacking via CSP frame-ancestors below (X-Frame-Options is omitted
+  // because it does not support multiple origins/wildcards and would block embedded apps).
   // Limit referrer leakage
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   // Disable powerful browser features not used by the app
@@ -48,7 +50,7 @@ const securityHeaders = [
       "connect-src 'self' https:",
       "frame-src 'self' https://challenges.cloudflare.com",
       "worker-src 'self' blob:",
-      "frame-ancestors 'none'",
+      "frame-ancestors 'self' https://*.zid.sa https://zid.sa https://*.zid.store https://zid.store https://*.salla.sa https://salla.sa https://*.salla.dev https://salla.dev https://*.myshopify.com https://admin.shopify.com https://*.bizsahla.com https://bizsahla.com",
       "base-uri 'self'",
       "form-action 'self'",
     ].join('; '),
