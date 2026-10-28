@@ -348,13 +348,15 @@ export default function StoreSelector({
     }
   }
 
-  const handleReconnect = (platform: string) => {
+  const handleReconnect = (platform: string, storeId?: string) => {
     const url =
       platform === 'salla'
         ? '/api/salla/connect'
         : platform === 'shopify'
           ? '/app/connect-store'
-          : '/api/zid/connect'
+          : storeId
+            ? `/api/zid/connect?store_id=${encodeURIComponent(storeId)}`
+            : '/api/zid/connect'
     router.push(url)
   }
 
@@ -478,7 +480,12 @@ export default function StoreSelector({
                           <RowActions
                             isAr={ar}
                             onOpen={() => openDetails(row.platform, row.key)}
-                            onReconnect={() => handleReconnect(row.platform)}
+                            onReconnect={() =>
+                              handleReconnect(
+                                row.platform,
+                                String(row.token?.store_id || row.token?.merchant_id || '')
+                              )
+                            }
                           />
                         </td>
                       </tr>
@@ -738,7 +745,15 @@ export default function StoreSelector({
               <WebhookStatusPill
                 platform={detail.platform}
                 merchantId={detail.platform === 'zid' ? String(detailToken.merchant_id ?? '') : ''}
-                reconnectHref={detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect'}
+                reconnectHref={
+                  detail.platform === 'salla'
+                    ? '/api/salla/connect'
+                    : `/api/zid/connect${
+                        detailToken?.store_id || detailToken?.merchant_id
+                          ? `?store_id=${encodeURIComponent(String(detailToken.store_id || detailToken.merchant_id))}`
+                          : ''
+                      }`
+                }
                 lang={lang}
               />
 
@@ -748,7 +763,10 @@ export default function StoreSelector({
                   size="sm"
                   variant="outline"
                   onClick={() =>
-                    router.push(detail.platform === 'salla' ? '/api/salla/connect' : '/api/zid/connect')
+                    handleReconnect(
+                      detail.platform,
+                      String(detailToken?.store_id || detailToken?.merchant_id || '')
+                    )
                   }
                   className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold"
                 >

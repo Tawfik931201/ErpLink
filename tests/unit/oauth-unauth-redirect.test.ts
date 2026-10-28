@@ -28,6 +28,11 @@ describe('OAuth unauthenticated ingress redirection', () => {
       expect(zidCallback).toContain("import('@/lib/workspace-defaults')")
       expect(zidCallback).toContain('await ensureDefaultWorkspace(userId)')
     })
+
+    it('supports store-scoped dashboard redirection in /api/zid/connect', () => {
+      expect(zidConnect).toContain("req.nextUrl.searchParams.get('store_id')")
+      expect(zidConnect).toContain('buildAuthorizationUrl(state, storeId)')
+    })
   })
 
   describe('Salla OAuth routes', () => {
