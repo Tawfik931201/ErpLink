@@ -181,9 +181,20 @@ export async function POST(req: NextRequest) {
   function inferEventFromPayload(p: any): string {
     const target = p.data && typeof p.data === 'object' ? p.data : p
     // 0. Check explicit event / topic / action in body if present
-    const explicitEvent = p.event || p.topic || p.action || target.event || target.topic || target.action
+    const explicitEvent =
+      p.event_name ||
+      p.event ||
+      p.topic ||
+      p.action ||
+      target.event_name ||
+      target.event ||
+      target.topic ||
+      target.action
     if (typeof explicitEvent === 'string') {
       const lower = explicitEvent.toLowerCase()
+      if (lower.startsWith('app.market.subscription.') || lower.startsWith('subscription.')) {
+        return lower
+      }
       if (lower.includes('uninstall')) return 'app.uninstalled'
       if (lower.includes('category.delete') || lower.includes('category_delete') || lower.includes('category.deleted') || lower.includes('category_deleted')) {
         return 'category.deleted'
@@ -404,6 +415,8 @@ export async function POST(req: NextRequest) {
         } else {
           await supabase.from('merchant_tokens').delete().eq('store_id', storeStr)
         }
+        const { handleZidSubscriptionWebhook } = await import('@/lib/zid/subscription-webhook')
+        await handleZidSubscriptionWebhook('app.market.subscription.suspended', store_id, payload).catch(() => {})
         const { recordAudit } = await import('@/lib/audit-logs')
         await recordAudit({
           actorId: storeStr,
@@ -509,6 +522,32 @@ export async function POST(req: NextRequest) {
   let handlerResult: HandlerResult = 'enqueued'
   try {
     switch (event) {
+      case 'app.market.subscription.active':
+      case 'app.market.subscription.renew':
+      case 'app.market.subscription.upgrade':
+      case 'app.market.subscription.suspended':
+      case 'app.market.subscription.expired':
+      case 'app.market.subscription.refunded':
+      case 'app.market.subscription.warning':
+      case 'subscription.active':
+      case 'subscription.renew':
+      case 'subscription.upgrade':
+      case 'subscription.suspended':
+      case 'subscription.expired':
+      case 'subscription.refunded':
+      case 'subscription.warning': {
+        const { handleZidSubscriptionWebhook } = await import('@/lib/zid/subscription-webhook')
+        const subResult = await handleZidSubscriptionWebhook(event, store_id, payload)
+        return NextResponse.json({
+          received: true,
+          processed: subResult.success,
+          action: subResult.action,
+          subscription_id: subResult.subscriptionId,
+          zid_subscription_id: subResult.zidSubscriptionId,
+          message: subResult.message,
+        })
+      }
+
       case 'order.create':
       case 'order.created':
       case 'order_create':

@@ -206,6 +206,18 @@ export default function SubscriptionDetailClient({
                 {workspace.subscription_number}
               </span>
             )}
+            {sub.zid_subscription_id && (
+              <span className="inline-flex items-center gap-1 border border-border bg-emerald-50/50 dark:bg-emerald-950/20 px-1.5 py-0.5 font-mono text-[10px] text-emerald-700 dark:text-emerald-300">
+                <span className="text-muted-foreground">{ar ? 'رقم اشتراك زد:' : 'Zid Sub ID:'}</span>
+                {sub.zid_subscription_id}
+              </span>
+            )}
+            {sub.plan_name && (
+              <span className="inline-flex items-center gap-1 border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] text-foreground">
+                <span className="text-muted-foreground">{ar ? 'الباقة:' : 'Plan:'}</span>
+                {sub.plan_name}
+              </span>
+            )}
             <span className="break-all font-mono text-[11px] text-muted-foreground/70">
               {sub.id}
             </span>

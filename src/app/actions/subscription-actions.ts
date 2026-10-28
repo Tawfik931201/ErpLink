@@ -745,6 +745,9 @@ export interface AdminSubscriptionRow {
   client_email: string | null
   subscription_number: string | null
   active_sub_count: number
+  zid_subscription_id?: string | null
+  plan_name?: string | null
+  platform?: string | null
 }
 
 export interface UserPick {
@@ -841,6 +844,9 @@ export async function getAllSubscriptions() {
         client_email: user?.email ?? null,
         subscription_number: ws?.subscription_number || null,
         active_sub_count: activeSubCountMap.get(sub.workspace_id) || 0,
+        zid_subscription_id: (sub as { zid_subscription_id?: string | null }).zid_subscription_id || null,
+        plan_name: (sub as { plan_name?: string | null }).plan_name || null,
+        platform: (sub as { platform?: string | null }).platform || null,
       })
     }
 
@@ -896,6 +902,9 @@ export interface SubscriptionDetailSubscription {
   archived_at: string | null
   isExpired: boolean
   daysRemaining: number
+  zid_subscription_id?: string | null
+  plan_name?: string | null
+  platform?: string | null
 }
 
 export interface SubscriptionDetailPayment {

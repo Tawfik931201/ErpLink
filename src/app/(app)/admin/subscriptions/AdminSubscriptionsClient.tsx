@@ -215,7 +215,9 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
       row.subscription_number?.toLowerCase().includes(query) ||
       row.client_email?.toLowerCase().includes(query) ||
       row.client_name?.toLowerCase().includes(query) ||
-      row.workspace_name?.toLowerCase().includes(query)
+      row.workspace_name?.toLowerCase().includes(query) ||
+      row.zid_subscription_id?.toLowerCase().includes(query) ||
+      row.plan_name?.toLowerCase().includes(query)
     )
   })
 
@@ -362,6 +364,12 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
                         {row.subscription_number && (
                           <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
                             {row.subscription_number}
+                          </span>
+                        )}
+                        {row.zid_subscription_id && (
+                          <span className="mt-0.5 block font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                            {isAr ? `اشتراك زد: #${row.zid_subscription_id}` : `Zid: #${row.zid_subscription_id}`}
+                            {row.plan_name ? ` (${row.plan_name})` : ''}
                           </span>
                         )}
                         {row.active_sub_count > 1 && (
