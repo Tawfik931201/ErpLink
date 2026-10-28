@@ -260,6 +260,16 @@ export async function handleZidSubscriptionWebhook(
   const planName = String(rawPayload.plan_name ?? data.plan_name ?? 'اشتراك زد')
   const amountPaid = Number(rawPayload.amount_paid ?? data.amount_paid ?? rawPayload.amount ?? data.amount ?? 0)
 
+  const planTypeStr = String(rawPayload.plan_type ?? data.plan_type ?? '').toLowerCase()
+  const planNameStr = String(rawPayload.plan_name ?? data.plan_name ?? '').toLowerCase()
+  const isFreePlan =
+    amountPaid <= 0 ||
+    planTypeStr.includes('free') ||
+    planTypeStr.includes('trial') ||
+    planNameStr.includes('free') ||
+    planNameStr.includes('مجان') ||
+    planNameStr.includes('تجريب')
+
   // Subscription ID in Zid App Market:
   const rawSubId = rawPayload.subscription_id ?? data.subscription_id ?? rawPayload.id ?? data.id
   const zidSubscriptionId = rawSubId !== undefined && rawSubId !== null ? String(rawSubId).trim() : ''
@@ -337,6 +347,32 @@ export async function handleZidSubscriptionWebhook(
 
   // ── Handling Cancellation / Expiration / Refund ───────────────
   if (isCancellation) {
+    // A secondary store cancellation on the free plan must NEVER cancel or affect the active paid subscription!
+    if (isFreePlan) {
+      await recordAudit({
+        actorId: `zid:store:${storeId}`,
+        actorRole: 'system',
+        action: 'subscription.zid_free_cancelled',
+        entityType: 'Subscription',
+        entityId: zidSubscriptionId || workspaceId,
+        metadata: {
+          workspace_id: workspaceId,
+          store_id: storeId,
+          event: eventName,
+          plan_name: planName,
+          detail: 'secondary_free_store_cancelled_without_affecting_paid_sub',
+        },
+      })
+
+      return {
+        success: true,
+        action: 'skipped',
+        workspaceId,
+        zidSubscriptionId,
+        message: 'إلغاء المتجر المجاني الإضافي لا يؤثر على الاشتراك المدفوع لمساحة العمل',
+      }
+    }
+
     let cancelQuery = supabase
       .from('subscriptions')
       .update({
@@ -363,25 +399,13 @@ export async function handleZidSubscriptionWebhook(
       }
     }
 
-    // If specific id did not match, cancel any remaining active Zid subscriptions for that store
-    if ((!cancelledSubs || cancelledSubs.length === 0) && zidSubscriptionId) {
-      await supabase
-        .from('subscriptions')
-        .update({
-          status: 'cancelled',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('workspace_id', workspaceId)
-        .eq('platform', 'zid')
-        .eq('status', 'active')
-    }
-
-    // Check if workspace has any remaining valid subscriptions
+    // Check if workspace has any remaining valid paid subscriptions
     const { data: remainingActive } = await supabase
       .from('subscriptions')
       .select('id')
       .eq('workspace_id', workspaceId)
       .eq('status', 'active')
+      .gt('amount_paid', 0)
       .gte('end_date', todayIso())
 
     if (!remainingActive || remainingActive.length === 0) {
@@ -409,6 +433,83 @@ export async function handleZidSubscriptionWebhook(
       workspaceId,
       zidSubscriptionId,
       message: 'تم إلغاء الاشتراك وإيقافه داخل المنصة بنجاح',
+    }
+  }
+
+  // ── Protection Against Free Plan Vulnerability ────────────────
+  // The Free plan in Zid App Market is ONLY intended for secondary stores when
+  // the workspace already has an active paid subscription (monthly or yearly).
+  // If the merchant does not have an active paid subscription, picking the free
+  // plan must NOT create any subscription row, must NOT create payments, and
+  // must NOT activate or unarchive the workspace.
+  if (isFreePlan) {
+    const { data: activePaidSubs } = await supabase
+      .from('subscriptions')
+      .select('id, end_date, amount_paid')
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'active')
+      .gt('amount_paid', 0)
+      .gte('end_date', todayIso())
+      .order('end_date', { ascending: false })
+      .limit(1)
+
+    const hasActivePaidSub = !!(activePaidSubs && activePaidSubs.length > 0)
+
+    if (!hasActivePaidSub) {
+      console.warn('[Zid Subscription] Free plan rejected: no active paid subscription on workspace:', {
+        workspaceId,
+        storeId,
+        planName,
+      })
+
+      await recordAudit({
+        actorId: `zid:store:${storeId}`,
+        actorRole: 'system',
+        action: 'subscription.zid_free_rejected',
+        entityType: 'Subscription',
+        entityId: zidSubscriptionId || workspaceId,
+        metadata: {
+          workspace_id: workspaceId,
+          store_id: storeId,
+          event: eventName,
+          plan_name: planName,
+          reason: 'free_plan_without_paid_subscription',
+        },
+      })
+
+      return {
+        success: true,
+        action: 'skipped',
+        workspaceId,
+        zidSubscriptionId,
+        message: 'تم تجاهل تفعيل الباقة المجانية لعدم وجود اشتراك مدفوع مسبق في مساحة العمل',
+      }
+    }
+
+    // Workspace ALREADY has an active paid subscription:
+    // Secondary store is authorized under the existing paid subscription.
+    // Do NOT create a 0-amount subscription, do NOT cancel the paid one, do NOT create a payment.
+    await recordAudit({
+      actorId: `zid:store:${storeId}`,
+      actorRole: 'system',
+      action: 'subscription.zid_free_attached',
+      entityType: 'Subscription',
+      entityId: activePaidSubs[0].id,
+      metadata: {
+        workspace_id: workspaceId,
+        store_id: storeId,
+        event: eventName,
+        plan_name: planName,
+        paid_subscription_id: activePaidSubs[0].id,
+      },
+    })
+
+    return {
+      success: true,
+      action: 'skipped',
+      workspaceId,
+      zidSubscriptionId,
+      message: 'تم ربط المتجر بنجاح تحت مظلة الاشتراك المدفوع القائم لمساحة العمل',
     }
   }
 

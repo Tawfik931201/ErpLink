@@ -59,5 +59,13 @@ describe('Zid App Subscription Webhook Integration', () => {
       expect(subWebhookSrc).toContain('fetchZidSubscriptionDetails')
       expect(subWebhookSrc).toContain('/v1/market/app/subscription')
     })
+
+    it('protects against free plan vulnerability by checking existing active paid subscription', () => {
+      expect(subWebhookSrc).toContain('isFreePlan')
+      expect(subWebhookSrc).toContain("gt('amount_paid', 0)")
+      expect(subWebhookSrc).toContain('subscription.zid_free_rejected')
+      expect(subWebhookSrc).toContain('subscription.zid_free_attached')
+      expect(subWebhookSrc).toContain('subscription.zid_free_cancelled')
+    })
   })
 })
