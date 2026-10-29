@@ -230,12 +230,13 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     precedes the first `.select()`. It also asserts the refresh route is
     admin-gated and refuses to run when nothing is derivable.
   - `tests/unit/analytic-distribution.test.ts` (23 tests) — the Zid/Salla
-    analytic rules saved under `settings.order.analytic`: `all` is a fallback
-    only (any matching warehouse/payment rule suppresses it), matching specific
-    rules merge as relative weights, two rules on one account sum, payment keys
-    normalise (`zid_cod` → `cod`), and percentages reach Odoo as exactly 100
-    with two decimals (largest remainder: 3 equal shares → 33.34/33.33/33.33).
-    Also pins the Odoo <17 fallback to a single `analytic_account_id`
+    analytic rules saved under `settings.order.analytic`: `all` rules always
+    stack alongside matching warehouse/payment rules (they are no longer
+    suppressed when a specific rule matches), matching rules merge as relative
+    weights, two rules on one account sum, payment keys normalise
+    (`zid_cod` → `cod`), and percentages reach Odoo as exactly 100 with two
+    decimals (largest remainder: 3 equal shares → 33.34/33.33/33.33). Also
+    pins the Odoo <17 fallback to a single `analytic_account_id`
   - `tests/unit/analytic-line-injection.test.ts` — source pins that both
     `analytic_distribution` and `analytic_account_id` are probed with the line
     meta, that injection happens **after** the unsupported-key allowlist (which

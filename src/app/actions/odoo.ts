@@ -1652,4 +1652,54 @@ export async function getOdooProducts(force = false): Promise<{
   }
 }
 
+/**
+ * Fetch accounting journals (account.journal) from Odoo, used for the
+ * credit-note journal on store returns (orders tab).
+ *
+ * Pass `force = true` to bypass the TTL memo (used by the manual refresh
+ * button, so journals created in Odoo after opening the tab appear at once).
+ */
+export async function getOdooJournals(force = false): Promise<{
+  success: boolean
+  journals?: Array<{ id: number; name: string; code: string; type: string }>
+  error?: string
+}> {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found' }
+    }
+
+    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
+      return { success: true, journals: [] }
+    }
+
+    const cacheKey = `odoo:journals:${connRes.connection.id}`
+    if (force) ttlCache.delete(cacheKey)
+
+    const journals = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
+      const client = createOdooClient(connRes.connection)
+
+      const records = await client.execute<Array<{ id: number; name: string; code: string; type: string }>>(
+        'account.journal',
+        'search_read',
+        [[]],
+        { fields: ['id', 'name', 'code', 'type', 'company_id'], order: 'type asc, name asc' }
+      )
+
+      return records.map(j => ({
+        id: j.id,
+        name: j.name || '',
+        code: j.code || '',
+        type: j.type || '',
+      }))
+    })
+
+    return { success: true, journals }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooJournals failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch journals' }
+  }
+}
+
 

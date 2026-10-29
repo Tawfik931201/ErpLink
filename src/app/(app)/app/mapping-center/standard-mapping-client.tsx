@@ -17,6 +17,7 @@ import {
   getOdooAnalyticAccounts,
   getOdooCustomers,
   getOdooFieldValueOptions,
+  getOdooJournals,
   getOdooLocations,
   getOdooProducts,
   getOdooTaxes,
@@ -273,18 +274,7 @@ export default function StandardMappingClient({
   const [isLoadingAnalyticOptions, setIsLoadingAnalyticOptions] = useState(false)
   const [analyticOptionsError, setAnalyticOptionsError] = useState('')
 
-  // Shipping & Discount Line items
-  const [orderAddShipping, setOrderAddShipping] = useState(false)
-  const [orderShippingProductId, setOrderShippingProductId] = useState('')
-  const [orderShippingProductSku, setOrderShippingProductSku] = useState('')
-  const [orderAddCod, setOrderAddCod] = useState(false)
-  const [orderCodProductId, setOrderCodProductId] = useState('')
-  const [orderCodProductSku, setOrderCodProductSku] = useState('')
-  const [orderCodAmount, setOrderCodAmount] = useState('')
-  const [orderAddDiscount, setOrderAddDiscount] = useState(false)
-  const [orderDiscountProductId, setOrderDiscountProductId] = useState('')
-  const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
-  const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
+
 
   // VAT (ضريبة القيمة المضافة)
   const [orderEnableVat, setOrderEnableVat] = useState(false)
@@ -292,6 +282,12 @@ export default function StandardMappingClient({
   const [orderVatNonSaudiTaxId, setOrderVatNonSaudiTaxId] = useState('')
   const [orderTaxOptions, setOrderTaxOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
+
+  // Discount lines
+  const [orderAddDiscount, setOrderAddDiscount] = useState(false)
+  const [orderDiscountProductId, setOrderDiscountProductId] = useState('')
+  const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
+  const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
 
   // Status mapping
   const [orderStateMapping, setOrderStateMapping] = useState<Record<string, { state: string; enabled: boolean }>>({})
@@ -312,6 +308,8 @@ export default function StandardMappingClient({
   const [isLoadingPricelists, setIsLoadingPricelists] = useState(false)
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingPaymentTerms, setIsLoadingPaymentTerms] = useState(false)
+  const [journalOptions, setJournalOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingJournals, setIsLoadingJournals] = useState(false)
   const [productOptions, setProductOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(false)
   const [isSavingOrders, setIsSavingOrders] = useState(false)
@@ -652,6 +650,24 @@ export default function StandardMappingClient({
         console.error('Failed to load taxes for orders:', err)
       })
       .finally(() => setIsLoadingOrderTaxes(false))
+
+    // 7. Get accounting journals (for the credit-note journal on store returns)
+    setIsLoadingJournals(true)
+    getOdooJournals(false)
+      .then(res => {
+        if (res.success && res.journals) {
+          setJournalOptions(
+            res.journals.map((j: any) => ({
+              value: String(j.id),
+              label: j.code ? `${j.name} — ${j.code}` : j.name || `Journal #${j.id}`,
+            }))
+          )
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load Odoo journals:', err)
+      })
+      .finally(() => setIsLoadingJournals(false))
   }, [hasOdooConnection, standardSubTab, fetchOdooOrderFields, lang])
 
   // Trigger customer fetch when switching to default_customer if not loaded yet
@@ -698,18 +714,11 @@ export default function StandardMappingClient({
           setOrderPricelistId('')
           setOrderPaymentTermId('')
           setOrderAutoConfirm(false)
-          setOrderAddShipping(false)
-          setOrderShippingProductId('')
-          setOrderShippingProductSku('')
-          setOrderAddCod(false)
-          setOrderCodProductId('')
-          setOrderCodProductSku('')
-          setOrderCodAmount('')
+          setOrderEnableVat(false)
           setOrderAddDiscount(false)
           setOrderDiscountProductId('')
           setOrderDiscountProductSku('')
           setOrderDiscountMode('fixed')
-          setOrderEnableVat(false)
           setOrderVatSaudiTaxId('')
           setOrderVatNonSaudiTaxId('')
           setOrderAutoInvoice(false)
@@ -857,13 +866,6 @@ export default function StandardMappingClient({
           })
         )
 
-        setOrderAddShipping(s.add_shipping_as_line || false)
-        setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
-        setOrderShippingProductSku(s.shipping_product_sku || '')
-        setOrderAddCod(s.add_cod_as_line || false)
-        setOrderCodProductId(s.cod_product_id ? String(s.cod_product_id) : '')
-        setOrderCodProductSku(s.cod_product_sku || '')
-        setOrderCodAmount(s.cod_amount ? String(s.cod_amount) : '')
         setOrderAddDiscount(s.add_discount_as_line || false)
         setOrderDiscountProductId(s.discount_product_id ? String(s.discount_product_id) : '')
         setOrderDiscountProductSku(s.discount_product_sku || '')
@@ -1295,6 +1297,44 @@ export default function StandardMappingClient({
     }
   }, [lang, toast, standardStoreTab, standardStoreId])
 
+  // Re-pull Odoo accounting journals with no cache, so a journal created in
+  // Odoo after opening the tab is selectable for the credit-note journal.
+  const handleRefreshJournals = useCallback(async () => {
+    setIsLoadingJournals(true)
+    try {
+      const res = await getOdooJournals(true)
+      if (res.success && res.journals) {
+        setJournalOptions(
+          res.journals.map((j: any) => ({
+            value: String(j.id),
+            label: j.code ? `${j.name} — ${j.code}` : j.name || `Journal #${j.id}`,
+          }))
+        )
+        toast({
+          title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+          description: lang === 'ar'
+            ? 'تم تحديث دفاتر اليومية من أودو'
+            : 'Odoo accounting journals reloaded',
+        })
+      } else {
+        toast({
+          title: lang === 'ar' ? 'خطأ' : 'Error',
+          description: res?.error || (lang === 'ar' ? 'فشل تحديث الدفاتر' : 'Failed to refresh journals'),
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      console.error('[OrderReturnsJournal] Refresh failed:', err)
+      toast({
+        title: lang === 'ar' ? 'خطأ' : 'Error',
+        description: lang === 'ar' ? 'فشل تحديث الدفاتر' : 'Failed to refresh journals',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingJournals(false)
+    }
+  }, [lang, toast])
+
   // Re-pull store + Odoo locations straight from the APIs (no cache), so a
   // warehouse/location created in Odoo after opening the tab shows up.
   // Only the dropdown lists are touched — unsaved pair rows are left alone.
@@ -1536,20 +1576,16 @@ export default function StandardMappingClient({
         warnings.push(lang === 'ar' ? 'قائمة الأسعار الافتراضية غير محددة — قد يفشل إنشاء الطلب في أودو' : 'Default pricelist not set — order creation may fail in Odoo')
       }
     }
-    if (orderAddShipping && !orderShippingProductId && !orderShippingProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل الشحن كبند لكن لم يتم تحديد منتج الشحن أو SKU' : 'Shipping as line item is enabled but no shipping product or SKU set')
-    }
-    if (orderAddCod && !orderCodProductId && !orderCodProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل رسوم الدفع عند الاستلام لكن لم يتم تحديد المنتج أو SKU' : 'COD fee line is enabled but no COD product or SKU set')
-    }
-    if (orderAddDiscount && !orderDiscountProductId && !orderDiscountProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled but no discount product or SKU set')
-    }
+
     if (orderCustomerFallbackPolicy === 'default_customer' && !orderDefaultCustomerId) {
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد عميل افتراضي لكن لم يتم تحديد العميل' : 'Default customer policy is selected but no customer selected')
     }
     if (orderProductFallbackPolicy === 'default_product' && !orderDefaultProductId) {
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد منتج افتراضي لكن لم يتم تحديد المنتج' : 'Default product policy is selected but no product selected')
+    }
+
+    if (orderAddDiscount && orderDiscountMode === 'fixed' && !orderDiscountProductId && !orderDiscountProductSku) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند بقيمة ثابتة لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled with fixed value but no discount product or SKU set')
     }
 
     // Drop half-filled analytic rows instead of persisting them: an empty
@@ -1605,20 +1641,14 @@ export default function StandardMappingClient({
       default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
       product_fallback_policy: orderProductFallbackPolicy,
       default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
-      add_shipping_as_line: orderAddShipping,
-      shipping_product_id: orderShippingProductId ? Number(orderShippingProductId) : null,
-      shipping_product_sku: orderShippingProductSku,
-      add_cod_as_line: orderAddCod,
-      cod_product_id: orderCodProductId ? Number(orderCodProductId) : null,
-      cod_product_sku: orderCodProductSku,
-      cod_amount: orderCodAmount ? Number(orderCodAmount) : null,
+
+      enable_vat: orderEnableVat,
+      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
+      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
       add_discount_as_line: orderAddDiscount,
       discount_product_id: orderDiscountProductId ? Number(orderDiscountProductId) : null,
       discount_product_sku: orderDiscountProductSku,
       discount_mode: orderDiscountMode,
-      enable_vat: orderEnableVat,
-      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
-      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
       update_custom_status_field: orderUpdateCustomStatus,
       order_status_custom_field: orderStatusCustomField,
       order: {
@@ -1696,9 +1726,9 @@ export default function StandardMappingClient({
     orderReturnsMode, orderReturnsCreditNote, orderReturnsJournalId, orderReturnsFallback, orderReturnsReason,
     orderAnalyticEnabled, orderAnalyticRules,
     orderCustomerFallbackPolicy, orderDefaultCustomerId, orderProductFallbackPolicy, orderDefaultProductId,
-    orderAddShipping, orderShippingProductId, orderShippingProductSku,
-    orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
+
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
+
     orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
     orderUpdateCustomStatus, orderStatusCustomField,
     orderStateMapping, standardStoreTab, standardStoreId, standardSubTab, lang, toast
@@ -2168,6 +2198,9 @@ export default function StandardMappingClient({
                   setOrderPaymentTermId={setOrderPaymentTermId}
                   paymentTermOptions={paymentTermOptions}
                   isLoadingPaymentTerms={isLoadingPaymentTerms}
+                  journalOptions={journalOptions}
+                  isLoadingJournals={isLoadingJournals}
+                  handleRefreshJournals={handleRefreshJournals}
                   orderCompanyId={orderCompanyId}
                   setOrderCompanyId={setOrderCompanyId}
                   orderLinkCompany={orderLinkCompany}
@@ -2217,20 +2250,6 @@ export default function StandardMappingClient({
                   setOrderVatNonSaudiTaxId={setOrderVatNonSaudiTaxId}
                   orderTaxOptions={orderTaxOptions}
                   isLoadingOrderTaxes={isLoadingOrderTaxes}
-                  orderAddShipping={orderAddShipping}
-                  setOrderAddShipping={setOrderAddShipping}
-                  orderShippingProductId={orderShippingProductId}
-                  setOrderShippingProductId={setOrderShippingProductId}
-                  orderShippingProductSku={orderShippingProductSku}
-                  setOrderShippingProductSku={setOrderShippingProductSku}
-                  orderAddCod={orderAddCod}
-                  setOrderAddCod={setOrderAddCod}
-                  orderCodProductId={orderCodProductId}
-                  setOrderCodProductId={setOrderCodProductId}
-                  orderCodProductSku={orderCodProductSku}
-                  setOrderCodProductSku={setOrderCodProductSku}
-                  orderCodAmount={orderCodAmount}
-                  setOrderCodAmount={setOrderCodAmount}
                   orderAddDiscount={orderAddDiscount}
                   setOrderAddDiscount={setOrderAddDiscount}
                   orderDiscountProductId={orderDiscountProductId}
@@ -2239,6 +2258,7 @@ export default function StandardMappingClient({
                   setOrderDiscountProductSku={setOrderDiscountProductSku}
                   orderDiscountMode={orderDiscountMode}
                   setOrderDiscountMode={setOrderDiscountMode}
+
                   orderUpdateCustomStatus={orderUpdateCustomStatus}
                   setOrderUpdateCustomStatus={setOrderUpdateCustomStatus}
                   statusFieldExists={statusFieldExists}

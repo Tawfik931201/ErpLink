@@ -119,10 +119,20 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           apiKey,
         })
 
+        let defaultCompanyId: number | null = null
+        try {
+          const uid = await client.authenticate()
+          const userRecs = await client.searchRead<any>('res.users', [['id', '=', uid]], ['company_id'], 1)
+          if (userRecs && userRecs[0]?.company_id) {
+            defaultCompanyId = Array.isArray(userRecs[0].company_id) ? userRecs[0].company_id[0] : userRecs[0].company_id
+          }
+        } catch {}
+
         // Auto-detect default warehouse
+        const warehouseDomain = defaultCompanyId ? [['company_id', 'in', [defaultCompanyId, false]]] : []
         const warehouses = await client.searchRead<any>(
           'stock.warehouse',
-          [],
+          warehouseDomain,
           ['id', 'name', 'code'],
           1
         )
@@ -130,10 +140,11 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           defaultWarehouseId = warehouses[0].id
         }
 
-        // Auto-detect default pricelist
+        // Auto-detect default pricelist (filter by company to avoid multi-company mismatch)
+        const pricelistDomain = defaultCompanyId ? [['company_id', 'in', [defaultCompanyId, false]]] : []
         const pricelists = await client.searchRead<any>(
           'product.pricelist',
-          [],
+          pricelistDomain,
           ['id', 'name'],
           1
         )

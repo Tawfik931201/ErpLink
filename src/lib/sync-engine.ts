@@ -1670,31 +1670,42 @@ async function buildOrderLineItems(
         ? Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
         : 0
       nameStr = `Discount ${discountValue}%`
+      // Percentage mode: the value IS the discount percentage — record it on the
+      // order line level directly. No discount product is required for percentages.
+      const discountPercentLine: Record<string, unknown> = {
+        name: nameStr,
+        product_uom_qty: 1,
+        price_unit: discountValue,
+        discount: discountValue,
+        [lineTaxField]: [defaultLineTaxCmd],
+      }
+      lines.push(discountPercentLine)
+      console.info(`[SyncEngine] Discount line appended as percentage on order line: name="${nameStr}"`)
     } else {
       // fixed mode: negative price_unit = a discount line in Odoo
       discountValue = -Math.abs(totalDiscountAmount)
       nameStr = 'Discount'
-    }
 
-    const discountLine: Record<string, unknown> = {
-      name: nameStr,
-      product_uom_qty: 1,
-      price_unit: discountValue,
-      [lineTaxField]: [defaultLineTaxCmd],
-    }
+      const discountLine: Record<string, unknown> = {
+        name: nameStr,
+        product_uom_qty: 1,
+        price_unit: discountValue,
+        [lineTaxField]: [defaultLineTaxCmd],
+      }
 
-    if (discountProductId) {
-      discountLine['product_id'] = parseInt(discountProductId)
-    } else if (discountProductSku) {
-      const foundId = await findOdooProductByCodeOrBarcode(client, discountProductSku)
-      if (foundId) discountLine['product_id'] = foundId
-    }
+      if (discountProductId) {
+        discountLine['product_id'] = parseInt(discountProductId)
+      } else if (discountProductSku) {
+        const foundId = await findOdooProductByCodeOrBarcode(client, discountProductSku)
+        if (foundId) discountLine['product_id'] = foundId
+      }
 
-    if (!discountLine['product_id']) {
-      console.warn('[SyncEngine] Discount line item skipped: no discount product ID/SKU configured. Configure addDiscountAsLine discountProductId or discountProductSku in the mapping settings.')
-    } else {
-      lines.push(discountLine)
-      console.info(`[SyncEngine] Discount line item appended: name="${nameStr}" price_unit=${discountValue}`)
+      if (!discountLine['product_id']) {
+        console.warn('[SyncEngine] Discount line item skipped: no discount product ID/SKU configured. Configure addDiscountAsLine discountProductId or discountProductSku in the mapping settings.')
+      } else {
+        lines.push(discountLine)
+        console.info(`[SyncEngine] Discount line item appended: name="${nameStr}" price_unit=${discountValue}`)
+      }
     }
   }
 
@@ -1770,6 +1781,10 @@ async function buildOrderLineItems(
           locationId,
           locationName,
           paymentKeys: paymentKeysFromOrder(zidData, platform),
+          // Send the merchant's configured percentages verbatim — no
+          // re-normalisation to 100. Odoo accepts analytic_distribution
+          // values whose percentages do not sum to 100.
+          preservePercentages: true,
         })
 
         if (distribution.length > 0) {
@@ -2389,6 +2404,19 @@ async function safeCreateOdooRecord(
         console.warn(`[SyncEngine] ⚠️ Pruning invalid field "${badField}" from ${model} create and retrying: ${err.message}`)
         const cleanValues = { ...values }
         delete cleanValues[badField]
+        return await safeCreateOdooRecord(client, model, cleanValues, _fallbackValues)
+      }
+    }
+
+    // If error is due to incompatible companies on a specific relational field (e.g. pricelist_id belongs to another company), prune and retry
+    const isCompanyIncompatible = String(err?.message || '').toLowerCase().includes('incompatible companies on records')
+    if (isCompanyIncompatible) {
+      const fieldInParenMatch = String(err?.message || '').match(/\(([a-z0-9_]+):/i)
+      const badRelField = fieldInParenMatch ? fieldInParenMatch[1] : (('pricelist_id' in values) ? 'pricelist_id' : null)
+      if (badRelField && badRelField in values) {
+        console.warn(`[SyncEngine] ⚠️ Pruning incompatible company field "${badRelField}" from ${model} create and retrying: ${err.message}`)
+        const cleanValues = { ...values }
+        delete cleanValues[badRelField]
         return await safeCreateOdooRecord(client, model, cleanValues, _fallbackValues)
       }
     }

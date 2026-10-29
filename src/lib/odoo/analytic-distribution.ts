@@ -12,12 +12,14 @@
  *   { enabled, rules: [{ condition, source_value, source_label,
  *                        odoo_analytic_account_id, percentage }] }
  *
- * Matching contract (decided 2026-10-21):
+ * Matching contract:
+ * - `all` rules match every order and are always included;
  * - `warehouse` and `payment` rules match independently;
- * - every matching specific rule is merged, then the percentages are used as
- *   RELATIVE WEIGHTS and normalised to exactly 100;
- * - `all` rules are a fallback and are ignored as soon as one specific rule
- *   matches, so a warehouse/payment rule never stacks on top of "everything".
+ * - every matching rule (including `all`) is merged, then the percentages
+ *   are used as RELATIVE WEIGHTS and normalised to exactly 100;
+ * - so an "all orders" rule stacks on top of a warehouse/payment rule when
+ *   both match — two matched rules give two analytic accounts, three give
+ *   three, and so on.
  */
 
 export type AnalyticCondition = 'all' | 'warehouse' | 'payment'
@@ -45,6 +47,13 @@ export interface ResolveAnalyticInput {
   locationId?: string
   locationName?: string
   paymentKeys?: string[]
+  /**
+   * When true, returns the rule percentages exactly as configured (no
+   * re-normalisation to 100). Odoo accepts analytic_distribution values whose
+   * percentages do not sum to 100, so the merchant's configured percentages
+   * are sent verbatim.
+   */
+  preservePercentages?: boolean
 }
 
 const CONDITIONS: AnalyticCondition[] = ['all', 'warehouse', 'payment']
@@ -243,20 +252,37 @@ export function resolveAnalyticDistribution({
   locationId,
   locationName,
   paymentKeys = [],
+  preservePercentages = false,
 }: ResolveAnalyticInput): AnalyticDistributionEntry[] {
   const parsed = parseAnalyticConfig(config)
   if (!parsed.enabled || parsed.rules.length === 0) return []
 
-  const fallbackRules = parsed.rules.filter(rule => rule.condition === 'all')
-  const specificRules = parsed.rules.filter(rule => rule.condition !== 'all')
+  const matched: AnalyticRule[] = []
+  for (const rule of parsed.rules) {
+    if (rule.condition === 'all') {
+      // "all orders" matches every order and always stacks with other rules.
+      matched.push(rule)
+      continue
+    }
+    if (rule.condition === 'warehouse') {
+      if (locationMatches(rule, locationId, locationName)) matched.push(rule)
+      continue
+    }
+    if (rule.condition === 'payment') {
+      if (paymentMatches(rule, paymentKeys)) matched.push(rule)
+      continue
+    }
+  }
 
-  const matched = specificRules.filter(rule =>
-    rule.condition === 'warehouse'
-      ? locationMatches(rule, locationId, locationName)
-      : paymentMatches(rule, paymentKeys)
-  )
+  if (preservePercentages) {
+    // Send percentages exactly as configured — no re-normalisation to 100.
+    return matched.map(rule => ({
+      accountId: rule.odoo_analytic_account_id,
+      percentage: rule.percentage,
+    }))
+  }
 
-  return normalizeToHundred(matched.length > 0 ? matched : fallbackRules)
+  return normalizeToHundred(matched)
 }
 
 /**
