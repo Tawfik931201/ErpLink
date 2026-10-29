@@ -31,6 +31,7 @@ import {
   SyncStatusBadge,
   SyncTriggerBadge,
 } from '../log-ui'
+import { PayloadViewer } from '../payload-viewer'
 
 function InfoField({
   label,
@@ -49,22 +50,6 @@ function InfoField({
   )
 }
 
-function prettyPayload(payload: unknown): string {
-  if (payload === null || payload === undefined) return ''
-  if (typeof payload === 'string') {
-    try {
-      return JSON.stringify(JSON.parse(payload), null, 2)
-    } catch {
-      return payload
-    }
-  }
-  try {
-    return JSON.stringify(payload, null, 2)
-  } catch {
-    return String(payload)
-  }
-}
-
 export default function LogDetailClient({ log }: { log: SyncLogRow }) {
   const { t, lang, dir } = useLanguage()
   const ar = lang === 'ar'
@@ -74,12 +59,10 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
   const [isRetrying, setIsRetrying] = useState(false)
   const [isResolving, setIsResolving] = useState(false)
   const [copiedId, setCopiedId] = useState(false)
-  const [copiedPayload, setCopiedPayload] = useState(false)
 
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft
   const isResolvedManually = log.resolved_manually === true
   const errorMessage = log.error_message || ''
-  const payloadText = prettyPayload(log.payload)
 
   const entityLabels: Record<string, string> = {
     product: t('log.entityProduct'),
@@ -103,16 +86,11 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
     })
   }
 
-  const copy = async (value: string, kind: 'id' | 'payload') => {
+  const copy = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
-      if (kind === 'id') {
-        setCopiedId(true)
-        setTimeout(() => setCopiedId(false), 1500)
-      } else {
-        setCopiedPayload(true)
-        setTimeout(() => setCopiedPayload(false), 1500)
-      }
+      setCopiedId(true)
+      setTimeout(() => setCopiedId(false), 1500)
     } catch {
       toast({
         title: ar ? 'تعذر النسخ' : 'Copy failed',
@@ -217,7 +195,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
             <span className="break-all font-mono text-[11px] text-muted-foreground">{log.id}</span>
             <button
               type="button"
-              onClick={() => copy(log.id, 'id')}
+              onClick={() => copy(log.id)}
               className="inline-flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title={t('log.copyId')}
             >
@@ -325,34 +303,8 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
         </div>
       )}
 
-      {/* Payload — fetched with this record only, never with the list. */}
-      <div className="overflow-hidden border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border bg-muted px-3 py-1.5">
-          <span className="text-[10px] font-bold text-muted-foreground">{t('log.payloadTitle')}</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[9px] font-mono text-muted-foreground">JSON</span>
-            {payloadText && (
-              <button
-                type="button"
-                onClick={() => copy(payloadText, 'payload')}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
-              >
-                {copiedPayload ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                {copiedPayload ? (ar ? 'تم النسخ' : 'Copied') : (ar ? 'نسخ' : 'Copy')}
-              </button>
-            )}
-          </div>
-        </div>
-        {payloadText ? (
-          <pre className="max-h-[520px] overflow-auto bg-card p-3 text-[10px] font-mono leading-relaxed text-foreground">
-            {payloadText}
-          </pre>
-        ) : (
-          <div className="py-6 text-center text-[11px] text-muted-foreground">
-            {t('log.payloadEmpty')}
-          </div>
-        )}
-      </div>
+      {/* Payload: Visual Fields & Tables + Raw JSON tabs */}
+      <PayloadViewer payload={log.payload} platform={log.platform} event={log.event} />
     </div>
   )
 }
