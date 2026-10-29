@@ -135,31 +135,35 @@ describe('resolveAnalyticDistribution', () => {
     expect(distribution).toEqual([{ accountId: 10, percentage: 100 }])
   })
 
-  it('prefers matching specific rule over general fallback rule (does not stack all)', () => {
+  it('includes both all rule and matching warehouse rule with percentages verbatim', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
-        rule({ odoo_analytic_account_id: 10 }),
-        rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20 }),
+        rule({ odoo_analytic_account_id: 10, percentage: 100 }),
+        rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20, percentage: 100 }),
       ]),
       locationId: 'loc-1',
     })
     expect(distribution).toEqual([
+      { accountId: 10, percentage: 100 },
       { accountId: 20, percentage: 100 },
     ])
   })
 
-  it('matches warehouse and payment rules together without stacking fallback all', () => {
+  it('includes all satisfied conditions (all, warehouse, payment) together', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
-        rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20 }),
-        rule({ condition: 'payment', source_value: 'cod', odoo_analytic_account_id: 30 }),
-        rule({ odoo_analytic_account_id: 10 }),
+        rule({ odoo_analytic_account_id: 10, percentage: 100 }),
+        rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20, percentage: 100 }),
+        rule({ condition: 'payment', source_value: 'cod', odoo_analytic_account_id: 30, percentage: 100 }),
       ]),
       locationId: 'loc-1',
       paymentKeys: ['cod'],
     })
-    expect(distribution.map(e => e.accountId)).toEqual([20, 30])
-    expect(distribution.map(e => e.percentage)).toEqual([100, 100])
+    expect(distribution).toEqual([
+      { accountId: 10, percentage: 100 },
+      { accountId: 20, percentage: 100 },
+      { accountId: 30, percentage: 100 },
+    ])
   })
 
   it('sums multiple rules that point at the same account', () => {

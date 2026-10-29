@@ -13,12 +13,13 @@
  *                        odoo_analytic_account_id, percentage }] }
  *
  * Matching contract:
- * - `warehouse` and `payment` rules match independently;
- * - `all` rules are a general fallback and are used ONLY when no specific
- *   rule (warehouse or payment) matches;
+ * - `all` rules match every order and are always included;
+ * - `warehouse` and `payment` rules match independently based on the order;
+ * - every matching condition is included together, so multiple analytic accounts
+ *   can be assigned to order lines (e.g. one for all orders, one for warehouse, etc.);
  * - configured percentages are sent verbatim to Odoo without any
- *   re-normalisation or calculation (e.g. if merchant set 100, 100 is sent
- *   to every line; if 50, 50 is sent).
+ *   re-normalisation or calculation (e.g. if merchant set 100 on each, each
+ *   is sent as 100: `{ "6": 100, "1": 100 }`).
  */
 
 export type AnalyticCondition = 'all' | 'warehouse' | 'payment'
@@ -221,22 +222,28 @@ export function resolveAnalyticDistribution({
   const parsed = parseAnalyticConfig(config)
   if (!parsed.enabled || parsed.rules.length === 0) return []
 
-  const fallbackRules = parsed.rules.filter(rule => rule.condition === 'all')
-  const specificRules = parsed.rules.filter(rule => rule.condition !== 'all')
-
-  const matched = specificRules.filter(rule =>
-    rule.condition === 'warehouse'
-      ? locationMatches(rule, locationId, locationName)
-      : paymentMatches(rule, paymentKeys)
-  )
-
-  const selected = matched.length > 0 ? matched : fallbackRules
+  const matched: AnalyticRule[] = []
+  for (const rule of parsed.rules) {
+    if (rule.condition === 'all') {
+      // "all orders" matches every order and includes its analytic account
+      matched.push(rule)
+      continue
+    }
+    if (rule.condition === 'warehouse') {
+      if (locationMatches(rule, locationId, locationName)) matched.push(rule)
+      continue
+    }
+    if (rule.condition === 'payment') {
+      if (paymentMatches(rule, paymentKeys)) matched.push(rule)
+      continue
+    }
+  }
 
   // Send the merchant's configured percentages verbatim — no
-  // re-normalisation to 100, no calculations. Odoo accepts analytic_distribution
-  // values whose percentages do not sum to 100.
+  // re-normalisation to 100, no calculations. Every satisfied condition is
+  // included so multiple analytic accounts are sent to Odoo lines.
   const totals = new Map<number, number>()
-  for (const rule of selected) {
+  for (const rule of matched) {
     if (rule.percentage <= 0) continue
     totals.set(
       rule.odoo_analytic_account_id,
