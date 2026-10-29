@@ -6,6 +6,7 @@ import {
   Boxes,
   Building2,
   Calculator,
+  CreditCard,
   GitCompare,
   History,
   Loader2,
@@ -101,6 +102,19 @@ interface OrderSettingsTabProps {
   journalOptions: { value: string; label: string }[]
   isLoadingJournals: boolean
   handleRefreshJournals: () => void
+  // Payment methods & journals mapping
+  orderPaymentAutoSync: boolean
+  setOrderPaymentAutoSync: (val: boolean) => void
+  orderPaymentJournalMappings: Array<{ rowKey: string; zid_payment_method: string; odoo_journal_id: string }>
+  handlePaymentJournalMappingChange: (
+    rowKey: string,
+    field: 'zid_payment_method' | 'odoo_journal_id',
+    value: string
+  ) => void
+  handleRemovePaymentJournalMapping: (rowKey: string) => void
+  handleAddPaymentJournalMapping: () => void
+  handleRefreshPaymentOptions: () => void
+  isLoadingPaymentMethods: boolean
   orderCompanyId: string
   setOrderCompanyId: (val: string) => void
   orderLinkCompany: boolean
@@ -253,6 +267,14 @@ export function OrderSettingsTab({
   journalOptions,
   isLoadingJournals,
   handleRefreshJournals,
+  orderPaymentAutoSync,
+  setOrderPaymentAutoSync,
+  orderPaymentJournalMappings,
+  handlePaymentJournalMappingChange,
+  handleRemovePaymentJournalMapping,
+  handleAddPaymentJournalMapping,
+  handleRefreshPaymentOptions,
+  isLoadingPaymentMethods,
   orderCompanyId,
   setOrderCompanyId,
   orderLinkCompany,
@@ -343,6 +365,32 @@ export function OrderSettingsTab({
     { value: 'cancel', label: lang === 'ar' ? 'إلغاء (Cancel)' : 'Cancel' },
     { value: 'deliver', label: lang === 'ar' ? 'توصيل (Deliver)' : 'Deliver' },
   ]
+
+  const defaultZidPaymentMethods = React.useMemo(
+    () => [
+      { value: 'zid_cod', label: lang === 'ar' ? 'الدفع عند الاستلام (COD)' : 'Cash on Delivery (COD)' },
+      { value: 'credit_card', label: lang === 'ar' ? 'بطاقة ائتمانية (Credit Card)' : 'Credit Card' },
+      { value: 'mada', label: lang === 'ar' ? 'مدى (Mada)' : 'Mada' },
+      { value: 'apple_pay', label: lang === 'ar' ? 'أبل باي (Apple Pay)' : 'Apple Pay' },
+      { value: 'bank_transfer', label: lang === 'ar' ? 'تحويل بنكي (Bank Transfer)' : 'Bank Transfer' },
+      { value: 'tamara', label: lang === 'ar' ? 'تمارا (Tamara)' : 'Tamara' },
+      { value: 'tabby', label: lang === 'ar' ? 'تابي (Tabby)' : 'Tabby' },
+      { value: 'stc_pay', label: lang === 'ar' ? 'STC Pay' : 'STC Pay' },
+      { value: 'pos', label: lang === 'ar' ? 'نقاط البيع (POS)' : 'Point of Sale (POS)' },
+    ],
+    [lang]
+  )
+
+  const availablePaymentMethodOptions = React.useMemo(() => {
+    const list = [...paymentMethodOptions]
+    const seen = new Set(list.map(p => p.value.toLowerCase()))
+    for (const def of defaultZidPaymentMethods) {
+      if (!seen.has(def.value.toLowerCase())) {
+        list.push(def)
+      }
+    }
+    return list
+  }, [paymentMethodOptions, defaultZidPaymentMethods])
 
   const odooStates = [
     { value: 'draft', label: lang === 'ar' ? 'مسودة (Quotation)' : 'Quotation (Draft)' },
@@ -799,6 +847,152 @@ export function OrderSettingsTab({
                     : 'Restricts the sales order to the selected company in Odoo'
                 }
               />
+            </div>
+          )}
+        </div>
+      </SettingCard>
+
+      {/* 5b. Payment Methods & Journals Mapping */}
+      <SettingCard
+        icon={<CreditCard className="h-4 w-4 text-emerald-600" />}
+        title={lang === 'ar' ? 'إعدادات المدفوعات وطرق الدفع' : 'Payment Methods & Journals'}
+        description={
+          lang === 'ar'
+            ? 'ربط طرق الدفع في متجر زد بدفاتر اليومية (Journals) المقابلة في أودوو لتسجيل استلام الأموال وتسوية الفواتير تلقائياً'
+            : 'Map Zid payment methods to Odoo journals to automatically register inbound payments and reconcile invoices'
+        }
+        headerAction={
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshPaymentOptions}
+              disabled={isLoadingPaymentMethods || isLoadingJournals}
+              className="h-8 text-xs gap-1.5"
+              title={lang === 'ar' ? 'تحديث طرق الدفع والدفاتر' : 'Refresh Methods & Journals'}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', (isLoadingPaymentMethods || isLoadingJournals) && 'animate-spin')} />
+              <span>{lang === 'ar' ? 'تحديث الخيارات' : 'Refresh'}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleAddPaymentJournalMapping}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{lang === 'ar' ? 'إضافة طريقة دفع' : 'Add Payment Method'}</span>
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <SettingToggle
+            checked={orderPaymentAutoSync}
+            onChange={setOrderPaymentAutoSync}
+            label={
+              lang === 'ar'
+                ? 'تسجيل المدفوعات تلقائياً في أودوو عند الدفع في زد'
+                : 'Auto-create inbound payments in Odoo when order is paid in Zid'
+            }
+            description={
+              lang === 'ar'
+                ? 'إنشاء دفعة استلام أموال (Inbound Payment) في دفتر اليومية المربوط وتسويتها تلقائياً مع الفاتورة فور صدورها.'
+                : 'Create an inbound payment in the mapped journal and automatically reconcile it with the invoice.'
+            }
+          />
+
+          {orderPaymentAutoSync && (
+            <div className="space-y-3 pt-2">
+              {/* Table header */}
+              <div className="hidden sm:grid grid-cols-12 gap-2 px-2 py-1.5 text-xs font-semibold text-muted-foreground bg-muted/40 border border-border/40">
+                <div className="col-span-5">
+                  {lang === 'ar' ? 'طريقة الدفع في متجر زد' : 'Zid Payment Method'}
+                </div>
+                <div className="col-span-1 text-center">⇄</div>
+                <div className="col-span-5">
+                  {lang === 'ar' ? 'دفتر اليومية في أودوو (Journal)' : 'Odoo Journal'}
+                </div>
+                <div className="col-span-1 text-center">
+                  {lang === 'ar' ? 'إجراء' : 'Action'}
+                </div>
+              </div>
+
+              {/* Rows */}
+              <div className="space-y-2">
+                {orderPaymentJournalMappings.map((mapping) => (
+                  <div
+                    key={mapping.rowKey}
+                    className="flex flex-col sm:grid sm:grid-cols-12 gap-2 p-2 border border-border/60 bg-background/60 items-center"
+                  >
+                    <div className="w-full sm:col-span-5">
+                      <label className="sm:hidden text-xs text-muted-foreground mb-1 block">
+                        {lang === 'ar' ? 'طريقة الدفع في زد:' : 'Zid Payment Method:'}
+                      </label>
+                      <SearchableSelect
+                        className="w-full"
+                        options={availablePaymentMethodOptions}
+                        value={mapping.zid_payment_method}
+                        onChange={(v: string) =>
+                          handlePaymentJournalMappingChange(mapping.rowKey, 'zid_payment_method', String(v ?? ''))
+                        }
+                        placeholder={lang === 'ar' ? '— اختر طريقة الدفع في زد —' : '— Select Zid Payment Method —'}
+                        disabled={isLoadingPaymentMethods}
+                      />
+                    </div>
+                    <div className="hidden sm:flex col-span-1 justify-center items-center">
+                      <ArrowRightLeft className="h-4 w-4 text-muted-foreground/70" />
+                    </div>
+                    <div className="w-full sm:col-span-5">
+                      <label className="sm:hidden text-xs text-muted-foreground mb-1 block">
+                        {lang === 'ar' ? 'دفتر اليومية في أودوو:' : 'Odoo Journal:'}
+                      </label>
+                      <SearchableSelect
+                        className="w-full"
+                        options={journalOptions}
+                        value={mapping.odoo_journal_id}
+                        onChange={(v: string) =>
+                          handlePaymentJournalMappingChange(mapping.rowKey, 'odoo_journal_id', String(v ?? ''))
+                        }
+                        placeholder={lang === 'ar' ? '— اختر دفتر اليومية في أودوو —' : '— Select Odoo Journal —'}
+                        disabled={isLoadingJournals}
+                      />
+                    </div>
+                    <div className="w-full sm:col-span-1 flex justify-end sm:justify-center">
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePaymentJournalMapping(mapping.rowKey)}
+                        title={lang === 'ar' ? 'حذف' : 'Remove'}
+                        className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {orderPaymentJournalMappings.length === 0 && (
+                  <div className="p-4 text-center border border-dashed border-border/80 text-xs text-muted-foreground space-y-2">
+                    <p>
+                      {lang === 'ar'
+                        ? 'لم يتم إضافة أي ربط لطرق الدفع بعد. انقر على "+ إضافة طريقة دفع" لربط طرق دفع متجر زد بدفاتر أودوو.'
+                        : 'No payment method mappings added yet. Click "+ Add Payment Method" to map Zid payment methods to Odoo journals.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Informative note */}
+              <div className="p-3 bg-muted/40 border border-border/50 text-xs text-muted-foreground leading-relaxed flex items-start gap-2">
+                <span className="text-primary font-bold shrink-0">ℹ</span>
+                <span>
+                  {lang === 'ar'
+                    ? 'عندما يسجل العميل الدفع في متجر زد، سيتم إنشاء دفعة (استلام أموال - Inbound Payment) في دفتر اليومية المربوط وتسويتها تلقائياً مع فاتورة الطلب. وإذا تم تسجيل الدفع قبل إنشاء الفاتورة، ستتم التسوية التلقائية فور إنشاء الفاتورة لاحقاً.'
+                    : 'When the customer pays in Zid, an inbound payment will be created in the mapped Odoo journal and reconciled with the invoice. If payment occurs before invoicing, automatic reconciliation will run as soon as the invoice is created.'}
+                </span>
+              </div>
             </div>
           )}
         </div>

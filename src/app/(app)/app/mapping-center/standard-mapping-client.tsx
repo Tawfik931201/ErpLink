@@ -272,6 +272,11 @@ export default function StandardMappingClient({
   const [orderAnalyticRules, setOrderAnalyticRules] = useState<AnalyticRuleRow[]>([])
   const [analyticAccountOptions, setAnalyticAccountOptions] = useState<{ value: string; label: string }[]>([])
   const [paymentMethodOptions, setPaymentMethodOptions] = useState<{ value: string; label: string }[]>([])
+  const [orderPaymentAutoSync, setOrderPaymentAutoSync] = useState(true)
+  const [orderPaymentJournalMappings, setOrderPaymentJournalMappings] = useState<
+    Array<{ rowKey: string; zid_payment_method: string; odoo_journal_id: string }>
+  >([])
+  const [isLoadingPaymentMethods, setIsLoadingPaymentMethods] = useState(false)
   const [isLoadingAnalyticOptions, setIsLoadingAnalyticOptions] = useState(false)
   const [analyticOptionsError, setAnalyticOptionsError] = useState('')
 
@@ -678,7 +683,21 @@ export default function StandardMappingClient({
         console.error('Failed to load Odoo journals:', err)
       })
       .finally(() => setIsLoadingJournals(false))
-  }, [hasOdooConnection, standardSubTab, fetchOdooOrderFields, lang])
+
+    // 8. Get payment methods for the connected store
+    if (standardStoreTab === 'zid' || standardStoreTab === 'salla') {
+      setIsLoadingPaymentMethods(true)
+      const fetchMethods = standardStoreTab === 'salla' ? getSallaPaymentMethods : getZidPaymentMethods
+      fetchMethods(false, standardStoreId)
+        .then(res => {
+          if (res.success && res.methods) {
+            setPaymentMethodOptions(res.methods.map(m => ({ value: m.value, label: m.label })))
+          }
+        })
+        .catch(err => console.error('Failed to load payment methods:', err))
+        .finally(() => setIsLoadingPaymentMethods(false))
+    }
+  }, [hasOdooConnection, standardSubTab, standardStoreTab, standardStoreId, fetchOdooOrderFields, lang])
 
   // Trigger customer fetch when switching to default_customer if not loaded yet
   useEffect(() => {
@@ -747,6 +766,8 @@ export default function StandardMappingClient({
           setOrderReturnsReason('')
           setOrderReturnsReasonType('store_reason')
           setStoreWarehouseRules([])
+          setOrderPaymentAutoSync(true)
+          setOrderPaymentJournalMappings([])
           setOrderCustomerFallbackPolicy('create_new')
           setOrderDefaultCustomerId('')
           setOrderProductFallbackPolicy('create_new')
@@ -867,6 +888,18 @@ export default function StandardMappingClient({
               odoo_warehouse_id: String(whId ?? ''),
             })
           )
+        )
+
+        const rawPayMappings = s.order?.payment_journal_mappings || s.payment_journal_mappings || []
+        setOrderPaymentAutoSync(s.order?.payment_sync_enabled !== false && s.payment_sync_enabled !== false)
+        setOrderPaymentJournalMappings(
+          Array.isArray(rawPayMappings)
+            ? rawPayMappings.map((m: any, idx: number) => ({
+                rowKey: `pay_${idx}_${Math.random().toString(36).slice(2, 7)}`,
+                zid_payment_method: String(m.zid_payment_method || ''),
+                odoo_journal_id: String(m.odoo_journal_id || ''),
+              }))
+            : []
         )
 
         const analytic = (s.order?.analytic || s.analytic) as { enabled?: boolean; rules?: unknown[] } | undefined
@@ -1235,6 +1268,70 @@ export default function StandardMappingClient({
   const handleRemoveWarehouseRule = useCallback((rowKey: string) => {
     setStoreWarehouseRules(prev => prev.filter(rule => rule.rowKey !== rowKey))
   }, [])
+
+  const handleAddPaymentJournalMapping = useCallback(() => {
+    setOrderPaymentJournalMappings(prev => [
+      ...prev,
+      {
+        rowKey: `pay_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        zid_payment_method: '',
+        odoo_journal_id: '',
+      },
+    ])
+  }, [])
+
+  const handlePaymentJournalMappingChange = useCallback(
+    (rowKey: string, field: 'zid_payment_method' | 'odoo_journal_id', value: string) => {
+      setOrderPaymentJournalMappings(prev =>
+        prev.map(rule => (rule.rowKey === rowKey ? { ...rule, [field]: value } : rule))
+      )
+    },
+    []
+  )
+
+  const handleRemovePaymentJournalMapping = useCallback((rowKey: string) => {
+    setOrderPaymentJournalMappings(prev => prev.filter(rule => rule.rowKey !== rowKey))
+  }, [])
+
+  const handleRefreshPaymentOptions = useCallback(async () => {
+    setIsLoadingPaymentMethods(true)
+    setIsLoadingJournals(true)
+    try {
+      const [payRes, journRes] = await Promise.all([
+        standardStoreTab === 'salla'
+          ? getSallaPaymentMethods(true, standardStoreId)
+          : getZidPaymentMethods(true, standardStoreId),
+        getOdooJournals(true),
+      ])
+      if (payRes.success && payRes.methods) {
+        setPaymentMethodOptions(payRes.methods.map(m => ({ value: m.value, label: m.label })))
+      }
+      if (journRes.success && journRes.journals) {
+        setJournalOptions(
+          journRes.journals.map((j: any) => ({
+            value: String(j.id),
+            label: j.code ? `${j.name} — ${j.code}` : j.name || `Journal #${j.id}`,
+          }))
+        )
+      }
+      toast({
+        title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+        description:
+          lang === 'ar'
+            ? 'تم تحديث طرق الدفع ودفاتر اليومية'
+            : 'Payment methods and journals refreshed',
+      })
+    } catch (err: any) {
+      toast({
+        title: lang === 'ar' ? 'خطأ في التحديث' : 'Refresh Error',
+        description: err?.message || 'Failed to refresh',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingPaymentMethods(false)
+      setIsLoadingJournals(false)
+    }
+  }, [standardStoreTab, standardStoreId, lang, toast])
 
   // ── Analytic distribution: option lists + row handlers ──
 
@@ -1704,6 +1801,13 @@ export default function StandardMappingClient({
       return
     }
 
+    const paymentJournalMappings = orderPaymentJournalMappings
+      .filter(m => m.zid_payment_method.trim() && m.odoo_journal_id.trim())
+      .map(m => ({
+        zid_payment_method: m.zid_payment_method.trim(),
+        odoo_journal_id: m.odoo_journal_id.trim(),
+      }))
+
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
       enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
@@ -1711,6 +1815,8 @@ export default function StandardMappingClient({
       match_odoo_field: orderMatchOdooField,
       company_id: orderCompanyId ? Number(orderCompanyId) : null,
       link_company: orderLinkCompany,
+      payment_sync_enabled: orderPaymentAutoSync,
+      payment_journal_mappings: paymentJournalMappings,
       customer_fallback_policy: orderCustomerFallbackPolicy,
       default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
       product_fallback_policy: orderProductFallbackPolicy,
@@ -1771,6 +1877,8 @@ export default function StandardMappingClient({
         },
         // Store status actions in JSON settings as well for 100% zero-migration reliability
         status_actions: orderStateMapping,
+        payment_sync_enabled: orderPaymentAutoSync,
+        payment_journal_mappings: paymentJournalMappings,
       }
     }
     // Save settings first, then mappings (if settings fails, stop early)
@@ -1815,6 +1923,7 @@ export default function StandardMappingClient({
 
     orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
     orderUpdateCustomStatus, orderStatusCustomField,
+    orderPaymentAutoSync, orderPaymentJournalMappings,
     orderStateMapping, standardStoreTab, standardStoreId, standardSubTab, lang, toast
   ])
 
@@ -2285,6 +2394,14 @@ export default function StandardMappingClient({
                   journalOptions={journalOptions}
                   isLoadingJournals={isLoadingJournals}
                   handleRefreshJournals={handleRefreshJournals}
+                  orderPaymentAutoSync={orderPaymentAutoSync}
+                  setOrderPaymentAutoSync={setOrderPaymentAutoSync}
+                  orderPaymentJournalMappings={orderPaymentJournalMappings}
+                  handlePaymentJournalMappingChange={handlePaymentJournalMappingChange}
+                  handleRemovePaymentJournalMapping={handleRemovePaymentJournalMapping}
+                  handleAddPaymentJournalMapping={handleAddPaymentJournalMapping}
+                  handleRefreshPaymentOptions={handleRefreshPaymentOptions}
+                  isLoadingPaymentMethods={isLoadingPaymentMethods}
                   orderCompanyId={orderCompanyId}
                   setOrderCompanyId={setOrderCompanyId}
                   orderLinkCompany={orderLinkCompany}

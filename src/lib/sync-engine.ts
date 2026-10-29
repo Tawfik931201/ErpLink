@@ -27,6 +27,7 @@ import {
   resolveAnalyticDistribution,
   toOdooAnalyticFields,
 } from '@/lib/odoo/analytic-distribution'
+import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import { OdooClient } from '@/lib/odoo-client'
 import {
   allPlatformIdFieldNames,
@@ -3119,6 +3120,19 @@ async function applyOrderInvoiceAction(
             }
           }
         }
+
+        // Reconcile any existing payment previously created for this order
+        for (const invId of existingInvoiceIds) {
+          await reconcilePendingPaymentsForOrder({
+            client,
+            saleOrderId: orderId,
+            invoiceId: invId,
+            workspaceId,
+            platform,
+            storeId,
+            zidEntityId,
+          }).catch(recErr => console.warn('[SyncEngine] Pending payment reconciliation error:', recErr?.message || recErr))
+        }
       }
       return
     }
@@ -3153,6 +3167,16 @@ async function applyOrderInvoiceAction(
               }
             }
           }
+
+          await reconcilePendingPaymentsForOrder({
+            client,
+            saleOrderId: orderId,
+            invoiceId: inv.id,
+            workspaceId,
+            platform,
+            storeId,
+            zidEntityId,
+          }).catch(recErr => console.warn('[SyncEngine] Pending payment reconciliation error:', recErr?.message || recErr))
         }
       }
       return
@@ -3285,6 +3309,20 @@ async function maybeApplyOrderStatusAction(
         zidEntityId
       )
     }
+
+    // 2d. Inbound Payment action (if order is paid, sync payment & reconcile)
+    const zidEntityId = String(zidData.id || (zidData as any).order_id || '')
+    await syncOrderPayment({
+      client,
+      saleOrderId: odooRecordId,
+      zidData,
+      workspaceId,
+      platform: resolvedPlatform,
+      storeId,
+      zidEntityId,
+    }).catch(payErr => {
+      console.warn('[SyncEngine] Order payment sync failed (non-fatal):', payErr?.message || payErr)
+    })
   } catch (err: any) {
     console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
   }
