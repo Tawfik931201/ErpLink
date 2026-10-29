@@ -254,6 +254,7 @@ export default function StandardMappingClient({
   const [orderReturnsJournalId, setOrderReturnsJournalId] = useState('')
   const [orderReturnsFallback, setOrderReturnsFallback] = useState<'skip' | 'negative_so'>('skip')
   const [orderReturnsReason, setOrderReturnsReason] = useState('')
+  const [orderReturnsReasonType, setOrderReturnsReasonType] = useState<'store_reason' | 'custom'>('store_reason')
   // Multi-warehouse rules: Zid location ↔ Odoo warehouse. Row-based so the
   // Zid side is a stable row key rather than an object key (a Record can't
   // represent two half-filled rows without clobbering one of them).
@@ -744,6 +745,7 @@ export default function StandardMappingClient({
           setOrderReturnsJournalId('')
           setOrderReturnsFallback('skip')
           setOrderReturnsReason('')
+          setOrderReturnsReasonType('store_reason')
           setStoreWarehouseRules([])
           setOrderCustomerFallbackPolicy('create_new')
           setOrderDefaultCustomerId('')
@@ -855,6 +857,7 @@ export default function StandardMappingClient({
           )
           setOrderReturnsFallback(returns.fallback_when_missing === 'negative_so' ? 'negative_so' : 'skip')
           setOrderReturnsReason(typeof returns.reason === 'string' ? returns.reason : '')
+          setOrderReturnsReasonType(returns.reason_type === 'custom' ? 'custom' : 'store_reason')
         }
         setStoreWarehouseRules(
           Object.entries((s.order?.store_warehouse_mappings || {}) as Record<string, unknown>).map(
@@ -1691,6 +1694,16 @@ export default function StandardMappingClient({
       )
     }
 
+    if (orderReturnsMode !== 'nothing' && orderReturnsReasonType === 'custom' && !orderReturnsReason.trim()) {
+      toast({
+        title: lang === 'ar' ? 'حقل إجباري مطلوب' : 'Required Field',
+        description: lang === 'ar' ? 'يرجى كتابة سبب المرتجع المخصص' : 'Please enter the custom return reason',
+        variant: 'destructive',
+      })
+      setIsSavingOrders(false)
+      return
+    }
+
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
       enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
@@ -1754,6 +1767,7 @@ export default function StandardMappingClient({
           credit_note_journal_id: orderReturnsJournalId ? Number(orderReturnsJournalId) : null,
           fallback_when_missing: orderReturnsFallback,
           reason: orderReturnsReason,
+          reason_type: orderReturnsReasonType,
         },
         // Store status actions in JSON settings as well for 100% zero-migration reliability
         status_actions: orderStateMapping,
@@ -2285,6 +2299,8 @@ export default function StandardMappingClient({
                   setOrderReturnsJournalId={setOrderReturnsJournalId}
                   orderReturnsFallback={orderReturnsFallback}
                   setOrderReturnsFallback={setOrderReturnsFallback}
+                  orderReturnsReasonType={orderReturnsReasonType}
+                  setOrderReturnsReasonType={setOrderReturnsReasonType}
                   orderReturnsReason={orderReturnsReason}
                   setOrderReturnsReason={setOrderReturnsReason}
                   storeWarehouseRules={storeWarehouseRules}

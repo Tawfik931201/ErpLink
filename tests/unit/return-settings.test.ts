@@ -46,6 +46,12 @@ describe('normalizeReturnSettings', () => {
     expect(normalizeReturnSettings({ reason: 'x'.repeat(500) }).reason).toHaveLength(200)
     expect(normalizeReturnSettings({ reason: 42 }).reason).toBe('')
   })
+
+  it('normalizes reason_type to store_reason by default and accepts custom', () => {
+    expect(normalizeReturnSettings({}).reason_type).toBe('store_reason')
+    expect(normalizeReturnSettings({ reason_type: 'custom' }).reason_type).toBe('custom')
+    expect(normalizeReturnSettings({ reason_type: 'other' }).reason_type).toBe('store_reason')
+  })
 })
 
 describe('isReturnModeEnabled', () => {

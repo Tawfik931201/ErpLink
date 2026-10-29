@@ -27,6 +27,7 @@ import type { PlatformKey } from '@/lib/platform-fields'
 import { isSaudiShippingAddress } from '@/lib/zid/order-helpers'
 
 import {
+  extractStoreReturnReason,
   returnDedupeKey,
   returnSnapshotSignature,
   type ReturnSettings,
@@ -414,11 +415,17 @@ async function createFromPayloadWithoutOrder(
     return [0, 0, lineVals]
   })
 
+  const storeReason = extractStoreReturnReason(input.payload, platform)
+  const effectiveReason =
+    settings.reason_type === 'custom'
+      ? (settings.reason || storeReason || `Return of ${platform}:${orderId}`)
+      : (storeReason || settings.reason || `Return of ${platform}:${orderId}`)
+
   const soVals: Record<string, unknown> = {
     partner_id: partnerId,
     client_order_ref: `RET:${platform}:${orderId}`,
     origin: `${platform}:${orderId}`,
-    note: settings.reason || `Return of ${platform}:${orderId}`,
+    note: effectiveReason,
     order_line: orderLines,
   }
   if (warehouseId) soVals.warehouse_id = warehouseId
@@ -463,6 +470,27 @@ async function createFromPayloadWithoutOrder(
   }
 }
 
+function resolveTriggeringStatus(payload: Record<string, unknown>, event: string): string {
+  const p = payload as any
+  const statusRaw =
+    p.order_status?.code ??
+    p.order_status?.slug ??
+    p.order?.order_status?.code ??
+    p.order?.order_status?.slug ??
+    p.order_status ??
+    p.order?.order_status ??
+    p.status ??
+    p.order?.status ??
+    p.financial_status ??
+    p.orderStatus ??
+    event
+  const key = String(statusRaw || '').toLowerCase().trim().replace(/-/g, '_')
+  if (key.includes('partially_reversed') || key.includes('partially')) return 'partially_reversed'
+  if (key.includes('reverse_in_progress') || key.includes('in_progress')) return 'reverse_in_progress'
+  if (key.includes('reversed') || key.includes('refund') || key.includes('return')) return 'reversed'
+  return key
+}
+
 export async function processReturnEvent(input: ReturnEventInput): Promise<ReturnOutcome> {
   const { client, platform, workspaceId, storeId, orderId, settings } = input
   if (settings.mode === 'nothing') {
@@ -494,11 +522,31 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       return skipped(`nothing_to_return:${original.name}`)
     }
 
+    const storeReason = extractStoreReturnReason(input.payload, platform)
+    const effectiveReason =
+      settings.reason_type === 'custom'
+        ? (settings.reason || storeReason || `Return of ${platform}:${orderId}`)
+        : (storeReason || settings.reason || `Return of ${platform}:${orderId}`)
+
+    const triggeringStatus = resolveTriggeringStatus(input.payload, input.event)
+    const statusActions =
+      input.orderStdSettings?.order?.status_actions ||
+      (input.orderStdSettings as any)?.status_actions ||
+      {}
+    const statusConfig =
+      statusActions[triggeringStatus] ||
+      statusActions['reversed'] ||
+      statusActions['partially_reversed'] ||
+      statusActions['reverse_in_progress'] ||
+      {}
+    const pickingAction = String(statusConfig.picking_action || '')
+    const invoiceAction = String(statusConfig.invoice_action || '')
+
     const actions: string[] = []
     let odooRecordId: number | undefined
 
     if (settings.mode === 'negative_so') {
-      odooRecordId = await createNegativeSaleOrder(client, original, lines, settings.reason, {
+      odooRecordId = await createNegativeSaleOrder(client, original, lines, effectiveReason, {
         orderStdSettings: input.orderStdSettings,
         payload: input.payload,
         platform,
@@ -510,25 +558,24 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       }
     } else {
       const majorVersion = await client.getMajorVersion().catch(() => 17)
-      const stock = await createStockReturn(client, original.id, lines, majorVersion)
+      const stock = await createStockReturn(client, original.id, lines, majorVersion, {
+        pickingAction,
+      })
       actions.push(`stock_return:${stock.pickingIds.join(',') || 'none'}`)
       odooRecordId = original.id
 
       if (settings.create_credit_note) {
         const invoiceId = await findInvoiceForOrder(client, original)
-        if (!invoiceId) {
-          actions.push('credit_note_skipped:no_invoice')
-        } else {
-          const creditId = await createCreditNote(
-            client,
-            original,
-            invoiceId,
-            lines,
-            settings.credit_note_journal_id,
-            settings.reason
-          )
-          actions.push(`credit_note:${creditId}`)
-        }
+        const creditId = await createCreditNote(
+          client,
+          original,
+          invoiceId,
+          lines,
+          settings.credit_note_journal_id,
+          effectiveReason,
+          { invoiceAction }
+        )
+        actions.push(`credit_note:${creditId}`)
       }
     }
 

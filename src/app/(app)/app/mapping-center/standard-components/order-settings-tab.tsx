@@ -116,6 +116,8 @@ interface OrderSettingsTabProps {
   setOrderReturnsJournalId: (val: string) => void
   orderReturnsFallback: 'skip' | 'negative_so'
   setOrderReturnsFallback: (val: 'skip' | 'negative_so') => void
+  orderReturnsReasonType: 'store_reason' | 'custom'
+  setOrderReturnsReasonType: (val: 'store_reason' | 'custom') => void
   orderReturnsReason: string
   setOrderReturnsReason: (val: string) => void
   // Multi-warehouse rules
@@ -265,6 +267,8 @@ export function OrderSettingsTab({
   setOrderReturnsJournalId,
   orderReturnsFallback,
   setOrderReturnsFallback,
+  orderReturnsReasonType,
+  setOrderReturnsReasonType,
   orderReturnsReason,
   setOrderReturnsReason,
   storeWarehouseRules,
@@ -1337,35 +1341,95 @@ export function OrderSettingsTab({
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-foreground/80">
-                    {lang === 'ar' ? 'إذا لم يوجد الأمر الأصلي في أودو' : 'If Original Order Missing'}
-                  </label>
-                  <select
-                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-                    value={orderReturnsFallback}
-                    onChange={(e) => setOrderReturnsFallback(e.target.value as typeof orderReturnsFallback)}
-                  >
-                    <option value="skip">{lang === 'ar' ? 'تجاهل المرتجع' : 'Skip Return'}</option>
-                    <option value="negative_so">
-                      {lang === 'ar' ? 'أمر بيع سالب مستقل' : 'Standalone Negative Order'}
-                    </option>
-                  </select>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-foreground/80">
+                      {lang === 'ar' ? 'إذا لم يوجد الأمر الأصلي في أودو' : 'If Original Order Missing'}
+                    </label>
+                    <select
+                      className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                      value={orderReturnsFallback}
+                      onChange={(e) => setOrderReturnsFallback(e.target.value as typeof orderReturnsFallback)}
+                    >
+                      <option value="skip">{lang === 'ar' ? 'تجاهل المرتجع' : 'Skip Return'}</option>
+                      <option value="negative_so">
+                        {lang === 'ar' ? 'أمر بيع سالب مستقل' : 'Standalone Negative Order'}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-foreground/80">
+                      {lang === 'ar' ? 'مصدر سبب المرتجع' : 'Return Reason Source'}
+                    </label>
+                    <select
+                      className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                      value={orderReturnsReasonType}
+                      onChange={(e) => setOrderReturnsReasonType(e.target.value as 'store_reason' | 'custom')}
+                    >
+                      <option value="store_reason">
+                        {lang === 'ar'
+                          ? `سبب المرتجع الوارد من ${statusStoreNameAr || 'المتجر'} تلقائياً`
+                          : 'Use store return reason automatically'}
+                      </option>
+                      <option value="custom">
+                        {lang === 'ar' ? 'كتابة سبب مخصص (إجباري)' : 'Custom Return Reason (Required)'}
+                      </option>
+                    </select>
+                  </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-foreground/80">
-                    {lang === 'ar' ? 'سبب المرتجع الافتراضي (اختياري)' : 'Default Return Reason (Optional)'}
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-                    value={orderReturnsReason}
-                    onChange={(e) => setOrderReturnsReason(e.target.value)}
-                    placeholder={lang === 'ar' ? 'يُكتب على أمر المبيعات أو الإشعار' : 'Written on order/credit note'}
-                  />
-                </div>
+                {orderReturnsReasonType === 'custom' ? (
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-foreground/80">
+                      {lang === 'ar' ? 'سبب المرتجع المخصص' : 'Custom Return Reason'}
+                      <span className="text-red-500 mr-1 ml-1">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className={cn(
+                        'w-full h-9 px-3 rounded-none border bg-background text-xs text-foreground focus:ring-1 outline-none transition-all',
+                        !orderReturnsReason.trim()
+                          ? 'border-red-500 focus:border-red-500 focus:ring-red-500'
+                          : 'border-input focus:border-primary focus:ring-primary'
+                      )}
+                      value={orderReturnsReason}
+                      onChange={(e) => setOrderReturnsReason(e.target.value)}
+                      placeholder={
+                        lang === 'ar'
+                          ? 'اكتب سبب المرتجع هنا (إجباري طالما تم تفعيل المرتجع)'
+                          : 'Enter return reason (required when returns enabled)'
+                      }
+                    />
+                    {!orderReturnsReason.trim() && (
+                      <span className="text-[11px] text-red-500 font-medium">
+                        {lang === 'ar'
+                          ? 'سبب المرتجع إجباري عند اختيار تحديد سبب مخصص'
+                          : 'Return reason is required when custom is selected'}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] text-muted-foreground bg-muted/40 p-2.5 border border-border/50">
+                      {lang === 'ar'
+                        ? `سيتم إرفاق وتضمين سبب المرتجع الذي يرسله ${statusStoreNameAr || 'المتجر'} تلقائياً على سجلات المرتجع في أودو.`
+                        : 'The return reason sent from the store will be automatically attached to Odoo records.'}
+                    </div>
+                    <input
+                      type="text"
+                      className="w-full h-8 px-3 rounded-none border border-input bg-background/60 text-[11px] text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                      value={orderReturnsReason}
+                      onChange={(e) => setOrderReturnsReason(e.target.value)}
+                      placeholder={
+                        lang === 'ar'
+                          ? 'سبب احتياطي بديل في حال لم يرسل المتجر سبباً (اختياري)'
+                          : 'Fallback reason if store sends none (optional)'
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}

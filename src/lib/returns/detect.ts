@@ -23,12 +23,15 @@ export type ReturnMode = 'nothing' | 'negative_so' | 'stock_return_credit_note'
 
 export type ReturnFallback = 'skip' | 'negative_so'
 
+export type ReturnReasonType = 'store_reason' | 'custom'
+
 export interface ReturnSettings {
   mode: ReturnMode
   create_credit_note: boolean
   credit_note_journal_id: number | null
   fallback_when_missing: ReturnFallback
   reason: string
+  reason_type: ReturnReasonType
 }
 
 export const DEFAULT_RETURN_SETTINGS: ReturnSettings = {
@@ -37,6 +40,7 @@ export const DEFAULT_RETURN_SETTINGS: ReturnSettings = {
   credit_note_journal_id: null,
   fallback_when_missing: 'skip',
   reason: '',
+  reason_type: 'store_reason',
 }
 
 export interface StoreReturnLine {
@@ -346,4 +350,61 @@ export function returnSnapshotSignature(lines: readonly StoreReturnLine[], extra
 
 export function returnDedupeKey(platform: string, orderId: string, signature: string): string {
   return `${platform}:return:${orderId}:${signature}`
+}
+
+/**
+ * Extract return/refund reason from platform payload (Zid / Salla).
+ */
+export function extractStoreReturnReason(
+  payload: Record<string, unknown> | null | undefined,
+  _platform?: string
+): string {
+  if (!payload) return ''
+  const p = payload as any
+  const nestedOrder = asRecord(p.order) as any
+
+  const candidates = [
+    p.reverse_order_label_request?.reason,
+    nestedOrder?.reverse_order_label_request?.reason,
+    p.reverse_order_label_requests?.[0]?.reason,
+    nestedOrder?.reverse_order_label_requests?.[0]?.reason,
+    p.reverse_reason,
+    nestedOrder?.reverse_reason,
+    p.return_reason,
+    nestedOrder?.return_reason,
+    p.refund_reason,
+    nestedOrder?.refund_reason,
+    p.reason,
+    nestedOrder?.reason,
+    p.cancel_reason,
+    nestedOrder?.cancel_reason,
+    p.customer_notes,
+    nestedOrder?.customer_notes,
+    p.notes,
+    nestedOrder?.notes,
+    p.note,
+    nestedOrder?.note,
+  ]
+
+  for (const c of candidates) {
+    if (!c) continue
+    if (typeof c === 'string' && c.trim()) return c.trim().slice(0, 200)
+    if (Array.isArray(c) && c.length > 0) {
+      const parts = c
+        .map((item: any) => {
+          if (typeof item === 'string') return item.trim()
+          if (item && typeof item === 'object') {
+            return String(item.name || item.title || item.reason || item.description || item.id || '').trim()
+          }
+          return ''
+        })
+        .filter(Boolean)
+      if (parts.length > 0) return parts.join(' - ').slice(0, 200)
+    }
+    if (typeof c === 'object') {
+      const name = String((c as any).name || (c as any).title || (c as any).reason || '').trim()
+      if (name) return name.slice(0, 200)
+    }
+  }
+  return ''
 }

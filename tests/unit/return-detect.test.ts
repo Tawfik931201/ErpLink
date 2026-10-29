@@ -1,6 +1,7 @@
 import {
   collectRefundedItems,
   extractSallaRefundedLines,
+  extractStoreReturnReason,
   extractZidRemainingLines,
   isReturnSignal,
   isSallaReturnEvent,
@@ -260,5 +261,24 @@ describe('returnDedupeKey', () => {
   it('is namespaced per platform and order', () => {
     expect(returnDedupeKey('zid', '10', 'abc')).toBe('zid:return:10:abc')
     expect(returnDedupeKey('salla', '10', 'abc')).toBe('salla:return:10:abc')
+  })
+})
+
+describe('extractStoreReturnReason', () => {
+  it('extracts Zid reverse_order_label_request reason array', () => {
+    const payload = {
+      reverse_order_label_request: {
+        reason: [{ id: '1', name: 'العميل لم يعد بحاجة للمنتج' }],
+      },
+    }
+    expect(extractStoreReturnReason(payload, 'zid')).toBe('العميل لم يعد بحاجة للمنتج')
+  })
+
+  it('extracts nested reason strings and fallbacks', () => {
+    expect(extractStoreReturnReason({ return_reason: 'تالف أثناء الشحن' })).toBe('تالف أثناء الشحن')
+    expect(extractStoreReturnReason({ order: { refund_reason: 'طلب العميل' } })).toBe('طلب العميل')
+    expect(extractStoreReturnReason({ reason: 'عيب مصنعي' })).toBe('عيب مصنعي')
+    expect(extractStoreReturnReason(null)).toBe('')
+    expect(extractStoreReturnReason({})).toBe('')
   })
 })

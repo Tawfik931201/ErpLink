@@ -30,6 +30,7 @@ export function normalizeReturnSettings(raw: unknown): ReturnSettings {
     ? (value.fallback_when_missing as ReturnFallback)
     : DEFAULT_RETURN_SETTINGS.fallback_when_missing
   const journalId = Number(value.credit_note_journal_id)
+  const reasonType = value.reason_type === 'custom' ? 'custom' : 'store_reason'
   return {
     mode,
     create_credit_note:
@@ -40,6 +41,7 @@ export function normalizeReturnSettings(raw: unknown): ReturnSettings {
       Number.isInteger(journalId) && journalId > 0 ? journalId : null,
     fallback_when_missing: fallback,
     reason: typeof value.reason === 'string' ? value.reason.slice(0, 200) : '',
+    reason_type: reasonType,
   }
 }
 

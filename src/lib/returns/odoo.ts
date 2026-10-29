@@ -631,12 +631,41 @@ async function readDeliveredMoves(
   orderId: number,
   majorVersion: number
 ): Promise<DeliveredMove[]> {
-  const pickings = await client.searchRead<any>(
+  let pickings = await client.searchRead<any>(
     'stock.picking',
     [['sale_id', '=', orderId], ['state', '=', 'done']],
     ['id'],
     100
   )
+
+  // If no done pickings found, check for assigned/confirmed outgoing pickings and validate them
+  if (!pickings || pickings.length === 0) {
+    const pending = await client.searchRead<any>(
+      'stock.picking',
+      [['sale_id', '=', orderId], ['state', 'in', ['assigned', 'confirmed']]],
+      ['id'],
+      20
+    )
+    if (pending && pending.length > 0) {
+      for (const p of pending) {
+        try {
+          await client.execute('stock.picking', 'button_validate', [[p.id]], {
+            context: { skip_backorder: true, skip_sms: true },
+          })
+          console.info(`[Returns] Auto-validated pending picking #${p.id} for order #${orderId} to allow return`)
+        } catch (vErr: any) {
+          console.warn(`[Returns] Failed to validate pending picking #${p.id}:`, vErr?.message || vErr)
+        }
+      }
+      pickings = await client.searchRead<any>(
+        'stock.picking',
+        [['sale_id', '=', orderId], ['state', '=', 'done']],
+        ['id'],
+        100
+      )
+    }
+  }
+
   const pickingIds = (pickings || []).map(p => Number(p.id)).filter(Boolean)
   if (pickingIds.length === 0) return []
 
@@ -674,14 +703,19 @@ async function readDeliveredMoves(
 async function createReturnPicking(
   client: OdooClient,
   pickingId: number,
-  moves: readonly { moveId: number; quantity: number }[]
+  moves: readonly { moveId: number; productId: number; quantity: number }[]
 ): Promise<number | null> {
   const wizardId = await client.create('stock.return.picking', {
     picking_id: pickingId,
     product_return_moves: moves.map(m => [
       0,
       0,
-      { move_id: m.moveId, quantity: Math.abs(m.quantity), to_refund: true },
+      {
+        move_id: m.moveId,
+        product_id: m.productId,
+        quantity: Math.abs(m.quantity),
+        to_refund: true,
+      },
     ]),
   })
   if (!wizardId) return null
@@ -709,10 +743,13 @@ export async function createStockReturn(
   client: OdooClient,
   orderId: number,
   lines: readonly OdooReturnLine[],
-  majorVersion: number
+  majorVersion: number,
+  options?: {
+    pickingAction?: string
+  }
 ): Promise<StockReturnResult> {
   const moves = await readDeliveredMoves(client, orderId, majorVersion)
-  const byPicking = new Map<number, { moveId: number; quantity: number }[]>()
+  const byPicking = new Map<number, { moveId: number; productId: number; quantity: number }[]>()
   const remaining = new Map<number, number>()
   for (const line of lines) {
     remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
@@ -724,21 +761,35 @@ export async function createStockReturn(
     const take = Math.min(need, move.quantity)
     if (take <= 0) continue
     const list = byPicking.get(move.pickingId) || []
-    list.push({ moveId: move.id, quantity: take })
+    list.push({ moveId: move.id, productId: move.productId, quantity: take })
     byPicking.set(move.pickingId, list)
     remaining.set(move.productId, need - take)
   }
 
   const pickingIds: number[] = []
   let returnedQty = 0
+  const pickingAction = String(options?.pickingAction || '')
+  // If explicitly 'create', keep as draft; if contains 'validate' or not specified, validate
+  const shouldValidate = pickingAction
+    ? (pickingAction === 'create_and_validate' || pickingAction === 'validate')
+    : true
+
   for (const [pickingId, pickingMoves] of byPicking.entries()) {
     const created = await createReturnPicking(client, pickingId, pickingMoves)
     if (!created) {
       throw new Error(`stock_return_not_created: picking ${pickingId}`)
     }
-    await client.execute('stock.picking', 'button_validate', [[created]], {
-      context: { skip_backorder: true, skip_sms: true },
-    })
+    if (shouldValidate) {
+      try {
+        await client.execute('stock.picking', 'button_validate', [[created]], {
+          context: { skip_backorder: true, skip_sms: true },
+        })
+      } catch (valErr: any) {
+        console.warn(`[Returns] button_validate on return picking #${created} failed:`, valErr?.message || valErr)
+      }
+    } else {
+      console.info(`[Returns] Return picking #${created} kept as draft (picking_action="${pickingAction}")`)
+    }
     pickingIds.push(created)
     returnedQty += pickingMoves.reduce((sum, m) => sum + m.quantity, 0)
   }
@@ -775,10 +826,13 @@ export async function findInvoiceForOrder(
 export async function createCreditNote(
   client: OdooClient,
   original: OriginalSaleOrder,
-  invoiceId: number,
+  invoiceId: number | null,
   lines: readonly OdooReturnLine[],
   journalId: number | null,
-  reason: string
+  reason: string,
+  options?: {
+    invoiceAction?: string
+  }
 ): Promise<number> {
   const today = new Date().toISOString().slice(0, 10)
   const values: Record<string, unknown> = {
@@ -786,7 +840,6 @@ export async function createCreditNote(
     partner_id: original.partnerId,
     invoice_date: today,
     invoice_origin: original.name,
-    reversed_entry_id: invoiceId,
     ref: reason || `Return of ${original.name}`,
     invoice_line_ids: lines.map(line => [
       0,
@@ -801,10 +854,26 @@ export async function createCreditNote(
       },
     ]),
   }
+  if (invoiceId) values.reversed_entry_id = invoiceId
   if (original.companyId) values.company_id = original.companyId
   if (journalId) values.journal_id = journalId
   const creditId = await client.create('account.move', values)
   if (!creditId) throw new Error('credit_note_not_created')
-  await client.execute('account.move', 'action_post', [[creditId]])
+
+  const invoiceAction = String(options?.invoiceAction || '')
+  // If explicitly 'create', keep as draft; if contains 'post' or not specified, post
+  const shouldPost = invoiceAction
+    ? (invoiceAction === 'create_and_post' || invoiceAction === 'post')
+    : true
+
+  if (shouldPost) {
+    try {
+      await client.execute('account.move', 'action_post', [[creditId]])
+    } catch (postErr: any) {
+      console.warn(`[Returns] action_post on credit note #${creditId} failed:`, postErr?.message || postErr)
+    }
+  } else {
+    console.info(`[Returns] Credit note #${creditId} kept as draft (invoice_action="${invoiceAction}")`)
+  }
   return creditId
 }
