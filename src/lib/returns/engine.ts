@@ -16,8 +16,15 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
+import {
+  extractOrderLocationInfo,
+  paymentKeysFromOrder,
+  resolveAnalyticDistribution,
+  toOdooAnalyticFields,
+} from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
 import type { PlatformKey } from '@/lib/platform-fields'
+import { isSaudiShippingAddress } from '@/lib/zid/order-helpers'
 
 import {
   returnDedupeKey,
@@ -51,6 +58,7 @@ export interface ReturnEventInput {
   /** Zid: remaining returnable quantities from `view-for-return`. */
   remaining?: { known: boolean; lines: StoreReturnLine[] }
   autoConfirm?: boolean
+  orderStdSettings?: Record<string, any> | null
 }
 
 export interface ReturnOutcome {
@@ -172,17 +180,140 @@ async function buildReturnLines(
       priceUnit: line.priceUnit,
       name: line.productName,
       taxIds: line.taxIds,
+      discount: line.discount,
+      productUomId: line.productUomId,
+      analyticDistribution: line.analyticDistribution,
+      analyticAccountId: line.analyticAccountId,
+      analyticTagIds: line.analyticTagIds,
       saleLineId: line.id,
     })
   }
   return out
 }
 
+function extractPayloadProducts(payload: Record<string, unknown>): StoreReturnLine[] {
+  const p = payload as any
+  const candidates = [
+    p.reverse_order_label_request?.products,
+    p.products,
+    p.order?.products,
+    p.items,
+    p.order?.items,
+    p.line_items,
+    p.order?.line_items,
+  ]
+  const list = candidates.find(c => Array.isArray(c) && c.length > 0) || []
+  return list.map((item: any) => ({
+    storeProductId: String(item.product_id || item.id || item.item_id || ''),
+    sku: String(item.sku || item.code || ''),
+    name: String(item.name || item.product_name || item.title || ''),
+    quantity: Math.abs(Number(item.quantity ?? item.qty ?? item.count ?? 1) || 1),
+    priceUnit: Number(item.price ?? item.price_unit ?? item.unit_price ?? item.total ?? 0) || 0,
+  }))
+}
+
+async function resolveCustomerPartner(
+  client: OdooClient,
+  payload: Record<string, unknown>,
+  orderStdSettings?: Record<string, any> | null
+): Promise<number | null> {
+  const custSettings = orderStdSettings || {}
+  const defaultCustId = Number(custSettings.order?.default_customer_id || custSettings.default_customer_id)
+  if (custSettings.customer_fallback_policy === 'default_customer' && Number.isInteger(defaultCustId) && defaultCustId > 0) {
+    return defaultCustId
+  }
+
+  const p = payload as any
+  const cust = p.customer || p.order?.customer || {}
+  const shipping = p.shipping_address || p.order?.shipping_address || {}
+  const billing = p.billing_address || p.order?.billing_address || {}
+
+  const rawName = cust.name
+    || [cust.first_name, cust.last_name].filter(Boolean).join(' ')
+    || p.customer_name
+    || shipping.name
+    || [shipping.first_name, shipping.last_name].filter(Boolean).join(' ')
+    || billing.name
+    || ''
+  const custName = String(rawName).trim()
+
+  const custEmail = String(cust.email || p.customer_email || p.email || shipping.email || billing.email || '').trim()
+  const custPhone = String(cust.phone || cust.mobile || p.customer_phone || p.phone || shipping.mobile || shipping.phone || '').trim()
+  const custVat = String(cust.tax_number || cust.vat || cust.tax_id || p.tax_number || '').trim()
+
+  // 1. Search by VAT
+  if (custVat) {
+    try {
+      const ids = await client.search('res.partner', [['vat', '=', custVat]], 1)
+      if (ids && ids.length > 0) return Number(ids[0])
+    } catch {}
+  }
+
+  // 2. Search by Email
+  if (custEmail) {
+    try {
+      const ids = await client.search('res.partner', [['email', '=', custEmail]], 1)
+      if (ids && ids.length > 0) return Number(ids[0])
+    } catch {}
+  }
+
+  // 3. Search by Phone
+  if (custPhone) {
+    const variants = [custPhone]
+    const noPlus = custPhone.replace(/^\+/, '')
+    if (noPlus !== custPhone) variants.push(noPlus)
+    if (noPlus.startsWith('9665')) variants.push('05' + noPlus.slice(4))
+    for (const ph of variants) {
+      try {
+        const ids = await client.search('res.partner', [['phone', 'ilike', ph]], 1)
+        if (ids && ids.length > 0) return Number(ids[0])
+      } catch {}
+    }
+  }
+
+  // 4. Search by Name
+  if (custName) {
+    try {
+      const ids = await client.search('res.partner', [['name', 'ilike', custName]], 1)
+      if (ids && ids.length > 0) return Number(ids[0])
+    } catch {}
+  }
+
+  // 5. Create new partner if not found
+  if (custName || custEmail || custPhone) {
+    try {
+      const partnerVals: Record<string, any> = {
+        name: custName || custPhone || custEmail || 'Store Customer',
+        customer_rank: 1,
+      }
+      if (custEmail) partnerVals.email = custEmail
+      if (custPhone) partnerVals.phone = custPhone
+      if (custVat) partnerVals.vat = custVat
+      const newId = await client.create('res.partner', partnerVals)
+      if (newId) return Number(newId)
+    } catch {}
+  }
+
+  // 6. Fallback to default customer or any active partner
+  if (Number.isInteger(defaultCustId) && defaultCustId > 0) {
+    return defaultCustId
+  }
+  try {
+    const ids = await client.search('res.partner', [['customer_rank', '>', 0]], 1)
+    if (ids && ids.length > 0) return Number(ids[0])
+    const anyIds = await client.search('res.partner', [], 1)
+    if (anyIds && anyIds.length > 0) return Number(anyIds[0])
+  } catch {}
+
+  return null
+}
+
 async function createFromPayloadWithoutOrder(
   input: ReturnEventInput,
-  lines: readonly StoreReturnLine[]
+  rawLines: readonly StoreReturnLine[]
 ): Promise<ReturnOutcome> {
-  const { client, platform, workspaceId, storeId, orderId, settings } = input
+  const { client, platform, workspaceId, storeId, orderId, settings, orderStdSettings } = input
+  const lines = rawLines.length > 0 ? rawLines : extractPayloadProducts(input.payload)
   if (lines.length === 0) return skipped('no_return_lines')
   const signature = returnSnapshotSignature(lines, `${platform}:${orderId}`)
   const key = returnDedupeKey(platform, orderId, signature)
@@ -195,9 +326,13 @@ async function createFromPayloadWithoutOrder(
   })
   if (existing) return skipped(`already_applied:${existing}`)
 
+  const defaultProductId = Number(orderStdSettings?.order?.default_product_id || orderStdSettings?.default_product_id)
   const resolved: OdooReturnLine[] = []
   for (const line of lines) {
-    const productId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+    let productId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+    if (!productId && Number.isInteger(defaultProductId) && defaultProductId > 0) {
+      productId = defaultProductId
+    }
     if (!productId) continue
     resolved.push({
       productId,
@@ -209,22 +344,112 @@ async function createFromPayloadWithoutOrder(
   }
   if (resolved.length === 0) return skipped('no_matching_products')
 
-  const created = await client.create('sale.order', {
-    partner_id: false,
+  const partnerId = await resolveCustomerPartner(client, input.payload, orderStdSettings)
+  if (!partnerId) return skipped('customer_not_found')
+
+  const majorVersion = await client.getMajorVersion().catch(() => 17)
+  const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+
+  // Resolve VAT / taxes from Standard Mapping
+  const isSaudi = isSaudiShippingAddress(input.payload)
+  const vatTaxId = isSaudi
+    ? Number(orderStdSettings?.vat_saudi_tax_id || orderStdSettings?.order?.vat_saudi_tax_id)
+    : Number(orderStdSettings?.vat_non_saudi_tax_id || orderStdSettings?.order?.vat_non_saudi_tax_id)
+  const defaultTaxId = Number(orderStdSettings?.order?.default_tax_id || orderStdSettings?.tax?.default_tax_ids)
+  const taxToApply = Number.isInteger(vatTaxId) && vatTaxId > 0
+    ? vatTaxId
+    : (Number.isInteger(defaultTaxId) && defaultTaxId > 0 ? defaultTaxId : null)
+
+  // Resolve Analytic Distribution from Standard Mapping
+  const stdAnalytic = orderStdSettings?.order?.analytic || orderStdSettings?.analytic
+  let evaluatedAnalyticFields: Record<string, unknown> | null = null
+  if (stdAnalytic) {
+    try {
+      const { locationId, locationName } = extractOrderLocationInfo(input.payload, platform)
+      const dist = resolveAnalyticDistribution({
+        config: stdAnalytic,
+        locationId,
+        locationName,
+        paymentKeys: paymentKeysFromOrder(input.payload, platform),
+        preservePercentages: true,
+      })
+      if (dist.length > 0) {
+        evaluatedAnalyticFields = toOdooAnalyticFields(dist, majorVersion >= 16, majorVersion < 16)
+      }
+    } catch {}
+  }
+
+  // Resolve warehouse from Standard Mapping
+  let warehouseId: number | null = null
+  const storeWhMappings = orderStdSettings?.order?.store_warehouse_mappings
+  if (storeWhMappings && typeof storeWhMappings === 'object') {
+    const { locationId } = extractOrderLocationInfo(input.payload, platform)
+    if (locationId && storeWhMappings[locationId]) {
+      const parsedWh = Number(storeWhMappings[locationId])
+      if (Number.isInteger(parsedWh) && parsedWh > 0) warehouseId = parsedWh
+    }
+  }
+  if (!warehouseId) {
+    const defWh = Number(orderStdSettings?.order?.default_warehouse_id || orderStdSettings?.default_warehouse_id)
+    if (Number.isInteger(defWh) && defWh > 0) warehouseId = defWh
+  }
+
+  const pricelistId = Number(orderStdSettings?.order?.default_pricelist_id || orderStdSettings?.default_pricelist_id)
+  const paymentTermId = Number(orderStdSettings?.order?.default_payment_term_id || orderStdSettings?.default_payment_term_id)
+  const companyId = Number(orderStdSettings?.company_id || orderStdSettings?.order?.company_id)
+
+  const orderLines = resolved.map(line => {
+    const lineVals: Record<string, unknown> = {
+      product_id: line.productId,
+      name: line.name || `Return - ${orderId}`,
+      product_uom_qty: -Math.abs(line.quantity),
+      price_unit: line.priceUnit,
+    }
+    if (taxToApply) {
+      lineVals[taxField] = [[6, 0, [taxToApply]]]
+    }
+    if (evaluatedAnalyticFields && Object.keys(evaluatedAnalyticFields).length > 0) {
+      Object.assign(lineVals, evaluatedAnalyticFields)
+    }
+    return [0, 0, lineVals]
+  })
+
+  const soVals: Record<string, unknown> = {
+    partner_id: partnerId,
     client_order_ref: `RET:${platform}:${orderId}`,
     origin: `${platform}:${orderId}`,
     note: settings.reason || `Return of ${platform}:${orderId}`,
-    order_line: resolved.map(line => [
-      0,
-      0,
-      {
-        product_id: line.productId,
-        name: line.name || `Return - ${orderId}`,
-        product_uom_qty: -Math.abs(line.quantity),
-        price_unit: line.priceUnit,
-      },
-    ]),
-  })
+    order_line: orderLines,
+  }
+  if (warehouseId) soVals.warehouse_id = warehouseId
+  if (Number.isInteger(pricelistId) && pricelistId > 0) soVals.pricelist_id = pricelistId
+  if (Number.isInteger(paymentTermId) && paymentTermId > 0) soVals.payment_term_id = paymentTermId
+  if (Number.isInteger(companyId) && companyId > 0) soVals.company_id = companyId
+
+  let created: number
+  try {
+    created = await client.create('sale.order', soVals)
+  } catch (err) {
+    const coreVals = {
+      partner_id: partnerId,
+      client_order_ref: soVals.client_order_ref,
+      origin: soVals.origin,
+      note: soVals.note,
+      order_line: soVals.order_line,
+    }
+    if (soVals.pricelist_id) (coreVals as any).pricelist_id = soVals.pricelist_id
+    if (soVals.warehouse_id) (coreVals as any).warehouse_id = soVals.warehouse_id
+    created = await client.create('sale.order', coreVals)
+  }
+
+  if (input.autoConfirm) {
+    try {
+      await client.execute('sale.order', 'action_confirm', [[Number(created)]])
+    } catch (confErr: any) {
+      console.warn(`[Returns] auto-confirm negative sale order #${created} failed:`, confErr?.message || confErr)
+    }
+  }
+
   await upsertEntityLink(
     { workspaceId, platform, storeId, odooModel: 'sale.order', storeEntityId: key },
     Number(created)
@@ -273,7 +498,11 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
     let odooRecordId: number | undefined
 
     if (settings.mode === 'negative_so') {
-      odooRecordId = await createNegativeSaleOrder(client, original, lines, settings.reason)
+      odooRecordId = await createNegativeSaleOrder(client, original, lines, settings.reason, {
+        orderStdSettings: input.orderStdSettings,
+        payload: input.payload,
+        platform,
+      })
       actions.push(`negative_so:${odooRecordId}`)
       if (input.autoConfirm) {
         await client.execute('sale.order', 'action_confirm', [[odooRecordId]])

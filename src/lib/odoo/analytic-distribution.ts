@@ -197,6 +197,79 @@ export function cleanLocationId(value: unknown): string {
   return String(value).trim().toLowerCase().replace(/[-_\s]/g, '')
 }
 
+/**
+ * Extract location ID and name from order payload across platforms (Zid, Salla, Shopify).
+ */
+export function extractOrderLocationInfo(
+  payload: Record<string, unknown> | null | undefined,
+  _platform?: 'zid' | 'salla' | 'shopify'
+): { locationId?: string; locationName?: string } {
+  if (!payload || typeof payload !== 'object') return {}
+  const p = payload as any
+
+  const idCandidates: any[] = [
+    p.inventory_address?.id,
+    p.inventory_address?.uuid,
+    p.inventory_address_id,
+    p.shipping?.method?.inventory_address?.id,
+    p.shipping?.method?.inventory_address?.uuid,
+    p.shipping?.inventory_address?.id,
+    p.shipping?.inventory_address?.uuid,
+    p.pickup_point?.id,
+    p.pickup_point?.uuid,
+    p.pickup_location_id,
+    p.location_id,
+    p.location?.id,
+    p.location?.uuid,
+    p.store_location_id,
+    p.branch_id,
+    p.branch?.id,
+    p.branch?.uuid,
+    p.pickup_branch?.id,
+    p.pickup_branch_id,
+    p.shipment_branch?.[0]?.id,
+    p.shipments?.[0]?.ship_from?.branch_id,
+    p.products?.[0]?.inventory_address?.id,
+    p.products?.[0]?.inventory_address?.uuid,
+    p.products?.[0]?.location_id,
+    p.products?.[0]?.store_location_id,
+    p.items?.[0]?.inventory_address?.id,
+    p.items?.[0]?.inventory_address?.uuid,
+    p.items?.[0]?.location_id,
+    p.items?.[0]?.branch?.id,
+    p.items?.[0]?.branch_id,
+    p.line_items?.[0]?.origin_location?.id,
+    p.fulfillments?.[0]?.location_id,
+  ]
+
+  const nameCandidates: any[] = [
+    p.inventory_address?.name,
+    p.shipping?.method?.inventory_address?.name,
+    p.shipping?.inventory_address?.name,
+    p.pickup_point?.name,
+    p.location?.name,
+    p.location_name,
+    p.branch?.name,
+    p.branch_name,
+    p.pickup_branch?.name,
+    p.shipment_branch?.[0]?.name,
+    p.shipments?.[0]?.ship_from?.name,
+    p.products?.[0]?.inventory_address?.name,
+    p.products?.[0]?.location_name,
+    p.items?.[0]?.inventory_address?.name,
+    p.items?.[0]?.location_name,
+    p.items?.[0]?.branch?.name,
+  ]
+
+  const firstValidId = idCandidates.find(v => v !== undefined && v !== null && String(v).trim() !== '')
+  const firstValidName = nameCandidates.find(v => v !== undefined && v !== null && String(v).trim() !== '')
+
+  return {
+    locationId: firstValidId !== undefined ? String(firstValidId).trim() : undefined,
+    locationName: firstValidName !== undefined ? String(firstValidName).trim() : undefined,
+  }
+}
+
 function locationMatches(
   rule: AnalyticRule,
   locationId?: string | string[],

@@ -115,6 +115,26 @@ describe('isReturnSignal', () => {
   it('reads the Zid status from the flat payload', () => {
     expect(isReturnSignal('zid', 'order.status.update', { status: 'reversed' })).toBe(true)
     expect(isReturnSignal('zid', 'order.status.update', { status: 'delivered' })).toBe(false)
+    // Anti-regression: empty reverse_order_label_requests array must NOT trigger return detection
+    expect(
+      isReturnSignal('zid', 'order.status.update', {
+        status: 'preparing',
+        reverse_order_label_requests: [],
+        reverse_order_label_request: null,
+      })
+    ).toBe(false)
+    expect(
+      isReturnSignal('zid', 'order.status.update', {
+        status: 'delivered',
+        reverse_order_label_requests: [{ id: 1 }],
+      })
+    ).toBe(true)
+    expect(
+      isReturnSignal('zid', 'order.status.update', {
+        status: 'delivered',
+        reverse_order_label_request: { id: 1 },
+      })
+    ).toBe(true)
   })
 
   it('reads the Zid status from an object and from a nested order', () => {

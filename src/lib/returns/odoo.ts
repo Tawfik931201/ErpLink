@@ -15,6 +15,12 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
+import {
+  extractOrderLocationInfo,
+  paymentKeysFromOrder,
+  resolveAnalyticDistribution,
+  toOdooAnalyticFields,
+} from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
 import {
   platformIdFieldNames,
@@ -30,6 +36,11 @@ export interface SaleOrderLineInfo {
   deliveredQty: number
   priceUnit: number
   taxIds: number[]
+  discount?: number
+  productUomId?: number | null
+  analyticDistribution?: Record<string, number> | null
+  analyticAccountId?: number | null
+  analyticTagIds?: number[]
 }
 
 export interface OriginalSaleOrder {
@@ -37,9 +48,16 @@ export interface OriginalSaleOrder {
   name: string
   state: string
   partnerId: number | null
+  partnerInvoiceId?: number | null
+  partnerShippingId?: number | null
   pricelistId: number | null
   companyId: number | null
   warehouseId: number | null
+  fiscalPositionId?: number | null
+  paymentTermId?: number | null
+  teamId?: number | null
+  userId?: number | null
+  analyticAccountId?: number | null
   invoiceIds: number[]
   lines: SaleOrderLineInfo[]
 }
@@ -50,6 +68,11 @@ export interface OdooReturnLine {
   priceUnit: number
   name: string
   taxIds: number[]
+  discount?: number
+  productUomId?: number | null
+  analyticDistribution?: Record<string, number> | null
+  analyticAccountId?: number | null
+  analyticTagIds?: number[]
   saleLineId?: number
 }
 
@@ -80,26 +103,70 @@ export function returnRefFor(orderName: string): string {
   return `${RETURN_REF_PREFIX}${orderName}`
 }
 
+function parseAnalyticDistribution(val: unknown): Record<string, number> | null {
+  if (val && typeof val === 'object' && !Array.isArray(val)) {
+    const res: Record<string, number> = {}
+    for (const [k, v] of Object.entries(val)) {
+      const n = Number(v)
+      if (Number.isFinite(n)) res[k] = n
+    }
+    if (Object.keys(res).length > 0) return res
+  }
+  return null
+}
+
 export async function readSaleOrder(
   client: OdooClient,
   orderId: number
 ): Promise<OriginalSaleOrder | null> {
-  const [order] = await client.searchRead<any>(
-    'sale.order',
-    [['id', '=', orderId]],
-    [
-      'id',
-      'name',
-      'state',
-      'partner_id',
-      'pricelist_id',
-      'company_id',
-      'warehouse_id',
-      'invoice_ids',
-      'order_line',
-    ],
-    1
-  )
+  const fullOrderFields = [
+    'id',
+    'name',
+    'state',
+    'partner_id',
+    'partner_invoice_id',
+    'partner_shipping_id',
+    'pricelist_id',
+    'company_id',
+    'warehouse_id',
+    'fiscal_position_id',
+    'payment_term_id',
+    'team_id',
+    'user_id',
+    'analytic_account_id',
+    'invoice_ids',
+    'order_line',
+  ]
+  const coreOrderFields = [
+    'id',
+    'name',
+    'state',
+    'partner_id',
+    'pricelist_id',
+    'company_id',
+    'warehouse_id',
+    'invoice_ids',
+    'order_line',
+  ]
+
+  let order: any = null
+  try {
+    const [found] = await client.searchRead<any>(
+      'sale.order',
+      [['id', '=', orderId]],
+      fullOrderFields,
+      1
+    )
+    order = found
+  } catch {
+    const [found] = await client.searchRead<any>(
+      'sale.order',
+      [['id', '=', orderId]],
+      coreOrderFields,
+      1
+    )
+    order = found
+  }
   if (!order?.id) return null
 
   const lineIds = many2manyIds(order.order_line)
@@ -107,12 +174,44 @@ export async function readSaleOrder(
   if (lineIds.length > 0) {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
     const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
-    const rows = await client.searchRead<any>(
-      'sale.order.line',
-      [['id', 'in', lineIds]],
-      ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', taxField],
-      lineIds.length
-    )
+    const fullLineFields = [
+      'id',
+      'product_id',
+      'name',
+      'product_uom_qty',
+      'qty_delivered',
+      'price_unit',
+      'discount',
+      'product_uom',
+      taxField,
+      ...(majorVersion >= 16 ? ['analytic_distribution'] : ['analytic_account_id', 'analytic_tag_ids']),
+    ]
+    let rows: any[] = []
+    try {
+      rows = await client.searchRead<any>(
+        'sale.order.line',
+        [['id', 'in', lineIds]],
+        fullLineFields,
+        lineIds.length
+      )
+    } catch {
+      try {
+        rows = await client.searchRead<any>(
+          'sale.order.line',
+          [['id', 'in', lineIds]],
+          ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', taxField],
+          lineIds.length
+        )
+      } catch {
+        const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+        rows = await client.searchRead<any>(
+          'sale.order.line',
+          [['id', 'in', lineIds]],
+          ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', altTaxField],
+          lineIds.length
+        )
+      }
+    }
     for (const row of rows || []) {
       const productId = many2oneId(row.product_id)
       if (!productId) continue
@@ -124,6 +223,11 @@ export async function readSaleOrder(
         deliveredQty: toNumber(row.qty_delivered),
         priceUnit: toNumber(row.price_unit),
         taxIds: many2manyIds(row[taxField] ?? row.tax_ids ?? row.tax_id),
+        discount: toNumber(row.discount),
+        productUomId: many2oneId(row.product_uom),
+        analyticDistribution: parseAnalyticDistribution(row.analytic_distribution),
+        analyticAccountId: many2oneId(row.analytic_account_id),
+        analyticTagIds: many2manyIds(row.analytic_tag_ids),
       })
     }
   }
@@ -133,9 +237,16 @@ export async function readSaleOrder(
     name: String(order.name || ''),
     state: String(order.state || ''),
     partnerId: many2oneId(order.partner_id),
+    partnerInvoiceId: many2oneId(order.partner_invoice_id),
+    partnerShippingId: many2oneId(order.partner_shipping_id),
     pricelistId: many2oneId(order.pricelist_id),
     companyId: many2oneId(order.company_id),
     warehouseId: many2oneId(order.warehouse_id),
+    fiscalPositionId: many2oneId(order.fiscal_position_id),
+    paymentTermId: many2oneId(order.payment_term_id),
+    teamId: many2oneId(order.team_id),
+    userId: many2oneId(order.user_id),
+    analyticAccountId: many2oneId(order.analytic_account_id),
     invoiceIds: many2manyIds(order.invoice_ids),
     lines,
   }
@@ -365,11 +476,18 @@ export async function readNegativeReturnLedger(
   return ledger
 }
 
+export interface NegativeSaleOrderOptions {
+  orderStdSettings?: Record<string, any> | null
+  payload?: Record<string, unknown>
+  platform?: PlatformKey
+}
+
 export async function createNegativeSaleOrder(
   client: OdooClient,
   original: OriginalSaleOrder,
   lines: readonly OdooReturnLine[],
-  reason: string
+  reason: string,
+  options?: NegativeSaleOrderOptions
 ): Promise<number> {
   const majorVersion = await client.getMajorVersion().catch(() => 17)
   const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
@@ -378,23 +496,110 @@ export async function createNegativeSaleOrder(
     client_order_ref: returnRefFor(original.name),
     origin: original.name,
     note: reason || `Return of ${original.name}`,
-    order_line: lines.map(line => {
-      const lineVals: Record<string, unknown> = {
-        product_id: line.productId,
-        name: line.name || `Return - ${original.name}`,
-        product_uom_qty: -Math.abs(line.quantity),
-        price_unit: line.priceUnit,
-      }
-      if (line.taxIds && line.taxIds.length > 0) {
-        lineVals[taxField] = [[6, 0, line.taxIds]]
-      }
-      return [0, 0, lineVals]
-    }),
   }
+  if (original.partnerInvoiceId) values.partner_invoice_id = original.partnerInvoiceId
+  if (original.partnerShippingId) values.partner_shipping_id = original.partnerShippingId
   if (original.pricelistId) values.pricelist_id = original.pricelistId
   if (original.companyId) values.company_id = original.companyId
   if (original.warehouseId) values.warehouse_id = original.warehouseId
-  return client.create('sale.order', values)
+  if (original.fiscalPositionId) values.fiscal_position_id = original.fiscalPositionId
+  if (original.paymentTermId) values.payment_term_id = original.paymentTermId
+  if (original.teamId) values.team_id = original.teamId
+  if (original.userId) values.user_id = original.userId
+  if (original.analyticAccountId) values.analytic_account_id = original.analyticAccountId
+
+  const stdAnalytic = options?.orderStdSettings?.order?.analytic || options?.orderStdSettings?.analytic
+  let evaluatedAnalyticFields: Record<string, unknown> | null = null
+  if (stdAnalytic) {
+    try {
+      const { locationId, locationName } = extractOrderLocationInfo(options?.payload, options?.platform)
+      const dist = resolveAnalyticDistribution({
+        config: stdAnalytic,
+        locationId,
+        locationName,
+        paymentKeys: paymentKeysFromOrder(options?.payload, options?.platform),
+        preservePercentages: true,
+      })
+      if (dist.length > 0) {
+        evaluatedAnalyticFields = toOdooAnalyticFields(dist, majorVersion >= 16, majorVersion < 16)
+      }
+    } catch {
+      // Ignore evaluation errors
+    }
+  }
+
+  const defaultTaxes: number[] = []
+  const configuredTax = options?.orderStdSettings?.order?.default_tax_id ?? options?.orderStdSettings?.tax?.default_tax_ids
+  if (configuredTax) {
+    const rawArr = Array.isArray(configuredTax) ? configuredTax : [configuredTax]
+    for (const t of rawArr) {
+      const id = Number(t)
+      if (Number.isInteger(id) && id > 0) defaultTaxes.push(id)
+    }
+  }
+
+  values.order_line = lines.map(line => {
+    const lineVals: Record<string, unknown> = {
+      product_id: line.productId,
+      name: line.name || `Return - ${original.name}`,
+      product_uom_qty: -Math.abs(line.quantity),
+      price_unit: line.priceUnit,
+    }
+    if (line.discount !== undefined && line.discount > 0) {
+      lineVals.discount = line.discount
+    }
+    if (line.productUomId) {
+      lineVals.product_uom = line.productUomId
+    }
+
+    // Taxes: replicate from original line if present, otherwise fallback to standard mapping default taxes
+    if (line.taxIds && line.taxIds.length > 0) {
+      lineVals[taxField] = [[6, 0, line.taxIds]]
+    } else if (defaultTaxes.length > 0) {
+      lineVals[taxField] = [[6, 0, defaultTaxes]]
+    }
+
+    // Analytic accounts: replicate from original line if present, otherwise fallback to evaluated standard mapping analytics
+    if (line.analyticDistribution && Object.keys(line.analyticDistribution).length > 0) {
+      if (majorVersion >= 16) {
+        lineVals.analytic_distribution = line.analyticDistribution
+      } else {
+        const top = Object.entries(line.analyticDistribution).sort((a, b) => b[1] - a[1])[0]
+        if (top) lineVals.analytic_account_id = Number(top[0])
+      }
+    } else if (line.analyticAccountId) {
+      if (majorVersion >= 16) {
+        lineVals.analytic_distribution = { [String(line.analyticAccountId)]: 100 }
+      } else {
+        lineVals.analytic_account_id = line.analyticAccountId
+      }
+    } else if (evaluatedAnalyticFields && Object.keys(evaluatedAnalyticFields).length > 0) {
+      Object.assign(lineVals, evaluatedAnalyticFields)
+    }
+
+    if (line.analyticTagIds && line.analyticTagIds.length > 0 && majorVersion < 16) {
+      lineVals.analytic_tag_ids = [[6, 0, line.analyticTagIds]]
+    }
+
+    return [0, 0, lineVals]
+  })
+
+  try {
+    return await client.create('sale.order', values)
+  } catch (err: any) {
+    // If an optional header field failed on a stripped Odoo installation, retry with core fields
+    const coreValues: Record<string, unknown> = {
+      partner_id: values.partner_id,
+      client_order_ref: values.client_order_ref,
+      origin: values.origin,
+      note: values.note,
+      order_line: values.order_line,
+    }
+    if (values.pricelist_id) (coreValues as any).pricelist_id = values.pricelist_id
+    if (values.company_id) (coreValues as any).company_id = values.company_id
+    if (values.warehouse_id) (coreValues as any).warehouse_id = values.warehouse_id
+    return await client.create('sale.order', coreValues)
+  }
 }
 
 interface DeliveredMove {

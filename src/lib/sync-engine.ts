@@ -22,6 +22,7 @@ import { resolveOperationForEvent } from '@/lib/event-operation'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import {
+  extractOrderLocationInfo as extractOrderLocationInfoHelper,
   paymentKeysFromOrder,
   resolveAnalyticDistribution,
   toOdooAnalyticFields,
@@ -3454,78 +3455,9 @@ async function resolveShippingCarrier(
 // ─── Helper: extract location ID and name from order payload across platforms ──
 export function extractOrderLocationInfo(
   payload: Record<string, unknown>,
-  _platform?: 'zid' | 'salla' | 'shopify'
+  platform?: 'zid' | 'salla' | 'shopify'
 ): { locationId?: string; locationName?: string } {
-  if (!payload || typeof payload !== 'object') return {}
-  const p = payload as any
-
-  // Collect candidate location IDs in priority order.
-  // Salla branch paths (shipment_branch[0], shipments[0].ship_from) sit
-  // alongside pickup_branch: Salla order payloads carry the fulfilling branch
-  // there (docs.salla.dev/doc-433804). Zid payloads lack these keys, so this
-  // is a no-op for them.
-  const idCandidates: any[] = [
-    p.inventory_address?.id,
-    p.inventory_address?.uuid,
-    p.inventory_address_id,
-    p.shipping?.method?.inventory_address?.id,
-    p.shipping?.method?.inventory_address?.uuid,
-    p.shipping?.inventory_address?.id,
-    p.shipping?.inventory_address?.uuid,
-    p.pickup_point?.id,
-    p.pickup_point?.uuid,
-    p.pickup_location_id,
-    p.location_id,
-    p.location?.id,
-    p.location?.uuid,
-    p.store_location_id,
-    p.branch_id,
-    p.branch?.id,
-    p.branch?.uuid,
-    p.pickup_branch?.id,
-    p.pickup_branch_id,
-    p.shipment_branch?.[0]?.id,
-    p.shipments?.[0]?.ship_from?.branch_id,
-    p.products?.[0]?.inventory_address?.id,
-    p.products?.[0]?.inventory_address?.uuid,
-    p.products?.[0]?.location_id,
-    p.products?.[0]?.store_location_id,
-    p.items?.[0]?.inventory_address?.id,
-    p.items?.[0]?.inventory_address?.uuid,
-    p.items?.[0]?.location_id,
-    p.items?.[0]?.branch?.id,
-    p.items?.[0]?.branch_id,
-    p.line_items?.[0]?.origin_location?.id,
-    p.fulfillments?.[0]?.location_id,
-  ]
-
-  // Collect candidate location Names in priority order
-  const nameCandidates: any[] = [
-    p.inventory_address?.name,
-    p.shipping?.method?.inventory_address?.name,
-    p.shipping?.inventory_address?.name,
-    p.pickup_point?.name,
-    p.location?.name,
-    p.location_name,
-    p.branch?.name,
-    p.branch_name,
-    p.pickup_branch?.name,
-    p.shipment_branch?.[0]?.name,
-    p.shipments?.[0]?.ship_from?.name,
-    p.products?.[0]?.inventory_address?.name,
-    p.products?.[0]?.location_name,
-    p.items?.[0]?.inventory_address?.name,
-    p.items?.[0]?.location_name,
-    p.items?.[0]?.branch?.name,
-  ]
-
-  const firstValidId = idCandidates.find(v => v !== undefined && v !== null && String(v).trim() !== '')
-  const firstValidName = nameCandidates.find(v => v !== undefined && v !== null && String(v).trim() !== '')
-
-  return {
-    locationId: firstValidId !== undefined ? String(firstValidId).trim() : undefined,
-    locationName: firstValidName !== undefined ? String(firstValidName).trim() : undefined,
-  }
+  return extractOrderLocationInfoHelper(payload, platform)
 }
 
 // ─── Helper: resolve platform location → Odoo warehouse / stock location ────
@@ -6694,6 +6626,7 @@ async function executeOdooOperation(params: {
         refundedLines: execPlatform === 'salla' ? extractSallaRefundedLines(zidData) : undefined,
         remaining,
         autoConfirm: Boolean((mergedSettings as any)?.order?.auto_confirm),
+        orderStdSettings: mergedSettings,
       })
 
       if (outcome.handled && outcome.status !== 'skipped') {

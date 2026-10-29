@@ -133,6 +133,13 @@ function zidStatusKey(status: unknown): string {
   return ARABIC_STATUS_MAP[raw] || raw
 }
 
+function hasZidReturnLabelRequest(val: unknown): boolean {
+  if (!val) return false
+  if (Array.isArray(val)) return val.length > 0
+  if (typeof val === 'object') return Object.keys(val as Record<string, unknown>).length > 0
+  return false
+}
+
 export function isSallaReturnEvent(event: string): boolean {
   const key = String(event || '').toLowerCase()
   if (!key) return false
@@ -155,9 +162,19 @@ export function isReturnSignal(
     const ev = String(event || '').toLowerCase()
     if (ev.includes('reversed') || ev.includes('refund') || ev.includes('return')) return true
     if (!data) return false
-    if (data.reverse_order_label_request || data.reverse_order_label_requests) return true
+    if (
+      hasZidReturnLabelRequest(data.reverse_order_label_request) ||
+      hasZidReturnLabelRequest(data.reverse_order_label_requests)
+    ) {
+      return true
+    }
     const nestedOrder = asRecord(data.order)
-    if (nestedOrder?.reverse_order_label_request || nestedOrder?.reverse_order_label_requests) return true
+    if (
+      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_request) ||
+      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_requests)
+    ) {
+      return true
+    }
     // Check all standard and custom Zid status locations (including Arabic display names)
     const status =
       data.order_status ??
