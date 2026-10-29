@@ -111,6 +111,42 @@ export async function saveOrderStatusMappings(
       if (deleteError) throw deleteError
     }
 
+    // Persist status_actions into standard_mapping_settings JSONB as dual storage (zero-migration guarantee)
+    try {
+      const { data: stdRow } = await supabase
+        .from('standard_mapping_settings')
+        .select('settings')
+        .eq('workspace_id', workspaceId)
+        .eq('store_type', platform)
+        .eq('store_id', storeId)
+        .eq('entity_type', 'orders')
+        .maybeSingle()
+
+      const currentSettings = stdRow?.settings && typeof stdRow.settings === 'object' ? stdRow.settings : {}
+      const orderConfig = currentSettings.order && typeof currentSettings.order === 'object' ? currentSettings.order : {}
+      const updatedSettings = {
+        ...currentSettings,
+        order: {
+          ...orderConfig,
+          status_actions: mappings,
+        },
+      }
+      await supabase
+        .from('standard_mapping_settings')
+        .upsert({
+          workspace_id: workspaceId,
+          store_type: platform,
+          store_id: storeId,
+          entity_type: 'orders',
+          settings: updatedSettings,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'workspace_id, store_type, store_id, entity_type',
+        })
+    } catch (stdErr) {
+      console.warn('[OrderStatusMappings] Non-fatal: failed to dual-save status_actions to standard_mapping_settings:', stdErr)
+    }
+
     revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
@@ -180,6 +216,49 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
         invoice_action: v.invoice_action || '',
         picking_action: v.picking_action || '',
       }
+    }
+
+    // Dual-storage check: if picking_action/invoice_action was empty (pre-migration DB),
+    // merge with JSON settings stored in standard_mapping_settings
+    try {
+      const { data: stdRows } = await supabase
+        .from('standard_mapping_settings')
+        .select('settings, store_id')
+        .eq('workspace_id', user.active_workspace_id)
+        .eq('store_type', platform)
+        .in('store_id', storeId ? [storeId, ''] : [''])
+        .eq('entity_type', 'orders')
+
+      for (const row of stdRows || []) {
+        const jsonActions = row?.settings?.order?.status_actions || row?.settings?.status_actions
+        if (jsonActions && typeof jsonActions === 'object') {
+          for (const [statusKey, cfg] of Object.entries(jsonActions)) {
+            if (cfg && typeof cfg === 'object') {
+              const c = cfg as any
+              if (!mappings[statusKey]) {
+                mappings[statusKey] = {
+                  state: String(c.state || ''),
+                  enabled: c.enabled !== false,
+                  invoice_action: String(c.invoice_action || ''),
+                  picking_action: String(c.picking_action || ''),
+                }
+              } else {
+                if (!mappings[statusKey].invoice_action && c.invoice_action) {
+                  mappings[statusKey].invoice_action = String(c.invoice_action)
+                }
+                if (!mappings[statusKey].picking_action && c.picking_action) {
+                  mappings[statusKey].picking_action = String(c.picking_action)
+                }
+                if (!mappings[statusKey].state && c.state) {
+                  mappings[statusKey].state = String(c.state)
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Safe fallback: table mappings already populated
     }
 
     return { success: true, mappings }

@@ -435,6 +435,7 @@ export default function StandardMappingClient({
       { key: 'ready', labelAr: 'جاهز للاستلام', labelEn: 'Ready' },
       { key: 'indelivery', labelAr: 'جاري التوصيل', labelEn: 'In Delivery' },
       { key: 'delivered', labelAr: 'تم التوصيل', labelEn: 'Delivered' },
+      { key: 'completed', labelAr: 'مكتمل', labelEn: 'Completed' },
       { key: 'canceled', labelAr: 'ملغي', labelEn: 'Canceled' },
       { key: 'reversed', labelAr: 'مرتجع', labelEn: 'Reversed' },
       { key: 'partially_reversed', labelAr: 'مرتجع جزئياً', labelEn: 'Partially Reversed' },
@@ -924,38 +925,57 @@ export default function StandardMappingClient({
             }
           })
         }
+      }
 
+      // Load order status mappings from the dedicated table + fallback to JSON settings
+      if (standardSubTab === 'orders') {
+        const jsonStatusActions: Record<string, any> =
+          res?.settings?.order?.status_actions || (res?.settings as any)?.status_actions || {}
+        getOrderStatusMappings(standardStoreTab, standardStoreId).then(mRes => {
+          const raw: Record<string, unknown> = (mRes.success ? (mRes.mappings || {}) : {}) as Record<string, unknown>
+          const normalized: Record<
+            string,
+            { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }
+          > = {}
+
+          // Combine status keys from both table mappings and JSON settings
+          const allKeys = new Set([...Object.keys(raw), ...Object.keys(jsonStatusActions)])
+          for (const k of allKeys) {
+            const v = raw[k]
+            const j = jsonStatusActions[k]
+            let state = ''
+            let enabled = true
+            let invoice_action = ''
+            let picking_action = ''
+
+            if (typeof v === 'string') {
+              state = v
+            } else if (v && typeof v === 'object') {
+              const o = v as {
+                state?: unknown
+                enabled?: unknown
+                invoice_action?: unknown
+                picking_action?: unknown
+              }
+              state = String(o.state || '')
+              enabled = o.enabled !== false
+              invoice_action = String(o.invoice_action || '')
+              picking_action = String(o.picking_action || '')
+            }
+
+            if (j && typeof j === 'object') {
+              if (!state && j.state) state = String(j.state)
+              if (j.enabled !== undefined && !v) enabled = j.enabled !== false
+              if (!invoice_action && j.invoice_action) invoice_action = String(j.invoice_action)
+              if (!picking_action && j.picking_action) picking_action = String(j.picking_action)
+            }
+
+            normalized[k] = { state, enabled, invoice_action, picking_action }
+          }
+          setOrderStateMapping(normalized)
+        })
       }
     })
-    // Load order status mappings from the dedicated table for Orders
-    if (standardSubTab === 'orders') {
-      getOrderStatusMappings(standardStoreTab, standardStoreId).then(res => {
-        const raw: Record<string, unknown> = (res.success ? (res.mappings || {}) : {}) as Record<string, unknown>
-        const normalized: Record<
-          string,
-          { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }
-        > = {}
-        for (const [k, v] of Object.entries(raw)) {
-          if (typeof v === 'string') {
-            normalized[k] = { state: v, enabled: true, invoice_action: '', picking_action: '' }
-          } else if (v && typeof v === 'object') {
-            const o = v as {
-              state?: unknown
-              enabled?: unknown
-              invoice_action?: unknown
-              picking_action?: unknown
-            }
-            normalized[k] = {
-              state: String(o.state || ''),
-              enabled: o.enabled !== false,
-              invoice_action: String(o.invoice_action || ''),
-              picking_action: String(o.picking_action || ''),
-            }
-          }
-        }
-        setOrderStateMapping(normalized)
-      })
-    }
   }, [standardStoreTab, standardStoreId, standardSubTab])
 
   // Load store locations (Zid or Salla), Odoo internal locations & existing
@@ -1736,6 +1756,8 @@ export default function StandardMappingClient({
           fallback_when_missing: orderReturnsFallback,
           reason: orderReturnsReason,
         },
+        // Store status actions in JSON settings as well for 100% zero-migration reliability
+        status_actions: orderStateMapping,
       }
     }
     // Save settings first, then mappings (if settings fails, stop early)

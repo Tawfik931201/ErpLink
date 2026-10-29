@@ -2601,16 +2601,42 @@ async function getOrderStatusRow(
       picking_action?: string
     }>
     const hit = rows.find(r => (r.store_id || '') === storeId) ?? rows.find(r => !r.store_id) ?? rows[0]
-    if (!hit) return null
-    return {
-      odoo_state: hit.odoo_state || '',
-      enabled: hit.enabled !== false,
-      invoice_action: hit.invoice_action || '',
-      picking_action: hit.picking_action || '',
+    let rowResult: { odoo_state: string; enabled: boolean; invoice_action?: string; picking_action?: string } | null = hit
+      ? {
+          odoo_state: hit.odoo_state || '',
+          enabled: hit.enabled !== false,
+          invoice_action: hit.invoice_action || '',
+          picking_action: hit.picking_action || '',
+        }
+      : null
+
+    // Dual-storage fallback: check JSON standard_mapping_settings
+    try {
+      const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, platform || 'zid', 'orders', storeId)
+      const statusActions = orderStdSettings?.order?.status_actions || (orderStdSettings as any)?.status_actions
+      const jsonConfig = statusActions?.[zidStatus]
+      if (jsonConfig && typeof jsonConfig === 'object') {
+        const state = String(jsonConfig.state || '')
+        const enabled = jsonConfig.enabled !== false
+        const invAction = String(jsonConfig.invoice_action || '')
+        const pickAction = String(jsonConfig.picking_action || '')
+
+        if (!rowResult) {
+          rowResult = { odoo_state: state, enabled, invoice_action: invAction, picking_action: pickAction }
+        } else {
+          if (!rowResult.invoice_action && invAction) rowResult.invoice_action = invAction
+          if (!rowResult.picking_action && pickAction) rowResult.picking_action = pickAction
+          if (!rowResult.odoo_state && state) rowResult.odoo_state = state
+        }
+      }
+    } catch {
+      // Non-fatal
     }
+    return rowResult
   } catch {
     // Pre-migration DBs without invoice_action/picking_action or enabled:
     // fall back to a select without them (backward compatible).
+    let rowResult: { odoo_state: string; enabled: boolean; invoice_action?: string; picking_action?: string } | null = null
     try {
       let fallback = supabaseAdmin
         .from('order_status_mappings')
@@ -2623,8 +2649,9 @@ async function getOrderStatusRow(
       if (error) throw error
       const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{ odoo_state: string; enabled?: boolean; store_id?: string }>
       const hit = rows.find(r => (r.store_id || '') === storeId) ?? rows.find(r => !r.store_id) ?? rows[0]
-      if (!hit?.odoo_state) return null
-      return { odoo_state: hit.odoo_state, enabled: hit.enabled !== false, invoice_action: '', picking_action: '' }
+      if (hit?.odoo_state) {
+        rowResult = { odoo_state: hit.odoo_state, enabled: hit.enabled !== false, invoice_action: '', picking_action: '' }
+      }
     } catch {
       try {
         let legacy = supabaseAdmin
@@ -2634,12 +2661,39 @@ async function getOrderStatusRow(
           .eq('zid_status', zidStatus) as any
         if (platform) legacy = legacy.eq('platform', platform)
         const { data } = await legacy.maybeSingle()
-        if (!data?.odoo_state) return null
-        return { odoo_state: data.odoo_state, enabled: true, invoice_action: '', picking_action: '' }
+        if (!data?.odoo_state) {
+          // Keep rowResult as null
+        } else {
+          rowResult = { odoo_state: data.odoo_state, enabled: true, invoice_action: '', picking_action: '' }
+        }
       } catch {
-        return null
+        // Fall through
       }
     }
+
+    // Merge JSON settings
+    try {
+      const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, platform || 'zid', 'orders', storeId)
+      const statusActions = orderStdSettings?.order?.status_actions || (orderStdSettings as any)?.status_actions
+      const jsonConfig = statusActions?.[zidStatus]
+      if (jsonConfig && typeof jsonConfig === 'object') {
+        const state = String(jsonConfig.state || '')
+        const enabled = jsonConfig.enabled !== false
+        const invAction = String(jsonConfig.invoice_action || '')
+        const pickAction = String(jsonConfig.picking_action || '')
+
+        if (!rowResult) {
+          rowResult = { odoo_state: state, enabled, invoice_action: invAction, picking_action: pickAction }
+        } else {
+          if (!rowResult.invoice_action && invAction) rowResult.invoice_action = invAction
+          if (!rowResult.picking_action && pickAction) rowResult.picking_action = pickAction
+          if (!rowResult.odoo_state && state) rowResult.odoo_state = state
+        }
+      }
+    } catch {
+      // Non-fatal
+    }
+    return rowResult
   }
 }
 
@@ -2723,7 +2777,12 @@ async function applyOrderPickingAction(
           await client.execute('sale.order', 'action_confirm', [orderId])
           console.info(`[SyncEngine] Confirmed sale.order #${orderId} to generate picking (status "${zidStatus}")`)
         } catch (e: any) {
-          console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} for picking:`, e?.message || e)
+          try {
+            await client.execute('sale.order', 'action_confirm', [[orderId]])
+            console.info(`[SyncEngine] Confirmed sale.order #${orderId} via [[orderId]] fallback (status "${zidStatus}")`)
+          } catch (e2: any) {
+            console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} for picking:`, e2?.message || e2)
+          }
         }
       }
     }
@@ -2790,7 +2849,12 @@ async function applyOrderInvoiceAction(
           await client.execute('sale.order', 'action_confirm', [orderId])
           console.info(`[SyncEngine] Confirmed sale.order #${orderId} for invoice creation (status "${zidStatus}")`)
         } catch (e: any) {
-          console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} before invoice:`, e?.message || e)
+          try {
+            await client.execute('sale.order', 'action_confirm', [[orderId]])
+            console.info(`[SyncEngine] Confirmed sale.order #${orderId} via [[orderId]] fallback before invoice (status "${zidStatus}")`)
+          } catch (e2: any) {
+            console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} before invoice:`, e2?.message || e2)
+          }
         }
       }
 
@@ -2800,10 +2864,20 @@ async function applyOrderInvoiceAction(
         console.info(`[SyncEngine] Invoice created via _create_invoices for sale.order #${orderId}`)
       } catch (modernErr: any) {
         try {
-          await client.execute('sale.order', 'action_invoice_create', [orderId])
-          console.info(`[SyncEngine] Invoice created via action_invoice_create for sale.order #${orderId}`)
-        } catch (legacyErr: any) {
-          console.warn(`[SyncEngine] Invoice creation skipped/failed for sale.order #${orderId}:`, legacyErr?.message || legacyErr)
+          await client.execute('sale.order', '_create_invoices', [[orderId]], { final: true })
+          console.info(`[SyncEngine] Invoice created via _create_invoices(final=true) for sale.order #${orderId}`)
+        } catch (finalErr: any) {
+          try {
+            await client.execute('sale.order', '_create_invoices', [orderId])
+            console.info(`[SyncEngine] Invoice created via _create_invoices [orderId] for sale.order #${orderId}`)
+          } catch (singleErr: any) {
+            try {
+              await client.execute('sale.order', 'action_invoice_create', [orderId])
+              console.info(`[SyncEngine] Invoice created via action_invoice_create for sale.order #${orderId}`)
+            } catch (legacyErr: any) {
+              console.warn(`[SyncEngine] Invoice creation skipped/failed for sale.order #${orderId}: ${legacyErr?.message || legacyErr}. Note: If your products in Odoo use "Delivered quantities" policy, delivery is required before invoicing.`)
+            }
+          }
         }
       }
 
