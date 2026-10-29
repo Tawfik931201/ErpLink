@@ -13,13 +13,12 @@
  *                        odoo_analytic_account_id, percentage }] }
  *
  * Matching contract:
- * - `all` rules match every order and are always included;
  * - `warehouse` and `payment` rules match independently;
- * - every matching rule (including `all`) is merged, then the percentages
- *   are used as RELATIVE WEIGHTS and normalised to exactly 100;
- * - so an "all orders" rule stacks on top of a warehouse/payment rule when
- *   both match — two matched rules give two analytic accounts, three give
- *   three, and so on.
+ * - `all` rules are a general fallback and are used ONLY when no specific
+ *   rule (warehouse or payment) matches;
+ * - configured percentages are sent verbatim to Odoo without any
+ *   re-normalisation or calculation (e.g. if merchant set 100, 100 is sent
+ *   to every line; if 50, 50 is sent).
  */
 
 export type AnalyticCondition = 'all' | 'warehouse' | 'payment'
@@ -212,77 +211,43 @@ function paymentMatches(rule: AnalyticRule, paymentKeys: string[]): boolean {
   return paymentKeys.includes(value)
 }
 
-/**
- * Normalises the selected rules into Odoo percentages that sum to exactly
- * 100. Two decimals, distributed by largest remainder so 3 equal shares give
- * 33.33 / 33.33 / 33.34 instead of 99.99.
- */
-function normalizeToHundred(rules: AnalyticRule[]): AnalyticDistributionEntry[] {
-  const totals = new Map<number, number>()
-  for (const rule of rules) {
-    if (rule.percentage <= 0) continue
-    totals.set(rule.odoo_analytic_account_id, (totals.get(rule.odoo_analytic_account_id) ?? 0) + rule.percentage)
-  }
-  const entries = [...totals.entries()]
-  if (entries.length === 0) return []
-
-  const grandTotal = entries.reduce((sum, [, percentage]) => sum + percentage, 0)
-  if (grandTotal <= 0) return []
-
-  const scaled = entries.map(([accountId, percentage], index) => {
-    const exactCents = (percentage / grandTotal) * 10000
-    const cents = Math.floor(exactCents)
-    return { accountId, index, cents, remainder: exactCents - cents }
-  })
-
-  let remaining = 10000 - scaled.reduce((sum, item) => sum + item.cents, 0)
-  const byRemainder = [...scaled].sort((a, b) => b.remainder - a.remainder || a.index - b.index)
-  for (let i = 0; i < byRemainder.length && remaining > 0; i++) {
-    byRemainder[i].cents += 1
-    remaining -= 1
-  }
-
-  return scaled
-    .sort((a, b) => a.index - b.index)
-    .map(item => ({ accountId: item.accountId, percentage: item.cents / 100 }))
-}
-
 export function resolveAnalyticDistribution({
   config,
   locationId,
   locationName,
   paymentKeys = [],
-  preservePercentages = false,
+  preservePercentages: _preservePercentages = true,
 }: ResolveAnalyticInput): AnalyticDistributionEntry[] {
   const parsed = parseAnalyticConfig(config)
   if (!parsed.enabled || parsed.rules.length === 0) return []
 
-  const matched: AnalyticRule[] = []
-  for (const rule of parsed.rules) {
-    if (rule.condition === 'all') {
-      // "all orders" matches every order and always stacks with other rules.
-      matched.push(rule)
-      continue
-    }
-    if (rule.condition === 'warehouse') {
-      if (locationMatches(rule, locationId, locationName)) matched.push(rule)
-      continue
-    }
-    if (rule.condition === 'payment') {
-      if (paymentMatches(rule, paymentKeys)) matched.push(rule)
-      continue
-    }
+  const fallbackRules = parsed.rules.filter(rule => rule.condition === 'all')
+  const specificRules = parsed.rules.filter(rule => rule.condition !== 'all')
+
+  const matched = specificRules.filter(rule =>
+    rule.condition === 'warehouse'
+      ? locationMatches(rule, locationId, locationName)
+      : paymentMatches(rule, paymentKeys)
+  )
+
+  const selected = matched.length > 0 ? matched : fallbackRules
+
+  // Send the merchant's configured percentages verbatim — no
+  // re-normalisation to 100, no calculations. Odoo accepts analytic_distribution
+  // values whose percentages do not sum to 100.
+  const totals = new Map<number, number>()
+  for (const rule of selected) {
+    if (rule.percentage <= 0) continue
+    totals.set(
+      rule.odoo_analytic_account_id,
+      (totals.get(rule.odoo_analytic_account_id) ?? 0) + rule.percentage
+    )
   }
 
-  if (preservePercentages) {
-    // Send percentages exactly as configured — no re-normalisation to 100.
-    return matched.map(rule => ({
-      accountId: rule.odoo_analytic_account_id,
-      percentage: rule.percentage,
-    }))
-  }
-
-  return normalizeToHundred(matched)
+  return [...totals.entries()].map(([accountId, percentage]) => ({
+    accountId,
+    percentage,
+  }))
 }
 
 /**

@@ -54,6 +54,7 @@ import { ttlCache } from '@/lib/ttl-cache'
 import {
   isSaudiShippingAddress,
   resolveZidCodAmount,
+  resolveOrderDiscountAmount,
   resolveZidShippingCost,
   resolveZidStatus,
 } from '@/lib/zid/order-helpers'
@@ -1201,9 +1202,9 @@ async function buildOrderLineItems(
   const defaultProductIdRaw = orDefault('defaultProductId', null)
   const defaultProductId = defaultProductIdRaw ? Number(defaultProductIdRaw) : null
 
-  const addShippingAsLine = !!orDefault('addShippingAsLine', false)
   const shippingProductId = String(orDefault('shippingProductId', '') || '')
   const shippingProductSku = String(orDefault('shippingProductSku', '') || '')
+  const addShippingAsLine = !!orDefault('addShippingAsLine', false) || !!shippingProductId
 
   const addDiscountAsLine = !!orDefault('addDiscountAsLine', false)
   const discountProductId = String(orDefault('discountProductId', '') || '')
@@ -1222,7 +1223,8 @@ async function buildOrderLineItems(
   const codFeeAmount = resolveZidCodAmount(zidData) || codAmount
 
   const shippingCost = resolveZidShippingCost(zidData)
-  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount}`)
+  const orderLevelDiscount = resolveOrderDiscountAmount(zidData)
+  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount} orderDiscount=${orderLevelDiscount}`)
 
   // 3. Fetch line field meta (for many2one resolution and tax field detection)
   // analytic_distribution (Odoo 17+) / analytic_account_id (<=16) are probed
@@ -1355,7 +1357,9 @@ async function buildOrderLineItems(
       anyProductHasDiscount = true
     }
 
-    if (hasLineDiscountMapping) {
+    const shouldApplyPercentToLine = hasLineDiscountMapping || (addDiscountAsLine && discountMode === 'percent')
+
+    if (shouldApplyPercentToLine) {
       let discountPercent = 0
       if (zidDiscountDirect > 0) {
         // Use Zid's explicit discount value
@@ -1372,12 +1376,13 @@ async function buildOrderLineItems(
       }
     }
 
-    // If price_unit wasn't set from mapping, derive it (prefer original price)
-    if (!line['price_unit'] && zidPrice > 0) {
-      line['price_unit'] = zidPrice
+    // If price_unit wasn't set from mapping, derive it
+    if (!line['price_unit']) {
+      line['price_unit'] = (zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
     }
 
-    subtotalBeforeDiscount += zidPrice * qty
+    const baseUnit = zidPrice > 0 ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
+    subtotalBeforeDiscount += baseUnit * qty
     totalDiscountAmount += Math.max(0, zidPrice - zidSalePrice) * qty
 
     // Auto-set product_uom_qty if user didn't map it explicitly
@@ -1603,6 +1608,25 @@ async function buildOrderLineItems(
     lines.push(line)
   }
 
+  if (orderLevelDiscount > 0) {
+    totalDiscountAmount = Math.max(totalDiscountAmount, orderLevelDiscount)
+    anyProductHasDiscount = true
+  }
+
+  // When discountMode is 'percent', apply discount directly to product lines.
+  // If individual lines did not have explicit discounts, distribute the overall order discount % across lines
+  if (addDiscountAsLine && discountMode === 'percent' && totalDiscountAmount > 0 && subtotalBeforeDiscount > 0) {
+    const overallDiscountPercent = Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
+    if (overallDiscountPercent > 0) {
+      for (const l of lines) {
+        if (!l['discount'] || Number(l['discount']) <= 0) {
+          l['discount'] = overallDiscountPercent
+        }
+      }
+      console.info(`[SyncEngine] Applied ${overallDiscountPercent}% discount to sale order lines`)
+    }
+  }
+
   if (lines.length === 0) {
     const emptyErr = new Error('تم إلغاء تسجيل الطلب: لا توجد بنود منتجات صالحة للتسجيل في أمر البيع بأودو (Order skipped: No valid product lines found for Odoo sales order)')
     ;(emptyErr as any).isOrderSkipped = true
@@ -1659,22 +1683,12 @@ async function buildOrderLineItems(
     }
   }
 
-  // ─── Discount as Order Line (Option B) ──────────────────────────────────
-  // Only append a discount line if the user enabled the setting AND discount exists in payload
-  if (addDiscountAsLine && anyProductHasDiscount && totalDiscountAmount > 0) {
-    let discountValue: number
-    let nameStr: string
-
-    if (discountMode === 'percent') {
-      discountValue = subtotalBeforeDiscount > 0
-        ? Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
-        : 0
-      nameStr = `Discount ${discountValue}%`
-    } else {
-      // fixed mode: negative price_unit = a discount line in Odoo
-      discountValue = -Math.abs(totalDiscountAmount)
-      nameStr = 'Discount'
-    }
+  // ─── Discount as Order Line (Fixed Mode Only) ──────────────────────────
+  // If discountMode is 'percent', discount was applied to the order lines directly above.
+  // In 'fixed' mode, append the discount line item with negative price_unit.
+  if (addDiscountAsLine && discountMode !== 'percent' && anyProductHasDiscount && totalDiscountAmount > 0) {
+    const discountValue = -Math.abs(totalDiscountAmount)
+    const nameStr = 'Discount (خصم)'
 
     const discountLine: Record<string, unknown> = {
       name: nameStr,
@@ -1691,7 +1705,7 @@ async function buildOrderLineItems(
     }
 
     if (!discountLine['product_id']) {
-      console.warn('[SyncEngine] Discount line item skipped: no discount product ID/SKU configured. Configure addDiscountAsLine discountProductId or discountProductSku in the mapping settings.')
+      console.warn('[SyncEngine] Discount line item skipped: no discount product ID/SKU configured. Configure addDiscountAsLine discountProductId in the mapping settings.')
     } else {
       lines.push(discountLine)
       console.info(`[SyncEngine] Discount line item appended: name="${nameStr}" price_unit=${discountValue}`)

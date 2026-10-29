@@ -880,7 +880,8 @@ export default function StandardMappingClient({
           })
         )
 
-        setOrderAddShipping(s.add_shipping_as_line || false)
+        const hasShipping = !!(s.shipping_product_id || s.add_shipping_as_line)
+        setOrderAddShipping(hasShipping)
         setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
         setOrderShippingProductSku(s.shipping_product_sku || '')
         setOrderAddCod(s.add_cod_as_line || false)
@@ -1597,14 +1598,14 @@ export default function StandardMappingClient({
         warnings.push(lang === 'ar' ? 'قائمة الأسعار الافتراضية غير محددة — قد يفشل إنشاء الطلب في أودو' : 'Default pricelist not set — order creation may fail in Odoo')
       }
     }
-    if (orderAddShipping && !orderShippingProductId && !orderShippingProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل الشحن كبند لكن لم يتم تحديد منتج الشحن أو SKU' : 'Shipping as line item is enabled but no shipping product or SKU set')
+    if (orderAddShipping && !orderShippingProductId) {
+      warnings.push(lang === 'ar' ? 'تم تحديد الشحن كبند لكن لم يتم اختيار منتج الشحن في أودو' : 'Shipping is enabled but no Odoo shipping product selected')
     }
-    if (orderAddCod && !orderCodProductId && !orderCodProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل رسوم الدفع عند الاستلام لكن لم يتم تحديد المنتج أو SKU' : 'COD fee line is enabled but no COD product or SKU set')
+    if (orderAddCod && !orderCodProductId) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل رسوم الدفع عند الاستلام لكن لم يتم تحديد منتج رسوم COD في أودو' : 'COD fee line is enabled but no Odoo COD product selected')
     }
-    if (orderAddDiscount && !orderDiscountProductId && !orderDiscountProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled but no discount product or SKU set')
+    if (orderAddDiscount && orderDiscountMode === 'fixed' && !orderDiscountProductId) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كقيمة ثابتة لكن لم يتم تحديد منتج الخصم في أودو' : 'Discount is enabled in fixed mode but no Odoo discount product selected')
     }
     if (orderCustomerFallbackPolicy === 'default_customer' && !orderDefaultCustomerId) {
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد عميل افتراضي لكن لم يتم تحديد العميل' : 'Default customer policy is selected but no customer selected')
@@ -1666,16 +1667,16 @@ export default function StandardMappingClient({
       default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
       product_fallback_policy: orderProductFallbackPolicy,
       default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
-      add_shipping_as_line: orderAddShipping,
+      add_shipping_as_line: !!orderShippingProductId,
       shipping_product_id: orderShippingProductId ? Number(orderShippingProductId) : null,
-      shipping_product_sku: orderShippingProductSku,
+      shipping_product_sku: orderShippingProductSku || null,
       add_cod_as_line: orderAddCod,
       cod_product_id: orderCodProductId ? Number(orderCodProductId) : null,
-      cod_product_sku: orderCodProductSku,
+      cod_product_sku: orderCodProductSku || null,
       cod_amount: orderCodAmount ? Number(orderCodAmount) : null,
       add_discount_as_line: orderAddDiscount,
-      discount_product_id: orderDiscountProductId ? Number(orderDiscountProductId) : null,
-      discount_product_sku: orderDiscountProductSku,
+      discount_product_id: (orderAddDiscount && orderDiscountMode === 'fixed' && orderDiscountProductId) ? Number(orderDiscountProductId) : null,
+      discount_product_sku: orderDiscountProductSku || null,
       discount_mode: orderDiscountMode,
       enable_vat: orderEnableVat,
       vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,

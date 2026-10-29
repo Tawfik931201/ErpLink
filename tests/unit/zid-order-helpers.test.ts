@@ -1,5 +1,6 @@
 import {
   isSaudiShippingAddress,
+  resolveOrderDiscountAmount,
   resolveZidCodAmount,
   resolveZidShippingCost,
   resolveZidStatus,
@@ -132,6 +133,36 @@ describe('resolveZidCodAmount', () => {
   it('never returns a negative or object value', () => {
     expect(resolveZidCodAmount({ cod_fee: -5 })).toBe(0)
     expect(resolveZidCodAmount({ cod_fee: { nested: 1 } })).toBe(0)
+  })
+})
+
+describe('resolveOrderDiscountAmount', () => {
+  it('reads a discount row out of payment.invoice[]', () => {
+    const discount = resolveOrderDiscountAmount({
+      payment: { invoice: [{ code: 'discount', title: 'Coupon discount', value: 15 }] },
+    })
+    expect(discount).toBe(15)
+  })
+
+  it('reads Arabic discount and coupon titles in invoice[]', () => {
+    expect(resolveOrderDiscountAmount({
+      payment: { invoice: [{ code: 'promo', title: 'خصم الكوبون', value: 20 }] },
+    })).toBe(20)
+    expect(resolveOrderDiscountAmount({
+      payment: { invoice: [{ code: 'coupon', title: 'كوبون تخفيض', value: 10 }] },
+    })).toBe(10)
+  })
+
+  it('falls back to named candidates when invoice[] is absent', () => {
+    expect(resolveOrderDiscountAmount({ order_discount: 25 })).toBe(25)
+    expect(resolveOrderDiscountAmount({ amounts: { discount: { amount: 30 } } })).toBe(30)
+    expect(resolveOrderDiscountAmount({ total_discount: 18.5 })).toBe(18.5)
+    expect(resolveOrderDiscountAmount({ coupon: { amount: 12 } })).toBe(12)
+  })
+
+  it('returns 0 when no discount exists', () => {
+    expect(resolveOrderDiscountAmount({})).toBe(0)
+    expect(resolveOrderDiscountAmount({ payment: { invoice: [{ code: 'shipping', value: 20 }] } })).toBe(0)
   })
 })
 

@@ -151,6 +151,46 @@ export function resolveZidCodAmount(zidData: Record<string, unknown>): number {
  * non-Saudi orders carry e.g. customer.country "الامارات" with mobile
  * "+971..." while Saudi ones carry country "SA"/"السعودية".
  */
+// ──── Helper: resolve overall discount amount from an order payload ─────
+export function resolveOrderDiscountAmount(zidData: Record<string, unknown>): number {
+  if (!zidData || typeof zidData !== 'object') return 0
+  const parseNum = (raw: unknown): number => {
+    if (raw === undefined || raw === null || typeof raw === 'object') return 0
+    const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+    return !isNaN(num) && num > 0 ? num : 0
+  }
+  try {
+    const payment = zidData.payment as Record<string, unknown> | undefined
+    const invoice = payment?.invoice
+    if (Array.isArray(invoice)) {
+      for (const row of invoice) {
+        const r = (row && typeof row === 'object') ? row as Record<string, unknown> : {}
+        const code = String(r.code ?? '')
+        const title = String(r.title ?? '')
+        if (/discount|خصم|coupon|كوبون/i.test(code) || /discount|خصم|coupon|كوبون/i.test(title)) {
+          const num = parseNum(r.value ?? r.value_string)
+          if (num > 0) return num
+        }
+      }
+    }
+  } catch { /* fall through to path candidates */ }
+  const candidates = [
+    'amounts.discount.amount',
+    'amounts.discount',
+    'order_discount',
+    'total_discount',
+    'discount_amount',
+    'coupon.amount',
+    'coupon.discount',
+    'discount',
+  ]
+  for (const path of candidates) {
+    const num = parseNum(resolvePath(zidData, path))
+    if (num > 0) return num
+  }
+  return 0
+}
+
 export function isSaudiShippingAddress(zidData: Record<string, unknown>): boolean {
   if (!zidData || typeof zidData !== 'object') return true
 

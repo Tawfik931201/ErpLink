@@ -135,7 +135,7 @@ describe('resolveAnalyticDistribution', () => {
     expect(distribution).toEqual([{ accountId: 10, percentage: 100 }])
   })
 
-  it('stacks the unified rule with a matching specific rule', () => {
+  it('prefers matching specific rule over general fallback rule (does not stack all)', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
         rule({ odoo_analytic_account_id: 10 }),
@@ -144,12 +144,11 @@ describe('resolveAnalyticDistribution', () => {
       locationId: 'loc-1',
     })
     expect(distribution).toEqual([
-      { accountId: 10, percentage: 50 },
-      { accountId: 20, percentage: 50 },
+      { accountId: 20, percentage: 100 },
     ])
   })
 
-  it('stacks all, warehouse and payment rules as relative weights', () => {
+  it('matches warehouse and payment rules together without stacking fallback all', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
         rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20 }),
@@ -159,8 +158,8 @@ describe('resolveAnalyticDistribution', () => {
       locationId: 'loc-1',
       paymentKeys: ['cod'],
     })
-    expect(distribution.map(e => e.accountId)).toEqual([20, 30, 10])
-    expect(distribution.reduce((sum, e) => sum + e.percentage, 0)).toBe(100)
+    expect(distribution.map(e => e.accountId)).toEqual([20, 30])
+    expect(distribution.map(e => e.percentage)).toEqual([100, 100])
   })
 
   it('sums multiple rules that point at the same account', () => {
@@ -192,7 +191,7 @@ describe('resolveAnalyticDistribution', () => {
     expect(distribution).toEqual([])
   })
 
-  it('normalises three equal weights to 33.34 / 33.33 / 33.33 (sum 100)', () => {
+  it('preserves three equal weights without re-normalising (sends 100 verbatim to each)', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
         rule({ condition: 'payment', source_value: 'a', odoo_analytic_account_id: 1 }),
@@ -201,11 +200,10 @@ describe('resolveAnalyticDistribution', () => {
       ]),
       paymentKeys: ['a', 'b', 'c'],
     })
-    expect(distribution.map(e => e.percentage)).toEqual([33.34, 33.33, 33.33])
-    expect(distribution.reduce((sum, e) => sum + e.percentage, 0)).toBe(100)
+    expect(distribution.map(e => e.percentage)).toEqual([100, 100, 100])
   })
 
-  it('respects uneven weights and keeps the sum exact', () => {
+  it('respects uneven weights and keeps each verbatim', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
         rule({ condition: 'payment', source_value: 'a', odoo_analytic_account_id: 1, percentage: 70 }),
@@ -219,36 +217,31 @@ describe('resolveAnalyticDistribution', () => {
     ])
   })
 
-  it('preserves configured percentages verbatim when preservePercentages is true (no re-normalise to 100)', () => {
+  it('preserves configured percentages verbatim (no re-normalise to 100)', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
-        rule({ condition: 'all', odoo_analytic_account_id: 10, percentage: 100 }),
         rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20, percentage: 100 }),
         rule({ condition: 'payment', source_value: 'cod', odoo_analytic_account_id: 30, percentage: 100 }),
       ]),
       locationId: 'loc-1',
       paymentKeys: ['cod'],
-      preservePercentages: true,
     })
     expect(distribution).toEqual([
-      { accountId: 10, percentage: 100 },
       { accountId: 20, percentage: 100 },
       { accountId: 30, percentage: 100 },
     ])
   })
 
-  it('preserves uneven configured percentages verbatim when preservePercentages is true', () => {
+  it('preserves fallback rule percentage verbatim when no specific rule matches', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([
-        rule({ condition: 'all', odoo_analytic_account_id: 10, percentage: 40 }),
+        rule({ condition: 'all', odoo_analytic_account_id: 10, percentage: 50 }),
         rule({ condition: 'warehouse', source_value: 'loc-1', odoo_analytic_account_id: 20, percentage: 100 }),
       ]),
-      locationId: 'loc-1',
-      preservePercentages: true,
+      locationId: 'loc-other',
     })
     expect(distribution).toEqual([
-      { accountId: 10, percentage: 40 },
-      { accountId: 20, percentage: 100 },
+      { accountId: 10, percentage: 50 },
     ])
   })
 })
