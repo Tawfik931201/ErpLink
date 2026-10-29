@@ -2825,6 +2825,151 @@ async function applyOrderPickingAction(
   }
 }
 
+// ──── Helper: direct draft invoice creation for sale.order when _create_invoices yields no lines ─────
+// This happens in Odoo whenever products have invoice_policy = 'delivery' and items have not yet
+// been validated in stock.picking. Creating the account.move directly linked via sale_line_ids
+// fulfills the user's explicit configuration without violating Odoo stock delivery rules.
+async function createDraftInvoiceForOrder(
+  client: OdooClient,
+  orderId: number,
+): Promise<number | null> {
+  try {
+    const orders = await client.searchRead<any>(
+      'sale.order',
+      [['id', '=', orderId]],
+      ['id', 'name', 'partner_id', 'partner_invoice_id', 'currency_id', 'company_id', 'payment_term_id', 'fiscal_position_id', 'order_line']
+    )
+    const order = orders?.[0]
+    if (!order) return null
+
+    const lineIds: number[] = Array.isArray(order.order_line)
+      ? order.order_line.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+      : []
+    if (lineIds.length === 0) {
+      console.warn(`[SyncEngine] Cannot create invoice for sale.order #${orderId}: order has no order lines.`)
+      return null
+    }
+
+    const orderLines = await client.searchRead<any>(
+      'sale.order.line',
+      [['id', 'in', lineIds], ['display_type', '=', false]],
+      ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', 'tax_id', 'product_uom']
+    )
+    if (!orderLines || orderLines.length === 0) {
+      console.warn(`[SyncEngine] Cannot create invoice for sale.order #${orderId}: no valid product lines found.`)
+      return null
+    }
+
+    // Try finding default journal and default income account for clean XML-RPC insert
+    let defaultJournalId: number | undefined
+    try {
+      const journals = await client.searchRead<any>('account.journal', [['type', '=', 'sale']], ['id'], 1)
+      if (journals?.[0]?.id) defaultJournalId = journals[0].id
+    } catch {
+      // Non-fatal
+    }
+
+    let defaultAccountId: number | undefined
+    try {
+      const accounts = await client.searchRead<any>(
+        'account.account',
+        [['account_type', 'in', ['income', 'income_other']]],
+        ['id'],
+        1
+      ).catch(async () => {
+        return await client.searchRead<any>(
+          'account.account',
+          [['internal_group', '=', 'income']],
+          ['id'],
+          1
+        ).catch(() => [])
+      })
+      if (accounts?.[0]?.id) defaultAccountId = accounts[0].id
+    } catch {
+      // Non-fatal
+    }
+
+    const invoiceLines = orderLines.map((line: any) => {
+      const lineVals: Record<string, any> = {
+        name: line.name || (Array.isArray(line.product_id) ? line.product_id[1] : 'Item'),
+        quantity: typeof line.product_uom_qty === 'number' && line.product_uom_qty > 0 ? line.product_uom_qty : 1,
+        price_unit: typeof line.price_unit === 'number' ? line.price_unit : 0,
+      }
+      if (Array.isArray(line.product_id) && line.product_id[0]) {
+        lineVals.product_id = line.product_id[0]
+      }
+      if (typeof line.discount === 'number' && line.discount > 0) {
+        lineVals.discount = line.discount
+      }
+      if (Array.isArray(line.product_uom) && line.product_uom[0]) {
+        lineVals.product_uom_id = line.product_uom[0]
+      }
+      if (Array.isArray(line.tax_id) && line.tax_id.length > 0) {
+        lineVals.tax_ids = [[6, 0, line.tax_id]]
+      }
+      if (defaultAccountId) {
+        lineVals.account_id = defaultAccountId
+      }
+      lineVals.sale_line_ids = [[6, 0, [line.id]]]
+      return [0, 0, lineVals]
+    })
+
+    const partnerId = Array.isArray(order.partner_invoice_id)
+      ? order.partner_invoice_id[0]
+      : Array.isArray(order.partner_id)
+      ? order.partner_id[0]
+      : order.partner_id
+
+    const moveVals: Record<string, any> = {
+      move_type: 'out_invoice',
+      partner_id: partnerId,
+      invoice_origin: order.name,
+      invoice_date: new Date().toISOString().slice(0, 10),
+      invoice_line_ids: invoiceLines,
+    }
+    if (defaultJournalId) {
+      moveVals.journal_id = defaultJournalId
+    }
+    if (Array.isArray(order.company_id) && order.company_id[0]) {
+      moveVals.company_id = order.company_id[0]
+    }
+    if (Array.isArray(order.currency_id) && order.currency_id[0]) {
+      moveVals.currency_id = order.currency_id[0]
+    }
+    if (Array.isArray(order.payment_term_id) && order.payment_term_id[0]) {
+      moveVals.invoice_payment_term_id = order.payment_term_id[0]
+    }
+    if (Array.isArray(order.fiscal_position_id) && order.fiscal_position_id[0]) {
+      moveVals.fiscal_position_id = order.fiscal_position_id[0]
+    }
+
+    let moveId: number | null = null
+    try {
+      moveId = await client.create('account.move', moveVals)
+    } catch (createErr: any) {
+      // If error is due to an invalid relational field (e.g. fiscal_position or payment_term), retry clean
+      console.warn(`[SyncEngine] account.move creation with full vals failed, retrying basic:`, createErr?.message || createErr)
+      const basicVals: Record<string, any> = {
+        move_type: 'out_invoice',
+        partner_id: partnerId,
+        invoice_origin: order.name,
+        invoice_date: new Date().toISOString().slice(0, 10),
+        invoice_line_ids: invoiceLines,
+      }
+      if (defaultJournalId) basicVals.journal_id = defaultJournalId
+      moveId = await client.create('account.move', basicVals)
+    }
+
+    if (moveId) {
+      console.info(`[SyncEngine] ✅ Created direct draft invoice #${moveId} for sale.order #${orderId} (${order.name})`)
+    }
+    return moveId
+  } catch (fallbackErr: any) {
+    console.error(`[SyncEngine] ❌ Failed to create direct draft invoice for sale.order #${orderId}:`, fallbackErr?.message || fallbackErr)
+    return null
+  }
+}
+
 // ──── Helper: apply invoice action for a sales order ─────
 async function applyOrderInvoiceAction(
   client: OdooClient,
@@ -2843,6 +2988,10 @@ async function applyOrderInvoiceAction(
     if (!order) return
 
     if (action === 'create' || action === 'create_and_post') {
+      let existingInvoiceIds: number[] = Array.isArray(order?.invoice_ids)
+        ? order.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+        : []
+
       // In Odoo, sale.order should be confirmed to invoice
       if (order.state === 'draft' || order.state === 'sent') {
         try {
@@ -2858,41 +3007,54 @@ async function applyOrderInvoiceAction(
         }
       }
 
-      // Create invoice via modern or legacy method
-      try {
-        await client.execute('sale.order', '_create_invoices', [[orderId]])
-        console.info(`[SyncEngine] Invoice created via _create_invoices for sale.order #${orderId}`)
-      } catch (modernErr: any) {
+      // If no invoice exists yet, create one
+      if (existingInvoiceIds.length === 0) {
+        // Try standard Odoo _create_invoices first
         try {
-          await client.execute('sale.order', '_create_invoices', [[orderId]], { final: true })
-          console.info(`[SyncEngine] Invoice created via _create_invoices(final=true) for sale.order #${orderId}`)
-        } catch (finalErr: any) {
+          await client.execute('sale.order', '_create_invoices', [[orderId]])
+          console.info(`[SyncEngine] Invoice created via _create_invoices for sale.order #${orderId}`)
+        } catch (modernErr: any) {
           try {
-            await client.execute('sale.order', '_create_invoices', [orderId])
-            console.info(`[SyncEngine] Invoice created via _create_invoices [orderId] for sale.order #${orderId}`)
-          } catch (singleErr: any) {
+            await client.execute('sale.order', '_create_invoices', [[orderId]], { final: true })
+            console.info(`[SyncEngine] Invoice created via _create_invoices(final=true) for sale.order #${orderId}`)
+          } catch (finalErr: any) {
             try {
-              await client.execute('sale.order', 'action_invoice_create', [orderId])
-              console.info(`[SyncEngine] Invoice created via action_invoice_create for sale.order #${orderId}`)
-            } catch (legacyErr: any) {
-              console.warn(`[SyncEngine] Invoice creation skipped/failed for sale.order #${orderId}: ${legacyErr?.message || legacyErr}. Note: If your products in Odoo use "Delivered quantities" policy, delivery is required before invoicing.`)
+              await client.execute('sale.order', '_create_invoices', [orderId])
+              console.info(`[SyncEngine] Invoice created via _create_invoices [orderId] for sale.order #${orderId}`)
+            } catch (singleErr: any) {
+              try {
+                await client.execute('sale.order', 'action_invoice_create', [orderId])
+                console.info(`[SyncEngine] Invoice created via action_invoice_create for sale.order #${orderId}`)
+              } catch (legacyErr: any) {
+                console.warn(`[SyncEngine] Standard invoice creation skipped/failed for sale.order #${orderId}: ${legacyErr?.message || legacyErr}`)
+              }
             }
+          }
+        }
+
+        // Re-read invoice_ids to see if _create_invoices produced any invoices
+        const [reloaded] = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['invoice_ids'])
+        existingInvoiceIds = Array.isArray(reloaded?.invoice_ids)
+          ? reloaded.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+          : []
+
+        // If _create_invoices returned empty (because product policy is "delivery" and items not delivered yet),
+        // create draft invoice directly linked to the sale.order
+        if (existingInvoiceIds.length === 0) {
+          console.info(`[SyncEngine] _create_invoices produced no invoices for sale.order #${orderId} (likely policy "delivery"). Creating direct draft invoice...`)
+          const directId = await createDraftInvoiceForOrder(client, orderId)
+          if (directId) {
+            existingInvoiceIds = [directId]
           }
         }
       }
 
-      // Re-read invoice_ids to link invoice entity
-      const [reloaded] = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['invoice_ids'])
-      const updatedInvoiceIds: number[] = Array.isArray(reloaded?.invoice_ids)
-        ? reloaded.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
-        : []
-
-      if (updatedInvoiceIds.length > 0) {
+      if (existingInvoiceIds.length > 0) {
         const invoices = await client.searchRead<any>(
           'account.move',
-          [['id', 'in', updatedInvoiceIds], ['move_type', '=', 'out_invoice']],
+          [['id', 'in', existingInvoiceIds], ['move_type', '=', 'out_invoice']],
           ['id', 'name', 'state'],
-          updatedInvoiceIds.length
+          existingInvoiceIds.length
         )
         const latest = (invoices || []).slice().sort((a: any, b: any) => Number(b.id) - Number(a.id))[0]
         if (latest?.id && workspaceId) {
@@ -2917,10 +3079,14 @@ async function applyOrderInvoiceAction(
               console.info(`[SyncEngine] Posted invoice #${inv.id} for sale.order #${orderId}`)
             } catch (postErr: any) {
               try {
-                await client.execute('account.move', 'post', [inv.id])
-                console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+                await client.execute('account.move', 'action_post', [[inv.id]])
               } catch (pErr2: any) {
-                console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr2?.message || pErr2)
+                try {
+                  await client.execute('account.move', 'post', [inv.id])
+                  console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+                } catch (pErr3: any) {
+                  console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr3?.message || pErr3)
+                }
               }
             }
           }
@@ -2930,9 +3096,13 @@ async function applyOrderInvoiceAction(
     }
 
     if (action === 'post') {
-      const invoiceIds: number[] = Array.isArray(order.invoice_ids)
+      let invoiceIds: number[] = Array.isArray(order.invoice_ids)
         ? order.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
         : []
+      if (invoiceIds.length === 0) {
+        const directId = await createDraftInvoiceForOrder(client, orderId)
+        if (directId) invoiceIds = [directId]
+      }
       if (invoiceIds.length > 0) {
         const invoicesToPost = await client.searchRead<any>(
           'account.move',
@@ -2945,10 +3115,14 @@ async function applyOrderInvoiceAction(
             console.info(`[SyncEngine] Posted draft invoice #${inv.id} for sale.order #${orderId}`)
           } catch (postErr: any) {
             try {
-              await client.execute('account.move', 'post', [inv.id])
-              console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+              await client.execute('account.move', 'action_post', [[inv.id]])
             } catch (pErr2: any) {
-              console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr2?.message || pErr2)
+              try {
+                await client.execute('account.move', 'post', [inv.id])
+                console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+              } catch (pErr3: any) {
+                console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr3?.message || pErr3)
+              }
             }
           }
         }
@@ -3037,7 +3211,14 @@ async function maybeApplyOrderStatusAction(
     // When store return handling is active (negative_so or stock_return_credit_note),
     // a return status must NOT cancel the original sale order via the status mapping ladder:
     // the return policy manages returns cleanly without voiding the original sale.
-    if (zidStatus === 'reversed' || zidStatus === 'partially_reversed') {
+    const isReturnStatus =
+      zidStatus === 'reversed' ||
+      zidStatus === 'partially_reversed' ||
+      zidStatus === 'reverse_in_progress' ||
+      zidStatus.includes('reverse') ||
+      zidStatus.includes('مرتجع') ||
+      zidStatus.includes('استرجاع')
+    if (isReturnStatus) {
       try {
         const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
         const returnMode = orderStdSettings?.order?.returns?.mode || (orderStdSettings as any)?.returns?.mode
@@ -6440,11 +6621,10 @@ async function executeOdooOperation(params: {
   // settings merge, and replaces the normal order write.
   if (
     odooModel === 'sale.order' &&
-    odooOperation === 'update' &&
     (execPlatform === 'zid' || execPlatform === 'salla') &&
     isReturnSignal(execPlatform, event, zidData)
   ) {
-    const returnSettings = normalizeReturnSettings((mergedSettings as any)?.order?.returns)
+    const returnSettings = normalizeReturnSettings((mergedSettings as any)?.order?.returns || (mergedSettings as any)?.returns)
     if (returnSettings.mode !== 'nothing') {
       const nestedOrder = (zidData.order && typeof zidData.order === 'object')
         ? (zidData.order as Record<string, unknown>)

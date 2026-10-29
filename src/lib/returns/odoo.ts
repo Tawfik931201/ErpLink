@@ -105,10 +105,12 @@ export async function readSaleOrder(
   const lineIds = many2manyIds(order.order_line)
   const lines: SaleOrderLineInfo[] = []
   if (lineIds.length > 0) {
+    const majorVersion = await client.getMajorVersion().catch(() => 17)
+    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
     const rows = await client.searchRead<any>(
       'sale.order.line',
       [['id', 'in', lineIds]],
-      ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', 'tax_id'],
+      ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', taxField],
       lineIds.length
     )
     for (const row of rows || []) {
@@ -121,7 +123,7 @@ export async function readSaleOrder(
         orderedQty: toNumber(row.product_uom_qty),
         deliveredQty: toNumber(row.qty_delivered),
         priceUnit: toNumber(row.price_unit),
-        taxIds: many2manyIds(row.tax_id),
+        taxIds: many2manyIds(row[taxField] ?? row.tax_ids ?? row.tax_id),
       })
     }
   }
@@ -369,21 +371,25 @@ export async function createNegativeSaleOrder(
   lines: readonly OdooReturnLine[],
   reason: string
 ): Promise<number> {
+  const majorVersion = await client.getMajorVersion().catch(() => 17)
+  const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
   const values: Record<string, unknown> = {
     partner_id: original.partnerId,
     client_order_ref: returnRefFor(original.name),
     origin: original.name,
     note: reason || `Return of ${original.name}`,
-    order_line: lines.map(line => [
-      0,
-      0,
-      {
+    order_line: lines.map(line => {
+      const lineVals: Record<string, unknown> = {
         product_id: line.productId,
         name: line.name || `Return - ${original.name}`,
         product_uom_qty: -Math.abs(line.quantity),
         price_unit: line.priceUnit,
-      },
-    ]),
+      }
+      if (line.taxIds && line.taxIds.length > 0) {
+        lineVals[taxField] = [[6, 0, line.taxIds]]
+      }
+      return [0, 0, lineVals]
+    }),
   }
   if (original.pricelistId) values.pricelist_id = original.pricelistId
   if (original.companyId) values.company_id = original.companyId

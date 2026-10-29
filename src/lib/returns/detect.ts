@@ -169,7 +169,7 @@ export function isReturnSignal(
       data.current_status ??
       data.new_status ??
       data.order_status_code
-    return isZidReturnStatus(status)
+    return isZidReturnStatus(status, true)
   }
   if (platform === 'salla') {
     if (isSallaReturnEvent(event)) return true

@@ -124,19 +124,20 @@ async function buildReturnLines(
   } else if (input.refundedLines && input.refundedLines.length > 0) {
     targets = (await resolveStoreLines(client, platform, input.refundedLines)).byProduct
   } else {
-    // If view-for-return was unavailable but this is a confirmed full reversal,
-    // all lines of the original order are returned (remaining = 0).
+    // If view-for-return was unavailable but this is a reversal/return event,
+    // all lines of the original order are treated as returned (or target lines).
     const ev = String(input.event || '').toLowerCase()
-    const st = String(
-      input.payload?.order_status ||
-      (input.payload?.order as any)?.order_status ||
-      input.payload?.status ||
-      (input.payload?.order as any)?.status ||
-      ''
-    ).toLowerCase()
-    const isFullReversal = ev.includes('reversed') || st === 'reversed' || st === 'مرتجع' || st === 'مسترجع'
-    if (platform === 'zid' && isFullReversal) {
-      console.info(`[Returns] Zid view-for-return state unconfirmed; treating full reversal "${input.orderId}" as all items returned`)
+    const rawStatus = (input.payload?.order as any)?.order_status ?? input.payload?.order_status ?? (input.payload?.order as any)?.status ?? input.payload?.status
+    const statusCode = String((rawStatus && typeof rawStatus === 'object') ? (rawStatus.code || rawStatus.name || '') : (rawStatus || '')).toLowerCase()
+    const isReversal =
+      ev.includes('reversed') ||
+      ev.includes('refund') ||
+      statusCode.includes('reverse') ||
+      statusCode.includes('مرتجع') ||
+      statusCode.includes('مسترجع') ||
+      Boolean(input.payload?.reverse_order_label_request)
+    if (platform === 'zid' && isReversal) {
+      console.info(`[Returns] Zid view-for-return state unconfirmed; treating reversal "${input.orderId}" as all items returned`)
       for (const line of original.lines) {
         if (line.orderedQty > 0) targets.set(line.productId, line.orderedQty)
       }
@@ -259,7 +260,7 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       }
       return createFromPayloadWithoutOrder(input, input.refundedLines || [])
     }
-    if (original.state === 'cancel') {
+    if (original.state === 'cancel' && settings.mode !== 'negative_so') {
       return skipped(`original_order_cancelled:${original.name}`)
     }
 
@@ -310,6 +311,7 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       actions,
     }
   } catch (err: any) {
+    console.error('[Returns Engine Error Stack]:', err?.stack || err)
     return {
       handled: true,
       status: 'failed',
