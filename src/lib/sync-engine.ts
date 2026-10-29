@@ -2853,21 +2853,31 @@ async function createDraftInvoiceForOrder(
 
     const majorVersion = await client.getMajorVersion().catch(() => 19)
     const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+    const uomField = majorVersion >= 19 ? 'product_uom_id' : 'product_uom'
 
     let orderLines: any[] = []
     try {
       orderLines = await client.searchRead<any>(
         'sale.order.line',
         [['id', 'in', lineIds], ['display_type', '=', false]],
-        ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', taxField, 'product_uom']
+        ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', taxField, uomField]
       )
     } catch {
-      const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
-      orderLines = await client.searchRead<any>(
-        'sale.order.line',
-        [['id', 'in', lineIds], ['display_type', '=', false]],
-        ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', altTaxField, 'product_uom']
-      ).catch(() => [])
+      try {
+        const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+        const altUomField = uomField === 'product_uom_id' ? 'product_uom' : 'product_uom_id'
+        orderLines = await client.searchRead<any>(
+          'sale.order.line',
+          [['id', 'in', lineIds], ['display_type', '=', false]],
+          ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', altTaxField, altUomField]
+        )
+      } catch {
+        orderLines = await client.searchRead<any>(
+          'sale.order.line',
+          [['id', 'in', lineIds], ['display_type', '=', false]],
+          ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount']
+        ).catch(() => [])
+      }
     }
     if (!orderLines || orderLines.length === 0) {
       console.warn(`[SyncEngine] Cannot create invoice for sale.order #${orderId}: no valid product lines found.`)
@@ -2915,8 +2925,11 @@ async function createDraftInvoiceForOrder(
       if (typeof line.discount === 'number' && line.discount > 0) {
         lineVals.discount = line.discount
       }
-      if (Array.isArray(line.product_uom) && line.product_uom[0]) {
-        lineVals.product_uom_id = line.product_uom[0]
+      const uomVal = line.product_uom_id ?? line.product_uom
+      if (Array.isArray(uomVal) && uomVal[0]) {
+        lineVals.product_uom_id = uomVal[0]
+      } else if (Number.isInteger(Number(uomVal)) && Number(uomVal) > 0) {
+        lineVals.product_uom_id = Number(uomVal)
       }
       const taxes = line.tax_ids ?? line.tax_id
       if (Array.isArray(taxes) && taxes.length > 0) {
