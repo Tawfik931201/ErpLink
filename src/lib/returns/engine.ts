@@ -311,7 +311,6 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       actions,
     }
   } catch (err: any) {
-    console.error('[Returns Engine Error Stack]:', err?.stack || err)
     return {
       handled: true,
       status: 'failed',
