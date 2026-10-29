@@ -30,8 +30,8 @@ import {
   createNegativeSaleOrder,
   createStockReturn,
   findInvoiceForOrder,
+  findOriginalSaleOrder,
   readNegativeReturnLedger,
-  readSaleOrder,
   resolveOdooProductId,
   type OdooReturnLine,
   type OriginalSaleOrder,
@@ -124,7 +124,25 @@ async function buildReturnLines(
   } else if (input.refundedLines && input.refundedLines.length > 0) {
     targets = (await resolveStoreLines(client, platform, input.refundedLines)).byProduct
   } else {
-    throw new Error('return_quantities_unknown')
+    // If view-for-return was unavailable but this is a confirmed full reversal,
+    // all lines of the original order are returned (remaining = 0).
+    const ev = String(input.event || '').toLowerCase()
+    const st = String(
+      input.payload?.order_status ||
+      (input.payload?.order as any)?.order_status ||
+      input.payload?.status ||
+      (input.payload?.order as any)?.status ||
+      ''
+    ).toLowerCase()
+    const isFullReversal = ev.includes('reversed') || st === 'reversed' || st === 'مرتجع' || st === 'مسترجع'
+    if (platform === 'zid' && isFullReversal) {
+      console.info(`[Returns] Zid view-for-return state unconfirmed; treating full reversal "${input.orderId}" as all items returned`)
+      for (const line of original.lines) {
+        if (line.orderedQty > 0) targets.set(line.productId, line.orderedQty)
+      }
+    } else {
+      throw new Error('return_quantities_unknown')
+    }
   }
 
   // One product can appear on several order lines (different prices/discounts).
@@ -226,14 +244,14 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
   }
 
   try {
-    const linkedId = await resolveEntityLinkId({
+    const original = await findOriginalSaleOrder(client, {
       workspaceId,
       platform,
       storeId,
-      odooModel: 'sale.order',
-      storeEntityId: orderId,
+      orderId,
+      orderCode: String((input.payload?.order as any)?.code || input.payload?.code || input.payload?.order_code || ''),
+      payload: input.payload,
     })
-    const original = linkedId ? await readSaleOrder(client, linkedId) : null
 
     if (!original) {
       if (settings.fallback_when_missing === 'skip') {

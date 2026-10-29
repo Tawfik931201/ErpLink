@@ -14,11 +14,13 @@
  *     the `product_uom` -> `uom_id` rename from the equation.
  */
 
+import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
 import type { OdooClient } from '@/lib/odoo-client'
 import {
   platformIdFieldNames,
   type PlatformKey,
 } from '@/lib/platform-fields'
+import { supabase } from '@/lib/supabase'
 
 export interface SaleOrderLineInfo {
   id: number
@@ -135,6 +137,137 @@ export async function readSaleOrder(
     invoiceIds: many2manyIds(order.invoice_ids),
     lines,
   }
+}
+
+/**
+ * Resiliently resolve the original Odoo sale order for a store return.
+ *
+ * Checks in order:
+ * 1. odoo_entity_links (fastest, permanent store-scoped link)
+ * 2. sync_logs (recent order sync records)
+ * 3. Direct Odoo search by client_order_ref, origin, name, or x_<platform>_id
+ *
+ * If found via fallback, the link is saved to odoo_entity_links for fast subsequent queries.
+ */
+export async function findOriginalSaleOrder(
+  client: OdooClient,
+  params: {
+    workspaceId: string
+    platform: PlatformKey
+    storeId: string
+    orderId: string
+    orderCode?: string
+    payload?: Record<string, unknown>
+  }
+): Promise<OriginalSaleOrder | null> {
+  const { workspaceId, platform, storeId, orderId, orderCode } = params
+  const candidatesToLink = [orderId, orderCode].filter((id): id is string => Boolean(id && String(id).trim()))
+
+  // 1. Resolve via durable entity links (primary)
+  for (const id of candidatesToLink) {
+    const linkedId = await resolveEntityLinkId({
+      workspaceId,
+      platform,
+      storeId,
+      odooModel: 'sale.order',
+      storeEntityId: id,
+    })
+    if (linkedId) {
+      const order = await readSaleOrder(client, linkedId)
+      if (order) return order
+    }
+  }
+
+  // 2. Resolve via sync_logs
+  for (const id of candidatesToLink) {
+    try {
+      const { data: logRow } = await supabase
+        .from('sync_logs')
+        .select('odoo_record_id')
+        .eq('workspace_id', workspaceId)
+        .eq('zid_entity_id', id)
+        .eq('odoo_model', 'sale.order')
+        .eq('status', 'success')
+        .not('odoo_record_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (logRow?.odoo_record_id) {
+        const idNum = Number(logRow.odoo_record_id)
+        if (Number.isInteger(idNum) && idNum > 0) {
+          const order = await readSaleOrder(client, idNum)
+          if (order) {
+            void upsertEntityLink(
+              { workspaceId, platform, storeId, odooModel: 'sale.order', storeEntityId: orderId },
+              idNum
+            )
+            return order
+          }
+        }
+      }
+    } catch {
+      // Continue to direct search
+    }
+  }
+
+  // 3. Fallback: Search directly in Odoo sale.order by standard reference fields
+  for (const field of ['client_order_ref', 'origin', 'name']) {
+    for (const val of candidatesToLink) {
+      try {
+        const found = await client.searchRead<any>(
+          'sale.order',
+          [[field, '=', val]],
+          ['id'],
+          1
+        )
+        const first = Array.isArray(found) ? found[0] : null
+        if (first?.id) {
+          const idNum = Number(first.id)
+          const order = await readSaleOrder(client, idNum)
+          if (order) {
+            void upsertEntityLink(
+              { workspaceId, platform, storeId, odooModel: 'sale.order', storeEntityId: orderId },
+              idNum
+            )
+            return order
+          }
+        }
+      } catch {
+        // Field not searchable or error, try next
+      }
+    }
+  }
+
+  // 4. Try custom platform id fields (e.g. x_zid_id)
+  for (const field of platformIdFieldNames(platform)) {
+    for (const val of candidatesToLink) {
+      try {
+        const found = await client.searchRead<any>(
+          'sale.order',
+          [[field, '=', val]],
+          ['id'],
+          1
+        )
+        const first = Array.isArray(found) ? found[0] : null
+        if (first?.id) {
+          const idNum = Number(first.id)
+          const order = await readSaleOrder(client, idNum)
+          if (order) {
+            void upsertEntityLink(
+              { workspaceId, platform, storeId, odooModel: 'sale.order', storeEntityId: orderId },
+              idNum
+            )
+            return order
+          }
+        }
+      } catch {
+        // Field does not exist on this Odoo database
+      }
+    }
+  }
+
+  return null
 }
 
 /**

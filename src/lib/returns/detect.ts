@@ -49,6 +49,22 @@ export interface StoreReturnLine {
 
 const ZID_RETURN_STATUSES = new Set(['reversed', 'partially_reversed', 'reverse_in_progress'])
 
+const ARABIC_STATUS_MAP: Record<string, string> = {
+  'مسترجع': 'reversed',
+  'مرتجع': 'reversed',
+  'استرجاع': 'reversed',
+  'مسترجع جزئيا': 'partially_reversed',
+  'مسترجع جزئي': 'partially_reversed',
+  'مرتجع جزئيا': 'partially_reversed',
+  'مرتجع جزئي': 'partially_reversed',
+  'جاري الاسترجاع': 'reverse_in_progress',
+  'جاري الإرجاع': 'reverse_in_progress',
+  'جاري ارجاع': 'reverse_in_progress',
+  'refund': 'reversed',
+  'refunded': 'reversed',
+  'reverse': 'reversed',
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -103,15 +119,18 @@ export function isZidReturnStatus(status: unknown, allowInProgress = false): boo
  */
 function zidStatusKey(status: unknown): string {
   const record = asRecord(status)
+  let raw = ''
   if (record) {
-    return (
+    raw = (
       toText(record.code) ||
       toText(record.slug) ||
       toText(record.value) ||
       toText(record.name)
     ).toLowerCase()
+  } else {
+    raw = toText(status).toLowerCase()
   }
-  return toText(status).toLowerCase()
+  return ARABIC_STATUS_MAP[raw] || raw
 }
 
 export function isSallaReturnEvent(event: string): boolean {
@@ -133,16 +152,23 @@ export function isReturnSignal(
   data: Record<string, unknown> | null | undefined
 ): boolean {
   if (platform === 'zid') {
+    const ev = String(event || '').toLowerCase()
+    if (ev.includes('reversed') || ev.includes('refund')) return true
     if (!data) return false
     const nestedOrder = asRecord(data.order)
-    // `order_status` is how the documented order payload names it; `status` is
-    // the flattened variant used by some webhook builds. Both are checked at
-    // the root and inside a nested `order`.
+    // Check all standard and custom Zid status locations (including Arabic display names)
     const status =
       data.order_status ??
       nestedOrder?.order_status ??
+      data.display_status ??
+      nestedOrder?.display_status ??
       data.status ??
-      nestedOrder?.status
+      nestedOrder?.status ??
+      data.financial_status ??
+      data.orderStatus ??
+      data.current_status ??
+      data.new_status ??
+      data.order_status_code
     return isZidReturnStatus(status)
   }
   if (platform === 'salla') {

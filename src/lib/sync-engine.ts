@@ -2960,6 +2960,24 @@ async function maybeApplyOrderStatusAction(
       return
     }
 
+    // When store return handling is active (negative_so or stock_return_credit_note),
+    // a return status must NOT cancel the original sale order via the status mapping ladder:
+    // the return policy manages returns cleanly without voiding the original sale.
+    if (zidStatus === 'reversed' || zidStatus === 'partially_reversed') {
+      try {
+        const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
+        const returnMode = orderStdSettings?.order?.returns?.mode || (orderStdSettings as any)?.returns?.mode
+        if (returnMode && returnMode !== 'nothing' && row.odoo_state === 'cancel') {
+          console.info(
+            `[SyncEngine] Status "${zidStatus}" mapping to "cancel" skipped on order #${odooRecordId} because return handling policy is active ("${returnMode}")`
+          )
+          return
+        }
+      } catch {
+        // Fall through
+      }
+    }
+
     // 2a. Order state action (quotation, confirm, done, cancel)
     if (row.odoo_state) {
       await applyOrderStatusAction(client, odooRecordId, row.odoo_state, zidStatus)
@@ -6358,9 +6376,12 @@ async function executeOdooOperation(params: {
         ? (zidData.order as Record<string, unknown>)
         : null
       const returnOrderId = String(
-        execPlatform === 'salla'
-          ? nestedOrder?.id ?? zidData.order_id ?? zidEntityId
-          : zidEntityId
+        zidEntityId ||
+        nestedOrder?.id ||
+        zidData.order_id ||
+        zidData.id ||
+        nestedOrder?.order_id ||
+        ''
       )
 
       let remaining: { known: boolean; lines: StoreReturnLine[] } | undefined
@@ -6370,11 +6391,21 @@ async function executeOdooOperation(params: {
           remaining = injected
         } else {
           try {
-            const { data: tokenRow } = await supabaseAdmin
+            let tokenRow: any = null
+            const { data: byStore } = await supabaseAdmin
               .from('merchant_tokens')
               .select('*')
               .or(`store_id.eq.${storeId},merchant_id.eq.${storeId}`)
               .maybeSingle()
+            tokenRow = byStore
+            if (!tokenRow && mapping.workspace_id) {
+              const { data: byWs } = await supabaseAdmin
+                .from('merchant_tokens')
+                .select('*')
+                .eq('workspace_id', mapping.workspace_id)
+                .maybeSingle()
+              tokenRow = byWs
+            }
             if (tokenRow) {
               const { getAccessToken } = await import('./zid/token')
               const storedTokens = await getAccessToken(tokenRow.merchant_id)
@@ -6438,6 +6469,16 @@ async function executeOdooOperation(params: {
       }
       if (outcome.handled) {
         console.info(`[Returns] ${execPlatform} order ${returnOrderId}: ${outcome.message} (continuing with normal sync)`)
+        if (outcome.message.startsWith('nothing_to_return') || outcome.message.startsWith('already_applied')) {
+          return {
+            mappingId: mapping.id,
+            mappingName: mapping.name,
+            model: 'sale.order',
+            status: 'success',
+            odooRecordId: outcome.odooRecordId,
+            message: outcome.message,
+          }
+        }
       }
     }
   }
