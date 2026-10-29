@@ -153,9 +153,11 @@ export function isReturnSignal(
 ): boolean {
   if (platform === 'zid') {
     const ev = String(event || '').toLowerCase()
-    if (ev.includes('reversed') || ev.includes('refund')) return true
+    if (ev.includes('reversed') || ev.includes('refund') || ev.includes('return')) return true
     if (!data) return false
+    if (data.reverse_order_label_request || data.reverse_order_label_requests) return true
     const nestedOrder = asRecord(data.order)
+    if (nestedOrder?.reverse_order_label_request || nestedOrder?.reverse_order_label_requests) return true
     // Check all standard and custom Zid status locations (including Arabic display names)
     const status =
       data.order_status ??

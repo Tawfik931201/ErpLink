@@ -6621,6 +6621,7 @@ async function executeOdooOperation(params: {
   // settings merge, and replaces the normal order write.
   if (
     odooModel === 'sale.order' &&
+    odooOperation === 'update' &&
     (execPlatform === 'zid' || execPlatform === 'salla') &&
     isReturnSignal(execPlatform, event, zidData)
   ) {
