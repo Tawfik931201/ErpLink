@@ -8,7 +8,7 @@ import { getOrCreateDbUser } from '@/lib/users'
 
 export async function saveOrderStatusMappings(
   platform: string,
-  mappings: Record<string, { state: string; enabled: boolean }>,
+  mappings: Record<string, { state: string; enabled: boolean; invoice_action?: string; picking_action?: string } | string>,
   storeId = ''
 ) {
   try {
@@ -30,29 +30,59 @@ export async function saveOrderStatusMappings(
       .eq('store_id', storeId)
 
     // Upsert new/changed mappings (safe: old data preserved if this fails)
-    // Accepts the object shape { state, enabled }; legacy plain-string values
+    // Accepts the object shape { state, enabled, invoice_action, picking_action }; legacy plain-string values
     // are tolerated and treated as enabled.
     const stateOf = (v: unknown): string => {
       const s = typeof v === 'string' ? v : (v as { state?: unknown } | null)?.state
       return String(s || '').trim()
     }
+    const pickingActionOf = (v: unknown): string | null => {
+      if (!v || typeof v !== 'object') return null
+      const a = (v as { picking_action?: unknown }).picking_action
+      return a ? String(a).trim() || null : null
+    }
+    const invoiceActionOf = (v: unknown): string | null => {
+      if (!v || typeof v !== 'object') return null
+      const a = (v as { invoice_action?: unknown }).invoice_action
+      return a ? String(a).trim() || null : null
+    }
+
     const rows = Object.entries(mappings)
-      .filter(([, v]) => stateOf(v) !== '')
+      .filter(([, v]) => stateOf(v) !== '' || pickingActionOf(v) !== null || invoiceActionOf(v) !== null)
       .map(([zidStatus, v]) => ({
         workspace_id: workspaceId,
         zid_status: zidStatus,
-        odoo_state: stateOf(v),
+        odoo_state: stateOf(v) || 'draft',
         enabled: typeof v === 'string' ? true : ((v as { enabled?: unknown } | null)?.enabled ?? true),
         platform,
         store_id: storeId,
+        picking_action: pickingActionOf(v),
+        invoice_action: invoiceActionOf(v),
       }))
 
     if (rows.length > 0) {
-      const { error: upsertError } = await supabase
+      let { error: upsertError } = await supabase
         .from('order_status_mappings')
         .upsert(rows, {
           onConflict: 'workspace_id, platform, store_id, zid_status',
         })
+
+      // Graceful fallback for pre-migration database without invoice_action / picking_action columns
+      if (
+        upsertError &&
+        (upsertError.message?.includes('picking_action') ||
+          upsertError.message?.includes('invoice_action') ||
+          (upsertError as any).code === '42703')
+      ) {
+        console.warn('[OrderStatusMappings] Columns picking_action/invoice_action not found in DB, falling back to basic columns')
+        const fallbackRows = rows.map(({ picking_action, invoice_action, ...rest }) => rest)
+        const res = await supabase
+          .from('order_status_mappings')
+          .upsert(fallbackRows, {
+            onConflict: 'workspace_id, platform, store_id, zid_status',
+          })
+        upsertError = res.error
+      }
 
       if (upsertError) throw upsertError
     }
@@ -61,7 +91,9 @@ export async function saveOrderStatusMappings(
     const newStatuses = Object.entries(mappings)
       .filter(([, v]) => {
         const s = typeof v === 'string' ? v : (v as { state?: unknown } | null)?.state
-        return s && String(s).trim() !== ''
+        const p = pickingActionOf(v)
+        const i = invoiceActionOf(v)
+        return (s && String(s).trim() !== '') || p !== null || i !== null
       })
       .map(([zidStatus]) => zidStatus)
     const toDelete = (existing || [])
@@ -97,30 +129,58 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
 
     // Per-store rows overlay the platform defaults (''): a store inherits
     // everything it has not overridden.
-    const { data, error } = await supabase
+    let data: any[] | null = null
+    const res = await supabase
       .from('order_status_mappings')
-      .select('zid_status, odoo_state, enabled, store_id')
+      .select('zid_status, odoo_state, enabled, store_id, invoice_action, picking_action')
       .eq('workspace_id', user.active_workspace_id)
       .eq('platform', platform)
       .in('store_id', storeId ? [storeId, ''] : [''])
 
-    if (error) throw error
+    if (res.error) {
+      // Pre-migration DB fallback without invoice_action/picking_action columns
+      const fallbackRes = await supabase
+        .from('order_status_mappings')
+        .select('zid_status, odoo_state, enabled, store_id')
+        .eq('workspace_id', user.active_workspace_id)
+        .eq('platform', platform)
+        .in('store_id', storeId ? [storeId, ''] : [''])
+      if (fallbackRes.error) throw fallbackRes.error
+      data = fallbackRes.data
+    } else {
+      data = res.data
+    }
 
-    const byStatus = new Map<string, { state: string; enabled: boolean; store: string }>()
+    const byStatus = new Map<
+      string,
+      { state: string; enabled: boolean; store: string; invoice_action?: string; picking_action?: string }
+    >()
     for (const row of data || []) {
-      if (!row.zid_status || !row.odoo_state) continue
+      if (!row.zid_status) continue
       const prev = byStatus.get(row.zid_status)
       // Store-specific row wins over the platform default.
       if (!prev || (prev.store === '' && row.store_id !== '')) {
         byStatus.set(row.zid_status, {
-          state: row.odoo_state,
+          state: row.odoo_state || '',
           enabled: (row as { enabled?: unknown }).enabled !== false,
           store: row.store_id || '',
+          invoice_action: (row as any).invoice_action || '',
+          picking_action: (row as any).picking_action || '',
         })
       }
     }
-    const mappings: Record<string, { state: string; enabled: boolean }> = {}
-    for (const [k, v] of byStatus) mappings[k] = { state: v.state, enabled: v.enabled }
+    const mappings: Record<
+      string,
+      { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }
+    > = {}
+    for (const [k, v] of byStatus) {
+      mappings[k] = {
+        state: v.state,
+        enabled: v.enabled,
+        invoice_action: v.invoice_action || '',
+        picking_action: v.picking_action || '',
+      }
+    }
 
     return { success: true, mappings }
   } catch (error: any) {

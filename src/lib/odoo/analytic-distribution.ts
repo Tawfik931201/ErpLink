@@ -44,8 +44,8 @@ export interface AnalyticDistributionEntry {
 
 export interface ResolveAnalyticInput {
   config?: unknown
-  locationId?: string
-  locationName?: string
+  locationId?: string | string[]
+  locationName?: string | string[]
   paymentKeys?: string[]
   /**
    * When true, returns the rule percentages exactly as configured (no
@@ -192,18 +192,60 @@ export function paymentKeysFromOrder(
   return [...new Set(keys)]
 }
 
-function locationMatches(rule: AnalyticRule, locationId?: string, locationName?: string): boolean {
+export function cleanLocationId(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  return String(value).trim().toLowerCase().replace(/[-_\s]/g, '')
+}
+
+function locationMatches(
+  rule: AnalyticRule,
+  locationId?: string | string[],
+  locationName?: string | string[]
+): boolean {
   const value = toText(rule.source_value)
-  if (!value) return false
+  const label = toText(rule.source_label)
+  if (!value && !label) return false
 
-  if (locationId && value === String(locationId).trim()) return true
-  if (!locationName) return false
+  const locIds = Array.isArray(locationId)
+    ? locationId.map(id => String(id).trim()).filter(Boolean)
+    : locationId
+      ? [String(locationId).trim()]
+      : []
 
-  // `source_value` may be an id while `source_label` holds the readable name —
-  // compare the order's location name against both, never against the rule's
-  // own label (that would always match itself).
-  const orderName = normalizeName(locationName)
-  return orderName === normalizeName(value) || orderName === normalizeName(rule.source_label)
+  if (locIds.length > 0) {
+    const cVal = cleanLocationId(value)
+    const cLabel = cleanLocationId(label)
+    for (const rawLoc of locIds) {
+      if (value && value === rawLoc) return true
+      const cLoc = cleanLocationId(rawLoc)
+      if (cLoc && cVal && cLoc === cVal) return true
+      if (cLoc && cLabel && cLoc === cLabel) return true
+    }
+  }
+
+  const locNames = Array.isArray(locationName)
+    ? locationName.map(n => normalizeName(n)).filter(Boolean)
+    : locationName
+      ? [normalizeName(locationName)]
+      : []
+
+  if (locNames.length > 0) {
+    const valName = normalizeName(value)
+    const labelName = normalizeName(label)
+    for (const orderName of locNames) {
+      if (!orderName) continue
+      if (valName && orderName === valName) return true
+      if (labelName && orderName === labelName) return true
+      if (valName && valName.length >= 3 && orderName.length >= 3) {
+        if (orderName.includes(valName) || valName.includes(orderName)) return true
+      }
+      if (labelName && labelName.length >= 3 && orderName.length >= 3) {
+        if (orderName.includes(labelName) || labelName.includes(orderName)) return true
+      }
+    }
+  }
+
+  return false
 }
 
 function paymentMatches(rule: AnalyticRule, paymentKeys: string[]): boolean {

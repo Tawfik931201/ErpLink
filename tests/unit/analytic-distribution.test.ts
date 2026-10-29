@@ -186,6 +186,34 @@ describe('resolveAnalyticDistribution', () => {
     expect(distribution).toEqual([{ accountId: 5, percentage: 100 }])
   })
 
+  it('matches warehouse UUID regardless of hyphen formatting (Zid webhook vs locations API)', () => {
+    const distribution = resolveAnalyticDistribution({
+      config: enabled([
+        rule({ odoo_analytic_account_id: 6, percentage: 100 }),
+        rule({ condition: 'warehouse', source_value: 'a85f865a-5017-4597-b639-69678990a434', odoo_analytic_account_id: 2, percentage: 100 }),
+      ]),
+      locationId: 'a85f865a50174597b63969678990a434',
+    })
+    expect(distribution).toEqual([
+      { accountId: 6, percentage: 100 },
+      { accountId: 2, percentage: 100 },
+    ])
+  })
+
+  it('matches warehouse location from an array of location IDs', () => {
+    const distribution = resolveAnalyticDistribution({
+      config: enabled([
+        rule({ odoo_analytic_account_id: 6, percentage: 100 }),
+        rule({ condition: 'warehouse', source_value: 'loc-main', odoo_analytic_account_id: 2, percentage: 100 }),
+      ]),
+      locationId: ['loc-secondary', 'loc-main'],
+    })
+    expect(distribution).toEqual([
+      { accountId: 6, percentage: 100 },
+      { accountId: 2, percentage: 100 },
+    ])
+  })
+
   it('does not match a warehouse by a different location', () => {
     const distribution = resolveAnalyticDistribution({
       config: enabled([rule({ condition: 'warehouse', source_value: 'Jeddah', odoo_analytic_account_id: 5 })]),

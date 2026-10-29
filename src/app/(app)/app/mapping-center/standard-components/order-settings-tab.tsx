@@ -107,12 +107,12 @@ interface OrderSettingsTabProps {
   setOrderLinkCompany: (val: boolean) => void
   companyOptions: { value: string; label: string }[]
   isLoadingCompanies: boolean
-  orderAutoConfirm: boolean
-  setOrderAutoConfirm: (val: boolean) => void
-  orderAutoInvoice: boolean
-  setOrderAutoInvoice: (val: boolean) => void
-  orderPartialFulfillment: boolean
-  setOrderPartialFulfillment: (val: boolean) => void
+  orderAutoConfirm?: boolean
+  setOrderAutoConfirm?: (val: boolean) => void
+  orderAutoInvoice?: boolean
+  setOrderAutoInvoice?: (val: boolean) => void
+  orderPartialFulfillment?: boolean
+  setOrderPartialFulfillment?: (val: boolean) => void
   // Store returns
   orderReturnsMode: 'nothing' | 'negative_so' | 'stock_return_credit_note'
   setOrderReturnsMode: (val: 'nothing' | 'negative_so' | 'stock_return_credit_note') => void
@@ -193,8 +193,15 @@ interface OrderSettingsTabProps {
   isCreatingStatusField: boolean
   hasOdooConnection: boolean
   // Status mapping
-  orderStateMapping: Record<string, { state: string; enabled: boolean }>
-  setOrderStateMapping: React.Dispatch<React.SetStateAction<Record<string, { state: string; enabled: boolean }>>>
+  orderStateMapping: Record<
+    string,
+    { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }
+  >
+  setOrderStateMapping: React.Dispatch<
+    React.SetStateAction<
+      Record<string, { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }>
+    >
+  >
   getOrderPlatformStatuses: () => { key: string; labelAr: string; labelEn: string }[]
   // Save & Modals
   isSavingOrders: boolean
@@ -299,26 +306,26 @@ export function OrderSettingsTab({
   setOrderVatNonSaudiTaxId,
   orderTaxOptions,
   isLoadingOrderTaxes,
-  orderAddShipping,
+  orderAddShipping: _orderAddShipping,
   setOrderAddShipping,
   orderShippingProductId,
   setOrderShippingProductId,
-  orderShippingProductSku,
-  setOrderShippingProductSku,
+  orderShippingProductSku: _orderShippingProductSku,
+  setOrderShippingProductSku: _setOrderShippingProductSku,
   orderAddCod,
   setOrderAddCod,
   orderCodProductId,
   setOrderCodProductId,
-  orderCodProductSku,
-  setOrderCodProductSku,
+  orderCodProductSku: _orderCodProductSku,
+  setOrderCodProductSku: _setOrderCodProductSku,
   orderCodAmount,
   setOrderCodAmount,
   orderAddDiscount,
   setOrderAddDiscount,
   orderDiscountProductId,
   setOrderDiscountProductId,
-  orderDiscountProductSku,
-  setOrderDiscountProductSku,
+  orderDiscountProductSku: _orderDiscountProductSku,
+  setOrderDiscountProductSku: _setOrderDiscountProductSku,
   orderDiscountMode,
   setOrderDiscountMode,
 
@@ -351,6 +358,22 @@ export function OrderSettingsTab({
     { value: 'sale', label: lang === 'ar' ? 'طلب مبيعات مؤكد (Sales Order)' : 'Sales Order (Sale)' },
     { value: 'done', label: lang === 'ar' ? 'مغلق (Locked)' : 'Locked (Done)' },
     { value: 'cancel', label: lang === 'ar' ? 'ملغي (Cancelled)' : 'Cancelled (Cancel)' },
+  ]
+
+  const pickingActionOptions = [
+    { value: '', label: lang === 'ar' ? '— بدون إجراء —' : '— No Action —' },
+    { value: 'create', label: lang === 'ar' ? 'إنشاء إذن الصرف فقط' : 'Create Picking Only' },
+    { value: 'validate', label: lang === 'ar' ? 'تصديق إذن الصرف فقط' : 'Validate Picking Only' },
+    { value: 'create_and_validate', label: lang === 'ar' ? 'إنشاء وتصديق إذن الصرف' : 'Create & Validate Picking' },
+    { value: 'cancel', label: lang === 'ar' ? 'إلغاء إذن الصرف' : 'Cancel Picking' },
+  ]
+
+  const invoiceActionOptions = [
+    { value: '', label: lang === 'ar' ? '— بدون إجراء —' : '— No Action —' },
+    { value: 'create', label: lang === 'ar' ? 'إنشاء مسودة الفاتورة فقط' : 'Create Draft Invoice Only' },
+    { value: 'post', label: lang === 'ar' ? 'تأكيد/ترحيل الفاتورة فقط' : 'Post Invoice Only' },
+    { value: 'create_and_post', label: lang === 'ar' ? 'إنشاء وتأكيد الفاتورة' : 'Create & Post Invoice' },
+    { value: 'cancel', label: lang === 'ar' ? 'إلغاء الفاتورة' : 'Cancel Invoice' },
   ]
 
   return (
@@ -786,41 +809,6 @@ export function OrderSettingsTab({
               />
             </div>
           )}
-
-          <div className="sm:col-span-2 space-y-2 pt-2 border-t border-border/60">
-            <SettingToggle
-              checked={orderAutoConfirm}
-              onChange={setOrderAutoConfirm}
-              label={lang === 'ar' ? 'تأكيد الطلب تلقائياً في أودو' : 'Auto Confirm Order'}
-              description={
-                lang === 'ar'
-                  ? 'تحويل أمر البيع من مسودة (Quotation) إلى مؤكد (Sales Order) فور وروده'
-                  : 'Converts draft quotation to confirmed sales order automatically'
-              }
-            />
-
-            <SettingToggle
-              checked={orderAutoInvoice}
-              onChange={setOrderAutoInvoice}
-              label={lang === 'ar' ? 'إنشاء الفاتورة تلقائياً' : 'Auto Create Invoice'}
-              description={
-                lang === 'ar'
-                  ? 'إصدار مسودة الفاتورة مباشرة بمجرد تأكيد أمر البيع'
-                  : 'Automatically generates the invoice draft upon confirmation'
-              }
-            />
-
-            <SettingToggle
-              checked={orderPartialFulfillment}
-              onChange={setOrderPartialFulfillment}
-              label={lang === 'ar' ? 'تفعيل التنفيذ والشحن الجزئي' : 'Enable Partial Fulfillment'}
-              description={
-                lang === 'ar'
-                  ? 'السماح بشحنات متعددة وتسليم مجزأ لبنود الطلب الواحد'
-                  : 'Allows multiple deliveries and partial line fulfillment'
-              }
-            />
-          </div>
         </div>
       </SettingCard>
 
@@ -1543,24 +1531,31 @@ export function OrderSettingsTab({
             : 'Map each store order status to its target lifecycle stage in Odoo'
         }
       >
-        <div className="rounded-none border border-border/80 overflow-hidden bg-background">
+        <div className="rounded-none border border-border/80 overflow-x-auto bg-background">
           <table className="w-full text-xs text-left border-collapse" dir={dir}>
             <thead>
               <tr className="bg-muted/40 text-muted-foreground border-b border-border/60">
-                <th className="px-4 py-3 font-semibold text-start">
+                <th className="px-4 py-3 font-semibold text-start whitespace-nowrap">
                   {lang === 'ar' ? 'حالة الطلب في المتجر' : 'Store Status'}
                 </th>
-                <th className="px-4 py-3 font-semibold text-start">
-                  {lang === 'ar' ? 'الحالة المقابلة في أودو' : 'Target Odoo State'}
+                <th className="px-4 py-3 font-semibold text-start whitespace-nowrap min-w-[170px]">
+                  {lang === 'ar' ? 'حالة أمر البيع في أودو' : 'Target Odoo State'}
                 </th>
-                <th className="px-4 py-3 font-semibold w-24 text-center">
+                <th className="px-4 py-3 font-semibold text-start whitespace-nowrap min-w-[190px]">
+                  {lang === 'ar' ? 'إذن المخزن (الشحن والتسليم)' : 'Stock Picking'}
+                </th>
+                <th className="px-4 py-3 font-semibold text-start whitespace-nowrap min-w-[190px]">
+                  {lang === 'ar' ? 'الفاتورة' : 'Invoice'}
+                </th>
+                <th className="px-4 py-3 font-semibold w-20 text-center whitespace-nowrap">
                   {lang === 'ar' ? 'تفعيل' : 'Enabled'}
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {getOrderPlatformStatuses().map((status) => {
-                const isEnabled = orderStateMapping[status.key]?.enabled ?? true
+                const current = orderStateMapping[status.key]
+                const isEnabled = current?.enabled ?? true
 
                 return (
                   <tr
@@ -1570,7 +1565,7 @@ export function OrderSettingsTab({
                       !isEnabled && 'opacity-50 bg-muted/10'
                     )}
                   >
-                    <td className="px-4 py-2.5 font-medium text-foreground">
+                    <td className="px-4 py-2.5 font-medium text-foreground whitespace-nowrap">
                       <span>{lang === 'ar' ? status.labelAr : status.labelEn}</span>
                       <span className="text-[10px] text-muted-foreground block font-mono">
                         {status.key}
@@ -1579,13 +1574,18 @@ export function OrderSettingsTab({
                     <td className="px-4 py-2.5">
                       <select
                         className="w-full h-8 px-2.5 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-                        value={orderStateMapping[status.key]?.state || ''}
+                        value={current?.state || ''}
                         disabled={!isEnabled}
                         onChange={(e) => {
                           const val = e.target.value
                           setOrderStateMapping((prev) => ({
                             ...prev,
-                            [status.key]: { state: val, enabled: prev[status.key]?.enabled ?? true },
+                            [status.key]: {
+                              state: val,
+                              enabled: prev[status.key]?.enabled ?? true,
+                              picking_action: prev[status.key]?.picking_action || '',
+                              invoice_action: prev[status.key]?.invoice_action || '',
+                            },
                           }))
                         }}
                       >
@@ -1595,6 +1595,56 @@ export function OrderSettingsTab({
                         {odooStates.map((st) => (
                           <option key={st.value} value={st.value}>
                             {st.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <select
+                        className="w-full h-8 px-2.5 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                        value={current?.picking_action || ''}
+                        disabled={!isEnabled}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setOrderStateMapping((prev) => ({
+                            ...prev,
+                            [status.key]: {
+                              state: prev[status.key]?.state || '',
+                              enabled: prev[status.key]?.enabled ?? true,
+                              picking_action: val,
+                              invoice_action: prev[status.key]?.invoice_action || '',
+                            },
+                          }))
+                        }}
+                      >
+                        {pickingActionOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <select
+                        className="w-full h-8 px-2.5 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                        value={current?.invoice_action || ''}
+                        disabled={!isEnabled}
+                        onChange={(e) => {
+                          const val = e.target.value
+                          setOrderStateMapping((prev) => ({
+                            ...prev,
+                            [status.key]: {
+                              state: prev[status.key]?.state || '',
+                              enabled: prev[status.key]?.enabled ?? true,
+                              picking_action: prev[status.key]?.picking_action || '',
+                              invoice_action: val,
+                            },
+                          }))
+                        }}
+                      >
+                        {invoiceActionOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
                           </option>
                         ))}
                       </select>
@@ -1612,6 +1662,8 @@ export function OrderSettingsTab({
                             [status.key]: {
                               state: cur?.state || '',
                               enabled: !(cur?.enabled ?? true),
+                              picking_action: cur?.picking_action || '',
+                              invoice_action: cur?.invoice_action || '',
                             },
                           }))
                         }}

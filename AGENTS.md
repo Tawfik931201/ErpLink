@@ -229,7 +229,7 @@ All four (type-check, lint, test, build) are **blocking** CI jobs.
     is never *read* again (naming it in a comment is fine) and that verification
     precedes the first `.select()`. It also asserts the refresh route is
     admin-gated and refuses to run when nothing is derivable.
-  - `tests/unit/analytic-distribution.test.ts` (25 tests) — the Zid/Salla
+  - `tests/unit/analytic-distribution.test.ts` (27 tests) — the Zid/Salla
     analytic rules saved under `settings.order.analytic`: `all` rules and matching
     warehouse/payment rules are all evaluated and included together, each configured
     percentage reaches Odoo verbatim without recalculation or re-normalisation
