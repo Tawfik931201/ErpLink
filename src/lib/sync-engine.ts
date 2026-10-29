@@ -2851,11 +2851,24 @@ async function createDraftInvoiceForOrder(
       return null
     }
 
-    const orderLines = await client.searchRead<any>(
-      'sale.order.line',
-      [['id', 'in', lineIds], ['display_type', '=', false]],
-      ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', 'tax_id', 'product_uom']
-    )
+    const majorVersion = await client.getMajorVersion().catch(() => 19)
+    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+
+    let orderLines: any[] = []
+    try {
+      orderLines = await client.searchRead<any>(
+        'sale.order.line',
+        [['id', 'in', lineIds], ['display_type', '=', false]],
+        ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', taxField, 'product_uom']
+      )
+    } catch {
+      const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+      orderLines = await client.searchRead<any>(
+        'sale.order.line',
+        [['id', 'in', lineIds], ['display_type', '=', false]],
+        ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'discount', altTaxField, 'product_uom']
+      ).catch(() => [])
+    }
     if (!orderLines || orderLines.length === 0) {
       console.warn(`[SyncEngine] Cannot create invoice for sale.order #${orderId}: no valid product lines found.`)
       return null
@@ -2905,8 +2918,9 @@ async function createDraftInvoiceForOrder(
       if (Array.isArray(line.product_uom) && line.product_uom[0]) {
         lineVals.product_uom_id = line.product_uom[0]
       }
-      if (Array.isArray(line.tax_id) && line.tax_id.length > 0) {
-        lineVals.tax_ids = [[6, 0, line.tax_id]]
+      const taxes = line.tax_ids ?? line.tax_id
+      if (Array.isArray(taxes) && taxes.length > 0) {
+        lineVals.tax_ids = [[6, 0, taxes]]
       }
       if (defaultAccountId) {
         lineVals.account_id = defaultAccountId
@@ -7923,21 +7937,26 @@ export async function findExistingOdooRecord(
         .not('odoo_record_id', 'is', null)
         .order('created_at', { ascending: false })
         .limit(1)
-      const { data: previousLog } = mapping?.merchant_id
-        ? await prevLogBase.eq('store_id', mapping.merchant_id).maybeSingle()
-        : await prevLogBase.maybeSingle()
+      const { data: previousLogs } = mapping?.merchant_id
+        ? await prevLogBase.eq('store_id', mapping.merchant_id).limit(5)
+        : await prevLogBase.limit(5)
 
-      if (previousLog?.odoo_record_id) {
-        const idNum = Number(previousLog.odoo_record_id)
-        if (Number.isInteger(idNum) && idNum > 0) {
-          try {
-            const exists = await client.search(model, [['id', '=', idNum]], 1)
-            if (exists.length > 0) {
-              console.info(`[SyncEngine] Resolved ${model} #${idNum} from sync_logs for zid_entity_id="${zidId}"`)
-              return idNum
+      if (previousLogs && previousLogs.length > 0) {
+        for (const logRow of previousLogs) {
+          const idNum = Number(logRow?.odoo_record_id)
+          if (Number.isInteger(idNum) && idNum > 0) {
+            try {
+              const recs = await client.searchRead<any>(model, [['id', '=', idNum]], ['id', 'amount_total'], 1)
+              if (recs.length > 0) {
+                // Ignore return orders (amount_total < 0) for normal updates
+                if (model !== 'sale.order' || Number(recs[0].amount_total) >= 0) {
+                  console.info(`[SyncEngine] Resolved ${model} #${idNum} from sync_logs for zid_entity_id="${zidId}"`)
+                  return idNum
+                }
+              }
+            } catch {
+              // Record might have been deleted in Odoo, continue with other candidates
             }
-          } catch {
-            // Record might have been deleted in Odoo, continue with other candidates
           }
         }
       }
@@ -7967,10 +7986,12 @@ export async function findExistingOdooRecord(
       })
       if (linkedId) {
         try {
-          const exists = await client.search(model, [['id', '=', linkedId]], 1)
-          if (exists.length > 0) {
-            console.info(`[SyncEngine] Resolved ${model} #${linkedId} from odoo_entity_links for store "${mapping.merchant_id}" entity "${zidId}"`)
-            return linkedId
+          const recs = await client.searchRead<any>(model, [['id', '=', linkedId]], ['id', 'amount_total'], 1)
+          if (recs.length > 0) {
+            if (model !== 'sale.order' || Number(recs[0].amount_total) >= 0) {
+              console.info(`[SyncEngine] Resolved ${model} #${linkedId} from odoo_entity_links for store "${mapping.merchant_id}" entity "${zidId}"`)
+              return linkedId
+            }
           }
         } catch {
           // Record was deleted in Odoo — fall through to other candidates.
@@ -8181,9 +8202,10 @@ export async function findExistingOdooRecord(
   console.info(`[SyncEngine] findExistingOdooRecord model=${model} candidates=${validCandidates.length} domains=${JSON.stringify(validCandidates)}`)
   for (const domain of validCandidates) {
     try {
-      const ids = await client.search(model, [domain], 1)
+      const searchDomain = model === 'sale.order' ? [domain, ['amount_total', '>=', 0]] : [domain]
+      const ids = await client.search(model, searchDomain, 1)
       if (ids.length > 0) {
-        console.info(`[SyncEngine] Matched ${model} #${ids[0]} via domain ${JSON.stringify(domain)}`)
+        console.info(`[SyncEngine] Matched ${model} #${ids[0]} via domain ${JSON.stringify(searchDomain)}`)
         return ids[0]
       }
     } catch (err) {
