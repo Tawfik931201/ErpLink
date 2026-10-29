@@ -297,7 +297,9 @@ export default function StandardMappingClient({
   const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
 
   // Status mapping
-  const [orderStateMapping, setOrderStateMapping] = useState<Record<string, { state: string; enabled: boolean }>>({})
+  const [orderStateMapping, setOrderStateMapping] = useState<
+    Record<string, { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }>
+  >({})
 
   // Zid Order Status Custom Field in Odoo
   const [orderUpdateCustomStatus, setOrderUpdateCustomStatus] = useState<boolean>(false)
@@ -929,12 +931,26 @@ export default function StandardMappingClient({
     if (standardSubTab === 'orders') {
       getOrderStatusMappings(standardStoreTab, standardStoreId).then(res => {
         const raw: Record<string, unknown> = (res.success ? (res.mappings || {}) : {}) as Record<string, unknown>
-        const normalized: Record<string, { state: string; enabled: boolean }> = {}
+        const normalized: Record<
+          string,
+          { state: string; enabled: boolean; invoice_action?: string; picking_action?: string }
+        > = {}
         for (const [k, v] of Object.entries(raw)) {
-          if (typeof v === 'string') normalized[k] = { state: v, enabled: true }
-          else if (v && typeof v === 'object') {
-            const o = v as { state?: unknown; enabled?: unknown }
-            normalized[k] = { state: String(o.state || ''), enabled: o.enabled !== false }
+          if (typeof v === 'string') {
+            normalized[k] = { state: v, enabled: true, invoice_action: '', picking_action: '' }
+          } else if (v && typeof v === 'object') {
+            const o = v as {
+              state?: unknown
+              enabled?: unknown
+              invoice_action?: unknown
+              picking_action?: unknown
+            }
+            normalized[k] = {
+              state: String(o.state || ''),
+              enabled: o.enabled !== false,
+              invoice_action: String(o.invoice_action || ''),
+              picking_action: String(o.picking_action || ''),
+            }
           }
         }
         setOrderStateMapping(normalized)
@@ -2240,12 +2256,6 @@ export default function StandardMappingClient({
                   setOrderLinkCompany={setOrderLinkCompany}
                   companyOptions={companyOptions}
                   isLoadingCompanies={isLoadingCompanies}
-                  orderAutoConfirm={orderAutoConfirm}
-                  setOrderAutoConfirm={setOrderAutoConfirm}
-                  orderAutoInvoice={orderAutoInvoice}
-                  setOrderAutoInvoice={setOrderAutoInvoice}
-                  orderPartialFulfillment={orderPartialFulfillment}
-                  setOrderPartialFulfillment={setOrderPartialFulfillment}
                   orderReturnsMode={orderReturnsMode}
                   setOrderReturnsMode={setOrderReturnsMode}
                   orderReturnsCreditNote={orderReturnsCreditNote}

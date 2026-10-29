@@ -2577,36 +2577,68 @@ async function getOrderStatusRow(
   zidStatus: string,
   platform?: 'zid' | 'salla' | 'shopify',
   storeId = '',
-): Promise<{ odoo_state: string; enabled: boolean } | null> {
+): Promise<{
+  odoo_state: string
+  enabled: boolean
+  invoice_action?: string
+  picking_action?: string
+} | null> {
   try {
     let query = supabaseAdmin
       .from('order_status_mappings')
-      .select('odoo_state, enabled, store_id')
+      .select('odoo_state, enabled, store_id, invoice_action, picking_action')
       .eq('workspace_id', workspaceId)
       .eq('zid_status', zidStatus) as any
     if (platform) query = query.eq('platform', platform)
     if (storeId) query = query.in('store_id', [storeId, ''])
     const { data, error } = await query
     if (error) throw error
-    const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{ odoo_state: string; enabled?: boolean; store_id?: string }>
+    const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
+      odoo_state: string
+      enabled?: boolean
+      store_id?: string
+      invoice_action?: string
+      picking_action?: string
+    }>
     const hit = rows.find(r => (r.store_id || '') === storeId) ?? rows.find(r => !r.store_id) ?? rows[0]
-    if (!hit?.odoo_state) return null
-    return { odoo_state: hit.odoo_state, enabled: hit.enabled !== false }
+    if (!hit) return null
+    return {
+      odoo_state: hit.odoo_state || '',
+      enabled: hit.enabled !== false,
+      invoice_action: hit.invoice_action || '',
+      picking_action: hit.picking_action || '',
+    }
   } catch {
-    // Pre-migration DBs without the `enabled` column: fall back to a select
-    // without it and treat every row as enabled (backward compatible).
+    // Pre-migration DBs without invoice_action/picking_action or enabled:
+    // fall back to a select without them (backward compatible).
     try {
       let fallback = supabaseAdmin
         .from('order_status_mappings')
-        .select('odoo_state')
+        .select('odoo_state, enabled, store_id')
         .eq('workspace_id', workspaceId)
         .eq('zid_status', zidStatus) as any
       if (platform) fallback = fallback.eq('platform', platform)
-      const { data } = await fallback.maybeSingle()
-      if (!data?.odoo_state) return null
-      return { odoo_state: data.odoo_state, enabled: true }
+      if (storeId) fallback = fallback.in('store_id', [storeId, ''])
+      const { data, error } = await fallback
+      if (error) throw error
+      const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{ odoo_state: string; enabled?: boolean; store_id?: string }>
+      const hit = rows.find(r => (r.store_id || '') === storeId) ?? rows.find(r => !r.store_id) ?? rows[0]
+      if (!hit?.odoo_state) return null
+      return { odoo_state: hit.odoo_state, enabled: hit.enabled !== false, invoice_action: '', picking_action: '' }
     } catch {
-      return null
+      try {
+        let legacy = supabaseAdmin
+          .from('order_status_mappings')
+          .select('odoo_state')
+          .eq('workspace_id', workspaceId)
+          .eq('zid_status', zidStatus) as any
+        if (platform) legacy = legacy.eq('platform', platform)
+        const { data } = await legacy.maybeSingle()
+        if (!data?.odoo_state) return null
+        return { odoo_state: data.odoo_state, enabled: true, invoice_action: '', picking_action: '' }
+      } catch {
+        return null
+      }
     }
   }
 }
@@ -2671,11 +2703,220 @@ async function applyOrderStatusAction(
   }
 }
 
+// ──── Helper: apply stock picking action for a sales order ─────
+async function applyOrderPickingAction(
+  client: OdooClient,
+  orderId: number,
+  action: string,
+  zidStatus: string,
+): Promise<void> {
+  if (!action || action === 'none') return
+  try {
+    const orders = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['name', 'state', 'picking_ids'])
+    const order = orders?.[0]
+    if (!order) return
+
+    // If action is create or create_and_validate, ensure order is confirmed so picking exists
+    if (action === 'create' || action === 'create_and_validate') {
+      if (order.state === 'draft' || order.state === 'sent') {
+        try {
+          await client.execute('sale.order', 'action_confirm', [orderId])
+          console.info(`[SyncEngine] Confirmed sale.order #${orderId} to generate picking (status "${zidStatus}")`)
+        } catch (e: any) {
+          console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} for picking:`, e?.message || e)
+        }
+      }
+    }
+
+    if (action === 'create') {
+      console.info(`[SyncEngine] Picking created/ensured for sale.order #${orderId} (status "${zidStatus}")`)
+      return
+    }
+
+    if (action === 'validate' || action === 'create_and_validate') {
+      await processFullDelivery(client, 'sale.order', orderId)
+      console.info(`[SyncEngine] Validated stock picking for sale.order #${orderId} (status "${zidStatus}")`)
+      return
+    }
+
+    if (action === 'cancel') {
+      let pickingIds: number[] = Array.isArray(order?.picking_ids) ? order.picking_ids : []
+      if (pickingIds.length === 0 && order?.name) {
+        const pickings = await client.searchRead<any>('stock.picking', [
+          ['origin', '=', order.name],
+          ['state', 'not in', ['cancel', 'done']]
+        ], ['id'])
+        pickingIds = pickings.map(p => p.id)
+      }
+      for (const pId of pickingIds) {
+        try {
+          const [pRec] = await client.searchRead<any>('stock.picking', [['id', '=', pId]], ['state'])
+          if (pRec?.state && pRec.state !== 'cancel' && pRec.state !== 'done') {
+            await client.execute('stock.picking', 'action_cancel', [pId])
+            console.info(`[SyncEngine] Cancelled stock picking #${pId} for sale.order #${orderId}`)
+          }
+        } catch (pickErr: any) {
+          console.warn(`[SyncEngine] Failed to cancel picking #${pId}:`, pickErr?.message || pickErr)
+        }
+      }
+      return
+    }
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Picking action "${action}" failed for order #${orderId} (status "${zidStatus}"):`, err?.message || err)
+  }
+}
+
+// ──── Helper: apply invoice action for a sales order ─────
+async function applyOrderInvoiceAction(
+  client: OdooClient,
+  orderId: number,
+  action: string,
+  zidStatus: string,
+  workspaceId: string,
+  platform: 'zid' | 'salla' | 'shopify',
+  storeId: string,
+  zidEntityId: string,
+): Promise<void> {
+  if (!action || action === 'none') return
+  try {
+    const orders = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['name', 'state', 'invoice_ids'])
+    const order = orders?.[0]
+    if (!order) return
+
+    if (action === 'create' || action === 'create_and_post') {
+      // In Odoo, sale.order should be confirmed to invoice
+      if (order.state === 'draft' || order.state === 'sent') {
+        try {
+          await client.execute('sale.order', 'action_confirm', [orderId])
+          console.info(`[SyncEngine] Confirmed sale.order #${orderId} for invoice creation (status "${zidStatus}")`)
+        } catch (e: any) {
+          console.warn(`[SyncEngine] Failed to confirm sale.order #${orderId} before invoice:`, e?.message || e)
+        }
+      }
+
+      // Create invoice via modern or legacy method
+      try {
+        await client.execute('sale.order', '_create_invoices', [[orderId]])
+        console.info(`[SyncEngine] Invoice created via _create_invoices for sale.order #${orderId}`)
+      } catch (modernErr: any) {
+        try {
+          await client.execute('sale.order', 'action_invoice_create', [orderId])
+          console.info(`[SyncEngine] Invoice created via action_invoice_create for sale.order #${orderId}`)
+        } catch (legacyErr: any) {
+          console.warn(`[SyncEngine] Invoice creation skipped/failed for sale.order #${orderId}:`, legacyErr?.message || legacyErr)
+        }
+      }
+
+      // Re-read invoice_ids to link invoice entity
+      const [reloaded] = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['invoice_ids'])
+      const updatedInvoiceIds: number[] = Array.isArray(reloaded?.invoice_ids)
+        ? reloaded.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+        : []
+
+      if (updatedInvoiceIds.length > 0) {
+        const invoices = await client.searchRead<any>(
+          'account.move',
+          [['id', 'in', updatedInvoiceIds], ['move_type', '=', 'out_invoice']],
+          ['id', 'name', 'state'],
+          updatedInvoiceIds.length
+        )
+        const latest = (invoices || []).slice().sort((a: any, b: any) => Number(b.id) - Number(a.id))[0]
+        if (latest?.id && workspaceId) {
+          await upsertEntityLink(
+            {
+              workspaceId,
+              platform,
+              storeId: String(storeId),
+              odooModel: 'account.move',
+              storeEntityId: String(zidEntityId),
+            },
+            Number(latest.id)
+          ).catch(e => console.warn('[SyncEngine] Invoice entity link failed:', e))
+        }
+
+        if (action === 'create_and_post') {
+          // Post draft invoices
+          const draftInvoices = (invoices || []).filter((inv: any) => inv.state === 'draft')
+          for (const inv of draftInvoices) {
+            try {
+              await client.execute('account.move', 'action_post', [inv.id])
+              console.info(`[SyncEngine] Posted invoice #${inv.id} for sale.order #${orderId}`)
+            } catch (postErr: any) {
+              try {
+                await client.execute('account.move', 'post', [inv.id])
+                console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+              } catch (pErr2: any) {
+                console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr2?.message || pErr2)
+              }
+            }
+          }
+        }
+      }
+      return
+    }
+
+    if (action === 'post') {
+      const invoiceIds: number[] = Array.isArray(order.invoice_ids)
+        ? order.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+        : []
+      if (invoiceIds.length > 0) {
+        const invoicesToPost = await client.searchRead<any>(
+          'account.move',
+          [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice'], ['state', '=', 'draft']],
+          ['id']
+        )
+        for (const inv of invoicesToPost || []) {
+          try {
+            await client.execute('account.move', 'action_post', [inv.id])
+            console.info(`[SyncEngine] Posted draft invoice #${inv.id} for sale.order #${orderId}`)
+          } catch (postErr: any) {
+            try {
+              await client.execute('account.move', 'post', [inv.id])
+              console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
+            } catch (pErr2: any) {
+              console.warn(`[SyncEngine] Failed to post invoice #${inv.id}:`, pErr2?.message || pErr2)
+            }
+          }
+        }
+      }
+      return
+    }
+
+    if (action === 'cancel') {
+      const invoiceIds: number[] = Array.isArray(order.invoice_ids)
+        ? order.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
+        : []
+      if (invoiceIds.length > 0) {
+        const invoicesToCancel = await client.searchRead<any>(
+          'account.move',
+          [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice'], ['state', '!=', 'cancel']],
+          ['id', 'state']
+        )
+        for (const inv of invoicesToCancel || []) {
+          try {
+            await client.execute('account.move', 'button_cancel', [inv.id])
+            console.info(`[SyncEngine] Cancelled invoice #${inv.id} for sale.order #${orderId}`)
+          } catch (cancelErr: any) {
+            try {
+              await client.execute('account.move', 'action_cancel', [inv.id])
+            } catch {
+              await client.write('account.move', [inv.id], { state: 'cancel' }).catch(() => {})
+            }
+          }
+        }
+      }
+      return
+    }
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Invoice action "${action}" failed for order #${orderId} (status "${zidStatus}"):`, err?.message || err)
+  }
+}
+
 // ──── Helper: dispatch the configured status action after the record write ─────
 // Looks up the order_status_mappings row for the payload status:
 //   - no row      → nothing (legacy passive state write already applied upstream)
 //   - disabled    → Odoo fully untouched for this status
-//   - enabled     → real workflow transition via applyOrderStatusAction
+//   - enabled     → real workflow transition via applyOrderStatusAction, applyOrderPickingAction, applyOrderInvoiceAction
 async function maybeApplyOrderStatusAction(
   client: OdooClient,
   odooRecordId: number,
@@ -2718,7 +2959,31 @@ async function maybeApplyOrderStatusAction(
       console.info(`[SyncEngine] Status "${zidStatus}" mapping is DISABLED — Odoo untouched (#${odooRecordId})`)
       return
     }
-    await applyOrderStatusAction(client, odooRecordId, row.odoo_state, zidStatus)
+
+    // 2a. Order state action (quotation, confirm, done, cancel)
+    if (row.odoo_state) {
+      await applyOrderStatusAction(client, odooRecordId, row.odoo_state, zidStatus)
+    }
+
+    // 2b. Stock picking action (create, validate, create_and_validate, cancel)
+    if (row.picking_action) {
+      await applyOrderPickingAction(client, odooRecordId, row.picking_action, zidStatus)
+    }
+
+    // 2c. Invoice action (create, post, create_and_post, cancel)
+    if (row.invoice_action) {
+      const zidEntityId = String(zidData.id || (zidData as any).order_id || '')
+      await applyOrderInvoiceAction(
+        client,
+        odooRecordId,
+        row.invoice_action,
+        zidStatus,
+        workspaceId,
+        resolvedPlatform,
+        storeId,
+        zidEntityId
+      )
+    }
   } catch (err: any) {
     console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
   }
@@ -7210,84 +7475,7 @@ async function executeOdooOperation(params: {
       }
     }
 
-    // Auto-confirm: convert draft/sent order to a confirmed sales order (action_confirm)
-    const autoConfirm = (mergedSettings)?.order?.auto_confirm
-    if (odooModel === 'sale.order' && autoConfirm) {
-      try {
-        const recs = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['state'])
-        if (recs.length > 0 && (recs[0].state === 'draft' || recs[0].state === 'sent')) {
-          await client.execute(odooModel, 'action_confirm', [newId])
-          console.info(`[SyncEngine] ✅ Auto-confirmed order #${newId} (auto_confirm enabled)`)
-        }
-      } catch (confirmErr: any) {
-        console.warn(`[SyncEngine] Auto-confirm failed for ${odooModel} #${newId}:`, confirmErr?.message || confirmErr)
-      }
-    }
 
-    // Auto-invoice: confirm + create invoice if enabled
-    const autoInvoice = (mergedSettings)?.order?.auto_invoice
-    if (odooModel === 'sale.order' && autoInvoice) {
-      try {
-        const recs = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['state'])
-        if (recs.length > 0 && (recs[0].state === 'draft' || recs[0].state === 'sent')) {
-          await client.execute(odooModel, 'action_confirm', [newId])
-          console.info(`[SyncEngine] Confirmed order #${newId} for auto-invoice`)
-        }
-        try {
-          await client.execute(odooModel, '_create_invoices', [[newId]])
-          console.info(`[SyncEngine] ? Invoice created via _create_invoices for ${odooModel} #${newId}`)
-        } catch (modernErr: any) {
-          console.info(`[SyncEngine] _create_invoices attempt failed, trying action_invoice_create fallback:`, modernErr?.message || modernErr)
-          await client.execute(odooModel, 'action_invoice_create', [newId])
-          console.info(`[SyncEngine] ? Invoice created via action_invoice_create for ${odooModel} #${newId}`)
-        }
-
-        // Persist the invoice link. `_create_invoices`' return value is not a
-        // reliable shape across Odoo 16-19 (recordset marshalling differs), so
-        // the id is read back from `sale.order.invoice_ids` - version-safe and
-        // independent of which creation path ran. Without this link a later
-        // return cannot find the invoice to credit (AGENTS.md: the invoice id
-        // used to be discarded entirely).
-        if (mapping.workspace_id) {
-          try {
-            const [orderRow] = await client.searchRead<any>(odooModel, [['id', '=', newId]], ['invoice_ids'])
-            const invoiceIds: number[] = Array.isArray(orderRow?.invoice_ids)
-              ? orderRow.invoice_ids.filter((v: unknown) => Number.isInteger(Number(v)) && Number(v) > 0)
-              : []
-            if (invoiceIds.length > 0) {
-              const invoices = await client.searchRead<any>(
-                'account.move',
-                [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice']],
-                ['id', 'name', 'state'],
-                invoiceIds.length
-              )
-              const latest = (invoices || [])
-                .slice()
-                .sort((a: any, b: any) => Number(b.id) - Number(a.id))[0]
-              if (latest?.id) {
-                const linked = await upsertEntityLink(
-                  {
-                    workspaceId: mapping.workspace_id,
-                    platform: execPlatform,
-                    storeId: String(storeId),
-                    odooModel: 'account.move',
-                    storeEntityId: String(zidEntityId),
-                  },
-                  Number(latest.id)
-                )
-                console.info(
-                  `[SyncEngine] ${linked ? '?' : '?'} Invoice link order ${zidEntityId} -> account.move #${latest.id} (${latest.name || 'draft'}, ${latest.state || 'n/a'})`
-                )
-              }
-            }
-          } catch (linkErr: any) {
-            console.warn(`[SyncEngine] Invoice link failed for ${odooModel} #${newId}:`, linkErr?.message || linkErr)
-          }
-        }
-      } catch (invErr: any) {
-        console.warn(`[SyncEngine] Auto-invoice failed for ${odooModel} #${newId}:`, invErr?.message || invErr)
-      }
-    }
 
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: newId, status: 'success', payload: zidData, trigger_type: triggerType, platform: execPlatform })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: newId }

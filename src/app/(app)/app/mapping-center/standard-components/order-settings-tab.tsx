@@ -107,12 +107,6 @@ interface OrderSettingsTabProps {
   setOrderLinkCompany: (val: boolean) => void
   companyOptions: { value: string; label: string }[]
   isLoadingCompanies: boolean
-  orderAutoConfirm?: boolean
-  setOrderAutoConfirm?: (val: boolean) => void
-  orderAutoInvoice?: boolean
-  setOrderAutoInvoice?: (val: boolean) => void
-  orderPartialFulfillment?: boolean
-  setOrderPartialFulfillment?: (val: boolean) => void
   // Store returns
   orderReturnsMode: 'nothing' | 'negative_so' | 'stock_return_credit_note'
   setOrderReturnsMode: (val: 'nothing' | 'negative_so' | 'stock_return_credit_note') => void
@@ -263,12 +257,6 @@ export function OrderSettingsTab({
   setOrderLinkCompany,
   companyOptions,
   isLoadingCompanies,
-  orderAutoConfirm,
-  setOrderAutoConfirm,
-  orderAutoInvoice,
-  setOrderAutoInvoice,
-  orderPartialFulfillment,
-  setOrderPartialFulfillment,
   orderReturnsMode,
   setOrderReturnsMode,
   orderReturnsCreditNote,

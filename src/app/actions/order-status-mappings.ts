@@ -75,7 +75,7 @@ export async function saveOrderStatusMappings(
           (upsertError as any).code === '42703')
       ) {
         console.warn('[OrderStatusMappings] Columns picking_action/invoice_action not found in DB, falling back to basic columns')
-        const fallbackRows = rows.map(({ picking_action, invoice_action, ...rest }) => rest)
+        const fallbackRows = rows.map(({ picking_action: _p, invoice_action: _i, ...rest }) => rest)
         const res = await supabase
           .from('order_status_mappings')
           .upsert(fallbackRows, {
