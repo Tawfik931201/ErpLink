@@ -354,9 +354,9 @@ export function resolveZidStatus(zidData: Record<string, unknown>): string {
     // rows match instead of receiving raw Arabic text.
     'بإنتظار المراجعة': 'under_review',
     'بانتظار المراجعة': 'under_review',
-    'مكتمل': 'completed',
-    'تم الإنجاز': 'completed',
-    'تم الانجاز': 'completed',
+    'مكتمل': 'delivered',
+    'تم الإنجاز': 'delivered',
+    'تم الانجاز': 'delivered',
     'تم التنفيذ': 'completed',
   }
   return ARABIC_TO_KEY[statusStr] || statusStr

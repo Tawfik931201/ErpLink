@@ -9,7 +9,6 @@ export const DEFAULT_ZID_ORDER_STATUSES: ZidStatusOption[] = [
   { key: 'ready', label: 'جاهز للاستلام (Ready)' },
   { key: 'indelivery', label: 'جاري التوصيل (In Delivery)' },
   { key: 'delivered', label: 'تم التوصيل (Delivered)' },
-  { key: 'completed', label: 'مكتمل (Completed)' },
   { key: 'canceled', label: 'ملغي (Canceled)' },
   { key: 'cancelled', label: 'ملغي (Cancelled)' },
   { key: 'reversed', label: 'مرتجع (Reversed)' },

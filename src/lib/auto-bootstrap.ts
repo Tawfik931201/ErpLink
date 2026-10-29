@@ -21,7 +21,6 @@ export const SMART_DEFAULT_ORDER_STATUSES: Record<string, Record<string, string>
     ready: 'sale',
     indelivery: 'sale',
     delivered: 'sale',
-    completed: 'sale',
     canceled: 'cancel',
     reversed: 'cancel',
     partially_reversed: 'cancel',
