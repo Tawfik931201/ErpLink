@@ -97,7 +97,7 @@ describe('Negative Sale Order Replication and Standard Mapping', () => {
     expect(lineVals.product_uom_qty).toBe(-1)
     expect(lineVals.price_unit).toBe(150)
     expect(lineVals.discount).toBe(10)
-    expect(lineVals.product_uom).toBe(1)
+    expect(lineVals.product_uom_id ?? lineVals.product_uom).toBe(1)
     expect(lineVals.tax_ids).toEqual([[6, 0, [15]]])
     expect(lineVals.analytic_distribution).toEqual({ '12': 60, '14': 40 })
   })

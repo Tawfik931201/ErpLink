@@ -174,6 +174,7 @@ export async function readSaleOrder(
   if (lineIds.length > 0) {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
     const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+    const uomField = majorVersion >= 18 ? 'product_uom_id' : 'product_uom'
     const fullLineFields = [
       'id',
       'product_id',
@@ -182,7 +183,7 @@ export async function readSaleOrder(
       'qty_delivered',
       'price_unit',
       'discount',
-      'product_uom',
+      uomField,
       taxField,
       ...(majorVersion >= 16 ? ['analytic_distribution'] : ['analytic_account_id', 'analytic_tag_ids']),
     ]
@@ -196,18 +197,30 @@ export async function readSaleOrder(
       )
     } catch {
       try {
+        const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+        const altUomField = uomField === 'product_uom_id' ? 'product_uom' : 'product_uom_id'
         rows = await client.searchRead<any>(
           'sale.order.line',
           [['id', 'in', lineIds]],
-          ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', taxField],
+          [
+            'id',
+            'product_id',
+            'name',
+            'product_uom_qty',
+            'qty_delivered',
+            'price_unit',
+            'discount',
+            altUomField,
+            altTaxField,
+            ...(majorVersion >= 16 ? ['analytic_distribution'] : ['analytic_account_id', 'analytic_tag_ids']),
+          ],
           lineIds.length
         )
       } catch {
-        const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
         rows = await client.searchRead<any>(
           'sale.order.line',
           [['id', 'in', lineIds]],
-          ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', altTaxField],
+          ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', 'discount'],
           lineIds.length
         )
       }
@@ -224,7 +237,7 @@ export async function readSaleOrder(
         priceUnit: toNumber(row.price_unit),
         taxIds: many2manyIds(row[taxField] ?? row.tax_ids ?? row.tax_id),
         discount: toNumber(row.discount),
-        productUomId: many2oneId(row.product_uom),
+        productUomId: many2oneId(row[uomField] ?? row.product_uom_id ?? row.product_uom),
         analyticDistribution: parseAnalyticDistribution(row.analytic_distribution),
         analyticAccountId: many2oneId(row.analytic_account_id),
         analyticTagIds: many2manyIds(row.analytic_tag_ids),
@@ -549,7 +562,11 @@ export async function createNegativeSaleOrder(
       lineVals.discount = line.discount
     }
     if (line.productUomId) {
-      lineVals.product_uom = line.productUomId
+      if (majorVersion >= 18) {
+        lineVals.product_uom_id = line.productUomId
+      } else {
+        lineVals.product_uom = line.productUomId
+      }
     }
 
     // Taxes: replicate from original line if present, otherwise fallback to standard mapping default taxes
