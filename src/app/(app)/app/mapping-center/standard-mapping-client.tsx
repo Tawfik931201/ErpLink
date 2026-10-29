@@ -276,18 +276,25 @@ export default function StandardMappingClient({
 
 
 
+  // Shipping & Discount Line items
+  const [orderAddShipping, setOrderAddShipping] = useState(false)
+  const [orderShippingProductId, setOrderShippingProductId] = useState('')
+  const [orderShippingProductSku, setOrderShippingProductSku] = useState('')
+  const [orderAddCod, setOrderAddCod] = useState(false)
+  const [orderCodProductId, setOrderCodProductId] = useState('')
+  const [orderCodProductSku, setOrderCodProductSku] = useState('')
+  const [orderCodAmount, setOrderCodAmount] = useState('')
+  const [orderAddDiscount, setOrderAddDiscount] = useState(false)
+  const [orderDiscountProductId, setOrderDiscountProductId] = useState('')
+  const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
+  const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
+
   // VAT (ضريبة القيمة المضافة)
   const [orderEnableVat, setOrderEnableVat] = useState(false)
   const [orderVatSaudiTaxId, setOrderVatSaudiTaxId] = useState('')
   const [orderVatNonSaudiTaxId, setOrderVatNonSaudiTaxId] = useState('')
   const [orderTaxOptions, setOrderTaxOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
-
-  // Discount lines
-  const [orderAddDiscount, setOrderAddDiscount] = useState(false)
-  const [orderDiscountProductId, setOrderDiscountProductId] = useState('')
-  const [orderDiscountProductSku, setOrderDiscountProductSku] = useState('')
-  const [orderDiscountMode, setOrderDiscountMode] = useState('fixed')
 
   // Status mapping
   const [orderStateMapping, setOrderStateMapping] = useState<Record<string, { state: string; enabled: boolean }>>({})
@@ -714,11 +721,18 @@ export default function StandardMappingClient({
           setOrderPricelistId('')
           setOrderPaymentTermId('')
           setOrderAutoConfirm(false)
-          setOrderEnableVat(false)
+          setOrderAddShipping(false)
+          setOrderShippingProductId('')
+          setOrderShippingProductSku('')
+          setOrderAddCod(false)
+          setOrderCodProductId('')
+          setOrderCodProductSku('')
+          setOrderCodAmount('')
           setOrderAddDiscount(false)
           setOrderDiscountProductId('')
           setOrderDiscountProductSku('')
           setOrderDiscountMode('fixed')
+          setOrderEnableVat(false)
           setOrderVatSaudiTaxId('')
           setOrderVatNonSaudiTaxId('')
           setOrderAutoInvoice(false)
@@ -866,6 +880,13 @@ export default function StandardMappingClient({
           })
         )
 
+        setOrderAddShipping(s.add_shipping_as_line || false)
+        setOrderShippingProductId(s.shipping_product_id ? String(s.shipping_product_id) : '')
+        setOrderShippingProductSku(s.shipping_product_sku || '')
+        setOrderAddCod(s.add_cod_as_line || false)
+        setOrderCodProductId(s.cod_product_id ? String(s.cod_product_id) : '')
+        setOrderCodProductSku(s.cod_product_sku || '')
+        setOrderCodAmount(s.cod_amount ? String(s.cod_amount) : '')
         setOrderAddDiscount(s.add_discount_as_line || false)
         setOrderDiscountProductId(s.discount_product_id ? String(s.discount_product_id) : '')
         setOrderDiscountProductSku(s.discount_product_sku || '')
@@ -1576,16 +1597,20 @@ export default function StandardMappingClient({
         warnings.push(lang === 'ar' ? 'قائمة الأسعار الافتراضية غير محددة — قد يفشل إنشاء الطلب في أودو' : 'Default pricelist not set — order creation may fail in Odoo')
       }
     }
-
+    if (orderAddShipping && !orderShippingProductId && !orderShippingProductSku) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل الشحن كبند لكن لم يتم تحديد منتج الشحن أو SKU' : 'Shipping as line item is enabled but no shipping product or SKU set')
+    }
+    if (orderAddCod && !orderCodProductId && !orderCodProductSku) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل رسوم الدفع عند الاستلام لكن لم يتم تحديد المنتج أو SKU' : 'COD fee line is enabled but no COD product or SKU set')
+    }
+    if (orderAddDiscount && !orderDiscountProductId && !orderDiscountProductSku) {
+      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled but no discount product or SKU set')
+    }
     if (orderCustomerFallbackPolicy === 'default_customer' && !orderDefaultCustomerId) {
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد عميل افتراضي لكن لم يتم تحديد العميل' : 'Default customer policy is selected but no customer selected')
     }
     if (orderProductFallbackPolicy === 'default_product' && !orderDefaultProductId) {
       warnings.push(lang === 'ar' ? 'تم اختيار اعتماد منتج افتراضي لكن لم يتم تحديد المنتج' : 'Default product policy is selected but no product selected')
-    }
-
-    if (orderAddDiscount && orderDiscountMode === 'fixed' && !orderDiscountProductId && !orderDiscountProductSku) {
-      warnings.push(lang === 'ar' ? 'تم تفعيل الخصم كبند بقيمة ثابتة لكن لم يتم تحديد منتج الخصم أو SKU' : 'Discount as line item is enabled with fixed value but no discount product or SKU set')
     }
 
     // Drop half-filled analytic rows instead of persisting them: an empty
@@ -1641,14 +1666,20 @@ export default function StandardMappingClient({
       default_customer_id: orderDefaultCustomerId ? Number(orderDefaultCustomerId) : null,
       product_fallback_policy: orderProductFallbackPolicy,
       default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
-
-      enable_vat: orderEnableVat,
-      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
-      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+      add_shipping_as_line: orderAddShipping,
+      shipping_product_id: orderShippingProductId ? Number(orderShippingProductId) : null,
+      shipping_product_sku: orderShippingProductSku,
+      add_cod_as_line: orderAddCod,
+      cod_product_id: orderCodProductId ? Number(orderCodProductId) : null,
+      cod_product_sku: orderCodProductSku,
+      cod_amount: orderCodAmount ? Number(orderCodAmount) : null,
       add_discount_as_line: orderAddDiscount,
       discount_product_id: orderDiscountProductId ? Number(orderDiscountProductId) : null,
       discount_product_sku: orderDiscountProductSku,
       discount_mode: orderDiscountMode,
+      enable_vat: orderEnableVat,
+      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
+      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
       update_custom_status_field: orderUpdateCustomStatus,
       order_status_custom_field: orderStatusCustomField,
       order: {
@@ -1726,7 +1757,8 @@ export default function StandardMappingClient({
     orderReturnsMode, orderReturnsCreditNote, orderReturnsJournalId, orderReturnsFallback, orderReturnsReason,
     orderAnalyticEnabled, orderAnalyticRules,
     orderCustomerFallbackPolicy, orderDefaultCustomerId, orderProductFallbackPolicy, orderDefaultProductId,
-
+    orderAddShipping, orderShippingProductId, orderShippingProductSku,
+    orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
 
     orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
@@ -2250,6 +2282,20 @@ export default function StandardMappingClient({
                   setOrderVatNonSaudiTaxId={setOrderVatNonSaudiTaxId}
                   orderTaxOptions={orderTaxOptions}
                   isLoadingOrderTaxes={isLoadingOrderTaxes}
+                  orderAddShipping={orderAddShipping}
+                  setOrderAddShipping={setOrderAddShipping}
+                  orderShippingProductId={orderShippingProductId}
+                  setOrderShippingProductId={setOrderShippingProductId}
+                  orderShippingProductSku={orderShippingProductSku}
+                  setOrderShippingProductSku={setOrderShippingProductSku}
+                  orderAddCod={orderAddCod}
+                  setOrderAddCod={setOrderAddCod}
+                  orderCodProductId={orderCodProductId}
+                  setOrderCodProductId={setOrderCodProductId}
+                  orderCodProductSku={orderCodProductSku}
+                  setOrderCodProductSku={setOrderCodProductSku}
+                  orderCodAmount={orderCodAmount}
+                  setOrderCodAmount={setOrderCodAmount}
                   orderAddDiscount={orderAddDiscount}
                   setOrderAddDiscount={setOrderAddDiscount}
                   orderDiscountProductId={orderDiscountProductId}

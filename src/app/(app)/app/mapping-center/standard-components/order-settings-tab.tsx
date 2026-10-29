@@ -20,8 +20,8 @@ import {
   Save,
   Sliders,
   TableProperties,
-  Tag,
   Trash2,
+  Truck,
   UserCheck,
   UserPlus,
   Users,
@@ -158,7 +158,21 @@ interface OrderSettingsTabProps {
   setOrderVatNonSaudiTaxId: (val: string) => void
   orderTaxOptions: { value: string; label: string }[]
   isLoadingOrderTaxes: boolean
-  // Discount lines
+  // Shipping & Discount & COD lines
+  orderAddShipping: boolean
+  setOrderAddShipping: (val: boolean) => void
+  orderShippingProductId: string
+  setOrderShippingProductId: (val: string) => void
+  orderShippingProductSku: string
+  setOrderShippingProductSku: (val: string) => void
+  orderAddCod: boolean
+  setOrderAddCod: (val: boolean) => void
+  orderCodProductId: string
+  setOrderCodProductId: (val: string) => void
+  orderCodProductSku: string
+  setOrderCodProductSku: (val: string) => void
+  orderCodAmount: string
+  setOrderCodAmount: (val: string) => void
   orderAddDiscount: boolean
   setOrderAddDiscount: (val: boolean) => void
   orderDiscountProductId: string
@@ -285,6 +299,20 @@ export function OrderSettingsTab({
   setOrderVatNonSaudiTaxId,
   orderTaxOptions,
   isLoadingOrderTaxes,
+  orderAddShipping,
+  setOrderAddShipping,
+  orderShippingProductId,
+  setOrderShippingProductId,
+  orderShippingProductSku,
+  setOrderShippingProductSku,
+  orderAddCod,
+  setOrderAddCod,
+  orderCodProductId,
+  setOrderCodProductId,
+  orderCodProductSku,
+  setOrderCodProductSku,
+  orderCodAmount,
+  setOrderCodAmount,
   orderAddDiscount,
   setOrderAddDiscount,
   orderDiscountProductId,
@@ -1123,74 +1151,165 @@ export function OrderSettingsTab({
         </div>
       </SettingCard>
 
-      {/* Discount Line Items */}
+      {/* 9. Shipping, COD & Discount Line Items */}
       <SettingCard
-        icon={<Tag className="h-4 w-4 text-orange-600" />}
-        title={lang === 'ar' ? 'خصم الطلب (Discount Line)' : 'Order Discount'}
+        icon={<Truck className="h-4 w-4 text-sky-600" />}
+        title={lang === 'ar' ? 'بنود الشحن والدفع عند الاستلام والخصومات' : 'Shipping, COD & Discounts'}
         description={
           lang === 'ar'
-            ? 'تسجيل خصم الطلب في أودو كسطر مستقل أو كنسبة مئوية على مستوى السطر'
-            : 'Record order discount in Odoo as a separate line or as a percentage at line level'
+            ? 'تحديد منتجات أودو المستخدمة لتمثيل رسوم الشحن وخدمة الدفع عند الاستلام وكوبونات الخصم'
+            : 'Configure dedicated Odoo products to represent delivery fees, COD charges, and discounts'
         }
       >
-        <div className="space-y-3">
-          {/* 1. Discount Method — shown FIRST */}
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-foreground/80">
-              {lang === 'ar' ? 'طريقة الخصم' : 'Discount Method'}
-            </label>
-            <select
-              className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-              value={orderDiscountMode}
-              onChange={(e) => setOrderDiscountMode(e.target.value)}
-            >
-              <option value="fixed">{lang === 'ar' ? 'قيمة ثابتة سالبة' : 'Negative Fixed Value'}</option>
-              <option value="percent">{lang === 'ar' ? 'نسبة مئوية' : 'Percentage'}</option>
-            </select>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Shipping */}
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
+            <SettingToggle
+              checked={orderAddShipping}
+              onChange={setOrderAddShipping}
+              label={lang === 'ar' ? 'إضافة الشحن كبند مستقل' : 'Add Shipping Line'}
+              description={lang === 'ar' ? 'تسجيل رسوم الشحن كبند في أمر البيع' : 'Append delivery fee as order line'}
+            />
+
+            {orderAddShipping && (
+              <div className="space-y-3 pt-2 border-t border-border/60">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'منتج الشحن في أودو' : 'Odoo Shipping Product'}
+                  </label>
+                  <SearchableSelect
+                    options={productOptions}
+                    value={orderShippingProductId}
+                    onChange={setOrderShippingProductId}
+                    placeholder={lang === 'ar' ? '— اختر منتج الشحن —' : '— Select Shipping Product —'}
+                    disabled={isLoadingProducts}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'الرمز المرجعي للشحن (SKU Fallback)' : 'Shipping SKU Fallback'}
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    value={orderShippingProductSku}
+                    onChange={(e) => setOrderShippingProductSku(e.target.value)}
+                    placeholder="shipping-product"
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* 2. Add Discount Line toggle */}
-          <SettingToggle
-            checked={orderAddDiscount}
-            onChange={setOrderAddDiscount}
-            label={lang === 'ar' ? 'إضافة الخصم كبند مستقل' : 'Add Discount Line'}
-            description={
-              lang === 'ar'
-                ? 'تسجيل الخصم كبند منفصل في أمر البيع'
-                : 'Append discount as separate order line'
-            }
-          />
+          {/* COD */}
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
+            <SettingToggle
+              checked={orderAddCod}
+              onChange={setOrderAddCod}
+              label={lang === 'ar' ? 'إضافة رسوم COD كبند' : 'Add COD Fee Line'}
+              description={lang === 'ar' ? 'رسوم الدفع عند الاستلام' : 'Cash on delivery fee line'}
+            />
 
-          {/* 3. Odoo Discount Product + SKU Fallback — ONLY for fixed mode */}
-          {orderDiscountMode === 'fixed' && orderAddDiscount && (
-            <div className="space-y-3 pt-2 border-t border-border/60">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-foreground/80">
-                  {lang === 'ar' ? 'منتج الخصم في أودو' : 'Odoo Discount Product'}
-                </label>
-                <SearchableSelect
-                  options={productOptions}
-                  value={orderDiscountProductId}
-                  onChange={setOrderDiscountProductId}
-                  placeholder={lang === 'ar' ? '— اختر منتج الخصم —' : '— Select Discount Product —'}
-                  disabled={isLoadingProducts}
-                />
-              </div>
+            {orderAddCod && (
+              <div className="space-y-3 pt-2 border-t border-border/60">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'منتج رسوم COD في أودو' : 'Odoo COD Product'}
+                  </label>
+                  <SearchableSelect
+                    options={productOptions}
+                    value={orderCodProductId}
+                    onChange={setOrderCodProductId}
+                    placeholder={lang === 'ar' ? '— اختر منتج COD —' : '— Select COD Product —'}
+                    disabled={isLoadingProducts}
+                  />
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-foreground/80">
-                  {lang === 'ar' ? 'الرمز المرجعي (SKU Fallback)' : 'Discount SKU Fallback'}
-                </label>
-                <input
-                  type="text"
-                  className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-                  value={orderDiscountProductSku}
-                  onChange={(e) => setOrderDiscountProductSku(e.target.value)}
-                  placeholder="discount-product"
-                />
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'الرمز المرجعي (SKU Fallback)' : 'COD SKU Fallback'}
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    value={orderCodProductSku}
+                    onChange={(e) => setOrderCodProductSku(e.target.value)}
+                    placeholder="cod-fee-product"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'مبلغ احتياطي ثابت' : 'Fallback Amount'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    value={orderCodAmount}
+                    onChange={(e) => setOrderCodAmount(e.target.value)}
+                    placeholder="10"
+                  />
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+
+          {/* Discount */}
+          <div className="rounded-none border border-border/80 bg-background/60 p-4 space-y-3">
+            <SettingToggle
+              checked={orderAddDiscount}
+              onChange={setOrderAddDiscount}
+              label={lang === 'ar' ? 'إضافة الخصم كبند مستقل' : 'Add Discount Line'}
+              description={lang === 'ar' ? 'كوبونات وخصومات الطلب' : 'Coupons and order discounts'}
+            />
+
+            {orderAddDiscount && (
+              <div className="space-y-3 pt-2 border-t border-border/60">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'منتج الخصم في أودو' : 'Odoo Discount Product'}
+                  </label>
+                  <SearchableSelect
+                    options={productOptions}
+                    value={orderDiscountProductId}
+                    onChange={setOrderDiscountProductId}
+                    placeholder={lang === 'ar' ? '— اختر منتج الخصم —' : '— Select Discount Product —'}
+                    disabled={isLoadingProducts}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'الرمز المرجعي (SKU Fallback)' : 'Discount SKU Fallback'}
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    value={orderDiscountProductSku}
+                    onChange={(e) => setOrderDiscountProductSku(e.target.value)}
+                    placeholder="discount-product"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'طريقة الخصم' : 'Discount Mode'}
+                  </label>
+                  <select
+                    className="w-full h-9 px-3 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
+                    value={orderDiscountMode}
+                    onChange={(e) => setOrderDiscountMode(e.target.value)}
+                  >
+                    <option value="fixed">{lang === 'ar' ? 'قيمة ثابتة سالبة' : 'Negative Fixed Value'}</option>
+                    <option value="percent">{lang === 'ar' ? 'نسبة مئوية' : 'Percentage'}</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </SettingCard>
 
