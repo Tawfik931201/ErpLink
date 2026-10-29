@@ -2481,6 +2481,14 @@ async function safeWriteOdooRecord(
       }
     }
 
+    // If error is due to modifying pricelist on a confirmed order in Odoo, prune pricelist_id and retry
+    if (/cannot change the pricelist/i.test(String(err?.message || '')) && 'pricelist_id' in values) {
+      console.warn(`[SyncEngine] ⚠️ Pruning pricelist_id from ${model} #${id} write and retrying: ${err.message}`)
+      const cleanValues = { ...values }
+      delete cleanValues.pricelist_id
+      return await safeWriteOdooRecord(client, model, id, cleanValues, _fallbackValues)
+    }
+
     const settingsKeys = [
       'property_account_income_categ_id', 'property_account_expense_categ_id',
       'property_stock_valuation_account_id', 'property_stock_journal_id',
@@ -4455,6 +4463,19 @@ async function processFixedMappingFallback(
   } catch (err: any) {
     const errMsg = err?.message ?? String(err)
     console.error(`[FixedMapping] ❌ Failed to ${odooOperation} ${odooModel}:`, errMsg)
+    await logSync({
+      workspace_id: workspaceId || virtualMapping.workspace_id,
+      field_mapping_id: virtualMapping.id,
+      event,
+      store_id: storeIdStr,
+      zid_entity_id: String(zidData.id ?? zidData.category_id ?? zidData.product_id ?? zidData.customer_id ?? zidData.order_id ?? ''),
+      odoo_model: odooModel,
+      status: 'failed',
+      error_message: errMsg,
+      payload: zidData,
+      trigger_type: 'automatic',
+      platform: platform,
+    }).catch(() => {})
     return {
       mappingId: virtualMapping.id,
       mappingName: virtualMapping.name,
@@ -6960,7 +6981,7 @@ async function executeOdooOperation(params: {
         console.info(`[SyncEngine] Using default warehouse_id=${orderSettings.default_warehouse_id}`)
       }
       // Apply default pricelist from settings if not already set
-      if (orderSettings.default_pricelist_id && !effectiveOdooValues.pricelist_id) {
+      if (odooOperation === 'create' && orderSettings.default_pricelist_id && !effectiveOdooValues.pricelist_id) {
         effectiveOdooValues.pricelist_id = orderSettings.default_pricelist_id
       }
       // Apply default payment term from settings if not already set
@@ -7148,6 +7169,7 @@ async function executeOdooOperation(params: {
       // Mirror Zid lines into the existing order (replace, never append → no duplicates)
       if (odooModel === 'sale.order') {
         await normalizeOrderLinesForUpdate(client, duplicateId, zidData, effectiveOdooValues)
+        delete effectiveOdooValues.pricelist_id
       }
       const ok = await safeWriteOdooRecord(client, odooModel, duplicateId, effectiveOdooValues, odooValues)
       if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${duplicateId}`)
@@ -7298,6 +7320,7 @@ async function executeOdooOperation(params: {
     // Mirror Zid lines into the existing order (replace, never append → no duplicates)
     if (odooModel === 'sale.order') {
       await normalizeOrderLinesForUpdate(client, existingId, zidData, effectiveOdooValues)
+      delete effectiveOdooValues.pricelist_id
     }
     const ok = await safeWriteOdooRecord(client, odooModel, existingId, effectiveOdooValues, odooValues)
     if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${existingId}`)

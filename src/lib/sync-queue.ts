@@ -856,7 +856,8 @@ export interface WorkspaceDrainResult {
 
 export async function processWorkspaceQueue(
   workspaceId: string,
-  maxItems = 25
+  maxItems = 25,
+  forceImmediate = false
 ): Promise<WorkspaceDrainResult> {
   const empty: WorkspaceDrainResult = { claimed: 0, processed: 0, succeeded: 0, retried: 0 }
   if (!workspaceId) return empty
@@ -869,12 +870,17 @@ export async function processWorkspaceQueue(
 
   let items: QueueItem[] = []
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('sync_queue')
       .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
       .eq('workspace_id', workspaceId)
       .not('next_retry_at', 'is', null)
-      .lte('next_retry_at', nowIso)
+
+    if (!forceImmediate) {
+      query = query.lte('next_retry_at', nowIso)
+    }
+
+    const { data, error } = await query
       .order('next_retry_at', { ascending: true })
       .limit(limit)
     if (error) {
@@ -895,13 +901,17 @@ export async function processWorkspaceQueue(
   for (const item of items) {
     try {
       const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
-      const { data: locked } = await supabase
+      let lockQuery = supabase
         .from('sync_queue')
         .update({ next_retry_at: leaseUntil })
         .eq('id', item.id)
         .not('next_retry_at', 'is', null)
-        .lte('next_retry_at', new Date().toISOString())
-        .select('id')
+
+      if (!forceImmediate) {
+        lockQuery = lockQuery.lte('next_retry_at', new Date().toISOString())
+      }
+
+      const { data: locked } = await lockQuery.select('id')
       if (locked && locked.length > 0) claimed.push(item)
     } catch {
       // فشل الحجز غير قاتل — تخطَّ هذا الصف.

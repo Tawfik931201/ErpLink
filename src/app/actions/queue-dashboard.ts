@@ -235,7 +235,7 @@ export async function sendNowWorkspace() {
     if (!workspaceId) return authError()
 
     const { processWorkspaceQueue } = await import('@/lib/sync-queue')
-    const result = await processWorkspaceQueue(workspaceId, 25)
+    const result = await processWorkspaceQueue(workspaceId, 25, true)
     revalidatePath('/app/queue')
     return { success: true, ...result }
   } catch (err: any) {

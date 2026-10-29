@@ -99,11 +99,19 @@ export default function QueueClient() {
     const res = await sendNowWorkspace()
     setSending(false)
     if (res.success && 'processed' in res) {
-      setNotice(
-        ar
-          ? `تم: عولج ${res.processed} — نجح ${res.succeeded} وأُعيدت جدولة ${res.retried}.`
-          : `Done: processed ${res.processed} — ${res.succeeded} succeeded, ${res.retried} rescheduled.`
-      )
+      if (res.processed === 0 && (overview?.frozen ?? 0) > 0) {
+        setNotice(
+          ar
+            ? `لا توجد طلبات معلقة (لديك ${overview?.frozen} طلبات في قسم "مجمدة" — اضغط زر "إعادة تشغيل المجمد" لإعادتها للطابور).`
+            : `No pending items (you have ${overview?.frozen} items in "Frozen" — click "Retry frozen" to revive them).`
+        )
+      } else {
+        setNotice(
+          ar
+            ? `تم: عولج ${res.processed} — نجح ${res.succeeded} وأُعيدت جدولة ${res.retried}.`
+            : `Done: processed ${res.processed} — ${res.succeeded} succeeded, ${res.retried} rescheduled.`
+        )
+      }
       load()
     } else {
       setNotice(res.error || '')
