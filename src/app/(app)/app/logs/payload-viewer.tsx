@@ -86,8 +86,8 @@ function renderStatusPill(status: string) {
   )
 }
 
-/** Single Primitive Field Card */
-function FieldCard({
+/** Single Field item rendered like top header InfoField (no surrounding card box) */
+function FieldItem({
   keyName,
   value,
   lang,
@@ -100,16 +100,18 @@ function FieldCard({
 }) {
   const ar = lang === 'ar'
   const label = humanizeKey(keyName)
+  const [copied, setCopied] = useState(false)
 
   let displayNode: React.ReactNode = null
+  let isMono = false
 
   if (value === null || value === undefined || value === '') {
-    displayNode = <span className="text-muted-foreground/50">—</span>
+    displayNode = <span className="text-muted-foreground/40">—</span>
   } else if (typeof value === 'boolean') {
     displayNode = (
       <span
         className={cn(
-          'inline-flex items-center rounded-sm border px-2 py-0.5 text-[10px] font-bold',
+          'inline-flex items-center rounded-sm border px-1.5 py-0.2 text-[10px] font-bold',
           value
             ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
             : 'border-muted-foreground/20 bg-muted text-muted-foreground'
@@ -119,9 +121,10 @@ function FieldCard({
       </span>
     )
   } else if (typeof value === 'string' && isIsoDateString(value)) {
+    isMono = true
     const d = new Date(value)
     displayNode = (
-      <span className="font-mono text-xs text-foreground" title={value}>
+      <span title={value}>
         {d.toLocaleString(ar ? 'ar-EG' : 'en-US', {
           year: 'numeric',
           month: 'short',
@@ -133,7 +136,7 @@ function FieldCard({
     )
   } else if (typeof value === 'string' && isImageUrl(value)) {
     displayNode = (
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         <a
           href={value}
           target="_blank"
@@ -141,13 +144,13 @@ function FieldCard({
           className="group relative inline-block overflow-hidden rounded border border-border"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={value} alt={label} className="h-8 w-8 object-cover transition-transform group-hover:scale-110" />
+          <img src={value} alt={label} className="h-6 w-6 object-cover" />
         </a>
         <a
           href={value}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+          className="inline-flex items-center gap-0.5 text-[11px] text-primary hover:underline"
         >
           <ExternalLink className="h-3 w-3" />
           {ar ? 'معاينة' : 'View'}
@@ -173,32 +176,46 @@ function FieldCard({
   ) {
     displayNode = renderStatusPill(value)
   } else if (typeof value === 'number') {
-    displayNode = <span className="font-mono text-xs font-semibold text-foreground">{value.toLocaleString('en-US')}</span>
+    isMono = true
+    displayNode = <span>{value.toLocaleString('en-US')}</span>
   } else {
-    displayNode = <span className="break-all text-xs text-foreground">{String(value)}</span>
+    if (/id|code|sku|barcode|ref|key/i.test(keyName)) {
+      isMono = true
+    }
+    displayNode = <span>{String(value)}</span>
   }
 
   const copyableStr = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '')
 
   return (
-    <div className="group relative flex flex-col justify-between rounded-sm border border-border/70 bg-card p-2.5 transition-colors hover:border-border hover:bg-muted/30">
-      <div className="flex items-start justify-between gap-1.5">
-        <div className="min-w-0">
-          <p className="truncate text-[10px] font-bold text-muted-foreground">{label}</p>
-          <p className="truncate font-mono text-[9px] text-muted-foreground/50">{keyName}</p>
-        </div>
+    <div className="group min-w-0">
+      <div className="flex items-center gap-1">
+        <p className="truncate text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </p>
+        {keyName !== label.toLowerCase() && (
+          <span className="hidden truncate font-mono text-[9px] text-muted-foreground/40 xl:inline" title={keyName}>
+            ({keyName})
+          </span>
+        )}
+      </div>
+      <div className={cn('mt-1 flex items-center gap-1.5 text-xs text-foreground break-all', isMono && 'font-mono')}>
+        <div className="min-w-0">{displayNode}</div>
         {value !== null && value !== undefined && value !== '' && (
           <button
             type="button"
-            onClick={() => onCopy(copyableStr)}
-            className="opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
-            title={ar ? 'نسخ القيمة' : 'Copy value'}
+            onClick={() => {
+              onCopy(copyableStr)
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1200)
+            }}
+            className="shrink-0 opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100"
+            title={ar ? 'نسخ' : 'Copy'}
           >
-            <Copy className="h-3 w-3 text-muted-foreground" />
+            {copied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
           </button>
         )}
       </div>
-      <div className="mt-2 min-w-0">{displayNode}</div>
     </div>
   )
 }
@@ -463,27 +480,31 @@ function UniversalSectionNode({
   if (isRoot) {
     return (
       <div className="space-y-4">
-        {/* Scalar Fields Grid */}
+        {/* Scalar Fields Grid — 4 columns like the top basic record data header */}
         {Object.keys(scalars).length > 0 && (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {Object.entries(scalars).map(([k, v]) => (
-              <FieldCard key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
-            ))}
+          <div className="border border-border bg-card p-4">
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              {Object.entries(scalars).map(([k, v]) => (
+                <FieldItem key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
+              ))}
+            </div>
           </div>
         )}
 
         {/* Arrays of primitives (Tags/Lists) */}
         {Object.entries(primitiveArrays).map(([k, arr]) => (
-          <div key={k} className="rounded-sm border border-border/80 bg-card p-3">
+          <div key={k} className="border border-border bg-card p-4">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-bold text-muted-foreground">{humanizeKey(k)}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {humanizeKey(k)}
+              </span>
               <span className="font-mono text-[9px] text-muted-foreground/50">({k})</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {arr.map((item, idx) => (
                 <span
                   key={idx}
-                  className="inline-flex items-center rounded border border-border bg-muted/70 px-2 py-0.5 text-xs font-medium text-foreground"
+                  className="inline-flex items-center rounded border border-border bg-muted/60 px-2 py-0.5 text-xs font-medium text-foreground"
                 >
                   {String(item)}
                 </span>
@@ -551,12 +572,14 @@ function UniversalSectionNode({
       {/* Section Body */}
       {isExpanded && (
         <div className="space-y-4 p-3">
-          {/* Scalar fields inside this section */}
+          {/* Scalar fields inside this section — 4 columns like top header */}
           {Object.keys(scalars).length > 0 && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {Object.entries(scalars).map(([k, v]) => (
-                <FieldCard key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
-              ))}
+            <div className="border border-border/70 bg-card p-4">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                {Object.entries(scalars).map(([k, v]) => (
+                  <FieldItem key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
+                ))}
+              </div>
             </div>
           )}
 
