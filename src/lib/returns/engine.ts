@@ -24,7 +24,12 @@ import {
 } from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
 import type { PlatformKey } from '@/lib/platform-fields'
-import { isSaudiShippingAddress } from '@/lib/zid/order-helpers'
+import {
+  isSaudiShippingAddress,
+  resolveOrderDiscountAmount,
+  resolveZidCodAmount,
+  resolveZidShippingCost,
+} from '@/lib/zid/order-helpers'
 
 import {
   extractStoreReturnReason,
@@ -39,10 +44,12 @@ import {
   createStockReturn,
   findInvoiceForOrder,
   findOriginalSaleOrder,
+  readCreditNoteReturnLedger,
   readNegativeReturnLedger,
   resolveOdooProductId,
   type OdooReturnLine,
   type OriginalSaleOrder,
+  type SaleOrderLineInfo,
 } from './odoo'
 
 export interface ReturnEventInput {
@@ -92,6 +99,110 @@ async function resolveStoreLines(
   return { byProduct, unresolved }
 }
 
+function isFeeOrServiceLine(
+  line: SaleOrderLineInfo,
+  orderStdSettings?: Record<string, any> | null
+): boolean {
+  const settings = orderStdSettings || {}
+  const shippingId = Number(settings.shipping_product_id || settings.order?.shipping_product_id)
+  const codId = Number(settings.cod_product_id || settings.order?.cod_product_id)
+  const discountId = Number(settings.discount_product_id || settings.order?.discount_product_id)
+
+  if (shippingId && line.productId === shippingId) return true
+  if (codId && line.productId === codId) return true
+  if (discountId && line.productId === discountId) return true
+
+  const lower = (line.productName || '').toLowerCase()
+  if (lower.includes('shipping') || line.productName.includes('شحن') || line.productName.includes('توصيل')) {
+    return true
+  }
+  if (
+    lower.includes('cash on delivery') ||
+    lower.includes('cod') ||
+    line.productName.includes('الدفع عند الاستلام') ||
+    line.productName.includes('تحصيل')
+  ) {
+    return true
+  }
+  if (lower.includes('discount') || line.productName.includes('خصم') || line.priceUnit < 0) {
+    return true
+  }
+  return false
+}
+
+export function resolveOrderDiscountPercent(payload: Record<string, unknown> | null | undefined): number {
+  if (!payload) return 0
+  const p = payload as any
+  const directPct = parseFloat(String(
+    p.discount_percentage ||
+    p.order?.discount_percentage ||
+    p.amounts?.discount?.percentage ||
+    p.order?.amounts?.discount?.percentage ||
+    '0'
+  ))
+  if (!isNaN(directPct) && directPct > 0) return directPct
+
+  const discountAmount = resolveOrderDiscountAmount(payload)
+  if (discountAmount > 0) {
+    const subtotal = parseFloat(String(
+      p.sub_total ||
+      p.order?.sub_total ||
+      p.amounts?.sub_total ||
+      p.order_subtotal ||
+      p.subtotal ||
+      '0'
+    ))
+    if (!isNaN(subtotal) && subtotal > 0) {
+      return Math.round((discountAmount / subtotal) * 100 * 100) / 100
+    }
+  }
+  return 0
+}
+
+export function resolveLineDiscountPercent(
+  line: SaleOrderLineInfo | StoreReturnLine,
+  payload: Record<string, unknown> | null | undefined,
+  orderDiscountPercent: number
+): number {
+  if ('discount' in line && line.discount && line.discount > 0) {
+    return line.discount
+  }
+  if (!payload) return orderDiscountPercent > 0 ? orderDiscountPercent : 0
+  const p = payload as any
+  const prods = [
+    ...(Array.isArray(p?.products) ? p.products : []),
+    ...(Array.isArray(p?.order?.products) ? p.order.products : []),
+    ...(Array.isArray(p?.items) ? p.items : []),
+    ...(Array.isArray(p?.order?.items) ? p.order.items : []),
+    ...(Array.isArray(p?.line_items) ? p.line_items : []),
+  ]
+  const lineSku = ('sku' in line ? line.sku : '') || ''
+  const lineName = ('productName' in line ? line.productName : ('name' in line ? line.name : '')) || ''
+  const lineStoreId = ('storeProductId' in line ? line.storeProductId : '') || ''
+
+  const match = prods.find(pr => {
+    const prSku = String(pr.sku || pr.code || pr.product_sku || '')
+    const prId = String(pr.id || pr.product_id || '')
+    const prName = String(pr.name || pr.product_name || pr.title || '')
+    if (lineSku && prSku && lineSku.toLowerCase() === prSku.toLowerCase()) return true
+    if (lineStoreId && prId && lineStoreId === prId) return true
+    if (lineName && prName && lineName.toLowerCase() === prName.toLowerCase()) return true
+    return false
+  })
+
+  if (match) {
+    const pct = parseFloat(String(match.discount_percentage || match.discount_percent || '0'))
+    if (!isNaN(pct) && pct > 0) return pct
+    const discAmount = parseFloat(String(match.discount || '0'))
+    const price = parseFloat(String(match.price || match.price_unit || match.original_price || '0'))
+    if (!isNaN(discAmount) && discAmount > 0 && !isNaN(price) && price > 0) {
+      return Math.round((discAmount / price) * 100 * 100) / 100
+    }
+  }
+
+  return orderDiscountPercent > 0 ? orderDiscountPercent : 0
+}
+
 async function buildReturnLines(
   client: OdooClient,
   original: OriginalSaleOrder,
@@ -103,7 +214,7 @@ async function buildReturnLines(
   const ledger =
     input.settings.mode === 'negative_so'
       ? await readNegativeReturnLedger(client, original.name)
-      : new Map<number, number>()
+      : await readCreditNoteReturnLedger(client, original.name)
 
   // Zid only ever gives us "remaining returnable", so the cumulative returned
   // quantity is derived from the order itself. Salla gives the refunded lines
@@ -155,6 +266,22 @@ async function buildReturnLines(
     }
   }
 
+  // If all regular lines are returned (or this is a full reversal), also include delivery, COD, and discount lines
+  const regularLines = original.lines.filter(l => !isFeeOrServiceLine(l, input.orderStdSettings))
+  const isFullReturn =
+    regularLines.length === 0 ||
+    regularLines.every(l => (targets.get(l.productId) || 0) >= l.orderedQty)
+
+  if (isFullReturn) {
+    for (const line of original.lines) {
+      if (isFeeOrServiceLine(line, input.orderStdSettings)) {
+        targets.set(line.productId, Math.max(1, Math.abs(line.orderedQty)))
+      }
+    }
+  }
+
+  const orderDiscountPercent = resolveOrderDiscountPercent(input.payload)
+
   // One product can appear on several order lines (different prices/discounts).
   // The target is per product, so it is spent once: without this budget the
   // second line would repeat the full quantity, and a credit note would refund
@@ -164,24 +291,25 @@ async function buildReturnLines(
   for (const line of original.lines) {
     const target = targets.get(line.productId) || 0
     if (target <= 0) continue
-    const already =
-      input.settings.mode === 'negative_so'
-        ? ledger.get(line.productId) || 0
-        : Math.max(0, line.orderedQty - line.deliveredQty)
+    const already = ledger.get(line.productId) || 0
     const available = Math.max(0, target - already - (consumed.get(line.productId) || 0))
-    const quantity =
-      input.settings.mode === 'negative_so'
-        ? available
-        : Math.min(available, Math.max(0, line.deliveredQty - already))
+    const quantity = available
     if (quantity <= 0) continue
     consumed.set(line.productId, (consumed.get(line.productId) || 0) + quantity)
+
+    let discount = line.discount && line.discount > 0 ? line.discount : undefined
+    if (!discount && !isFeeOrServiceLine(line, input.orderStdSettings)) {
+      const resolvedDisc = resolveLineDiscountPercent(line, input.payload, orderDiscountPercent)
+      if (resolvedDisc > 0) discount = resolvedDisc
+    }
+
     out.push({
       productId: line.productId,
       quantity,
       priceUnit: line.priceUnit,
       name: line.productName,
       taxIds: line.taxIds,
-      discount: line.discount,
+      discount,
       productUomId: line.productUomId,
       analyticDistribution: line.analyticDistribution,
       analyticAccountId: line.analyticAccountId,
@@ -328,6 +456,7 @@ async function createFromPayloadWithoutOrder(
   if (existing) return skipped(`already_applied:${existing}`)
 
   const defaultProductId = Number(orderStdSettings?.order?.default_product_id || orderStdSettings?.default_product_id)
+  const orderDiscountPercent = resolveOrderDiscountPercent(input.payload)
   const resolved: OdooReturnLine[] = []
   for (const line of lines) {
     let productId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
@@ -335,12 +464,14 @@ async function createFromPayloadWithoutOrder(
       productId = defaultProductId
     }
     if (!productId) continue
+    const discount = resolveLineDiscountPercent(line, input.payload, orderDiscountPercent)
     resolved.push({
       productId,
       quantity: Math.abs(line.quantity),
       priceUnit: line.priceUnit || 0,
       name: line.name || '',
       taxIds: [],
+      discount: discount > 0 ? discount : undefined,
     })
   }
   if (resolved.length === 0) return skipped('no_matching_products')
@@ -406,6 +537,9 @@ async function createFromPayloadWithoutOrder(
       product_uom_qty: -Math.abs(line.quantity),
       price_unit: line.priceUnit,
     }
+    if (line.discount !== undefined && line.discount > 0) {
+      lineVals.discount = line.discount
+    }
     if (taxToApply) {
       lineVals[taxField] = [[6, 0, [taxToApply]]]
     }
@@ -414,6 +548,70 @@ async function createFromPayloadWithoutOrder(
     }
     return [0, 0, lineVals]
   })
+
+  // Shipping line
+  const shippingCost = resolveZidShippingCost(input.payload)
+  const addShipping = !!orderStdSettings?.order?.add_shipping_as_line || !!orderStdSettings?.add_shipping_as_line || !!orderStdSettings?.shipping_product_id
+  if (addShipping && shippingCost > 0) {
+    let shippingProdId = Number(orderStdSettings?.shipping_product_id || orderStdSettings?.order?.shipping_product_id)
+    if (!shippingProdId && orderStdSettings?.shipping_product_sku) {
+      shippingProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.shipping_product_sku))) || 0
+    }
+    if (shippingProdId > 0) {
+      const shipVals: Record<string, unknown> = {
+        product_id: shippingProdId,
+        name: 'Shipping (شحن)',
+        product_uom_qty: -1,
+        price_unit: shippingCost,
+      }
+      if (taxToApply) shipVals[taxField] = [[6, 0, [taxToApply]]]
+      if (evaluatedAnalyticFields) Object.assign(shipVals, evaluatedAnalyticFields)
+      orderLines.push([0, 0, shipVals])
+    }
+  }
+
+  // COD fee line
+  const codFee = resolveZidCodAmount(input.payload)
+  const addCod = !!orderStdSettings?.order?.add_cod_as_line || !!orderStdSettings?.add_cod_as_line || !!orderStdSettings?.cod_product_id
+  if (addCod && codFee > 0) {
+    let codProdId = Number(orderStdSettings?.cod_product_id || orderStdSettings?.order?.cod_product_id)
+    if (!codProdId && orderStdSettings?.cod_product_sku) {
+      codProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.cod_product_sku))) || 0
+    }
+    if (codProdId > 0) {
+      const codVals: Record<string, unknown> = {
+        product_id: codProdId,
+        name: 'Cash on Delivery (الدفع عند الاستلام)',
+        product_uom_qty: -1,
+        price_unit: codFee,
+      }
+      if (taxToApply) codVals[taxField] = [[6, 0, [taxToApply]]]
+      if (evaluatedAnalyticFields) Object.assign(codVals, evaluatedAnalyticFields)
+      orderLines.push([0, 0, codVals])
+    }
+  }
+
+  // Fixed discount line
+  const discountMode = String(orderStdSettings?.order?.discount_mode || orderStdSettings?.discount_mode || 'percent')
+  const orderDiscountAmount = resolveOrderDiscountAmount(input.payload)
+  const addDiscount = !!orderStdSettings?.order?.add_discount_as_line || !!orderStdSettings?.add_discount_as_line
+  if (addDiscount && discountMode !== 'percent' && orderDiscountAmount > 0) {
+    let discProdId = Number(orderStdSettings?.discount_product_id || orderStdSettings?.order?.discount_product_id)
+    if (!discProdId && orderStdSettings?.discount_product_sku) {
+      discProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.discount_product_sku))) || 0
+    }
+    if (discProdId > 0) {
+      const discVals: Record<string, unknown> = {
+        product_id: discProdId,
+        name: 'Discount (خصم)',
+        product_uom_qty: -1,
+        price_unit: -Math.abs(orderDiscountAmount),
+      }
+      if (taxToApply) discVals[taxField] = [[6, 0, [taxToApply]]]
+      if (evaluatedAnalyticFields) Object.assign(discVals, evaluatedAnalyticFields)
+      orderLines.push([0, 0, discVals])
+    }
+  }
 
   const storeReason = extractStoreReturnReason(input.payload, platform)
   const effectiveReason =
@@ -559,6 +757,7 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
     } else {
       const majorVersion = await client.getMajorVersion().catch(() => 17)
       const stock = await createStockReturn(client, original.id, lines, majorVersion, {
+        orderName: original.name,
         pickingAction,
       })
       actions.push(`stock_return:${stock.pickingIds.join(',') || 'none'}`)

@@ -630,23 +630,21 @@ interface DeliveredMove {
 async function readDeliveredMoves(
   client: OdooClient,
   orderId: number,
+  orderName: string | undefined,
   majorVersion: number
 ): Promise<DeliveredMove[]> {
-  let pickings = await client.searchRead<any>(
-    'stock.picking',
-    [['sale_id', '=', orderId], ['state', '=', 'done']],
-    ['id'],
-    100
-  )
+  const domain: any[] = orderName
+    ? ['&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName], ['state', '=', 'done']]
+    : [['sale_id', '=', orderId], ['state', '=', 'done']]
+
+  let pickings = await client.searchRead<any>('stock.picking', domain, ['id'], 100)
 
   // If no done pickings found, check for assigned/confirmed outgoing pickings and validate them
   if (!pickings || pickings.length === 0) {
-    const pending = await client.searchRead<any>(
-      'stock.picking',
-      [['sale_id', '=', orderId], ['state', 'in', ['assigned', 'confirmed']]],
-      ['id'],
-      20
-    )
+    const pendingDomain: any[] = orderName
+      ? ['&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName], ['state', 'in', ['assigned', 'confirmed', 'waiting']]]
+      : [['sale_id', '=', orderId], ['state', 'in', ['assigned', 'confirmed', 'waiting']]]
+    const pending = await client.searchRead<any>('stock.picking', pendingDomain, ['id'], 20)
     if (pending && pending.length > 0) {
       for (const p of pending) {
         try {
@@ -658,12 +656,7 @@ async function readDeliveredMoves(
           console.warn(`[Returns] Failed to validate pending picking #${p.id}:`, vErr?.message || vErr)
         }
       }
-      pickings = await client.searchRead<any>(
-        'stock.picking',
-        [['sale_id', '=', orderId], ['state', '=', 'done']],
-        ['id'],
-        100
-      )
+      pickings = await client.searchRead<any>('stock.picking', domain, ['id'], 100)
     }
   }
 
@@ -746,10 +739,11 @@ export async function createStockReturn(
   lines: readonly OdooReturnLine[],
   majorVersion: number,
   options?: {
+    orderName?: string
     pickingAction?: string
   }
 ): Promise<StockReturnResult> {
-  const moves = await readDeliveredMoves(client, orderId, majorVersion)
+  const moves = await readDeliveredMoves(client, orderId, options?.orderName, majorVersion)
   const byPicking = new Map<number, { moveId: number; productId: number; quantity: number }[]>()
   const remaining = new Map<number, number>()
   for (const line of lines) {
@@ -824,6 +818,46 @@ export async function findInvoiceForOrder(
   return fallback?.id ? Number(fallback.id) : null
 }
 
+/** Quantities already returned through credit notes (out_refund) for this order. */
+export async function readCreditNoteReturnLedger(
+  client: OdooClient,
+  orderName: string
+): Promise<Map<number, number>> {
+  const ledger = new Map<number, number>()
+  if (!orderName) return ledger
+  try {
+    const moves = await client.searchRead<any>(
+      'account.move',
+      [
+        ['move_type', '=', 'out_refund'],
+        ['state', '!=', 'cancel'],
+        ['invoice_origin', '=', orderName],
+      ],
+      ['id'],
+      50
+    )
+    if (!moves || moves.length === 0) return ledger
+    const moveIds = moves.map(m => Number(m.id)).filter(Boolean)
+    const lines = await client.searchRead<any>(
+      'account.move.line',
+      [['move_id', 'in', moveIds], ['product_id', '!=', false]],
+      ['product_id', 'quantity'],
+      moveIds.length * 50
+    )
+    for (const l of lines || []) {
+      const prodId = many2oneId(l.product_id)
+      if (!prodId) continue
+      const qty = toNumber(l.quantity)
+      if (qty > 0) {
+        ledger.set(prodId, (ledger.get(prodId) || 0) + qty)
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[Returns] Failed to read credit note return ledger for ${orderName}:`, err?.message || err)
+  }
+  return ledger
+}
+
 export async function createCreditNote(
   client: OdooClient,
   original: OriginalSaleOrder,
@@ -835,6 +869,7 @@ export async function createCreditNote(
     invoiceAction?: string
   }
 ): Promise<number> {
+  const majorVersion = await client.getMajorVersion().catch(() => 17)
   const today = new Date().toISOString().slice(0, 10)
   const values: Record<string, unknown> = {
     move_type: 'out_refund',
@@ -842,18 +877,41 @@ export async function createCreditNote(
     invoice_date: today,
     invoice_origin: original.name,
     ref: reason || `Return of ${original.name}`,
-    invoice_line_ids: lines.map(line => [
-      0,
-      0,
-      {
+    invoice_line_ids: lines.map(line => {
+      const lineVals: Record<string, unknown> = {
         product_id: line.productId,
         name: line.name || `Return - ${original.name}`,
         quantity: Math.abs(line.quantity),
         price_unit: line.priceUnit,
-        ...(line.taxIds.length > 0 ? { tax_ids: [[6, 0, line.taxIds]] } : {}),
-        ...(line.saleLineId ? { sale_line_ids: [[6, 0, [line.saleLineId]]] } : {}),
-      },
-    ]),
+      }
+      if (line.discount !== undefined && line.discount > 0) {
+        lineVals.discount = line.discount
+      }
+      if (line.taxIds && line.taxIds.length > 0) {
+        lineVals.tax_ids = [[6, 0, line.taxIds]]
+      }
+      if (line.productUomId) {
+        lineVals.product_uom_id = line.productUomId
+      }
+      if (line.saleLineId) {
+        lineVals.sale_line_ids = [[6, 0, [line.saleLineId]]]
+      }
+      if (line.analyticDistribution && Object.keys(line.analyticDistribution).length > 0) {
+        if (majorVersion >= 16) {
+          lineVals.analytic_distribution = line.analyticDistribution
+        } else {
+          const top = Object.entries(line.analyticDistribution).sort((a, b) => b[1] - a[1])[0]
+          if (top) lineVals.analytic_account_id = Number(top[0])
+        }
+      } else if (line.analyticAccountId) {
+        if (majorVersion >= 16) {
+          lineVals.analytic_distribution = { [String(line.analyticAccountId)]: 100 }
+        } else {
+          lineVals.analytic_account_id = line.analyticAccountId
+        }
+      }
+      return [0, 0, lineVals]
+    }),
   }
   if (invoiceId) values.reversed_entry_id = invoiceId
   if (original.companyId) values.company_id = original.companyId
