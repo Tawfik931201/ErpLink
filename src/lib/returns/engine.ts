@@ -25,8 +25,8 @@ import {
 import type { OdooClient } from '@/lib/odoo-client'
 import type { PlatformKey } from '@/lib/platform-fields'
 import {
-  isSaudiShippingAddress,
   resolveOrderDiscountAmount,
+  resolveOrderVatTax,
   resolveZidCodAmount,
   resolveZidShippingCost,
 } from '@/lib/zid/order-helpers'
@@ -483,13 +483,15 @@ async function createFromPayloadWithoutOrder(
   const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
 
   // Resolve VAT / taxes from Standard Mapping
-  const isSaudi = isSaudiShippingAddress(input.payload)
-  const vatTaxId = isSaudi
-    ? Number(orderStdSettings?.vat_saudi_tax_id || orderStdSettings?.order?.vat_saudi_tax_id)
-    : Number(orderStdSettings?.vat_non_saudi_tax_id || orderStdSettings?.order?.vat_non_saudi_tax_id)
+  const { taxId: vatTaxId } = resolveOrderVatTax(input.payload, {
+    enableVat: true,
+    vatCountryRules: orderStdSettings?.vat_country_rules || orderStdSettings?.order?.vat_country_rules,
+    vatSaudiTaxId: orderStdSettings?.vat_saudi_tax_id || orderStdSettings?.order?.vat_saudi_tax_id,
+    vatNonSaudiTaxId: orderStdSettings?.vat_non_saudi_tax_id || orderStdSettings?.order?.vat_non_saudi_tax_id,
+  })
   const defaultTaxId = Number(orderStdSettings?.order?.default_tax_id || orderStdSettings?.tax?.default_tax_ids)
-  const taxToApply = Number.isInteger(vatTaxId) && vatTaxId > 0
-    ? vatTaxId
+  const taxToApply = Number.isInteger(vatTaxId) && (vatTaxId as number) > 0
+    ? (vatTaxId as number)
     : (Number.isInteger(defaultTaxId) && defaultTaxId > 0 ? defaultTaxId : null)
 
   // Resolve Analytic Distribution from Standard Mapping

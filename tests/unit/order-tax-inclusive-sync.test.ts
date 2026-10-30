@@ -1,6 +1,7 @@
 import type { OdooClient } from '@/lib/odoo-client'
 import { buildOrderLineItems } from '@/lib/sync-engine'
 import type { FieldMappingRow } from '@/lib/sync-types'
+import { resolveEffectiveTaxRate, resolveOrderCountryCode } from '@/lib/zid/order-helpers'
 
 describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across ALL line types', () => {
   const baseMapping: FieldMappingRow = {
@@ -246,5 +247,122 @@ describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across 
     expect(codLine?.name).toBe('Cash on Delivery (الدفع عند الاستلام)')
     expect(codLine?.price_unit).toBe(10)
     expect(codLine?.tax_ids).toEqual([[6, 0, [5]]])
+  })
+
+  describe('Country-specific tax rate table and export order handling', () => {
+    it('Case 5: Egypt order with configured 14% tax rate divides by 1.14', async () => {
+      const client = createMockClient() as unknown as OdooClient
+      const egyptOrderPayload = {
+        products: [{ sku: 'SKU-EG', price: 114, sale_price: 114, quantity: 1 }],
+        shipping_address: { country: 'Egypt', city: 'Cairo' },
+      }
+
+      const stdSettings = {
+        prices_include_tax: true,
+        tax_rates_by_country: [
+          { country_code: 'SA', country_name: 'السعودية', tax_rate: 15 },
+          { country_code: 'EG', country_name: 'مصر', tax_rate: 14 },
+        ],
+      }
+
+      const lines = await buildOrderLineItems(
+        client,
+        baseMapping,
+        egyptOrderPayload,
+        new Map(),
+        {},
+        'zid',
+        stdSettings,
+        'store-1'
+      )
+
+      expect(lines).toHaveLength(1)
+      // 114 / 1.14 = 100
+      expect(lines[0].price_unit).toBe(100)
+    })
+
+    it('Case 6: Export order (e.g. US / Germany) not in tax table defaults to 0% and does NOT divide price', async () => {
+      const client = createMockClient() as unknown as OdooClient
+      const exportOrderPayload = {
+        products: [{ sku: 'SKU-EXP', price: 115, sale_price: 115, quantity: 1 }],
+        shipping_address: { country: 'US', city: 'New York' },
+      }
+
+      const stdSettings = {
+        prices_include_tax: true,
+        tax_rates_by_country: [
+          { country_code: 'SA', country_name: 'السعودية', tax_rate: 15 },
+          { country_code: 'EG', country_name: 'مصر', tax_rate: 14 },
+        ],
+      }
+
+      const lines = await buildOrderLineItems(
+        client,
+        baseMapping,
+        exportOrderPayload,
+        new Map(),
+        {},
+        'zid',
+        stdSettings,
+        'store-1'
+      )
+
+      expect(lines).toHaveLength(1)
+      // US is not in tax table -> tax rate is 0 -> 115 / (1 + 0) = 115 verbatim!
+      expect(lines[0].price_unit).toBe(115)
+    })
+
+    it('resolveOrderCountryCode detects various country payloads accurately', () => {
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'SA' } })).toBe('SA')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'Saudi Arabia' } })).toBe('SA')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'المملكة العربية السعودية' } })).toBe('SA')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'EG' } })).toBe('EG')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'Egypt' } })).toBe('EG')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'مصر' } })).toBe('EG')
+      expect(resolveOrderCountryCode({ shipping_address: { city: 'Cairo' } })).toBe('EG')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'AE' } })).toBe('AE')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'United Arab Emirates' } })).toBe('AE')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'الامارات' } })).toBe('AE')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'KW' } })).toBe('KW')
+      expect(resolveOrderCountryCode({ shipping_address: { country: 'US' } })).toBe('US')
+    })
+
+    it('resolveEffectiveTaxRate respects configured country table and export rules', () => {
+      const countryRules = [
+        { country_code: 'SA', tax_rate: 15 },
+        { country_code: 'EG', tax_rate: 14 },
+      ]
+
+      // 1. SA order -> 15%
+      const saResult = resolveEffectiveTaxRate(
+        { shipping_address: { country: 'SA' } },
+        { pricesIncludeTax: true, countryTaxRates: countryRules }
+      )
+      expect(saResult.taxRate).toBe(15)
+      expect(saResult.matchedCountryCode).toBe('SA')
+
+      // 2. EG order -> 14%
+      const egResult = resolveEffectiveTaxRate(
+        { shipping_address: { country: 'EG' } },
+        { pricesIncludeTax: true, countryTaxRates: countryRules }
+      )
+      expect(egResult.taxRate).toBe(14)
+      expect(egResult.matchedCountryCode).toBe('EG')
+
+      // 3. Unlisted export order -> 0%
+      const expResult = resolveEffectiveTaxRate(
+        { shipping_address: { country: 'US' } },
+        { pricesIncludeTax: true, countryTaxRates: countryRules }
+      )
+      expect(expResult.taxRate).toBe(0)
+      expect(expResult.matchedCountryCode).toBeNull()
+
+      // 4. When pricesIncludeTax is disabled -> 0%
+      const disabledResult = resolveEffectiveTaxRate(
+        { shipping_address: { country: 'SA' } },
+        { pricesIncludeTax: false, countryTaxRates: countryRules }
+      )
+      expect(disabledResult.taxRate).toBe(0)
+    })
   })
 })

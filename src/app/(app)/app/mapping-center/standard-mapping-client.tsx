@@ -49,7 +49,7 @@ import { cn } from '@/lib/utils'
 
 import { CategorySettingsTab } from './standard-components/category-settings-tab'
 import { CustomerSettingsTab } from './standard-components/customer-settings-tab'
-import { OrderSettingsTab } from './standard-components/order-settings-tab'
+import { OrderSettingsTab, type CountryTaxRateRule, type VatCountryRuleRow } from './standard-components/order-settings-tab'
 import { ProductSettingsTab } from './standard-components/product-settings-tab'
 import SyncLogModal from './sync-log-modal'
 
@@ -299,10 +299,17 @@ export default function StandardMappingClient({
   const [orderEnableVat, setOrderEnableVat] = useState(false)
   const [orderVatSaudiTaxId, setOrderVatSaudiTaxId] = useState('')
   const [orderVatNonSaudiTaxId, setOrderVatNonSaudiTaxId] = useState('')
+  const [orderVatCountryRules, setOrderVatCountryRules] = useState<VatCountryRuleRow[]>([
+    { rowKey: 'vat-sa', country_code: 'SA', country_name: 'المملكة العربية السعودية', tax_id: '' },
+    { rowKey: 'vat-other', country_code: 'OTHER', country_name: 'باقي الدول', tax_id: '' },
+  ])
   const [orderTaxOptions, setOrderTaxOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
   const [orderPricesIncludeTax, setOrderPricesIncludeTax] = useState(false)
   const [orderTaxRatePercent, setOrderTaxRatePercent] = useState('15')
+  const [orderCountryTaxRates, setOrderCountryTaxRates] = useState<CountryTaxRateRule[]>([
+    { rowKey: 'rule-sa', country_code: 'SA', country_name: 'السعودية', tax_rate: '15' }
+  ])
 
   // Status mapping
   const [orderStateMapping, setOrderStateMapping] = useState<
@@ -933,14 +940,47 @@ export default function StandardMappingClient({
         setOrderDiscountProductSku(s.discount_product_sku || '')
         setOrderDiscountMode(s.discount_mode || 'fixed')
         setOrderEnableVat(s.enable_vat ?? s.order?.enable_vat ?? false)
-        setOrderVatSaudiTaxId(s.vat_saudi_tax_id ? String(s.vat_saudi_tax_id) : (s.order?.vat_saudi_tax_id ? String(s.order.vat_saudi_tax_id) : ''))
-        setOrderVatNonSaudiTaxId(s.vat_non_saudi_tax_id ? String(s.vat_non_saudi_tax_id) : (s.order?.vat_non_saudi_tax_id ? String(s.order.vat_non_saudi_tax_id) : ''))
+        const loadedSaudiTaxId = s.vat_saudi_tax_id ? String(s.vat_saudi_tax_id) : (s.order?.vat_saudi_tax_id ? String(s.order.vat_saudi_tax_id) : '')
+        const loadedNonSaudiTaxId = s.vat_non_saudi_tax_id ? String(s.vat_non_saudi_tax_id) : (s.order?.vat_non_saudi_tax_id ? String(s.order.vat_non_saudi_tax_id) : '')
+        setOrderVatSaudiTaxId(loadedSaudiTaxId)
+        setOrderVatNonSaudiTaxId(loadedNonSaudiTaxId)
+
+        const rawVatRules = s.vat_country_rules ?? s.order?.vat_country_rules
+        if (Array.isArray(rawVatRules) && rawVatRules.length > 0) {
+          setOrderVatCountryRules(rawVatRules.map((r: any, idx: number) => ({
+            rowKey: r.rowKey || `vat-rule-${idx}-${Date.now()}`,
+            country_code: r.country_code || '',
+            tax_id: r.tax_id !== undefined && r.tax_id !== null ? String(r.tax_id) : (r.odoo_tax_id ? String(r.odoo_tax_id) : ''),
+            country_name: r.country_name || '',
+          })))
+        } else {
+          setOrderVatCountryRules([
+            { rowKey: 'vat-sa', country_code: 'SA', country_name: 'المملكة العربية السعودية', tax_id: loadedSaudiTaxId },
+            { rowKey: 'vat-other', country_code: 'OTHER', country_name: 'باقي الدول', tax_id: loadedNonSaudiTaxId },
+          ])
+        }
         setOrderPricesIncludeTax(s.prices_include_tax ?? s.order?.prices_include_tax ?? false)
         setOrderTaxRatePercent(
           s.tax_rate_percent !== undefined && s.tax_rate_percent !== null
             ? String(s.tax_rate_percent)
             : (s.order?.tax_rate_percent !== undefined && s.order?.tax_rate_percent !== null ? String(s.order.tax_rate_percent) : '15')
         )
+        const rawCountryRates = s.tax_rates_by_country ?? s.order?.tax_rates_by_country
+        if (Array.isArray(rawCountryRates) && rawCountryRates.length > 0) {
+          setOrderCountryTaxRates(rawCountryRates.map((r: any, idx: number) => ({
+            rowKey: r.rowKey || `rule-${idx}-${Date.now()}`,
+            country_code: r.country_code || 'SA',
+            country_name: r.country_name || '',
+            tax_rate: r.tax_rate !== undefined && r.tax_rate !== null ? String(r.tax_rate) : '15',
+          })))
+        } else {
+          const legacyRate = s.tax_rate_percent !== undefined && s.tax_rate_percent !== null
+            ? String(s.tax_rate_percent)
+            : (s.order?.tax_rate_percent !== undefined && s.order?.tax_rate_percent !== null ? String(s.order.tax_rate_percent) : '15')
+          setOrderCountryTaxRates([
+            { rowKey: 'rule-sa', country_code: 'SA', country_name: 'السعودية', tax_rate: legacyRate }
+          ])
+        }
 
         setOrderCustomerFallbackPolicy(s.customer_fallback_policy || s.order?.customer_fallback_policy || 'create_new')
         setOrderDefaultCustomerId(s.default_customer_id ? String(s.default_customer_id) : (s.order?.default_customer_id ? String(s.order.default_customer_id) : ''))
@@ -1816,6 +1856,14 @@ export default function StandardMappingClient({
         odoo_journal_id: m.odoo_journal_id.trim(),
       }))
 
+    const cleanedCountryTaxRates = orderCountryTaxRates
+      .filter(r => r.country_code && r.country_code.trim())
+      .map(r => ({
+        country_code: r.country_code.trim().toUpperCase(),
+        country_name: r.country_name?.trim() || '',
+        tax_rate: r.tax_rate !== '' && !isNaN(Number(r.tax_rate)) ? Number(r.tax_rate) : 0,
+      }))
+
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
       enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
@@ -1845,6 +1893,7 @@ export default function StandardMappingClient({
       vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
       prices_include_tax: orderPricesIncludeTax,
       tax_rate_percent: orderTaxRatePercent !== '' && !isNaN(Number(orderTaxRatePercent)) ? Number(orderTaxRatePercent) : 15,
+      tax_rates_by_country: cleanedCountryTaxRates,
       update_custom_status_field: orderUpdateCustomStatus,
       order_status_custom_field: orderStatusCustomField,
       order: {
@@ -1934,7 +1983,7 @@ export default function StandardMappingClient({
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
 
     orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
-    orderPricesIncludeTax, orderTaxRatePercent,
+    orderPricesIncludeTax, orderTaxRatePercent, orderCountryTaxRates,
     orderUpdateCustomStatus, orderStatusCustomField,
     orderPaymentAutoSync, orderPaymentJournalMappings,
     orderStateMapping, standardStoreTab, standardStoreId, standardSubTab, lang, toast
@@ -2464,6 +2513,8 @@ export default function StandardMappingClient({
                   setOrderPricesIncludeTax={setOrderPricesIncludeTax}
                   orderTaxRatePercent={orderTaxRatePercent}
                   setOrderTaxRatePercent={setOrderTaxRatePercent}
+                  orderCountryTaxRates={orderCountryTaxRates}
+                  setOrderCountryTaxRates={setOrderCountryTaxRates}
                   orderAddShipping={orderAddShipping}
                   setOrderAddShipping={setOrderAddShipping}
                   orderShippingProductId={orderShippingProductId}

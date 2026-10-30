@@ -49,6 +49,49 @@ interface AnalyticRuleRow {
   percentage: string
 }
 
+export interface CountryTaxRateRule {
+  rowKey: string
+  country_code: string
+  country_name?: string
+  tax_rate: number | string
+}
+
+export interface VatCountryRuleRow {
+  rowKey: string
+  country_code: string
+  tax_id: string
+  country_name?: string
+}
+
+export const COMMON_VAT_COUNTRIES = [
+  { code: 'SA', name_ar: 'المملكة العربية السعودية (SA)', name_en: 'Saudi Arabia (SA)' },
+  { code: 'OTHER', name_ar: 'باقي الدول (الافتراضي الدولي / غير المحددة)', name_en: 'Other Countries (Rest of world / unselected)' },
+  { code: 'AE', name_ar: 'الإمارات العربية المتحدة (AE)', name_en: 'United Arab Emirates (AE)' },
+  { code: 'KW', name_ar: 'الكويت (KW)', name_en: 'Kuwait (KW)' },
+  { code: 'BH', name_ar: 'البحرين (BH)', name_en: 'Bahrain (BH)' },
+  { code: 'QA', name_ar: 'قطر (QA)', name_en: 'Qatar (QA)' },
+  { code: 'OM', name_ar: 'سلطنة عمان (OM)', name_en: 'Oman (OM)' },
+  { code: 'EG', name_ar: 'مصر (EG)', name_en: 'Egypt (EG)' },
+  { code: 'JO', name_ar: 'الأردن (JO)', name_en: 'Jordan (JO)' },
+  { code: 'US', name_ar: 'الولايات المتحدة (US)', name_en: 'United States (US)' },
+  { code: 'GB', name_ar: 'المملكة المتحدة (GB)', name_en: 'United Kingdom (GB)' },
+  { code: 'CUSTOM', name_ar: 'دولة أخرى (رمز مخصص)...', name_en: 'Other Country (Custom code)...' },
+]
+
+export const COMMON_TAX_COUNTRIES = [
+  { code: 'SA', name_ar: 'المملكة العربية السعودية (15%)', name_en: 'Saudi Arabia (15%)', default_rate: '15' },
+  { code: 'EG', name_ar: 'مصر (14%)', name_en: 'Egypt (14%)', default_rate: '14' },
+  { code: 'AE', name_ar: 'الإمارات العربية المتحدة (5%)', name_en: 'United Arab Emirates (5%)', default_rate: '5' },
+  { code: 'BH', name_ar: 'البحرين (10%)', name_en: 'Bahrain (10%)', default_rate: '10' },
+  { code: 'OM', name_ar: 'سلطنة عمان (5%)', name_en: 'Oman (5%)', default_rate: '5' },
+  { code: 'KW', name_ar: 'الكويت (0%)', name_en: 'Kuwait (0%)', default_rate: '0' },
+  { code: 'QA', name_ar: 'قطر (0%)', name_en: 'Qatar (0%)', default_rate: '0' },
+  { code: 'JO', name_ar: 'الأردن (16%)', name_en: 'Jordan (16%)', default_rate: '16' },
+  { code: 'US', name_ar: 'الولايات المتحدة (0%)', name_en: 'United States (0%)', default_rate: '0' },
+  { code: 'GB', name_ar: 'المملكة المتحدة (20%)', name_en: 'United Kingdom (20%)', default_rate: '20' },
+  { code: 'CUSTOM', name_ar: 'دولة أخرى (رمز مخصص)', name_en: 'Other Country (Custom code)', default_rate: '0' },
+]
+
 interface OrderSettingsTabProps {
   lang: string
   dir: string
@@ -169,11 +212,18 @@ interface OrderSettingsTabProps {
   setOrderVatNonSaudiTaxId: (val: string) => void
   orderTaxOptions: { value: string; label: string }[]
   isLoadingOrderTaxes: boolean
+  orderVatCountryRules?: VatCountryRuleRow[]
+  setOrderVatCountryRules?: React.Dispatch<React.SetStateAction<VatCountryRuleRow[]>>
+  handleAddVatCountryRule?: () => void
+  handleRemoveVatCountryRule?: (rowKey: string) => void
+  handleVatCountryRuleChange?: (rowKey: string, field: 'country_code' | 'tax_id', value: string) => void
   // Prices include tax
   orderPricesIncludeTax: boolean
   setOrderPricesIncludeTax: (val: boolean) => void
   orderTaxRatePercent: string
   setOrderTaxRatePercent: (val: string) => void
+  orderCountryTaxRates?: CountryTaxRateRule[]
+  setOrderCountryTaxRates?: React.Dispatch<React.SetStateAction<CountryTaxRateRule[]>>
   // Shipping & Discount & COD lines
   orderAddShipping: boolean
   setOrderAddShipping: (val: boolean) => void
@@ -326,10 +376,17 @@ export function OrderSettingsTab({
   setOrderVatNonSaudiTaxId,
   orderTaxOptions,
   isLoadingOrderTaxes,
+  orderVatCountryRules,
+  setOrderVatCountryRules,
+  handleAddVatCountryRule,
+  handleRemoveVatCountryRule,
+  handleVatCountryRuleChange,
   orderPricesIncludeTax,
   setOrderPricesIncludeTax,
   orderTaxRatePercent,
   setOrderTaxRatePercent,
+  orderCountryTaxRates,
+  setOrderCountryTaxRates,
   orderAddShipping: _orderAddShipping,
   setOrderAddShipping,
   orderShippingProductId,
@@ -425,6 +482,117 @@ export function OrderSettingsTab({
     { value: 'create_and_post', label: lang === 'ar' ? 'إنشاء وتأكيد الفاتورة' : 'Create & Post Invoice' },
     { value: 'cancel', label: lang === 'ar' ? 'إلغاء الفاتورة' : 'Cancel Invoice' },
   ]
+
+  const countryRules = orderCountryTaxRates || []
+
+  const handleAddCountryRule = () => {
+    if (!setOrderCountryTaxRates) return
+    const existingCodes = new Set(countryRules.map(r => r.country_code.toUpperCase()))
+    const nextPick = COMMON_TAX_COUNTRIES.find(c => c.code !== 'CUSTOM' && !existingCodes.has(c.code))
+      || { code: 'EG', name_ar: 'مصر', name_en: 'Egypt', default_rate: '14' }
+
+    const updated = [
+      ...countryRules,
+      {
+        rowKey: "rule-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+        country_code: nextPick.code,
+        country_name: lang === 'ar' ? nextPick.name_ar : nextPick.name_en,
+        tax_rate: nextPick.default_rate,
+      }
+    ]
+    setOrderCountryTaxRates(updated)
+  }
+
+  const handleRemoveCountryRule = (rowKey: string) => {
+    if (!setOrderCountryTaxRates) return
+    const updated = countryRules.filter(r => r.rowKey !== rowKey)
+    setOrderCountryTaxRates(updated)
+  }
+
+  const handleCountryRuleChange = (rowKey: string, field: 'country_code' | 'tax_rate' | 'country_name', value: string) => {
+    if (!setOrderCountryTaxRates) return
+    const updated = countryRules.map(rule => {
+      if (rule.rowKey !== rowKey) return rule
+      if (field === 'country_code') {
+        const found = COMMON_TAX_COUNTRIES.find(c => c.code === value)
+        return {
+          ...rule,
+          country_code: value,
+          country_name: found ? (lang === 'ar' ? found.name_ar : found.name_en) : rule.country_name,
+          tax_rate: (rule.tax_rate === '' || rule.tax_rate === '0' || rule.tax_rate === '15') && found ? found.default_rate : rule.tax_rate,
+        }
+      }
+      return { ...rule, [field]: value }
+    })
+    setOrderCountryTaxRates(updated)
+
+    const saRule = updated.find(r => r.country_code.toUpperCase() === 'SA') || updated[0]
+    if (saRule && saRule.tax_rate !== undefined && saRule.tax_rate !== '') {
+      setOrderTaxRatePercent(String(saRule.tax_rate))
+    }
+  }
+
+  const vatRules = orderVatCountryRules || []
+
+  const onAddVatCountryRule = () => {
+    if (handleAddVatCountryRule) {
+      handleAddVatCountryRule()
+      return
+    }
+    if (!setOrderVatCountryRules) return
+    const existingCodes = new Set(vatRules.map(r => r.country_code.toUpperCase()))
+    const nextPick = COMMON_VAT_COUNTRIES.find(c => c.code !== 'CUSTOM' && !existingCodes.has(c.code))
+      || { code: 'AE', name_ar: 'الإمارات العربية المتحدة (AE)', name_en: 'United Arab Emirates (AE)' }
+    const updated = [
+      ...vatRules,
+      {
+        rowKey: "vat-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+        country_code: nextPick.code,
+        country_name: lang === 'ar' ? nextPick.name_ar : nextPick.name_en,
+        tax_id: '',
+      }
+    ]
+    setOrderVatCountryRules(updated)
+  }
+
+  const onRemoveVatCountryRule = (rowKey: string) => {
+    if (handleRemoveVatCountryRule) {
+      handleRemoveVatCountryRule(rowKey)
+      return
+    }
+    if (!setOrderVatCountryRules) return
+    const updated = vatRules.filter(r => r.rowKey !== rowKey)
+    setOrderVatCountryRules(updated)
+    const saRule = updated.find(r => r.country_code.toUpperCase() === 'SA')
+    setOrderVatSaudiTaxId(saRule?.tax_id || '')
+    const otherRule = updated.find(r => r.country_code.toUpperCase() === 'OTHER')
+    setOrderVatNonSaudiTaxId(otherRule?.tax_id || '')
+  }
+
+  const onVatCountryRuleChange = (rowKey: string, field: 'country_code' | 'tax_id', value: string) => {
+    if (handleVatCountryRuleChange) {
+      handleVatCountryRuleChange(rowKey, field, value)
+      return
+    }
+    if (!setOrderVatCountryRules) return
+    const updated = vatRules.map(rule => {
+      if (rule.rowKey !== rowKey) return rule
+      if (field === 'country_code') {
+        const found = COMMON_VAT_COUNTRIES.find(c => c.code === value)
+        return {
+          ...rule,
+          country_code: value,
+          country_name: found ? (lang === 'ar' ? found.name_ar : found.name_en) : rule.country_name,
+        }
+      }
+      return { ...rule, [field]: value }
+    })
+    setOrderVatCountryRules(updated)
+    const saRule = updated.find(r => r.country_code.toUpperCase() === 'SA')
+    if (saRule) setOrderVatSaudiTaxId(saRule.tax_id || '')
+    const otherRule = updated.find(r => r.country_code.toUpperCase() === 'OTHER')
+    if (otherRule) setOrderVatNonSaudiTaxId(otherRule.tax_id || '')
+  }
 
   return (
     <div className="space-y-4">
@@ -1298,33 +1466,143 @@ export function OrderSettingsTab({
           />
 
           {orderEnableVat ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border/60">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-foreground/80">
-                  {lang === 'ar' ? 'ضريبة العميل السعودي (داخل المملكة)' : 'Saudi Customer Tax'}
-                </label>
-                <SearchableSelect
-                  options={orderTaxOptions}
-                  value={orderVatSaudiTaxId}
-                  onChange={setOrderVatSaudiTaxId}
-                  placeholder={lang === 'ar' ? '— اختر ضريبة العميل السعودي —' : '— Select Saudi Tax —'}
-                  disabled={isLoadingOrderTaxes}
-                />
-              </div>
+            setOrderVatCountryRules || orderVatCountryRules ? (
+              <div className="space-y-3 pt-2 border-t border-border/60">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground/90">
+                      {lang === 'ar' ? 'جدول ضرائب أودو حسب دولة شحن الطلب' : 'Odoo Taxes by Destination Country'}
+                    </label>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                      {lang === 'ar'
+                        ? 'حدد الضريبة المطبقة في أودو لكل دولة شحن. خيار "باقي الدول" يمثل أي دولة أخرى غير مختارة بالجدول. في حال عدم تحديد ضريبة لدولة معينة، سيُرسل الطلب بدون خانة الضريبة ليقوم أودو بتطبيق الضريبة الافتراضية.'
+                        : 'Set the Odoo tax applied for each shipping destination. "Other Countries" applies to any unlisted destination. If no tax is set, order lines are sent without a tax field so Odoo applies its default tax.'}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onAddVatCountryRule}
+                    className="h-7 text-xs gap-1 shrink-0 border-blue-300 dark:border-blue-800 hover:bg-blue-100/50 dark:hover:bg-blue-900/40"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>{lang === 'ar' ? 'إضافة دولة' : 'Add Country'}</span>
+                  </Button>
+                </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-foreground/80">
-                  {lang === 'ar' ? 'ضريبة العميل غير السعودي (شحن دولي)' : 'Non-Saudi Customer Tax'}
-                </label>
-                <SearchableSelect
-                  options={orderTaxOptions}
-                  value={orderVatNonSaudiTaxId}
-                  onChange={setOrderVatNonSaudiTaxId}
-                  placeholder={lang === 'ar' ? '— اختر ضريبة العميل الدولي —' : '— Select Non-Saudi Tax —'}
-                  disabled={isLoadingOrderTaxes}
-                />
+                {vatRules.length > 0 ? (
+                  <div className="space-y-2">
+                    {vatRules.map((rule) => {
+                      const isCustom = !COMMON_VAT_COUNTRIES.some(c => c.code === rule.country_code) || rule.country_code === 'CUSTOM'
+                      return (
+                        <div
+                          key={rule.rowKey}
+                          className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 border border-border/80 bg-background/80"
+                        >
+                          {/* Country Selector */}
+                          <div className="w-full sm:w-64 shrink-0">
+                            <select
+                              className="w-full h-8 px-2 border border-input bg-background text-xs text-foreground focus:border-primary outline-none transition-all"
+                              value={isCustom ? 'CUSTOM' : rule.country_code}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                if (val === 'CUSTOM') {
+                                  onVatCountryRuleChange(rule.rowKey, 'country_code', '')
+                                } else {
+                                  onVatCountryRuleChange(rule.rowKey, 'country_code', val)
+                                }
+                              }}
+                            >
+                              {COMMON_VAT_COUNTRIES.map((c) => (
+                                <option key={c.code} value={c.code}>
+                                  {lang === 'ar' ? c.name_ar : c.name_en}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Custom ISO Code Input */}
+                          {isCustom && (
+                            <div className="w-full sm:w-28 shrink-0">
+                              <input
+                                type="text"
+                                placeholder={lang === 'ar' ? 'رمز (مثال: KW)' : 'Code (e.g. KW)'}
+                                maxLength={5}
+                                value={rule.country_code === 'CUSTOM' ? '' : rule.country_code}
+                                onChange={(e) => onVatCountryRuleChange(rule.rowKey, 'country_code', e.target.value.toUpperCase())}
+                                className="w-full h-8 px-2 border border-input bg-background text-xs text-foreground uppercase font-mono"
+                              />
+                            </div>
+                          )}
+
+                          {/* Odoo Tax SearchableSelect */}
+                          <div className="flex-1 min-w-[200px]">
+                            <SearchableSelect
+                              options={orderTaxOptions}
+                              value={rule.tax_id}
+                              onChange={(val) => onVatCountryRuleChange(rule.rowKey, 'tax_id', val)}
+                              placeholder={
+                                rule.country_code === 'SA'
+                                  ? (lang === 'ar' ? '— ضريبة العميل داخل السعودية (أودو) —' : '— Saudi Customer Tax in Odoo —')
+                                  : rule.country_code === 'OTHER'
+                                  ? (lang === 'ar' ? '— ضريبة باقي الدول (أودو) —' : '— Other Countries Tax in Odoo —')
+                                  : (lang === 'ar' ? '— اختر الضريبة في أودو —' : '— Select Odoo Tax —')
+                              }
+                              disabled={isLoadingOrderTaxes}
+                            />
+                          </div>
+
+                          {/* Trash Button */}
+                          <button
+                            type="button"
+                            onClick={() => onRemoveVatCountryRule(rule.rowKey)}
+                            title={lang === 'ar' ? 'حذف الدولة' : 'Remove Country'}
+                            className="h-8 w-8 shrink-0 flex items-center justify-center self-end sm:self-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-3 text-center border border-dashed border-border text-xs text-muted-foreground">
+                    {lang === 'ar'
+                      ? 'لا توجد قواعد ضرائب مضافة. اضغط "إضافة دولة" لتعيين ضريبة لدولة معينة أو لباقي الدول.'
+                      : 'No tax rules added. Click "Add Country" to assign taxes for specific destinations or rest of world.'}
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border/60">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'ضريبة العميل السعودي (داخل المملكة)' : 'Saudi Customer Tax'}
+                  </label>
+                  <SearchableSelect
+                    options={orderTaxOptions}
+                    value={orderVatSaudiTaxId}
+                    onChange={setOrderVatSaudiTaxId}
+                    placeholder={lang === 'ar' ? '— اختر ضريبة العميل السعودي —' : '— Select Saudi Tax —'}
+                    disabled={isLoadingOrderTaxes}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/80">
+                    {lang === 'ar' ? 'ضريبة العميل غير السعودي (شحن دولي)' : 'Non-Saudi Customer Tax'}
+                  </label>
+                  <SearchableSelect
+                    options={orderTaxOptions}
+                    value={orderVatNonSaudiTaxId}
+                    onChange={setOrderVatNonSaudiTaxId}
+                    placeholder={lang === 'ar' ? '— اختر ضريبة العميل الدولي —' : '— Select Non-Saudi Tax —'}
+                    disabled={isLoadingOrderTaxes}
+                  />
+                </div>
+              </div>
+            )
           ) : (
             <p className="text-xs text-muted-foreground">
               {lang === 'ar'
@@ -1373,30 +1651,142 @@ export function OrderSettingsTab({
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-blue-200/60 dark:border-blue-900/40 max-w-xs space-y-1.5">
-                  <label className="block text-xs font-medium text-foreground/90">
-                    {lang === 'ar' ? 'نسبة الضريبة بالمتجر' : 'Store Tax Rate'}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      className="w-full h-9 px-3 pe-8 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono"
-                      value={orderTaxRatePercent}
-                      onChange={(e) => setOrderTaxRatePercent(e.target.value)}
-                      placeholder="15"
-                    />
-                    <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground pointer-events-none select-none">
-                      %
+                <div className="pt-2.5 border-t border-blue-200/60 dark:border-blue-900/40 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="block text-xs font-semibold text-foreground/90">
+                        {lang === 'ar' ? 'جدول نسب الضريبة حسب دولة الشحن' : 'Tax Rates by Destination Country'}
+                      </label>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {lang === 'ar'
+                          ? 'حدد نسبة الضريبة لكل دولة شحن. أي دولة غير مضافة بالجدول (مثل التصدير) تُعتبر نسبة ضريبتها 0% تلقائياً ولا يتم تقسيم السعر عليها.'
+                          : 'Set tax rate per destination. Any unlisted country (e.g. export) defaults to 0% with no deductions.'}
+                      </p>
+                    </div>
+                    {setOrderCountryTaxRates && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleAddCountryRule}
+                        className="h-7 text-xs gap-1 border-blue-300 dark:border-blue-800 hover:bg-blue-100/50 dark:hover:bg-blue-900/40"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>{lang === 'ar' ? 'إضافة دولة' : 'Add Country'}</span>
+                      </Button>
+                    )}
+                  </div>
+
+                  {setOrderCountryTaxRates ? (
+                    <div className="space-y-2">
+                      {countryRules.map((rule) => {
+                        const isCustom = !COMMON_TAX_COUNTRIES.some(c => c.code === rule.country_code) || rule.country_code === 'CUSTOM'
+                        return (
+                          <div
+                            key={rule.rowKey}
+                            className="flex items-center gap-2 p-2 rounded-none border border-blue-200/80 dark:border-blue-900/60 bg-background/80"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <select
+                                className="w-full h-8 px-2 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary outline-none transition-all"
+                                value={isCustom ? 'CUSTOM' : rule.country_code}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  if (val === 'CUSTOM') {
+                                    handleCountryRuleChange(rule.rowKey, 'country_code', '')
+                                  } else {
+                                    handleCountryRuleChange(rule.rowKey, 'country_code', val)
+                                  }
+                                }}
+                              >
+                                {COMMON_TAX_COUNTRIES.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    {lang === 'ar' ? c.name_ar : c.name_en}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {isCustom && (
+                              <div className="w-24 shrink-0">
+                                <input
+                                  type="text"
+                                  placeholder="رمز (مثال: KW)"
+                                  maxLength={5}
+                                  value={rule.country_code === 'CUSTOM' ? '' : rule.country_code}
+                                  onChange={(e) => handleCountryRuleChange(rule.rowKey, 'country_code', e.target.value.toUpperCase())}
+                                  className="w-full h-8 px-2 rounded-none border border-input bg-background text-xs text-foreground uppercase font-mono"
+                                />
+                              </div>
+                            )}
+
+                            <div className="w-28 shrink-0 relative">
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                placeholder="15"
+                                value={rule.tax_rate}
+                                onChange={(e) => handleCountryRuleChange(rule.rowKey, 'tax_rate', e.target.value)}
+                                className="w-full h-8 px-2 pe-6 rounded-none border border-input bg-background text-xs text-foreground font-mono focus:border-primary outline-none"
+                              />
+                              <span className="absolute end-2 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground pointer-events-none select-none">
+                                %
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveCountryRule(rule.rowKey)}
+                              title={lang === 'ar' ? 'حذف الدولة' : 'Remove Country'}
+                              className="h-8 w-8 shrink-0 flex items-center justify-center rounded-none text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )
+                      })}
+
+                      {countryRules.length === 0 && (
+                        <div className="p-3 text-center border border-dashed border-blue-200 dark:border-blue-900/60 rounded-none text-xs text-muted-foreground">
+                          {lang === 'ar'
+                            ? 'لا توجد دول مضافة — سيتم اعتبار نسبة الضريبة 0% لكافة الطلبات دون أي تقسيم.'
+                            : 'No countries configured — all orders will default to 0% tax rate with no division.'}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <div className={setOrderCountryTaxRates ? "hidden" : "max-w-xs space-y-1.5"}>
+                    <label className="block text-xs font-medium text-foreground/90">
+                      {lang === 'ar' ? 'نسبة الضريبة بالمتجر' : 'Store Tax Rate'}
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        className="w-full h-9 px-3 pe-8 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono"
+                        value={orderTaxRatePercent}
+                        onChange={(e) => setOrderTaxRatePercent(e.target.value)}
+                        placeholder="15"
+                      />
+                      <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground pointer-events-none select-none">
+                        %
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-[11px] text-emerald-900 dark:text-emerald-200 flex items-start gap-1.5">
+                    <span className="font-bold shrink-0">✓</span>
+                    <span>
+                      {lang === 'ar'
+                        ? 'حماية مبيعات التصدير: أي طلب شحن دولي لدولة خارج هذا الجدول يُعامل بنسبة ضريبة 0%، بحيث يُسجل السعر كاملاً في أودو دون قسمة على (1 + 15%) لمنع أي خسارة على التاجر.'
+                        : 'Export Protection: Any international order outside this table receives a 0% tax rate; full amounts are recorded in Odoo without division to protect export revenue.'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    {lang === 'ar'
-                      ? 'اكتب نسبة الضريبة (افتراضياً 15). سيتم حساب السعر الصافي = السعر ÷ (1 + النسبة / 100).'
-                      : 'Enter tax percentage (default 15). Net price = Price / (1 + Rate / 100).'}
-                  </p>
                 </div>
               </div>
             ) : (

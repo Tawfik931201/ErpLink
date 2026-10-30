@@ -54,12 +54,15 @@ import { notifySyncResult } from '@/lib/telegram-notifier'
 import type { SyncRecordSummary } from '@/lib/telegram-notifier'
 import { ttlCache } from '@/lib/ttl-cache'
 import {
-  isSaudiShippingAddress,
+  resolveEffectiveTaxRate,
+  resolveOrderVatTax,
   resolveZidCodAmount,
   resolveOrderDiscountAmount,
   resolveZidShippingCost,
   resolveZidStatus,
 } from '@/lib/zid/order-helpers'
+import type { VatCountryRule } from '@/lib/zid/order-helpers'
+export type { CountryTaxRateRule } from '@/lib/zid/order-helpers'
 
 // Types live in sync-types.ts so erpnext-engine.ts can share them without
 // importing this file. Re-exported here: this was their original path.
@@ -1168,10 +1171,12 @@ export async function buildOrderLineItems(
     productFallbackPolicy: 'product_fallback_policy',
     defaultProductId: 'default_product_id',
     enableVat: 'enable_vat',
+    vatCountryRules: 'vat_country_rules',
     vatSaudiTaxId: 'vat_saudi_tax_id',
     vatNonSaudiTaxId: 'vat_non_saudi_tax_id',
     pricesIncludeTax: 'prices_include_tax',
     taxRatePercent: 'tax_rate_percent',
+    taxRatesByCountry: 'tax_rates_by_country',
   }
   const orDefault = (camelKey: string, fallback: any) => {
     if (settingsKeys.has(camelKey)) return settings[camelKey]
@@ -1182,30 +1187,59 @@ export async function buildOrderLineItems(
   }
 
   const enableVat = !!orDefault('enableVat', false)
+  const vatCountryRules: VatCountryRule[] = (
+    orDefault('vatCountryRules', null)
+    ?? orderStdSettings?.vat_country_rules
+    ?? orderStdSettings?.order?.vat_country_rules
+    ?? settings?.vat_country_rules
+    ?? []
+  )
   const vatSaudiTaxId = orDefault('vatSaudiTaxId', null) ? Number(orDefault('vatSaudiTaxId', null)) : null
   const vatNonSaudiTaxId = orDefault('vatNonSaudiTaxId', null) ? Number(orDefault('vatNonSaudiTaxId', null)) : null
 
-  const isSaudi = isSaudiShippingAddress(zidData)
-  let resolvedVatTaxId: number | null = null
+  const { taxId: resolvedVatTaxId, appliedCountryCode, destinationCountryCode } = resolveOrderVatTax(zidData, {
+    enableVat,
+    vatCountryRules,
+    vatSaudiTaxId,
+    vatNonSaudiTaxId,
+  })
+
   if (enableVat) {
-    if (isSaudi) {
-      resolvedVatTaxId = vatSaudiTaxId && Number(vatSaudiTaxId) > 0 ? Number(vatSaudiTaxId) : null
+    if (resolvedVatTaxId) {
+      console.info(`[SyncEngine] VAT enabled for order: destination=${destinationCountryCode || 'Unknown'} (matched=${appliedCountryCode}), applied tax ID: ${resolvedVatTaxId}`)
     } else {
-      resolvedVatTaxId = vatNonSaudiTaxId && Number(vatNonSaudiTaxId) > 0 ? Number(vatNonSaudiTaxId) : null
+      console.info(`[SyncEngine] VAT enabled for order: destination=${destinationCountryCode || 'Unknown'}, but no tax configured for this destination — lines will be sent without tax (Odoo will apply default tax)`)
     }
-    console.info(`[SyncEngine] VAT enabled for order: destination=${isSaudi ? 'Saudi' : 'Non-Saudi'}, applied tax ID: ${resolvedVatTaxId ?? 'None'}`)
   } else {
-    console.info('[SyncEngine] VAT disabled for order in Standard Mapping: lines will be sent without tax')
+    console.info('[SyncEngine] VAT disabled for order in Standard Mapping: lines will be sent without tax (Odoo will apply default tax)')
   }
-  const defaultLineTaxCmd: [number, number, number[]] = enableVat && resolvedVatTaxId
+  const defaultLineTaxCmd: [number, number, number[]] | null = enableVat && resolvedVatTaxId
     ? [6, 0, [resolvedVatTaxId]]
-    : [6, 0, []]
+    : null
 
   const pricesIncludeTax = !!orDefault('pricesIncludeTax', false)
   const taxRatePercentRaw = orDefault('taxRatePercent', 15)
-  const taxRatePercent = (taxRatePercentRaw !== null && taxRatePercentRaw !== undefined && !isNaN(Number(taxRatePercentRaw)))
+  const fallbackTaxRate = (taxRatePercentRaw !== null && taxRatePercentRaw !== undefined && !isNaN(Number(taxRatePercentRaw)))
     ? Number(taxRatePercentRaw)
     : 15
+  const countryTaxRates = orDefault('taxRatesByCountry', null)
+    ?? orderStdSettings?.tax_rates_by_country
+    ?? orderStdSettings?.order?.tax_rates_by_country
+    ?? settings?.tax_rates_by_country
+
+  const { taxRate: taxRatePercent, matchedCountryCode, destinationCountryCode: taxDestCountry } = resolveEffectiveTaxRate(zidData, {
+    pricesIncludeTax,
+    countryTaxRates,
+    fallbackTaxRatePercent: fallbackTaxRate,
+  })
+
+  if (pricesIncludeTax) {
+    if (taxRatePercent > 0) {
+      console.info(`[SyncEngine] Prices include tax enabled (${taxRatePercent}% for country "${taxDestCountry}" matched="${matchedCountryCode}")`)
+    } else {
+      console.info(`[SyncEngine] Prices include tax enabled, but tax rate is 0% for destination "${taxDestCountry}" (export/unlisted) — amounts will not be divided`)
+    }
+  }
 
 
   const productFallbackPolicy = String(orDefault('productFallbackPolicy', 'create_new') || 'create_new')
@@ -1447,7 +1481,7 @@ export async function buildOrderLineItems(
       }
       if (resolvedMappingTaxId) {
         line[lineTaxField] = [[6, 0, [resolvedMappingTaxId]]]
-      } else {
+      } else if (defaultLineTaxCmd) {
         line[lineTaxField] = [defaultLineTaxCmd]
       }
     }
@@ -1677,7 +1711,9 @@ export async function buildOrderLineItems(
       name: 'Shipping (شحن)',
       product_uom_qty: 1,
       price_unit: finalShippingCost,
-      [lineTaxField]: [defaultLineTaxCmd],
+    }
+    if (defaultLineTaxCmd) {
+      shippingLine[lineTaxField] = [defaultLineTaxCmd]
     }
 
     if (shippingProductId) {
@@ -1734,7 +1770,9 @@ export async function buildOrderLineItems(
       name: nameStr,
       product_uom_qty: 1,
       price_unit: discountValue,
-      [lineTaxField]: [defaultLineTaxCmd],
+    }
+    if (defaultLineTaxCmd) {
+      discountLine[lineTaxField] = [defaultLineTaxCmd]
     }
 
     if (discountProductId) {
@@ -1777,7 +1815,9 @@ export async function buildOrderLineItems(
       name: 'Cash on Delivery (الدفع عند الاستلام)',
       product_uom_qty: 1,
       price_unit: finalCodFee,
-      [lineTaxField]: [defaultLineTaxCmd],
+    }
+    if (defaultLineTaxCmd) {
+      codLine[lineTaxField] = [defaultLineTaxCmd]
     }
     if (codProductId) {
       codLine['product_id'] = parseInt(codProductId)

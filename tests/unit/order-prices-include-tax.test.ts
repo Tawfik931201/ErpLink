@@ -60,11 +60,19 @@ describe('Order Prices Include Tax — UI contract', () => {
     expect(tabSource).toContain('%')
   })
 
-  it('persists prices_include_tax and tax_rate_percent in standard-mapping-client', () => {
+  it('persists prices_include_tax, tax_rate_percent, and tax_rates_by_country in standard-mapping-client', () => {
     expect(clientSource).toContain('prices_include_tax: orderPricesIncludeTax')
     expect(clientSource).toContain('tax_rate_percent: orderTaxRatePercent')
+    expect(clientSource).toContain('tax_rates_by_country: cleanedCountryTaxRates')
     expect(clientSource).toContain('setOrderPricesIncludeTax')
     expect(clientSource).toContain('setOrderTaxRatePercent')
+    expect(clientSource).toContain('setOrderCountryTaxRates')
+  })
+
+  it('renders country tax rate table with export protection notice', () => {
+    expect(tabSource).toContain('جدول نسب الضريبة حسب دولة الشحن')
+    expect(tabSource).toContain('حماية مبيعات التصدير')
+    expect(tabSource).toContain('COMMON_TAX_COUNTRIES')
   })
 })
 
