@@ -1113,7 +1113,7 @@ async function findOdooProductByCodeOrBarcode(client: OdooClient, code: string):
  *
  * Reads line-level mappings from mapping.mappings['sale.order.line'].
  */
-async function buildOrderLineItems(
+export async function buildOrderLineItems(
   client: OdooClient,
   mapping: FieldMappingRow,
   zidData: Record<string, unknown>,
@@ -1170,6 +1170,8 @@ async function buildOrderLineItems(
     enableVat: 'enable_vat',
     vatSaudiTaxId: 'vat_saudi_tax_id',
     vatNonSaudiTaxId: 'vat_non_saudi_tax_id',
+    pricesIncludeTax: 'prices_include_tax',
+    taxRatePercent: 'tax_rate_percent',
   }
   const orDefault = (camelKey: string, fallback: any) => {
     if (settingsKeys.has(camelKey)) return settings[camelKey]
@@ -1198,6 +1200,12 @@ async function buildOrderLineItems(
   const defaultLineTaxCmd: [number, number, number[]] = enableVat && resolvedVatTaxId
     ? [6, 0, [resolvedVatTaxId]]
     : [6, 0, []]
+
+  const pricesIncludeTax = !!orDefault('pricesIncludeTax', false)
+  const taxRatePercentRaw = orDefault('taxRatePercent', 15)
+  const taxRatePercent = (taxRatePercentRaw !== null && taxRatePercentRaw !== undefined && !isNaN(Number(taxRatePercentRaw)))
+    ? Number(taxRatePercentRaw)
+    : 15
 
 
   const productFallbackPolicy = String(orDefault('productFallbackPolicy', 'create_new') || 'create_new')
@@ -1339,6 +1347,9 @@ async function buildOrderLineItems(
         const parsed = parseFloat(val)
         if (!isNaN(parsed)) val = parsed
       }
+      if (fm.erpField === 'price_unit' && typeof val === 'number' && val > 0 && pricesIncludeTax && taxRatePercent > 0) {
+        val = Math.round((val / (1 + (taxRatePercent / 100))) * 100) / 100
+      }
       line[fm.erpField] = val
     }
 
@@ -1347,12 +1358,23 @@ async function buildOrderLineItems(
     // gross_sale_price / price_before / net_price / total ...). Prefer explicit
     // unit keys, then derive the unit from line totals / quantity.
     const qty = parseFloat(String(productData.quantity ?? productData.qty ?? 1)) || 1
-    const zidPrice = numFromKeys(productData, ['price_before', 'net_price', 'gross_price', 'price', 'unit_price', 'amount'])
+    let zidPrice = numFromKeys(productData, ['price_before', 'net_price', 'gross_price', 'price', 'unit_price', 'amount'])
       || numFromKeys(productData, ['total_before', 'total']) / qty
-    const zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
+    let zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
       || numFromKeys(productData, ['discounted_total', 'total']) / qty
       || zidPrice
     const zidDiscountDirect = numFromKeys(productData, ['discount', 'discount_percentage'])
+
+    if (pricesIncludeTax && taxRatePercent > 0) {
+      const taxDivisor = 1 + (taxRatePercent / 100)
+      if (zidPrice > 0) {
+        zidPrice = Math.round((zidPrice / taxDivisor) * 100) / 100
+      }
+      if (zidSalePrice > 0) {
+        zidSalePrice = Math.round((zidSalePrice / taxDivisor) * 100) / 100
+      }
+      console.info(`[SyncEngine] Prices include tax enabled (${taxRatePercent}%): converted unit price before tax (price=${zidPrice}, salePrice=${zidSalePrice})`)
+    }
     console.info(`[SyncEngine] Order line sku=${String(productData.sku ?? '')} qty=${qty} price=${zidPrice} salePrice=${zidSalePrice} discountDirect=${zidDiscountDirect}`)
 
     if (zidDiscountDirect > 0 || (zidSalePrice > 0 && zidSalePrice < zidPrice)) {
@@ -1495,6 +1517,9 @@ async function buildOrderLineItems(
           }
           const barcode = String(productData.barcode ?? '').trim()
           let price = numFromKeys(productData, ['price', 'sale_price', 'unit_price', 'amount']) || 0
+          if (pricesIncludeTax && taxRatePercent > 0 && price > 0) {
+            price = Math.round((price / (1 + (taxRatePercent / 100))) * 100) / 100
+          }
 
           let prodStd: Record<string, any> | null = null
           if (mapping.workspace_id && platform) {

@@ -9,6 +9,7 @@ import {
   CreditCard,
   GitCompare,
   History,
+  Info,
   Loader2,
   Package,
   PackageCheck,
@@ -168,6 +169,11 @@ interface OrderSettingsTabProps {
   setOrderVatNonSaudiTaxId: (val: string) => void
   orderTaxOptions: { value: string; label: string }[]
   isLoadingOrderTaxes: boolean
+  // Prices include tax
+  orderPricesIncludeTax: boolean
+  setOrderPricesIncludeTax: (val: boolean) => void
+  orderTaxRatePercent: string
+  setOrderTaxRatePercent: (val: string) => void
   // Shipping & Discount & COD lines
   orderAddShipping: boolean
   setOrderAddShipping: (val: boolean) => void
@@ -320,6 +326,10 @@ export function OrderSettingsTab({
   setOrderVatNonSaudiTaxId,
   orderTaxOptions,
   isLoadingOrderTaxes,
+  orderPricesIncludeTax,
+  setOrderPricesIncludeTax,
+  orderTaxRatePercent,
+  setOrderTaxRatePercent,
   orderAddShipping: _orderAddShipping,
   setOrderAddShipping,
   orderShippingProductId,
@@ -1322,6 +1332,84 @@ export function OrderSettingsTab({
                 : 'VAT mapping is disabled: order lines will be created without taxes in Odoo.'}
             </p>
           )}
+
+          {/* Tax-inclusive store prices setting */}
+          <div className="pt-3 border-t border-border/60 space-y-3">
+            <SettingToggle
+              checked={orderPricesIncludeTax}
+              onChange={setOrderPricesIncludeTax}
+              label={
+                lang === 'ar'
+                  ? 'أسعار المنتجات بالمتجر تشمل الضريبة (استخراج السعر قبل الضريبة لأودو)'
+                  : 'Store product prices include tax (extract price before tax for Odoo)'
+              }
+              description={
+                lang === 'ar'
+                  ? 'تفعيل هذا الخيار يقوم باستخراج السعر الصافي قبل الضريبة لتسجيله في أودو منعاً لتكرار احتساب الضريبة'
+                  : 'Extracts the net price before tax to register in Odoo to avoid double-charging tax'
+              }
+            />
+
+            {orderPricesIncludeTax ? (
+              <div className="space-y-3 p-3.5 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 text-xs">
+                <div className="flex items-start gap-2.5 text-blue-900 dark:text-blue-200">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-blue-950 dark:text-blue-100">
+                      {lang === 'ar'
+                        ? 'تنبيه وتوصية: يُنصح بتفعيل هذا الإعداد عند مطابقة الشروط التالية:'
+                        : 'Notice & Recommendation: Recommended when the following conditions match:'}
+                    </p>
+                    <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
+                      {lang === 'ar'
+                        ? '1. أسعار البيع المعروضة بمتجرك شاملة لضريبة القيمة المضافة.\n2. إعدادات الضرائب في أودو محددة بأن الأسعار قبل الضريبة (Tax Excluded).'
+                        : '1. Store product sales prices are tax-inclusive.\n2. Odoo taxes are configured as tax-excluded.'}
+                    </p>
+                    <p className="text-blue-900/90 dark:text-blue-300/90 leading-relaxed font-medium pt-1">
+                      {lang === 'ar'
+                        ? '💡 آلية العمل: عند استقبال طلب من المتجر بسعر شامل (مثلاً 115 ر.س مع ضريبة 15%)، سيقوم النظام تلقائياً باحتساب السعر قبل الضريبة (100 ر.س) وهو المبلغ الذي سيُسجل في أودو، ليقوم أودو بعدها بإضافة نسبة الضريبة تلقائياً ويصبح إجمالي الطلب 115 ر.س دون أي ازدواج ضريبي.'
+                        : '💡 How it works: When receiving an order with an inclusive price (e.g. 115 SAR with 15% VAT), the system calculates the pre-tax base price (100 SAR) and registers it in Odoo. Odoo then adds the tax, achieving the correct 115 SAR total without duplication.'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-blue-200/60 dark:border-blue-900/40 max-w-xs space-y-1.5">
+                  <label className="block text-xs font-medium text-foreground/90">
+                    {lang === 'ar' ? 'نسبة الضريبة بالمتجر' : 'Store Tax Rate'}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      className="w-full h-9 px-3 pe-8 rounded-none border border-input bg-background text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all font-mono"
+                      value={orderTaxRatePercent}
+                      onChange={(e) => setOrderTaxRatePercent(e.target.value)}
+                      placeholder="15"
+                    />
+                    <span className="absolute end-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground pointer-events-none select-none">
+                      %
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    {lang === 'ar'
+                      ? 'اكتب نسبة الضريبة (افتراضياً 15). سيتم حساب السعر الصافي = السعر ÷ (1 + النسبة / 100).'
+                      : 'Enter tax percentage (default 15). Net price = Price / (1 + Rate / 100).'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2.5 bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                <Info className="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                <span>
+                  {lang === 'ar'
+                    ? 'تنبيه: يُنصح بتفعيل هذا الخيار عندما تكون الأسعار بالمتجر شاملة للضريبة وإعدادات أودو في الضريبة أن الأسعار قبل الضريبة، لتفادي تسجيل السعر شاملاً وإضافة أودو ضريبة أخرى فوقه.'
+                    : 'Notice: Recommended when store prices include VAT and Odoo taxes expect tax-exclusive amounts, to avoid double-taxation.'}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </SettingCard>
 

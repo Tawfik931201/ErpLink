@@ -301,6 +301,8 @@ export default function StandardMappingClient({
   const [orderVatNonSaudiTaxId, setOrderVatNonSaudiTaxId] = useState('')
   const [orderTaxOptions, setOrderTaxOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingOrderTaxes, setIsLoadingOrderTaxes] = useState(false)
+  const [orderPricesIncludeTax, setOrderPricesIncludeTax] = useState(false)
+  const [orderTaxRatePercent, setOrderTaxRatePercent] = useState('15')
 
   // Status mapping
   const [orderStateMapping, setOrderStateMapping] = useState<
@@ -933,6 +935,12 @@ export default function StandardMappingClient({
         setOrderEnableVat(s.enable_vat ?? s.order?.enable_vat ?? false)
         setOrderVatSaudiTaxId(s.vat_saudi_tax_id ? String(s.vat_saudi_tax_id) : (s.order?.vat_saudi_tax_id ? String(s.order.vat_saudi_tax_id) : ''))
         setOrderVatNonSaudiTaxId(s.vat_non_saudi_tax_id ? String(s.vat_non_saudi_tax_id) : (s.order?.vat_non_saudi_tax_id ? String(s.order.vat_non_saudi_tax_id) : ''))
+        setOrderPricesIncludeTax(s.prices_include_tax ?? s.order?.prices_include_tax ?? false)
+        setOrderTaxRatePercent(
+          s.tax_rate_percent !== undefined && s.tax_rate_percent !== null
+            ? String(s.tax_rate_percent)
+            : (s.order?.tax_rate_percent !== undefined && s.order?.tax_rate_percent !== null ? String(s.order.tax_rate_percent) : '15')
+        )
 
         setOrderCustomerFallbackPolicy(s.customer_fallback_policy || s.order?.customer_fallback_policy || 'create_new')
         setOrderDefaultCustomerId(s.default_customer_id ? String(s.default_customer_id) : (s.order?.default_customer_id ? String(s.order.default_customer_id) : ''))
@@ -1835,6 +1843,8 @@ export default function StandardMappingClient({
       enable_vat: orderEnableVat,
       vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
       vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+      prices_include_tax: orderPricesIncludeTax,
+      tax_rate_percent: orderTaxRatePercent !== '' && !isNaN(Number(orderTaxRatePercent)) ? Number(orderTaxRatePercent) : 15,
       update_custom_status_field: orderUpdateCustomStatus,
       order_status_custom_field: orderStatusCustomField,
       order: {
@@ -1851,6 +1861,8 @@ export default function StandardMappingClient({
         enable_vat: orderEnableVat,
         vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
         vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+        prices_include_tax: orderPricesIncludeTax,
+        tax_rate_percent: orderTaxRatePercent !== '' && !isNaN(Number(orderTaxRatePercent)) ? Number(orderTaxRatePercent) : 15,
         update_custom_status_field: orderUpdateCustomStatus,
         order_status_custom_field: orderStatusCustomField,
         // Persisted as a plain Record (Zid location id → Odoo warehouse id);
@@ -1922,6 +1934,7 @@ export default function StandardMappingClient({
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
 
     orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
+    orderPricesIncludeTax, orderTaxRatePercent,
     orderUpdateCustomStatus, orderStatusCustomField,
     orderPaymentAutoSync, orderPaymentJournalMappings,
     orderStateMapping, standardStoreTab, standardStoreId, standardSubTab, lang, toast
@@ -2447,6 +2460,10 @@ export default function StandardMappingClient({
                   setOrderVatNonSaudiTaxId={setOrderVatNonSaudiTaxId}
                   orderTaxOptions={orderTaxOptions}
                   isLoadingOrderTaxes={isLoadingOrderTaxes}
+                  orderPricesIncludeTax={orderPricesIncludeTax}
+                  setOrderPricesIncludeTax={setOrderPricesIncludeTax}
+                  orderTaxRatePercent={orderTaxRatePercent}
+                  setOrderTaxRatePercent={setOrderTaxRatePercent}
                   orderAddShipping={orderAddShipping}
                   setOrderAddShipping={setOrderAddShipping}
                   orderShippingProductId={orderShippingProductId}

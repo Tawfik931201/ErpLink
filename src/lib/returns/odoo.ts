@@ -119,6 +119,7 @@ export async function readSaleOrder(
   client: OdooClient,
   orderId: number
 ): Promise<OriginalSaleOrder | null> {
+  const majorVersion = await client.getMajorVersion().catch(() => 17)
   const fullOrderFields = [
     'id',
     'name',
@@ -133,7 +134,7 @@ export async function readSaleOrder(
     'payment_term_id',
     'team_id',
     'user_id',
-    'analytic_account_id',
+    ...(majorVersion < 17 ? ['analytic_account_id'] : []),
     'invoice_ids',
     'order_line',
   ]
