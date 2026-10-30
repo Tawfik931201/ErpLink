@@ -18,8 +18,13 @@ type Recorded = {
 
 const calls: Recorded[] = []
 
+let mockResponder: ((table: string, op: string) => any) | null = null
+const mockTables: Record<string, any[]> = {}
+
 function makeBuilder(table: string) {
   const builder: Record<string, unknown> = {}
+  let isSingle = false
+  let isMaybeSingle = false
 
   const chainMethods = [
     'select', 'insert', 'update', 'upsert', 'delete',
@@ -37,6 +42,10 @@ function makeBuilder(table: string) {
       if (['select', 'insert', 'update', 'upsert', 'delete'].includes(method)) {
         current = { table, op: method, args, filters: [] }
         calls.push(current)
+      } else if (method === 'single') {
+        isSingle = true
+      } else if (method === 'maybeSingle') {
+        isMaybeSingle = true
       } else if (current && ['eq', 'neq', 'match'].includes(method)) {
         // `match` takes a single object; the rest take (column, value).
         if (method === 'match' && args[0] && typeof args[0] === 'object') {
@@ -51,23 +60,46 @@ function makeBuilder(table: string) {
     }
   }
 
+  function getSettled() {
+    if (mockResponder) {
+      const r = mockResponder(table, current?.op ?? 'select')
+      if (r !== undefined) return r
+    }
+    if (mockTables[table]) {
+      let rows = mockTables[table]
+      if (current && current.filters.length > 0) {
+        rows = rows.filter((r) =>
+          current!.filters.every(([col, val]) => r[col] === val)
+        )
+      }
+      if (isSingle) {
+        return {
+          data: rows[0] || null,
+          error: rows[0] ? null : { message: 'Row not found' },
+          count: rows.length,
+        }
+      }
+      if (isMaybeSingle) {
+        return { data: rows[0] || null, error: null, count: rows.length }
+      }
+      return { data: rows, error: null, count: rows.length }
+    }
+    return { data: null, error: null, count: null }
+  }
+
   // Terminal operations: no network, empty result.
-  //
-  // `then` must INVOKE the resolve callback that `await` hands it. An
-  // `async () => value` here is not enough: `await builder` calls
-  // `builder.then(resolve, reject)` and settles only when `resolve` is called,
-  // so a builder that just returned a value of its own hung forever. No test
-  // noticed until one actually awaited a query.
-  const settled = { data: null, error: null, count: null }
-  builder.execute = async () => settled
+  builder.execute = async () => getSettled()
   builder.then = (
-    onFulfilled?: ((value: typeof settled) => unknown) | null,
+    onFulfilled?: ((value: any) => unknown) | null,
     onRejected?: ((reason: unknown) => unknown) | null
-  ) => Promise.resolve(settled).then(onFulfilled, onRejected)
+  ) => {
+    const res = getSettled()
+    return Promise.resolve(res).then(onFulfilled, onRejected)
+  }
   builder.catch = (onRejected?: ((reason: unknown) => unknown) | null) =>
-    Promise.resolve(settled).catch(onRejected)
+    Promise.resolve(getSettled()).catch(onRejected)
   builder.finally = (onFinally?: (() => void) | null) =>
-    Promise.resolve(settled).finally(onFinally)
+    Promise.resolve(getSettled()).finally(onFinally)
 
   return builder
 }
@@ -81,8 +113,16 @@ export const supabase = {
   auth: {
     getUser: async () => ({ data: { user: null }, error: null }),
   },
+  addMock(table: string, data: any[]) {
+    mockTables[table] = data
+  },
+  setMockResponder(fn: ((table: string, op: string) => any) | null) {
+    mockResponder = fn
+  },
   reset() {
     calls.length = 0
+    mockResponder = null
+    for (const k of Object.keys(mockTables)) delete mockTables[k]
   },
 }
 

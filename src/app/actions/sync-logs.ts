@@ -5,7 +5,8 @@ import { revalidatePath } from 'next/cache'
 
 import { SHOPIFY_TOPIC_CATALOG } from '@/lib/shopify-topics'
 import { supabase } from '@/lib/supabase'
-import { processSingleMapping } from '@/lib/sync-engine'
+import { processSingleMapping, processWebhookEvent } from '@/lib/sync-engine'
+import type { FieldMappingRow } from '@/lib/sync-types'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
 async function getOrCreateDbUser() {
@@ -404,34 +405,131 @@ export async function retrySyncLog(logId: string) {
     if (logErr) throw new Error('Failed to fetch log: ' + logErr.message)
     if (!log) throw new Error('Sync log not found')
 
-    // 2. Fetch field mapping
-    const { data: mapping, error: mapErr } = await supabase
-      .from('field_mappings')
-      .select('*')
-      .eq('id', log.field_mapping_id)
-      .eq('workspace_id', user.active_workspace_id)
-      .maybeSingle()
+    if (!log.event) {
+      throw new Error('لا يوجد نوع حدث مسجل لهذا السجل (Log does not contain an event type)')
+    }
 
-    if (mapErr) throw new Error('Failed to fetch field mapping: ' + mapErr.message)
-    if (!mapping) throw new Error('المطابقة الخاصة بهذا السجل تم حذفها ولا يمكن إعادة إرسالها (Associated field mapping was deleted)')
+    const payload = (log.payload && typeof log.payload === 'object' && !Array.isArray(log.payload))
+      ? (log.payload as Record<string, unknown>)
+      : {}
 
-    // 3. Re-run mapping
-    const result = await processSingleMapping(
-      mapping,
-      log.event,
-      log.store_id,
-      log.payload || {},
-      'manual', // triggerType
-      logId // existingLogId
-    )
+    // 2. Fetch field mapping (only if field_mapping_id is a valid UUID)
+    const isUuid =
+      typeof log.field_mapping_id === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(log.field_mapping_id)
+
+    let mapping: FieldMappingRow | null = null
+    if (isUuid) {
+      const { data: mappingData, error: mapErr } = await supabase
+        .from('field_mappings')
+        .select('*')
+        .eq('id', log.field_mapping_id)
+        .eq('workspace_id', user.active_workspace_id)
+        .maybeSingle()
+
+      if (mapErr) {
+        console.warn('[Sync Logs Action] Failed to fetch field mapping:', mapErr.message)
+      } else if (mappingData) {
+        mapping = mappingData as unknown as FieldMappingRow
+      }
+    }
+
+    let status: string
+    let message: string
+    let isFailed = false
+
+    if (mapping) {
+      // 3a. Re-run custom mapping
+      const result = await processSingleMapping(
+        mapping,
+        log.event,
+        log.store_id || '',
+        payload,
+        'manual', // triggerType
+        logId // existingLogId
+      )
+
+      status = result.status
+      message = result.message || ''
+      isFailed = result.status === 'failed'
+    } else {
+      // 3b. Standard Mapping (preset / webhook event fallback where field_mapping_id is null or mapping was removed)
+      const retryStartTime = new Date(Date.now() - 2000).toISOString()
+      const platform = await resolveLogPlatform(log.store_id, user.active_workspace_id)
+      const result = await processWebhookEvent(
+        log.event,
+        log.store_id || '',
+        payload,
+        platform || undefined,
+        true, // isQueueExecution
+        user.active_workspace_id
+      )
+
+      if (!result.records || result.records.length === 0) {
+        throw new Error('لم يتم العثور على مطابقة مفعّلة أو إعدادات قياسية لهذا الحدث (No active mapping or standard settings found for this event)')
+      }
+
+      const firstFailed = result.records.find((r) => r.status === 'failed')
+      const primaryRecord = firstFailed || result.records.find((r) => r.status === 'success') || result.records[0]
+
+      isFailed = primaryRecord.status === 'failed'
+      status = primaryRecord.status
+      message = primaryRecord.message || (isFailed ? 'فشلت المزامنة' : 'تمت المزامنة بنجاح')
+
+      // Update the existing log in place so the opened record view (/app/logs/[id]) reflects the new result
+      await supabase
+        .from('sync_logs')
+        .update({
+          status: primaryRecord.status,
+          error_message: isFailed ? (primaryRecord.message || 'فشلت المزامنة') : null,
+          odoo_record_id: primaryRecord.odooRecordId ?? (primaryRecord as any).odoo_record_id ?? null,
+          odoo_model: primaryRecord.model || undefined,
+          trigger_type: 'manual',
+          resolved_manually: false,
+        })
+        .eq('id', logId)
+        .eq('workspace_id', user.active_workspace_id)
+
+      // Clean up duplicate new row inserted by processWebhookEvent if present
+      try {
+        const { data: newLogs } = await supabase
+          .from('sync_logs')
+          .select('id')
+          .eq('workspace_id', user.active_workspace_id)
+          .eq('store_id', log.store_id)
+          .eq('event', log.event)
+          .gte('created_at', retryStartTime)
+          .neq('id', logId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        if (newLogs && newLogs.length > 0) {
+          await supabase
+            .from('sync_logs')
+            .delete()
+            .eq('id', newLogs[0].id)
+            .eq('workspace_id', user.active_workspace_id)
+        }
+      } catch {
+        // Cleanup is best effort
+      }
+    }
 
     revalidatePath('/app/mapping-center')
     revalidatePath('/app/logs')
 
+    if (isFailed) {
+      return {
+        success: false,
+        status,
+        error: message || 'فشلت إعادة الإرسال (Retry sync failed)',
+      }
+    }
+
     return {
       success: true,
-      status: result.status,
-      message: result.message || 'تمت إعادة معالجة المزامنة بنجاح (Sync retry completed)'
+      status,
+      message: message || 'تمت إعادة معالجة المزامنة بنجاح (Sync retry completed)',
     }
   } catch (error: any) {
     console.error('[Sync Logs Action] retrySyncLog failed:', error)
