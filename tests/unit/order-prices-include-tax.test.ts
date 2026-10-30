@@ -45,8 +45,8 @@ describe('Order Prices Include Tax — UI contract', () => {
   })
 
   it('renders the toggle with clear Arabic and English labels', () => {
-    expect(tabSource).toContain('أسعار المنتجات بالمتجر تشمل الضريبة')
-    expect(tabSource).toContain('Store product prices include tax')
+    expect(tabSource).toContain('أسعار المتجر تشمل الضريبة')
+    expect(tabSource).toContain('Store prices include tax')
   })
 
   it('renders advisory message explaining 115 SAR -> 100 SAR calculation and Odoo tax settings', () => {

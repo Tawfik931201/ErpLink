@@ -1635,8 +1635,13 @@ export async function buildOrderLineItems(
     lines.push(line)
   }
 
-  if (orderLevelDiscount > 0) {
-    totalDiscountAmount = Math.max(totalDiscountAmount, orderLevelDiscount)
+  let effectiveOrderDiscount = orderLevelDiscount
+  if (pricesIncludeTax && taxRatePercent > 0 && effectiveOrderDiscount > 0) {
+    const taxDivisor = 1 + (taxRatePercent / 100)
+    effectiveOrderDiscount = Math.round((effectiveOrderDiscount / taxDivisor) * 100) / 100
+  }
+  if (effectiveOrderDiscount > 0) {
+    totalDiscountAmount = Math.max(totalDiscountAmount, effectiveOrderDiscount)
     anyProductHasDiscount = true
   }
 
@@ -1662,10 +1667,16 @@ export async function buildOrderLineItems(
 
   // ─── Shipping as Line Item ──────────────────────────────────────────────
   if (addShippingAsLine) {
+    let finalShippingCost = shippingCost
+    if (pricesIncludeTax && taxRatePercent > 0 && finalShippingCost > 0) {
+      const taxDivisor = 1 + (taxRatePercent / 100)
+      finalShippingCost = Math.round((finalShippingCost / taxDivisor) * 100) / 100
+      console.info(`[SyncEngine] Prices include tax enabled (${taxRatePercent}%): converted shipping cost to tax-exclusive (${shippingCost} → ${finalShippingCost})`)
+    }
     const shippingLine: Record<string, unknown> = {
       name: 'Shipping (شحن)',
       product_uom_qty: 1,
-      price_unit: shippingCost,
+      price_unit: finalShippingCost,
       [lineTaxField]: [defaultLineTaxCmd],
     }
 
@@ -1713,6 +1724,8 @@ export async function buildOrderLineItems(
   // ─── Discount as Order Line (Fixed Mode Only) ──────────────────────────
   // If discountMode is 'percent', discount was applied to the order lines directly above.
   // In 'fixed' mode, append the discount line item with negative price_unit.
+  // Note: totalDiscountAmount is already in pre-tax units when pricesIncludeTax is enabled
+  // because line prices and orderLevelDiscount were converted before accumulating.
   if (addDiscountAsLine && discountMode !== 'percent' && anyProductHasDiscount && totalDiscountAmount > 0) {
     const discountValue = -Math.abs(totalDiscountAmount)
     const nameStr = 'Discount (خصم)'
@@ -1754,10 +1767,16 @@ export async function buildOrderLineItems(
     || /cod|cash.?on.?delivery|الدفع عند الاستلام|عند الاستلام/i.test(payMethodTitle)
     || (zidData as any)?.cod_confirmed === true
   if (addCodAsLine && isCodPayment && codFeeAmount > 0) {
+    let finalCodFee = codFeeAmount
+    if (pricesIncludeTax && taxRatePercent > 0 && finalCodFee > 0) {
+      const taxDivisor = 1 + (taxRatePercent / 100)
+      finalCodFee = Math.round((finalCodFee / taxDivisor) * 100) / 100
+      console.info(`[SyncEngine] Prices include tax enabled (${taxRatePercent}%): converted COD fee to tax-exclusive (${codFeeAmount} → ${finalCodFee})`)
+    }
     const codLine: Record<string, unknown> = {
       name: 'Cash on Delivery (الدفع عند الاستلام)',
       product_uom_qty: 1,
-      price_unit: codFeeAmount,
+      price_unit: finalCodFee,
       [lineTaxField]: [defaultLineTaxCmd],
     }
     if (codProductId) {
@@ -1768,7 +1787,7 @@ export async function buildOrderLineItems(
     }
     if (codLine['product_id']) {
       lines.push(codLine)
-      console.info(`[SyncEngine] COD line item appended: price_unit=${codFeeAmount}`)
+      console.info(`[SyncEngine] COD line item appended: price_unit=${finalCodFee}`)
     } else {
       console.warn('[SyncEngine] COD line skipped: add_cod_as_line is enabled and payment is COD but no COD product was resolved. Set cod_product_id or cod_product_sku in Standard Mapping settings.')
     }

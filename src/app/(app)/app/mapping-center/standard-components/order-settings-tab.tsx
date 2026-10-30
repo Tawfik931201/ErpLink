@@ -1340,13 +1340,13 @@ export function OrderSettingsTab({
               onChange={setOrderPricesIncludeTax}
               label={
                 lang === 'ar'
-                  ? 'أسعار المنتجات بالمتجر تشمل الضريبة (استخراج السعر قبل الضريبة لأودو)'
-                  : 'Store product prices include tax (extract price before tax for Odoo)'
+                  ? 'أسعار المتجر تشمل الضريبة (استخراج المبالغ قبل الضريبة لكافة البنود والخدمات لأودو)'
+                  : 'Store prices include tax (extract pre-tax amounts for all items & services for Odoo)'
               }
               description={
                 lang === 'ar'
-                  ? 'تفعيل هذا الخيار يقوم باستخراج السعر الصافي قبل الضريبة لتسجيله في أودو منعاً لتكرار احتساب الضريبة'
-                  : 'Extracts the net price before tax to register in Odoo to avoid double-charging tax'
+                  ? 'يُطبق على كافة الصفوف في أمر البيع (المنتجات، خدمات الشحن والتوصيل، رسوم الدفع عند الاستلام، وبنود الخصم) لاستخراج المبلغ الصافي قبل الضريبة'
+                  : 'Applies to all sales order lines (products, delivery/shipping, COD fees, and discount lines) to extract net amounts before tax'
               }
             />
 
@@ -1367,8 +1367,8 @@ export function OrderSettingsTab({
                     </p>
                     <p className="text-blue-900/90 dark:text-blue-300/90 leading-relaxed font-medium pt-1">
                       {lang === 'ar'
-                        ? '💡 آلية العمل: عند استقبال طلب من المتجر بسعر شامل (مثلاً 115 ر.س مع ضريبة 15%)، سيقوم النظام تلقائياً باحتساب السعر قبل الضريبة (100 ر.س) وهو المبلغ الذي سيُسجل في أودو، ليقوم أودو بعدها بإضافة نسبة الضريبة تلقائياً ويصبح إجمالي الطلب 115 ر.س دون أي ازدواج ضريبي.'
-                        : '💡 How it works: When receiving an order with an inclusive price (e.g. 115 SAR with 15% VAT), the system calculates the pre-tax base price (100 SAR) and registers it in Odoo. Odoo then adds the tax, achieving the correct 115 SAR total without duplication.'}
+                        ? '💡 نطاق التطبيق الشامل: يتم احتساب السعر قبل الضريبة لجميع صفوف الطلب بدون استثناء:\n• منتجات الطلب (مثال: سعر 115 ر.س يسجل في أودو 100 ر.س).\n• رسوم الشحن والتوصيل (مثال: شحن 23 ر.س يسجل في أودو 20 ر.س لتضاف ضريبة الـ 15% ويصل لـ 23 ر.س).\n• خدمة ورسوم الدفع عند الاستلام (COD).\n• بنود الخصم بالقيمة السالبة (مثال: خصم 23 ر.س يسجل في أودو -20 ر.س لتخصم الضريبة ويصل صافي الخصم لـ -23 ر.س).'
+                        : '💡 Comprehensive Scope: Pre-tax extraction applies across all order lines without exception:\n• Order products (e.g. 115 SAR price records as 100 SAR in Odoo).\n• Delivery and shipping charges (e.g. 23 SAR delivery records as 20 SAR).\n• Cash on Delivery (COD) collection fees.\n• Fixed discount lines with negative value (e.g. 23 SAR discount records as -20 SAR so tax is discounted proportionally).'}
                     </p>
                   </div>
                 </div>
