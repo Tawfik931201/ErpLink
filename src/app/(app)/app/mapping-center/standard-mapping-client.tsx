@@ -1864,6 +1864,19 @@ export default function StandardMappingClient({
         tax_rate: r.tax_rate !== '' && !isNaN(Number(r.tax_rate)) ? Number(r.tax_rate) : 0,
       }))
 
+    const cleanedVatCountryRules = orderVatCountryRules
+      .filter(r => r.country_code && r.country_code.trim())
+      .map(r => ({
+        country_code: r.country_code.trim().toUpperCase(),
+        country_name: r.country_name?.trim() || '',
+        tax_id: r.tax_id ? Number(r.tax_id) : null,
+      }))
+
+    const resolvedSaudiTax = cleanedVatCountryRules.find(r => r.country_code === 'SA')?.tax_id
+      ?? (orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null)
+    const resolvedNonSaudiTax = cleanedVatCountryRules.find(r => r.country_code === 'OTHER' || r.country_code === '*')?.tax_id
+      ?? (orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null)
+
     const settingsPayload: Record<string, any> = {
       disabled: orderDisabled,
       enabled_actions: (!orderDisabled && orderEnabledActions.length === 0) ? ['create', 'update', 'cancel', 'deliver'] : orderEnabledActions,
@@ -1889,8 +1902,9 @@ export default function StandardMappingClient({
       discount_product_sku: orderDiscountProductSku || null,
       discount_mode: orderDiscountMode,
       enable_vat: orderEnableVat,
-      vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
-      vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+      vat_country_rules: cleanedVatCountryRules,
+      vat_saudi_tax_id: resolvedSaudiTax,
+      vat_non_saudi_tax_id: resolvedNonSaudiTax,
       prices_include_tax: orderPricesIncludeTax,
       tax_rate_percent: orderTaxRatePercent !== '' && !isNaN(Number(orderTaxRatePercent)) ? Number(orderTaxRatePercent) : 15,
       tax_rates_by_country: cleanedCountryTaxRates,
@@ -1908,8 +1922,9 @@ export default function StandardMappingClient({
         product_fallback_policy: orderProductFallbackPolicy,
         default_product_id: orderDefaultProductId ? Number(orderDefaultProductId) : null,
         enable_vat: orderEnableVat,
-        vat_saudi_tax_id: orderVatSaudiTaxId ? Number(orderVatSaudiTaxId) : null,
-        vat_non_saudi_tax_id: orderVatNonSaudiTaxId ? Number(orderVatNonSaudiTaxId) : null,
+        vat_country_rules: cleanedVatCountryRules,
+        vat_saudi_tax_id: resolvedSaudiTax,
+        vat_non_saudi_tax_id: resolvedNonSaudiTax,
         prices_include_tax: orderPricesIncludeTax,
         tax_rate_percent: orderTaxRatePercent !== '' && !isNaN(Number(orderTaxRatePercent)) ? Number(orderTaxRatePercent) : 15,
         update_custom_status_field: orderUpdateCustomStatus,
@@ -1982,7 +1997,7 @@ export default function StandardMappingClient({
     orderAddCod, orderCodProductId, orderCodProductSku, orderCodAmount,
     orderAddDiscount, orderDiscountProductId, orderDiscountProductSku, orderDiscountMode,
 
-    orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId,
+    orderEnableVat, orderVatSaudiTaxId, orderVatNonSaudiTaxId, orderVatCountryRules,
     orderPricesIncludeTax, orderTaxRatePercent, orderCountryTaxRates,
     orderUpdateCustomStatus, orderStatusCustomField,
     orderPaymentAutoSync, orderPaymentJournalMappings,
@@ -2507,6 +2522,8 @@ export default function StandardMappingClient({
                   setOrderVatSaudiTaxId={setOrderVatSaudiTaxId}
                   orderVatNonSaudiTaxId={orderVatNonSaudiTaxId}
                   setOrderVatNonSaudiTaxId={setOrderVatNonSaudiTaxId}
+                  orderVatCountryRules={orderVatCountryRules}
+                  setOrderVatCountryRules={setOrderVatCountryRules}
                   orderTaxOptions={orderTaxOptions}
                   isLoadingOrderTaxes={isLoadingOrderTaxes}
                   orderPricesIncludeTax={orderPricesIncludeTax}
