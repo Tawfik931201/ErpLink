@@ -1703,3 +1703,57 @@ export async function getOdooJournals(force = false): Promise<{
 }
 
 
+
+/**
+ * Fetch currencies (res.currency) from Odoo.
+ * Returns both active and inactive currencies with their codes, symbols, and rate.
+ */
+export async function getOdooCurrencies(force = false): Promise<{
+  success: boolean
+  currencies?: Array<{ id: number; name: string; symbol: string; active: boolean; rate?: number }>
+  options?: Array<{ value: string; label: string }>
+  error?: string
+}> {
+  try {
+    const connRes = await getActiveWorkspaceErpConnection()
+    if (!connRes.success || !connRes.connection) {
+      return { success: false, error: 'ERP connection not found', options: [] }
+    }
+
+    if (connRes.connection.erp_type && connRes.connection.erp_type !== 'odoo') {
+      return { success: true, currencies: [], options: [] }
+    }
+
+    const cacheKey = `odoo:currencies:${connRes.connection.id}`
+    if (force) ttlCache.delete(cacheKey)
+
+    const currencies = await ttlCache.get(cacheKey, TTL_OPTIONS_MS, async () => {
+      const client = createOdooClient(connRes.connection)
+
+      const records = await client.execute<Array<{ id: number; name: string; symbol: string; active: boolean; rate?: number }>>(
+        'res.currency',
+        'search_read',
+        [[]],
+        { fields: ['id', 'name', 'symbol', 'active', 'rate'], order: 'active desc, name asc' }
+      )
+
+      return (records || []).map(c => ({
+        id: c.id,
+        name: c.name || '',
+        symbol: c.symbol || '',
+        active: !!c.active,
+        rate: typeof c.rate === 'number' ? c.rate : 1,
+      }))
+    })
+
+    const options = (currencies || []).map(c => ({
+      value: String(c.id),
+      label: `${c.name}${c.symbol ? ` (${c.symbol})` : ''}${!c.active ? ' [غير مفعّلة في أودو / Inactive]' : ''}`,
+    }))
+
+    return { success: true, currencies, options }
+  } catch (error: any) {
+    console.error('[Odoo Action] getOdooCurrencies failed:', error)
+    return { success: false, error: error.message || 'Failed to fetch currencies', options: [] }
+  }
+}

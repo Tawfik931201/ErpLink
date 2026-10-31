@@ -6,6 +6,7 @@ import {
   Boxes,
   Building2,
   Calculator,
+  Coins,
   CreditCard,
   GitCompare,
   History,
@@ -142,6 +143,14 @@ interface OrderSettingsTabProps {
   setOrderPaymentTermId: (val: string) => void
   paymentTermOptions: { value: string; label: string }[]
   isLoadingPaymentTerms: boolean
+  // Multi-currency
+  orderMultiCurrencyEnabled: boolean
+  setOrderMultiCurrencyEnabled: (val: boolean) => void
+  orderBaseCurrencyId: string
+  setOrderBaseCurrencyId: (val: string) => void
+  currencyOptions: { value: string; label: string }[]
+  isLoadingCurrencies?: boolean
+  handleRefreshCurrencies?: () => void
   // Credit-note journal (fetched from Odoo)
   journalOptions: { value: string; label: string }[]
   isLoadingJournals: boolean
@@ -320,6 +329,13 @@ export function OrderSettingsTab({
   setOrderPaymentTermId,
   paymentTermOptions,
   isLoadingPaymentTerms,
+  orderMultiCurrencyEnabled,
+  setOrderMultiCurrencyEnabled,
+  orderBaseCurrencyId,
+  setOrderBaseCurrencyId,
+  currencyOptions,
+  isLoadingCurrencies = false,
+  handleRefreshCurrencies,
   journalOptions,
   isLoadingJournals,
   handleRefreshJournals,
@@ -1027,6 +1043,84 @@ export function OrderSettingsTab({
               />
             </div>
           )}
+        </div>
+      </SettingCard>
+
+      {/* Multi-Currency & Base Currency Settings */}
+      <SettingCard
+        icon={<Coins className="h-4 w-4 text-amber-500" />}
+        title={lang === 'ar' ? 'العملات والعملات المتعددة (Multi-Currency)' : 'Currencies & Multi-Currency'}
+        description={
+          lang === 'ar'
+            ? 'التحكم في تسجيل الطلبات وفق العملة المرسلة من المتجر وتحديد العملة الأساسية البديلة'
+            : 'Configure multi-currency order handling and the fallback base currency'
+        }
+        headerAction={
+          handleRefreshCurrencies && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRefreshCurrencies}
+              disabled={isLoadingCurrencies}
+              className="h-8 text-xs gap-1.5"
+              title={lang === 'ar' ? 'تحديث قائمة العملات من أودو' : 'Refresh currencies from Odoo'}
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', isLoadingCurrencies && 'animate-spin')} />
+              <span>{lang === 'ar' ? 'تحديث العملات' : 'Refresh'}</span>
+            </Button>
+          )
+        }
+      >
+        <div className="space-y-4">
+          <SettingToggle
+            checked={orderMultiCurrencyEnabled}
+            onChange={setOrderMultiCurrencyEnabled}
+            label={lang === 'ar' ? 'تفعيل العملات المتعددة (Multi-Currency)' : 'Enable Multi-Currency'}
+            description={
+              lang === 'ar'
+                ? 'تسجيل الطلب في أودو بنفس العملة المرسلة من زد (مثل: درهم إماراتي AED، دولار USD، دينار كويتي KWD). إذا كانت العملة مفعّلة في أودو، يتم تسجيل الطلب والفواتير والمرتجعات بها مباشرة.'
+                : 'Record orders in Odoo with the currency sent by Zid. If active in Odoo, orders, invoices and returns are recorded in that currency.'
+            }
+          />
+
+          {orderMultiCurrencyEnabled && (
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-foreground/90 space-y-2">
+              <div className="flex items-start gap-2">
+                <Info className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <span className="font-semibold text-amber-600 dark:text-amber-400">
+                    {lang === 'ar' ? 'تنبيه هام حول العملات غير المفعّلة في أودو:' : 'Important Note on Inactive Currencies in Odoo:'}
+                  </span>
+                  <p className="text-muted-foreground leading-relaxed">
+                    {lang === 'ar'
+                      ? 'أي عملة غير مفعّلة في أودو يتم تسجيل الطلب تلقائياً بالعملة الأساسية (بدون تحديد العملة ليعتمد أودو عملته الأساسية)، ويقوم النظام تلقائياً بتعديل مبالغ سطور الطلب والشحن والرسوم والخصومات إلى ما يقابلها بالعملة الأساسية بناءً على سعر الصرف لمنع اختلاف القيمة المالية (مثال: طلب بـ 200 درهم يُعدل مبلغه للريال بدلاً من تسجيل 200 ريال خطأً).'
+                      : 'Any currency not active in Odoo will be recorded in the base currency (defaulting in Odoo), and line item prices, shipping, COD fees, and discounts will be converted automatically to the base currency according to the exchange rate to prevent value discrepancies.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+            <div className="space-y-1.5 sm:col-span-2 md:col-span-1">
+              <label className="block text-xs font-medium text-foreground/80">
+                {lang === 'ar' ? 'العملة الأساسية البديلة (Fallback Currency)' : 'Base / Fallback Currency'}
+              </label>
+              <SearchableSelect
+                options={currencyOptions}
+                value={orderBaseCurrencyId}
+                onChange={setOrderBaseCurrencyId}
+                placeholder={lang === 'ar' ? '— اختر العملة الأساسية (الافتراضي: الريال السعودي SAR) —' : '— Select Base Currency (Default: SAR) —'}
+                disabled={isLoadingCurrencies}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {lang === 'ar'
+                  ? 'العملة المعتمدة لتعديل المبالغ إليها في حال كانت عملة الطلب غير مفعلة بأودو (غالباً SAR - الريال السعودي).'
+                  : 'The fallback currency used for converting amounts when order currency is inactive in Odoo (usually SAR).'}
+              </p>
+            </div>
+          </div>
         </div>
       </SettingCard>
 

@@ -15,6 +15,7 @@ import { getFieldMappings } from '@/app/actions/field-mappings'
 import { disableOdooStockWebhook, enableOdooStockWebhook, type OdooStockWebhookRefs } from '@/app/actions/inventory-sync'
 import {
   getOdooAnalyticAccounts,
+  getOdooCurrencies,
   getOdooCustomers,
   getOdooFieldValueOptions,
   getOdooJournals,
@@ -244,6 +245,8 @@ export default function StandardMappingClient({
   const [orderWarehouseId, setOrderWarehouseId] = useState('')
   const [orderPricelistId, setOrderPricelistId] = useState('')
   const [orderPaymentTermId, setOrderPaymentTermId] = useState('')
+  const [orderMultiCurrencyEnabled, setOrderMultiCurrencyEnabled] = useState(false)
+  const [orderBaseCurrencyId, setOrderBaseCurrencyId] = useState('')
   const [orderAutoConfirm, setOrderAutoConfirm] = useState(false)
   const [orderAutoInvoice, setOrderAutoInvoice] = useState(false)
   const [orderPartialFulfillment, setOrderPartialFulfillment] = useState(false)
@@ -332,6 +335,8 @@ export default function StandardMappingClient({
   const [isLoadingPricelists, setIsLoadingPricelists] = useState(false)
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingPaymentTerms, setIsLoadingPaymentTerms] = useState(false)
+  const [currencyOptions, setCurrencyOptions] = useState<{ value: string; label: string }[]>([])
+  const [isLoadingCurrencies, setIsLoadingCurrencies] = useState(false)
   const [journalOptions, setJournalOptions] = useState<{ value: string; label: string }[]>([])
   const [isLoadingJournals, setIsLoadingJournals] = useState(false)
   const [productOptions, setProductOptions] = useState<{ value: string; label: string }[]>([])
@@ -693,6 +698,19 @@ export default function StandardMappingClient({
       })
       .finally(() => setIsLoadingJournals(false))
 
+    // 7b. Get currencies (res.currency)
+    setIsLoadingCurrencies(true)
+    getOdooCurrencies(false)
+      .then(res => {
+        if (res.success && res.options) {
+          setCurrencyOptions(res.options)
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load Odoo currencies:', err)
+      })
+      .finally(() => setIsLoadingCurrencies(false))
+
     // 8. Get payment methods for the connected store
     if (standardStoreTab === 'zid' || standardStoreTab === 'salla') {
       setIsLoadingPaymentMethods(true)
@@ -751,6 +769,8 @@ export default function StandardMappingClient({
           setOrderWarehouseId('')
           setOrderPricelistId('')
           setOrderPaymentTermId('')
+          setOrderMultiCurrencyEnabled(false)
+          setOrderBaseCurrencyId('')
           setOrderAutoConfirm(false)
           setOrderAddShipping(false)
           setOrderShippingProductId('')
@@ -871,6 +891,18 @@ export default function StandardMappingClient({
         setOrderWarehouseId(s.order?.default_warehouse_id ? String(s.order.default_warehouse_id) : '')
         setOrderPricelistId(s.order?.default_pricelist_id ? String(s.order.default_pricelist_id) : '')
         setOrderPaymentTermId(s.order?.default_payment_term_id ? String(s.order.default_payment_term_id) : '')
+        setOrderMultiCurrencyEnabled(
+          s.multi_currency_enabled !== undefined
+            ? !!s.multi_currency_enabled
+            : !!s.order?.multi_currency_enabled
+        )
+        setOrderBaseCurrencyId(
+          s.base_currency_id
+            ? String(s.base_currency_id)
+            : s.order?.base_currency_id
+            ? String(s.order.base_currency_id)
+            : ''
+        )
         setOrderAutoConfirm(s.order?.auto_confirm || false)
         setOrderAutoInvoice(s.order?.auto_invoice || false)
         setOrderPartialFulfillment(s.order?.partial_fulfillment || false)
@@ -1540,6 +1572,39 @@ export default function StandardMappingClient({
     }
   }, [lang, toast])
 
+  const handleRefreshCurrencies = useCallback(async (force = true) => {
+    setIsLoadingCurrencies(true)
+    try {
+      const res = await getOdooCurrencies(force)
+      if (res.success && res.options) {
+        setCurrencyOptions(res.options)
+        if (force) {
+          toast({
+            title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
+            description: lang === 'ar' ? 'تم تحديث قائمة العملات من أودو' : 'Odoo currencies reloaded',
+          })
+        }
+      } else if (force) {
+        toast({
+          title: lang === 'ar' ? 'خطأ' : 'Error',
+          description: res?.error || (lang === 'ar' ? 'فشل تحديث العملات' : 'Failed to refresh currencies'),
+          variant: 'destructive',
+        })
+      }
+    } catch (err: any) {
+      console.error('[OrderCurrency] Refresh failed:', err)
+      if (force) {
+        toast({
+          title: lang === 'ar' ? 'خطأ' : 'Error',
+          description: lang === 'ar' ? 'فشل تحديث العملات' : 'Failed to refresh currencies',
+          variant: 'destructive',
+        })
+      }
+    } finally {
+      setIsLoadingCurrencies(false)
+    }
+  }, [lang, toast])
+
   // Re-pull store + Odoo locations straight from the APIs (no cache), so a
   // warehouse/location created in Odoo after opening the tab shows up.
   // Only the dropdown lists are touched — unsaved pair rows are left alone.
@@ -1910,10 +1975,14 @@ export default function StandardMappingClient({
       tax_rates_by_country: cleanedCountryTaxRates,
       update_custom_status_field: orderUpdateCustomStatus,
       order_status_custom_field: orderStatusCustomField,
+      multi_currency_enabled: orderMultiCurrencyEnabled,
+      base_currency_id: orderBaseCurrencyId ? Number(orderBaseCurrencyId) : null,
       order: {
         default_warehouse_id: orderWarehouseId ? Number(orderWarehouseId) : null,
         default_pricelist_id: orderPricelistId ? Number(orderPricelistId) : null,
         default_payment_term_id: orderPaymentTermId ? Number(orderPaymentTermId) : null,
+        multi_currency_enabled: orderMultiCurrencyEnabled,
+        base_currency_id: orderBaseCurrencyId ? Number(orderBaseCurrencyId) : null,
         auto_confirm: orderAutoConfirm,
         auto_invoice: orderAutoInvoice,
         partial_fulfillment: orderPartialFulfillment,
@@ -2468,6 +2537,13 @@ export default function StandardMappingClient({
                   setOrderPaymentTermId={setOrderPaymentTermId}
                   paymentTermOptions={paymentTermOptions}
                   isLoadingPaymentTerms={isLoadingPaymentTerms}
+                  orderMultiCurrencyEnabled={orderMultiCurrencyEnabled}
+                  setOrderMultiCurrencyEnabled={setOrderMultiCurrencyEnabled}
+                  orderBaseCurrencyId={orderBaseCurrencyId}
+                  setOrderBaseCurrencyId={setOrderBaseCurrencyId}
+                  currencyOptions={currencyOptions}
+                  isLoadingCurrencies={isLoadingCurrencies}
+                  handleRefreshCurrencies={handleRefreshCurrencies}
                   journalOptions={journalOptions}
                   isLoadingJournals={isLoadingJournals}
                   handleRefreshJournals={handleRefreshJournals}

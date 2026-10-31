@@ -28,6 +28,11 @@ import {
   toOdooAnalyticFields,
 } from '@/lib/odoo/analytic-distribution'
 import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
+import {
+  convertCurrencyAmount,
+  extractOrderCurrency,
+  resolveOrderExchangeRate,
+} from '@/lib/odoo/order-currency'
 import { OdooClient } from '@/lib/odoo-client'
 import {
   allPlatformIdFieldNames,
@@ -1264,11 +1269,19 @@ export async function buildOrderLineItems(
   // Shopify sends no COD fee amount at all (only the gateway name), so for
   // Shopify orders this is always the configured `cod_amount` — that is the
   // intended behaviour, not a missing read.
-  const codFeeAmount = resolveZidCodAmount(zidData) || codAmount
+  const currencyConversionRate = typeof orderStdSettings?._currency_conversion_rate === 'number'
+    ? orderStdSettings._currency_conversion_rate
+    : (typeof orderStdSettings?.currency_conversion_rate === 'number' ? orderStdSettings.currency_conversion_rate : 1.0)
 
-  const shippingCost = resolveZidShippingCost(zidData)
+  const rawCodFee = resolveZidCodAmount(zidData) || codAmount
+  const codFeeAmount = convertCurrencyAmount(rawCodFee, currencyConversionRate)
+
+  const rawShippingCost = resolveZidShippingCost(zidData)
+  const shippingCost = convertCurrencyAmount(rawShippingCost, currencyConversionRate)
+
   const orderLevelDiscount = resolveOrderDiscountAmount(zidData)
-  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount} orderDiscount=${orderLevelDiscount}`)
+  const convertedOrderDiscount = convertCurrencyAmount(orderLevelDiscount, currencyConversionRate)
+  console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount} orderDiscount=${convertedOrderDiscount} rate=${currencyConversionRate}`)
 
   // 3. Fetch line field meta (for many2one resolution and tax field detection)
   // analytic_distribution (Odoo 17+) / analytic_account_id (<=16) are probed
@@ -1439,9 +1452,13 @@ export async function buildOrderLineItems(
       line['price_unit'] = (zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
     }
 
-    const baseUnit = zidPrice > 0 ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
+    if (currencyConversionRate > 0 && currencyConversionRate !== 1.0 && typeof line['price_unit'] === 'number') {
+      line['price_unit'] = convertCurrencyAmount(line['price_unit'], currencyConversionRate)
+    }
+
+    const baseUnit = typeof line['price_unit'] === 'number' ? line['price_unit'] : ((zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0))
     subtotalBeforeDiscount += baseUnit * qty
-    totalDiscountAmount += Math.max(0, zidPrice - zidSalePrice) * qty
+    totalDiscountAmount += convertCurrencyAmount(Math.max(0, zidPrice - zidSalePrice), currencyConversionRate) * qty
 
     // Auto-set product_uom_qty if user didn't map it explicitly
     if (!('product_uom_qty' in line)) {
@@ -7403,6 +7420,8 @@ async function executeOdooOperation(params: {
       }
     }
 
+    let resolvedConversionRate = 1.0
+
     // Fallback check if partner_id is still missing after customer processing
     if (!effectiveOdooValues.partner_id) {
       const customerPolicy = (mergedSettings)?.customer_fallback_policy
@@ -7546,21 +7565,72 @@ async function executeOdooOperation(params: {
           effectiveOdooValues.carrier_id = carrier.carrier_id
         }
       }
-      // Resolve currency from DB currency_mappings
-      const zidCurrency = String((zidData as any)?.currency || (zidData as any)?.amounts?.currency || (zidData as any)?.payment?.currency || '')
-      if (zidCurrency && !effectiveOdooValues.currency_id) {
+      // Resolve currency from Multi-Currency settings or DB currency_mappings
+      resolvedConversionRate = 1.0
+      const sourceCurrency = extractOrderCurrency(zidData, execPlatform)
+      const isMultiCurrencyEnabled = !!(orderSettings?.multi_currency_enabled ?? orderSettings?.order?.multi_currency_enabled)
+      const baseCurrencyId = Number(orderSettings?.base_currency_id ?? orderSettings?.order?.base_currency_id) || null
+
+      if (isMultiCurrencyEnabled && sourceCurrency) {
         try {
-          const { data: curRow } = await supabaseAdmin
-            .from('currency_mappings')
-            .select('odoo_currency_id')
-            .eq('workspace_id', mapping.workspace_id)
-            .eq('source_currency', zidCurrency)
-            .maybeSingle()
-          if (curRow?.odoo_currency_id) {
-            effectiveOdooValues.currency_id = curRow.odoo_currency_id
+          const odooCurrs = await client.searchRead<any>(
+            'res.currency',
+            [['name', '=', sourceCurrency]],
+            ['id', 'name', 'active', 'rate'],
+            1
+          ).catch(() => [])
+
+          const matchedCurr = odooCurrs?.[0]
+          if (matchedCurr && matchedCurr.active) {
+            // Currency is active in Odoo! Assign it directly to sale.order
+            effectiveOdooValues.currency_id = matchedCurr.id
+            console.info(`[SyncEngine] 💱 Multi-currency: Order currency "${sourceCurrency}" is active in Odoo (ID=${matchedCurr.id}). Recording order in ${sourceCurrency}.`)
+
+            // Try to match pricelist with this currency if possible
+            if (odooOperation === 'create') {
+              try {
+                const matchedPricelists = await client.searchRead<any>(
+                  'product.pricelist',
+                  [['currency_id', '=', matchedCurr.id], ['active', '=', true]],
+                  ['id'],
+                  1
+                ).catch(() => [])
+                if (matchedPricelists?.[0]?.id) {
+                  effectiveOdooValues.pricelist_id = matchedPricelists[0].id
+                  console.info(`[SyncEngine] 💱 Matched pricelist #${matchedPricelists[0].id} for currency "${sourceCurrency}"`)
+                }
+              } catch {
+                // Non-fatal
+              }
+            }
+          } else {
+            // Currency is NOT active in Odoo (or not found)
+            console.warn(`[SyncEngine] 💱 Multi-currency: Order currency "${sourceCurrency}" is NOT active in Odoo. Recording order in base currency and converting amounts.`)
+            if (baseCurrencyId) {
+              effectiveOdooValues.currency_id = baseCurrencyId
+            }
+            resolvedConversionRate = resolveOrderExchangeRate(zidData, sourceCurrency, 'SAR', matchedCurr?.rate)
+            console.info(`[SyncEngine] 💱 Currency conversion rate applied: 1 ${sourceCurrency} = ${resolvedConversionRate} Base (SAR)`)
           }
-        } catch (err) {
-          console.warn(`[SyncEngine] Failed to resolve currency "${zidCurrency}":`, err)
+        } catch (currErr) {
+          console.warn('[SyncEngine] Error resolving multi-currency from Odoo:', currErr)
+        }
+      } else {
+        const zidCurrency = String((zidData as any)?.currency || (zidData as any)?.amounts?.currency || (zidData as any)?.payment?.currency || '')
+        if (zidCurrency && !effectiveOdooValues.currency_id) {
+          try {
+            const { data: curRow } = await supabaseAdmin
+              .from('currency_mappings')
+              .select('odoo_currency_id')
+              .eq('workspace_id', mapping.workspace_id)
+              .eq('source_currency', zidCurrency)
+              .maybeSingle()
+            if (curRow?.odoo_currency_id) {
+              effectiveOdooValues.currency_id = curRow.odoo_currency_id
+            }
+          } catch (err) {
+            console.warn(`[SyncEngine] Failed to resolve currency "${zidCurrency}":`, err)
+          }
         }
       }
       // Apply per-warehouse rule if one matches. Rules are keyed by the platform
@@ -7685,6 +7755,10 @@ async function executeOdooOperation(params: {
         } catch (err) {
           console.warn('[SyncEngine] Failed to load standard mapping settings for order lines:', err)
         }
+      }
+      if (resolvedConversionRate !== 1.0) {
+        if (!orderStdSettings) orderStdSettings = {}
+        orderStdSettings._currency_conversion_rate = resolvedConversionRate
       }
       try {
         const orderLines = await buildOrderLineItems(
