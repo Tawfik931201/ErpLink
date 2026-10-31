@@ -3476,6 +3476,98 @@ async function applyOrderInvoiceAction(
 //   - no row      → nothing (legacy passive state write already applied upstream)
 //   - disabled    → Odoo fully untouched for this status
 //   - enabled     → real workflow transition via applyOrderStatusAction, applyOrderPickingAction, applyOrderInvoiceAction
+/**
+ * Verifies and enforces the correct country VAT on all sale.order.line items in Odoo.
+ * Whenever an order is created, confirmed, or updated, Odoo's internal compute logic can
+ * automatically reset taxes to domestic 15% VAT on export orders.
+ * This function inspects the order lines and explicitly enforces the tax ID configured in
+ * Standard Mapping by destination shipping country (e.g. 0% for Egypt/UAE/OTHER).
+ */
+export async function ensureSaleOrderTaxes(
+  client: OdooClient,
+  odooOrderId: number,
+  zidData: Record<string, unknown>,
+  workspaceId: string,
+  platform?: 'zid' | 'salla' | 'shopify',
+  storeId = '',
+): Promise<void> {
+  if (!workspaceId || !odooOrderId) return
+  try {
+    const resolvedPlatform = platform || 'zid'
+    const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
+    const enableVat = orderStdSettings?.enable_vat ?? (orderStdSettings as any)?.order?.enable_vat ?? false
+    if (!enableVat) return
+
+    const vatCountryRules: VatCountryRule[] = (
+      orderStdSettings?.vat_country_rules
+      ?? (orderStdSettings as any)?.order?.vat_country_rules
+      ?? []
+    )
+    const vatSaudiTaxId = orderStdSettings?.vat_saudi_tax_id ?? (orderStdSettings as any)?.order?.vat_saudi_tax_id
+    const vatNonSaudiTaxId = orderStdSettings?.vat_non_saudi_tax_id ?? (orderStdSettings as any)?.order?.vat_non_saudi_tax_id
+
+    const { taxId: expectedTaxId, destinationCountryCode, appliedCountryCode } = resolveOrderVatTax(zidData, {
+      enableVat: true,
+      vatCountryRules,
+      vatSaudiTaxId,
+      vatNonSaudiTaxId,
+    })
+
+    const expectedTaxIds = expectedTaxId ? [expectedTaxId] : []
+
+    const majorVersion = await client.getMajorVersion().catch(() => 19)
+    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+
+    let lines: any[] = []
+    try {
+      lines = await client.searchRead<any>(
+        'sale.order.line',
+        [['order_id', '=', odooOrderId], ['display_type', '=', false]],
+        ['id', 'name', taxField]
+      )
+    } catch {
+      const altField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+      lines = await client.searchRead<any>(
+        'sale.order.line',
+        [['order_id', '=', odooOrderId], ['display_type', '=', false]],
+        ['id', 'name', altField]
+      ).catch(() => [])
+    }
+
+    if (!lines || lines.length === 0) return
+
+    const linesNeedingUpdate: number[] = []
+    for (const line of lines) {
+      const rawTaxes = line[taxField] ?? line.tax_ids ?? line.tax_id
+      const currentTaxIds: number[] = Array.isArray(rawTaxes)
+        ? rawTaxes.map(Number).filter(n => !isNaN(n) && n > 0)
+        : []
+
+      const isMatch = (
+        (expectedTaxIds.length === 0 && currentTaxIds.length === 0) ||
+        (expectedTaxIds.length === currentTaxIds.length && expectedTaxIds.every(t => currentTaxIds.includes(t)))
+      )
+
+      if (!isMatch) {
+        linesNeedingUpdate.push(line.id)
+      }
+    }
+
+    if (linesNeedingUpdate.length > 0) {
+      const taxCmd = expectedTaxIds.length > 0 ? [[6, 0, expectedTaxIds]] : [[6, 0, []]]
+      await client.write('sale.order.line', linesNeedingUpdate, {
+        [taxField]: taxCmd,
+      })
+      console.info(
+        `[SyncEngine] ✅ Enforced destination tax (${expectedTaxIds.length > 0 ? expectedTaxIds.join(',') : '0%'} ` +
+        `for country "${destinationCountryCode || 'Unknown'}" matched "${appliedCountryCode}") on ${linesNeedingUpdate.length} line(s) of sale.order #${odooOrderId}`
+      )
+    }
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Failed to enforce order lines taxes on sale.order #${odooOrderId} (non-fatal):`, err?.message || err)
+  }
+}
+
 async function maybeApplyOrderStatusAction(
   client: OdooClient,
   odooRecordId: number,
@@ -3601,6 +3693,12 @@ async function maybeApplyOrderStatusAction(
     }).catch(payErr => {
       console.warn('[SyncEngine] Order payment sync failed (non-fatal):', payErr?.message || payErr)
     })
+
+    // 2e. Re-enforce correct destination country VAT on lines
+    // When Odoo confirms quotations or changes order status, Odoo's internal compute
+    // might re-apply domestic default taxes (15%) on export orders. We inspect
+    // and re-enforce the standard mapping country tax rule (e.g. 0% for Egypt/UAE).
+    await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId)
   } catch (err: any) {
     console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
   }
@@ -8131,6 +8229,7 @@ async function executeOdooOperation(params: {
     const newId = await safeCreateOdooRecord(client, odooModel, effectiveOdooValues, odooValues)
     console.info(`[SyncEngine] ✅ Created ${odooModel} #${newId} in Odoo (zid_id="${zidEntityId}")`)
     if (odooModel === 'sale.order') {
+      await ensureSaleOrderTaxes(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
       await maybeApplyOrderStatusAction(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
     }
     if (odooModel === 'product.template') {
@@ -8278,6 +8377,7 @@ async function executeOdooOperation(params: {
     const ok = await safeWriteOdooRecord(client, odooModel, existingId, effectiveOdooValues, odooValues)
     if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${existingId}`)
     if (odooModel === 'sale.order') {
+      await ensureSaleOrderTaxes(client, existingId, zidData, mapping.workspace_id, execPlatform, storeId)
       await maybeApplyOrderStatusAction(client, existingId, zidData, mapping.workspace_id, execPlatform, storeId)
     }
     console.info(`[SyncEngine] ✅ Updated ${odooModel} #${existingId} in Odoo (zid_id="${zidEntityId}")`)

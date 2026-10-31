@@ -585,8 +585,8 @@ export function resolveOrderVatTax(
   appliedCountryCode: string | null
   destinationCountryCode: string
 } {
-  if (options.isOrderCreate === false || (options.event && !isOrderCreationEvent(options.event))) {
-    console.info(`[resolveOrderVatTax] Skipped: event "${options.event || 'unknown'}" is not an order creation event. Taxes are established strictly at initial order creation.`)
+  if (options.isOrderCreate === false) {
+    console.info(`[resolveOrderVatTax] Skipped: isOrderCreate is false. Taxes are established strictly at initial order creation.`)
     return { taxId: null, appliedCountryCode: null, destinationCountryCode: '' }
   }
 
