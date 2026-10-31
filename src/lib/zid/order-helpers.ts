@@ -90,6 +90,30 @@ export function resolveZidShippingCost(zidData: Record<string, unknown>): number
     }
     if (num > 0) return num
   }
+
+  // Derived fallback: when Zid webhook event (e.g. order.updated or manual merchant admin order)
+  // omits payment.invoice and explicit shipping keys, derive shipping fee from order_total minus products total.
+  try {
+    const orderTotal = parseFloat(String(zidData.order_total ?? zidData.total ?? 0)) || 0
+    let prodsTotal = 0
+    if (zidData.products_sum_total_string) {
+      prodsTotal = parseFloat(String(zidData.products_sum_total_string).replace(/[^0-9.]/g, '')) || 0
+    }
+    if (!prodsTotal && Array.isArray(zidData.products)) {
+      for (const p of zidData.products) {
+        const pObj = (p && typeof p === 'object') ? (p as Record<string, unknown>) : {}
+        const lineTotal = parseFloat(String(pObj.total ?? pObj.discounted_total ?? (Number(pObj.price || 0) * Number(pObj.quantity || 1)))) || 0
+        prodsTotal += lineTotal
+      }
+    }
+    if (orderTotal > 0 && prodsTotal > 0 && orderTotal > prodsTotal) {
+      const derivedShipping = Math.round((orderTotal - prodsTotal) * 100) / 100
+      if (derivedShipping > 0) return derivedShipping
+    }
+  } catch {
+    // Non-fatal
+  }
+
   return 0
 }
 

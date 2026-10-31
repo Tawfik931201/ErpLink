@@ -64,6 +64,18 @@ describe('resolveZidShippingCost', () => {
     expect(cost).toBe(0)
   })
 
+  it('derives shipping cost from order_total minus products_sum_total when invoice is absent', () => {
+    const cost = resolveZidShippingCost({
+      order_total: '253.10000000000000',
+      products_sum_total_string: '205.10 SAR',
+      products: [
+        { price: 80, quantity: 1, total: 80 },
+        { price: 125.1, quantity: 1, total: 125.1 },
+      ],
+    })
+    expect(cost).toBe(48.00)
+  })
+
   it('sums Shopify shipping_lines[] rows', () => {
     const cost = resolveZidShippingCost({
       shipping_lines: [
