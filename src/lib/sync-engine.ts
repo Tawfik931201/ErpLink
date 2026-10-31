@@ -1012,6 +1012,7 @@ async function normalizeOrderLinesForUpdate(
   odooRecordId: number,
   zidData: Record<string, unknown>,
   effectiveOdooValues: Record<string, unknown>,
+  existingState?: string,
 ): Promise<void> {
   if (!('order_line' in effectiveOdooValues)) return
   const drop = (reason: string) => {
@@ -1034,12 +1035,14 @@ async function normalizeOrderLinesForUpdate(
     drop('no products in payload')
     return
   }
-  let state = ''
-  try {
-    const recs = await client.searchRead<any>('sale.order', [['id', '=', odooRecordId]], ['state'])
-    state = String(recs?.[0]?.state || '')
-  } catch {
-    state = ''
+  let state = existingState ?? ''
+  if (!state) {
+    try {
+      const recs = await client.searchRead<any>('sale.order', [['id', '=', odooRecordId]], ['state'])
+      state = String(recs?.[0]?.state || '')
+    } catch {
+      state = ''
+    }
   }
   if (state !== 'draft' && state !== 'sent') {
     drop(`order state is "${state || 'unknown'}" (lines are replaced only on draft/sent quotations)`)
@@ -1047,6 +1050,63 @@ async function normalizeOrderLinesForUpdate(
   }
   effectiveOdooValues.order_line = [[5, 0, 0], ...creates]
   console.info(`[SyncEngine] Order update will REPLACE ${creates.length} line(s) on Odoo #${odooRecordId} (no duplicates)`)
+}
+
+/**
+ * Prepares sale.order values for updating an existing record in Odoo:
+ * 1. Checks current order state & pricelist in Odoo.
+ * 2. Prunes partner_id: Never re-write partner_id on an existing order.
+ *    In Odoo, writing partner_id triggers onchange('partner_id') which overwrites
+ *    pricelist_id with partner.property_product_pricelist (resetting AED to SAR)
+ *    and recalculates fiscal positions and taxes.
+ * 3. Handles pricelist_id:
+ *    - On confirmed orders ('sale', 'done', 'cancel'): Odoo forbids changing pricelist.
+ *      Prunes pricelist_id and currency_id.
+ *    - On draft quotations ('draft', 'sent'): Preserves the resolved multi-currency
+ *      pricelist_id so Odoo never resets it to partner default.
+ * 4. Normalizes order lines (replaces lines only on draft/sent quotations).
+ */
+async function prepareSaleOrderForUpdate(
+  client: OdooClient,
+  odooRecordId: number,
+  zidData: Record<string, unknown>,
+  effectiveOdooValues: Record<string, unknown>,
+): Promise<void> {
+  let state = ''
+  let existingPricelistId: number | null = null
+  try {
+    const recs = await client.searchRead<any>(
+      'sale.order',
+      [['id', '=', odooRecordId]],
+      ['id', 'state', 'pricelist_id', 'currency_id'],
+      1
+    )
+    if (recs?.[0]) {
+      state = String(recs[0].state || '')
+      if (Array.isArray(recs[0].pricelist_id) && recs[0].pricelist_id[0]) {
+        existingPricelistId = Number(recs[0].pricelist_id[0])
+      }
+    }
+  } catch {
+    state = ''
+  }
+
+  // Never re-write partner_id on an existing sale.order:
+  delete effectiveOdooValues.partner_id
+
+  const isConfirmed = state && state !== 'draft' && state !== 'sent'
+  if (isConfirmed) {
+    // Confirmed orders in Odoo forbid mutating pricelist_id (raises UserError)
+    delete effectiveOdooValues.pricelist_id
+    delete effectiveOdooValues.currency_id
+  } else {
+    // On draft quotations, preserve the multi-currency pricelist!
+    if (!effectiveOdooValues.pricelist_id && existingPricelistId) {
+      effectiveOdooValues.pricelist_id = existingPricelistId
+    }
+  }
+
+  await normalizeOrderLinesForUpdate(client, odooRecordId, zidData, effectiveOdooValues, state)
 }
 
 const odooProductLookupCache = new Map<string, { id: number; timestamp: number }>()
@@ -3040,6 +3100,8 @@ async function createDraftInvoiceForOrder(
       const taxes = line.tax_ids ?? line.tax_id
       if (Array.isArray(taxes) && taxes.length > 0) {
         lineVals.tax_ids = [[6, 0, taxes]]
+      } else {
+        lineVals.tax_ids = [[5, 0, 0]]
       }
       if (defaultAccountId) {
         lineVals.account_id = defaultAccountId
@@ -7923,8 +7985,7 @@ async function executeOdooOperation(params: {
       console.info(`[SyncEngine] Matching ${odooModel} #${duplicateId} already exists in Odoo. Updating existing record...`)
       // Mirror Zid lines into the existing order (replace, never append → no duplicates)
       if (odooModel === 'sale.order') {
-        await normalizeOrderLinesForUpdate(client, duplicateId, zidData, effectiveOdooValues)
-        delete effectiveOdooValues.pricelist_id
+        await prepareSaleOrderForUpdate(client, duplicateId, zidData, effectiveOdooValues)
       }
       const ok = await safeWriteOdooRecord(client, odooModel, duplicateId, effectiveOdooValues, odooValues)
       if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${duplicateId}`)
@@ -7997,8 +8058,7 @@ async function executeOdooOperation(params: {
   if (odooOperation === 'update') {
     // Mirror Zid lines into the existing order (replace, never append → no duplicates)
     if (odooModel === 'sale.order') {
-      await normalizeOrderLinesForUpdate(client, existingId, zidData, effectiveOdooValues)
-      delete effectiveOdooValues.pricelist_id
+      await prepareSaleOrderForUpdate(client, existingId, zidData, effectiveOdooValues)
     }
     const ok = await safeWriteOdooRecord(client, odooModel, existingId, effectiveOdooValues, odooValues)
     if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${existingId}`)
