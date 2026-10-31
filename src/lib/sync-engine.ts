@@ -3483,12 +3483,31 @@ async function maybeApplyOrderStatusAction(
       const customField = orderStdSettings?.order_status_custom_field || (orderStdSettings as any)?.order?.order_status_custom_field
       const isEnabled = orderStdSettings?.update_custom_status_field !== false && (orderStdSettings as any)?.order?.update_custom_status_field !== false
       if (customField && isEnabled) {
-        const knownKeys = await getSaleOrderSelectionKeys(client, workspaceId, customField)
-        if (!knownKeys || knownKeys.has(zidStatus)) {
-          await client.write('sale.order', [odooRecordId], { [customField]: zidStatus })
-          console.info(`[SyncEngine] Synced ${resolvedPlatform} status "${zidStatus}" to custom field "${customField}" on sale.order #${odooRecordId}`)
-        } else {
-          console.warn(`[SyncEngine] Skipping custom status "${zidStatus}" on sale.order #${odooRecordId} — not an option of "${customField}"`)
+        // Monotonic guard: do not downgrade an already completed / delivered / confirmed order to 'new' or 'draft'
+        let shouldWriteCustom = true
+        if (zidStatus === 'new' || zidStatus === 'draft') {
+          try {
+            const currentRec = await client.searchRead<any>('sale.order', [['id', '=', odooRecordId]], ['state', customField], 1)
+            const curState = currentRec?.[0]?.state
+            const curCustom = currentRec?.[0]?.[customField]
+            const isAdvancedState = curState === 'sale' || curState === 'done' || curState === 'cancel'
+            const isAdvancedCustom = curCustom && curCustom !== 'new' && curCustom !== 'draft'
+            if (isAdvancedState || isAdvancedCustom) {
+              console.info(`[SyncEngine] Skipping custom status downgrade to "${zidStatus}" on sale.order #${odooRecordId} (current state="${curState}", ${customField}="${curCustom}")`)
+              shouldWriteCustom = false
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
+        if (shouldWriteCustom) {
+          const knownKeys = await getSaleOrderSelectionKeys(client, workspaceId, customField)
+          if (!knownKeys || knownKeys.has(zidStatus)) {
+            await client.write('sale.order', [odooRecordId], { [customField]: zidStatus })
+            console.info(`[SyncEngine] Synced ${resolvedPlatform} status "${zidStatus}" to custom field "${customField}" on sale.order #${odooRecordId}`)
+          } else {
+            console.warn(`[SyncEngine] Skipping custom status "${zidStatus}" on sale.order #${odooRecordId} — not an option of "${customField}"`)
+          }
         }
       }
     } catch (fieldErr: any) {
@@ -4493,12 +4512,20 @@ export async function processWebhookEvent(
 
           if (orderData && (orderData.id || orderData.order_number || orderData.code)) {
             console.info(`[SyncEngine] Full Zid order data fetched for ID ${orderId}. Status: ${orderData.order_status || orderData.status || 'n/a'}`)
-            //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
+            // When fetching full order details from Zid API, orderData represents the authoritative real-time state of the order.
+            // For order.create events, the webhook payload status (e.g. 'new') is stale if the user already updated the status in Zid.
+            // The live API status from orderData must take precedence over stale body status.
+            const liveStatus = orderData.order_status || orderData.status || orderData.display_status
             data = isLegacyDelivery
               ? { ...data, ...orderData }
               : {
                   ...orderData,
                   ...data,
+                  ...(liveStatus ? {
+                    order_status: orderData.order_status,
+                    status: orderData.status,
+                    display_status: orderData.display_status,
+                  } : {})
                 }
           } else {
             // استُجيب لكن لا يوجد طلب بهذا المعرّف ⇒ لا بنود ⇒ لا نكتب.
@@ -8129,11 +8156,98 @@ async function executeOdooOperation(params: {
       existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
     }
   }
+
+  // ── Out-of-order resolution for sale.order updates ───────────────────────
+  // When an order status update arrives before the order is created in Odoo:
+  // 1) Look for a pending order.create in sync_queue and execute it first.
+  // 2) If not in queue, but full order details (items) are present, auto-create (Upsert).
+  // 3) If creation is not possible yet, return 'failed' so the queue retries it
+  //    (rather than 'skipped' which permanently deletes the event).
+  if (existingId === null && odooModel === 'sale.order' && odooOperation === 'update' && mapping.workspace_id) {
+    try {
+      const { data: pendingRows } = await supabaseAdmin
+        .from('sync_queue')
+        .select('id, event, store_id, payload, platform, workspace_id')
+        .eq('workspace_id', mapping.workspace_id)
+        .in('event', ['order.create', 'order.created', 'order_create', 'order_created'])
+        .not('next_retry_at', 'is', null)
+        .limit(10)
+
+      const targetOrderRef = String(zidEntityId || zidData.id || zidData.order_id || '')
+      const matchCreate = (pendingRows ?? []).find(r => {
+        const p = (r.payload ?? {}) as Record<string, unknown>
+        const entId = String(p.id ?? p.order_id ?? (p.order as any)?.id ?? '')
+        return entId && targetOrderRef && (entId === targetOrderRef || String(p.code ?? '') === String(zidData.code ?? ''))
+      })
+
+      if (matchCreate) {
+        console.info(`[SyncEngine] Found pending order create in queue for order #${targetOrderRef}. Executing create first...`)
+        await processWebhookEvent(
+          matchCreate.event,
+          matchCreate.store_id,
+          matchCreate.payload as Record<string, unknown>,
+          matchCreate.platform as 'zid' | 'salla' | 'shopify',
+          true,
+          matchCreate.workspace_id,
+          matchCreate.id
+        )
+        try { await supabaseAdmin.from('sync_queue').delete().eq('id', matchCreate.id) } catch {}
+        existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
+      }
+    } catch (queueLookupErr) {
+      console.warn(`[SyncEngine] Failed to check/process pending order create from queue:`, queueLookupErr)
+    }
+
+    // 2. Upsert: auto-create order if items are available
+    if (existingId === null) {
+      const hasOrderItems = ['products', 'items', 'order_items', 'order_items_list', 'line_items']
+        .some(k => Array.isArray((zidData as any)?.[k]) && ((zidData as any)[k] as any[]).length > 0)
+      if (hasOrderItems) {
+        console.info(`[SyncEngine] Order #${zidEntityId} not found in Odoo for update; auto-creating order with available items...`)
+        try {
+          if (!('order_line' in effectiveOdooValues)) {
+            let orderStdSettings: Record<string, any> | null = null
+            try {
+              orderStdSettings = await getCachedStandardMappingSettings(mapping.workspace_id, execPlatform, 'orders', storeId || mapping.merchant_id || '')
+            } catch {}
+            const orderLines = await buildOrderLineItems(
+              client,
+              mapping,
+              zidData,
+              new Map<string, OdooFieldMeta>(),
+              effectiveOdooValues,
+              execPlatform,
+              orderStdSettings,
+              storeId
+            )
+            if (orderLines.length > 0) {
+              effectiveOdooValues.order_line = orderLines.map(item => [0, 0, item])
+            }
+          }
+
+          if (effectiveOdooValues.order_line && (effectiveOdooValues.order_line as any[]).length > 0) {
+            const newId = await safeCreateOdooRecord(client, odooModel, effectiveOdooValues, odooValues)
+            console.info(`[SyncEngine] ✅ Auto-created ${odooModel} #${newId} in Odoo for update (zid_id="${zidEntityId}")`)
+            await maybeApplyOrderStatusAction(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
+            await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: newId, status: 'success', payload: zidData, trigger_type: triggerType, platform: execPlatform })
+            return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: newId, message: `Created and updated ${odooModel} #${newId}` }
+          }
+        } catch (autoCreateErr: any) {
+          console.warn(`[SyncEngine] Auto-create order #${zidEntityId} for update failed:`, autoCreateErr?.message || autoCreateErr)
+        }
+      }
+    }
+  }
+
   if (existingId === null) {
-    const msg = `No matching ${odooModel} record found in Odoo for ${odooOperation}`
+    const isOrderUpdate = odooModel === 'sale.order' && odooOperation === 'update'
+    const msg = isOrderUpdate
+      ? `Sale order #${zidEntityId} not yet found in Odoo for status update; rescheduled to retry`
+      : `No matching ${odooModel} record found in Odoo for ${odooOperation}`
     console.warn(`[SyncEngine] ${msg}`)
-    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: msg, payload: zidData, trigger_type: triggerType })
-    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: msg }
+    const logStatus = isOrderUpdate ? 'failed' : 'skipped'
+    await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: logStatus, error_message: msg, payload: zidData, trigger_type: triggerType })
+    return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: logStatus, message: msg }
   }
 
   if (odooOperation === 'update') {

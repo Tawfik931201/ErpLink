@@ -771,6 +771,27 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
     else perWorkspace.set(ws, [item])
   }
 
+  // ── Dependency ordering within each workspace: order.create precedes order.update ──
+  // When an order's create and update events are both in the queue, ensure create runs first.
+  const isOrderCreateEvent = (ev: string) =>
+    ev === 'order.create' || ev === 'order.created' || ev === 'order_create' || ev === 'order_created'
+
+  for (const [, list] of perWorkspace) {
+    if (list.length > 1) {
+      list.sort((a, b) => {
+        const entA = extractEntityId(a.payload ?? {})
+        const entB = extractEntityId(b.payload ?? {})
+        if (entA && entB && entA === entB) {
+          const aIsCreate = isOrderCreateEvent(a.event)
+          const bIsCreate = isOrderCreateEvent(b.event)
+          if (aIsCreate && !bIsCreate) return -1
+          if (!aIsCreate && bIsCreate) return 1
+        }
+        return 0
+      })
+    }
+  }
+
   const batch: QueueItem[] = []
   let hasMore = true
   while (batch.length < maxItems && hasMore) {
@@ -1176,8 +1197,11 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
 
-  // كل فشل يمر من هنا — نقطة الربط الوحيدة لقاطع الدائرة لكل عميل.
-  await noteWorkspaceFailure(item.workspace_id, errorMessage).catch(() => {})
+  const isOrderPending = typeof errorMessage === 'string' && (/not yet found in Odoo for status update/i).test(errorMessage)
+  if (!isOrderPending) {
+    // كل فشل يمر من هنا — نقطة الربط الوحيدة لقاطع الدائرة لكل عميل.
+    await noteWorkspaceFailure(item.workspace_id, errorMessage).catch(() => {})
+  }
 
   if (newCount >= maxRetries) {
     // استُنفدت المحاولات — يُجمَّد الصف (next_retry_at = NULL) للمراجعة اليدوية.
@@ -1222,12 +1246,13 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
     // (SYNC_SEASON_MODE=true) يقصّر التسلسل ليناسب نافذة 30 دقيقة.
     const isRateLimited = typeof errorMessage === 'string' && (/429|rate\s*limit|too\s*many\s*requests/i).test(errorMessage)
     const isConnRefused = typeof errorMessage === 'string' && (/ECONNREFUSED|ETIMEDOUT|502|504/i).test(errorMessage)
-    const backoffMinutes = computeBackoffMinutes(newCount, {
+    const isOrderPending = typeof errorMessage === 'string' && (/not yet found in Odoo for status update/i).test(errorMessage)
+    const backoffMinutes = isOrderPending ? 0.2 : computeBackoffMinutes(newCount, {
       rateLimited: isRateLimited,
       connRefused: isConnRefused,
       season: isSeasonMode(),
     })
-    const jitterMs = Math.floor(Math.random() * 60_000)
+    const jitterMs = isOrderPending ? Math.floor(Math.random() * 3_000) : Math.floor(Math.random() * 60_000)
     // نفس CAS: الحذف/التغيّر السباقي يجعل المطابقة صفراً ولا تُكتب حالة
     // «لإعادة محاولة» على صف لم نمنحها منا محاولتها.
     await supabase
