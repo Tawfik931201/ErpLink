@@ -310,6 +310,38 @@ describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across 
       expect(lines).toHaveLength(1)
       // US is not in tax table -> tax rate is 0 -> 115 / (1 + 0) = 115 verbatim!
       expect(lines[0].price_unit).toBe(115)
+      // Because tax rate is 0%, tax_ids must be cleared to avoid Odoo defaulting to 15% VAT
+      expect(lines[0].tax_ids).toEqual([[6, 0, []]])
+    })
+
+    it('Case 7: Export / UAE order when VAT is enabled with Saudi-only tax leaves tax_ids undefined on create so Odoo applies Fiscal Position', async () => {
+      const client = createMockClient() as unknown as OdooClient
+      const uaeOrderPayload = {
+        products: [{ sku: 'SKU-UAE', price: 200, sale_price: 200, quantity: 1 }],
+        shipping_address: { country: 'United Arab Emirates', city: 'Dubai' },
+      }
+
+      const stdSettings = {
+        enable_vat: true,
+        vat_saudi_tax_id: 5,
+        prices_include_tax: false,
+      }
+
+      const lines = await buildOrderLineItems(
+        client,
+        baseMapping,
+        uaeOrderPayload,
+        new Map(),
+        {},
+        'zid',
+        stdSettings,
+        'store-1'
+      )
+
+      expect(lines).toHaveLength(1)
+      expect(lines[0].price_unit).toBe(200)
+      // tax_ids is undefined on build, allowing Odoo ORM to apply partner Fiscal Position
+      expect(lines[0].tax_ids).toBeUndefined()
     })
 
     it('resolveOrderCountryCode detects various country payloads accurately', () => {

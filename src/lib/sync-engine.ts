@@ -1048,6 +1048,57 @@ async function normalizeOrderLinesForUpdate(
     drop(`order state is "${state || 'unknown'}" (lines are replaced only on draft/sent quotations)`)
     return
   }
+
+  // Preserve existing line taxes so replacement lines don't revert to default domestic VAT
+  try {
+    const existingLines = await client.searchRead<any>(
+      'sale.order.line',
+      [['order_id', '=', odooRecordId]],
+      ['id', 'product_id', 'tax_id', 'name'],
+      50
+    )
+    if (existingLines && existingLines.length > 0) {
+      const taxByProduct = new Map<number, number[]>()
+      let fallbackTaxIds: number[] | null = null
+
+      for (const el of existingLines) {
+        const prodId = Array.isArray(el.product_id) ? el.product_id[0] : (typeof el.product_id === 'number' ? el.product_id : null)
+        const taxes = Array.isArray(el.tax_id) ? el.tax_id.map(Number).filter((n: number) => !isNaN(n) && n > 0) : []
+        if (prodId) {
+          taxByProduct.set(prodId, taxes)
+        }
+        if (taxes.length > 0 && fallbackTaxIds === null) {
+          fallbackTaxIds = taxes
+        }
+      }
+
+      const zidTaxTotal = Number((zidData as any)?.tax_total ?? (zidData as any)?.total_tax ?? (zidData as any)?.order_tax ?? -1)
+      const orderHasZeroTaxInZid = zidTaxTotal === 0
+
+      for (const createCmd of creates) {
+        const line = createCmd[2]
+        if (!line) continue
+        const hasExplicitTax = line.tax_ids !== undefined || line.tax_id !== undefined
+        if (!hasExplicitTax) {
+          const prodId = typeof line.product_id === 'number' ? line.product_id : null
+          const existingTaxes = prodId ? taxByProduct.get(prodId) : null
+          if (existingTaxes !== undefined && existingTaxes !== null) {
+            line.tax_ids = [[6, 0, existingTaxes]]
+            console.info(`[SyncEngine] Preserved existing Odoo taxes ${JSON.stringify(existingTaxes)} for product #${prodId} on order #${odooRecordId} update`)
+          } else if (orderHasZeroTaxInZid) {
+            line.tax_ids = [[6, 0, []]]
+            console.info(`[SyncEngine] Explicitly cleared taxes for order #${odooRecordId} line (Zid tax_total is 0)`)
+          } else if (fallbackTaxIds) {
+            line.tax_ids = [[6, 0, fallbackTaxIds]]
+            console.info(`[SyncEngine] Preserved existing order tax ${JSON.stringify(fallbackTaxIds)} on order #${odooRecordId} update`)
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[SyncEngine] Could not inspect existing lines for taxes on order #${odooRecordId}:`, err)
+  }
+
   effectiveOdooValues.order_line = [[5, 0, 0], ...creates]
   console.info(`[SyncEngine] Order update will REPLACE ${creates.length} line(s) on Odoo #${odooRecordId} (no duplicates)`)
 }
@@ -1273,14 +1324,11 @@ export async function buildOrderLineItems(
     if (resolvedVatTaxId) {
       console.info(`[SyncEngine] VAT enabled for order: destination=${destinationCountryCode || 'Unknown'} (matched=${appliedCountryCode}), applied tax ID: ${resolvedVatTaxId}`)
     } else {
-      console.info(`[SyncEngine] VAT enabled for order: destination=${destinationCountryCode || 'Unknown'}, but no tax configured for this destination — lines will be sent without tax (Odoo will apply default tax)`)
+      console.info(`[SyncEngine] VAT enabled for order: destination=${destinationCountryCode || 'Unknown'}, but no tax configured for this destination — lines will be sent with 0% tax (clearing default taxes)`)
     }
   } else {
-    console.info('[SyncEngine] VAT disabled for order in Standard Mapping: lines will be sent without tax (Odoo will apply default tax)')
+    console.info('[SyncEngine] VAT disabled for order in Standard Mapping')
   }
-  const defaultLineTaxCmd: [number, number, number[]] | null = enableVat && resolvedVatTaxId
-    ? [6, 0, [resolvedVatTaxId]]
-    : null
 
   const pricesIncludeTax = !!orDefault('pricesIncludeTax', false)
   const taxRatePercentRaw = orDefault('taxRatePercent', 15)
@@ -1297,6 +1345,10 @@ export async function buildOrderLineItems(
     countryTaxRates,
     fallbackTaxRatePercent: fallbackTaxRate,
   })
+
+  const defaultLineTaxCmd: [number, number, number[]] | null = enableVat && resolvedVatTaxId
+    ? [6, 0, [resolvedVatTaxId]]
+    : (pricesIncludeTax && taxRatePercent === 0 ? [6, 0, []] : null)
 
   if (pricesIncludeTax) {
     if (taxRatePercent > 0) {

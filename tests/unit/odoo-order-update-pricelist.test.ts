@@ -20,4 +20,11 @@ describe('Odoo sale.order update multi-currency and partner safety', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../../src/lib/sync-engine.ts'), 'utf8')
     expect(src).toContain('lineVals.tax_ids = [[5, 0, 0]]')
   })
+
+  it('pins that normalizeOrderLinesForUpdate preserves existing line taxes and checks zero-tax orders', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../../src/lib/sync-engine.ts'), 'utf8')
+    expect(src).toContain("Preserve existing line taxes so replacement lines don't revert to default domestic VAT")
+    expect(src).toContain('line.tax_ids = [[6, 0, existingTaxes]]')
+    expect(src).toContain('line.tax_ids = [[6, 0, []]]')
+  })
 })
