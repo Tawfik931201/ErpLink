@@ -1581,7 +1581,7 @@ export default function StandardMappingClient({
         if (force) {
           toast({
             title: lang === 'ar' ? 'تم التحديث' : 'Refreshed',
-            description: lang === 'ar' ? 'تم تحديث قائمة العملات من أودو' : 'Odoo currencies reloaded',
+            description: lang === 'ar' ? 'تم تحديث قائمة العملات المفعّلة من أودو' : 'Odoo active currencies reloaded',
           })
         }
       } else if (force) {

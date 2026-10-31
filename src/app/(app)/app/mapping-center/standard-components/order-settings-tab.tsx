@@ -150,7 +150,7 @@ interface OrderSettingsTabProps {
   setOrderBaseCurrencyId: (val: string) => void
   currencyOptions: { value: string; label: string }[]
   isLoadingCurrencies?: boolean
-  handleRefreshCurrencies?: () => void
+  handleRefreshCurrencies?: (force?: boolean) => void | Promise<void>
   // Credit-note journal (fetched from Odoo)
   journalOptions: { value: string; label: string }[]
   isLoadingJournals: boolean
@@ -1061,7 +1061,7 @@ export function OrderSettingsTab({
               type="button"
               variant="outline"
               size="sm"
-              onClick={handleRefreshCurrencies}
+              onClick={() => handleRefreshCurrencies(true)}
               disabled={isLoadingCurrencies}
               className="h-8 text-xs gap-1.5"
               title={lang === 'ar' ? 'تحديث قائمة العملات من أودو' : 'Refresh currencies from Odoo'}
@@ -1104,14 +1104,28 @@ export function OrderSettingsTab({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
             <div className="space-y-1.5 sm:col-span-2 md:col-span-1">
-              <label className="block text-xs font-medium text-foreground/80">
-                {lang === 'ar' ? 'العملة الأساسية البديلة (Fallback Currency)' : 'Base / Fallback Currency'}
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-medium text-foreground/80">
+                  {lang === 'ar' ? 'العملة الأساسية البديلة (Fallback Currency)' : 'Base / Fallback Currency'}
+                </label>
+                {handleRefreshCurrencies && (
+                  <button
+                    type="button"
+                    onClick={() => handleRefreshCurrencies(true)}
+                    disabled={isLoadingCurrencies}
+                    className="text-muted-foreground hover:text-foreground text-[11px] flex items-center gap-1 transition-colors"
+                    title={lang === 'ar' ? 'تحديث العملات المفعّلة من أودو' : 'Refresh active currencies from Odoo'}
+                  >
+                    <RefreshCw className={cn('h-3 w-3', isLoadingCurrencies && 'animate-spin')} />
+                    <span>{lang === 'ar' ? 'تحديث' : 'Refresh'}</span>
+                  </button>
+                )}
+              </div>
               <SearchableSelect
                 options={currencyOptions}
                 value={orderBaseCurrencyId}
                 onChange={setOrderBaseCurrencyId}
-                placeholder={lang === 'ar' ? '— اختر العملة الأساسية (الافتراضي: الريال السعودي SAR) —' : '— Select Base Currency (Default: SAR) —'}
+                placeholder={lang === 'ar' ? '— اختر العملة الأساسية المفعّلة في أودو (الافتراضي: SAR) —' : '— Select Active Base Currency in Odoo (Default: SAR) —'}
                 disabled={isLoadingCurrencies}
               />
               <p className="text-[11px] text-muted-foreground">

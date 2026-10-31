@@ -27,12 +27,12 @@ import {
   resolveAnalyticDistribution,
   toOdooAnalyticFields,
 } from '@/lib/odoo/analytic-distribution'
-import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import {
   convertCurrencyAmount,
   extractOrderCurrency,
   resolveOrderExchangeRate,
 } from '@/lib/odoo/order-currency'
+import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import { OdooClient } from '@/lib/odoo-client'
 import {
   allPlatformIdFieldNames,

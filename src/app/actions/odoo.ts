@@ -1733,8 +1733,8 @@ export async function getOdooCurrencies(force = false): Promise<{
       const records = await client.execute<Array<{ id: number; name: string; symbol: string; active: boolean; rate?: number }>>(
         'res.currency',
         'search_read',
-        [[]],
-        { fields: ['id', 'name', 'symbol', 'active', 'rate'], order: 'active desc, name asc' }
+        [[['active', '=', true]]],
+        { fields: ['id', 'name', 'symbol', 'active', 'rate'], order: 'name asc' }
       )
 
       return (records || []).map(c => ({
@@ -1748,7 +1748,7 @@ export async function getOdooCurrencies(force = false): Promise<{
 
     const options = (currencies || []).map(c => ({
       value: String(c.id),
-      label: `${c.name}${c.symbol ? ` (${c.symbol})` : ''}${!c.active ? ' [غير مفعّلة في أودو / Inactive]' : ''}`,
+      label: `${c.name}${c.symbol ? ` (${c.symbol})` : ''}`,
     }))
 
     return { success: true, currencies, options }
