@@ -29,10 +29,11 @@ describe('Odoo sale.order update multi-currency and partner safety', () => {
     expect(src).toContain('line.tax_ids = [[6, 0, []]]')
   })
 
-  it('pins that pure status-change events do not rebuild or replace order lines on update', () => {
+  it('pins that pure status-change events and updates do not rebuild or replace order lines on update', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../../src/lib/sync-engine.ts'), 'utf8')
     expect(src).toContain("const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update'")
-    expect(src).toContain('(odooOperation === \'create\' || (odooOperation === \'update\' && !isStatusUpdateEvent))')
+    expect(src).toContain('delete effectiveOdooValues.tax_ids')
+    expect(src).toContain('delete effectiveOdooValues.order_line')
   })
 
   it('pins that account.payment uses memo for Odoo 17+ and ref for Odoo <= 16', () => {

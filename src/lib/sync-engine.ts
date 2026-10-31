@@ -1163,6 +1163,13 @@ async function prepareSaleOrderForUpdate(
   // Never re-write partner_id on an existing sale.order:
   delete effectiveOdooValues.partner_id
 
+  // Never modify taxes or order lines on an existing sale.order:
+  // Taxes and line items are established ONLY at order creation.
+  delete effectiveOdooValues.tax_id
+  delete effectiveOdooValues.tax_ids
+  delete effectiveOdooValues.amount_tax
+  delete effectiveOdooValues.order_line
+
   const isConfirmed = state && state !== 'draft' && state !== 'sent'
   if (isConfirmed) {
     // Confirmed orders in Odoo forbid mutating pricelist_id (raises UserError)
@@ -7914,10 +7921,11 @@ async function executeOdooOperation(params: {
     // mapping settings (add_shipping_as_line / add_discount_as_line, product ids).
     // Built for create AND update; update writes convert the (0,0) creates into a
     // full replace [(5,0,0), ...] via normalizeOrderLinesForUpdate (mirror Zid, no dups).
-    // Pure status-change events (e.g. order.status.update) on an existing order must NOT
+    // Status-change events and order updates on an existing order must NEVER
     // rebuild or replace lines, protecting existing line items, taxes, pricelists, and discounts.
-    const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update'
-    if ((odooOperation === 'create' || (odooOperation === 'update' && !isStatusUpdateEvent)) && !('order_line' in effectiveOdooValues)) {
+    // Order lines and taxes are established strictly at initial order creation.
+    const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update' || event === 'order.updated' || event.endsWith('.updated') || event === 'order.update' || odooOperation === 'update'
+    if ((odooOperation === 'create' && !isStatusUpdateEvent) && !('order_line' in effectiveOdooValues)) {
       let orderStdSettings: Record<string, any> | null = null
       if (mapping.workspace_id && platform) {
         try {
