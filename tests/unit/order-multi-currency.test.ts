@@ -1,3 +1,6 @@
+import fs from 'fs'
+import path from 'path'
+
 import {
   COMMON_RATES_TO_SAR,
   convertCurrencyAmount,
@@ -206,6 +209,21 @@ describe('Multi-Currency Order Sync & Conversion', () => {
       const codLine = lines.find(l => l.product_id === 77)
       expect(codLine).toBeDefined()
       expect(codLine?.price_unit).toBe(15.3)
+    })
+  })
+
+  describe('Multi-currency pricelist resolution & fallback contract', () => {
+    it('pins the Odoo 14-20 requirement that currency_id depends on pricelist_id', () => {
+      // In Odoo standard sale.order, currency_id is a computed/related field from pricelist_id.currency_id.
+      // Recording a sale order in AED requires a pricelist whose currency is AED.
+      const syncEngineSrc = fs.readFileSync(
+        path.resolve(__dirname, '../../src/lib/sync-engine.ts'),
+        'utf8'
+      )
+      expect(syncEngineSrc).toContain("['currency_id', '=', matchedCurr.id], ['active', '=', true]")
+      expect(syncEngineSrc).toContain("product.pricelist")
+      expect(syncEngineSrc).toContain("effectiveOdooValues.pricelist_id = matchedPricelistId")
+      expect(syncEngineSrc).toContain("Auto-created pricelist")
     })
   })
 })

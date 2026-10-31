@@ -3087,6 +3087,8 @@ async function createDraftInvoiceForOrder(
         invoice_line_ids: invoiceLines,
       }
       if (defaultJournalId) basicVals.journal_id = defaultJournalId
+      if (moveVals.currency_id) basicVals.currency_id = moveVals.currency_id
+      if (moveVals.company_id) basicVals.company_id = moveVals.company_id
       moveId = await client.create('account.move', basicVals)
     }
 
@@ -7582,26 +7584,55 @@ async function executeOdooOperation(params: {
 
           const matchedCurr = odooCurrs?.[0]
           if (matchedCurr && matchedCurr.active) {
-            // Currency is active in Odoo! Assign it directly to sale.order
-            effectiveOdooValues.currency_id = matchedCurr.id
-            console.info(`[SyncEngine] 💱 Multi-currency: Order currency "${sourceCurrency}" is active in Odoo (ID=${matchedCurr.id}). Recording order in ${sourceCurrency}.`)
-
-            // Try to match pricelist with this currency if possible
-            if (odooOperation === 'create') {
-              try {
-                const matchedPricelists = await client.searchRead<any>(
-                  'product.pricelist',
-                  [['currency_id', '=', matchedCurr.id], ['active', '=', true]],
-                  ['id'],
-                  1
-                ).catch(() => [])
-                if (matchedPricelists?.[0]?.id) {
-                  effectiveOdooValues.pricelist_id = matchedPricelists[0].id
-                  console.info(`[SyncEngine] 💱 Matched pricelist #${matchedPricelists[0].id} for currency "${sourceCurrency}"`)
-                }
-              } catch {
-                // Non-fatal
+            // Currency is active in Odoo!
+            // In Odoo (v14 to v20), sale.order.currency_id depends strictly on pricelist_id.currency_id.
+            // A sale.order CANNOT be recorded in a currency unless its pricelist has that currency.
+            let matchedPricelistId: number | null = null
+            try {
+              const matchedPricelists = await client.searchRead<any>(
+                'product.pricelist',
+                [['currency_id', '=', matchedCurr.id], ['active', '=', true]],
+                ['id', 'name'],
+                1
+              ).catch(() => [])
+              if (matchedPricelists?.[0]?.id) {
+                matchedPricelistId = matchedPricelists[0].id
+                console.info(`[SyncEngine] 💱 Found existing pricelist #${matchedPricelistId} ("${matchedPricelists[0].name}") for currency "${sourceCurrency}" in Odoo`)
               }
+            } catch {
+              // Non-fatal
+            }
+
+            // If no active pricelist exists for this currency in Odoo, try to auto-create one
+            if (!matchedPricelistId && odooOperation === 'create') {
+              try {
+                matchedPricelistId = await client.create('product.pricelist', {
+                  name: `${sourceCurrency} Pricelist`,
+                  currency_id: matchedCurr.id,
+                  active: true,
+                })
+                console.info(`[SyncEngine] 💱 Auto-created pricelist #${matchedPricelistId} for currency "${sourceCurrency}" in Odoo`)
+              } catch (plCreateErr: any) {
+                console.warn(`[SyncEngine] Could not auto-create pricelist for currency "${sourceCurrency}" in Odoo:`, plCreateErr?.message || plCreateErr)
+              }
+            }
+
+            if (matchedPricelistId) {
+              // Both currency and pricelist exist in Odoo! Assign both directly
+              effectiveOdooValues.currency_id = matchedCurr.id
+              effectiveOdooValues.pricelist_id = matchedPricelistId
+              resolvedConversionRate = 1.0
+              console.info(`[SyncEngine] 💱 Multi-currency: Order currency "${sourceCurrency}" is active in Odoo (ID=${matchedCurr.id}, pricelist_id=${matchedPricelistId}). Recording order in ${sourceCurrency}.`)
+            } else {
+              // Currency is active, but NO pricelist exists in Odoo and none could be created.
+              // In Odoo, sale.order CANNOT be created in this currency without a pricelist.
+              // Fallback to base currency and convert line amounts!
+              console.warn(`[SyncEngine] 💱 Multi-currency: Currency "${sourceCurrency}" is active in Odoo but has no matching pricelist. Recording in base currency and converting amounts.`)
+              if (baseCurrencyId) {
+                effectiveOdooValues.currency_id = baseCurrencyId
+              }
+              resolvedConversionRate = resolveOrderExchangeRate(zidData, sourceCurrency, 'SAR', matchedCurr?.rate)
+              console.info(`[SyncEngine] 💱 Currency conversion rate applied: 1 ${sourceCurrency} = ${resolvedConversionRate} Base (SAR)`)
             }
           } else {
             // Currency is NOT active in Odoo (or not found)
