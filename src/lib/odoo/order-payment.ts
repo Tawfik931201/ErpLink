@@ -177,7 +177,13 @@ export async function createOdooPayment(
     amount: params.amount,
     journal_id: params.journalId,
     date: params.date || new Date().toISOString().slice(0, 10),
-    ref: params.ref || '',
+  }
+  if (params.ref) {
+    if (major >= 17) {
+      paymentValues.memo = params.ref
+    } else {
+      paymentValues.ref = params.ref
+    }
   }
 
   if (params.currencyId) {
@@ -489,19 +495,32 @@ export async function reconcilePendingPaymentsForOrder(params: {
       storeEntityId: String(zidEntityId),
     })
 
-    // If not found in entity_links, try searching account.payment by ref
+    // If not found in entity_links, try searching account.payment by memo / ref
     if (!paymentId) {
       try {
         const orders = await client.searchRead<any>('sale.order', [['id', '=', saleOrderId]], ['name'])
         const orderName = orders?.[0]?.name
         const searchTerms = [`Zid Order #${orderName || zidEntityId}`, `Zid Order #${zidEntityId}`]
+        const major = await client.getMajorVersion().catch(() => 17)
+        const refField = major >= 17 ? 'memo' : 'ref'
         for (const term of searchTerms) {
-          const payments = await client.searchRead<any>(
-            'account.payment',
-            [['ref', '=', term]],
-            ['id', 'state'],
-            1
-          )
+          let payments: any[] = []
+          try {
+            payments = await client.searchRead<any>(
+              'account.payment',
+              [[refField, '=', term]],
+              ['id', 'state'],
+              1
+            )
+          } catch {
+            const altField = refField === 'memo' ? 'ref' : 'memo'
+            payments = await client.searchRead<any>(
+              'account.payment',
+              [[altField, '=', term]],
+              ['id', 'state'],
+              1
+            ).catch(() => [])
+          }
           if (payments?.[0]?.id) {
             paymentId = payments[0].id
             break

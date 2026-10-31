@@ -59,10 +59,12 @@ import { notifySyncResult } from '@/lib/telegram-notifier'
 import type { SyncRecordSummary } from '@/lib/telegram-notifier'
 import { ttlCache } from '@/lib/ttl-cache'
 import {
+  isSaudiShippingAddress,
   resolveEffectiveTaxRate,
+  resolveOrderCountryCode,
+  resolveOrderDiscountAmount,
   resolveOrderVatTax,
   resolveZidCodAmount,
-  resolveOrderDiscountAmount,
   resolveZidShippingCost,
   resolveZidStatus,
 } from '@/lib/zid/order-helpers'
@@ -1051,19 +1053,33 @@ async function normalizeOrderLinesForUpdate(
 
   // Preserve existing line taxes so replacement lines don't revert to default domestic VAT
   try {
-    const existingLines = await client.searchRead<any>(
-      'sale.order.line',
-      [['order_id', '=', odooRecordId]],
-      ['id', 'product_id', 'tax_id', 'name'],
-      50
-    )
+    const majorVersion = await client.getMajorVersion().catch(() => 19)
+    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+    let existingLines: any[] = []
+    try {
+      existingLines = await client.searchRead<any>(
+        'sale.order.line',
+        [['order_id', '=', odooRecordId]],
+        ['id', 'product_id', taxField, 'name'],
+        50
+      )
+    } catch {
+      const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+      existingLines = await client.searchRead<any>(
+        'sale.order.line',
+        [['order_id', '=', odooRecordId]],
+        ['id', 'product_id', altTaxField, 'name'],
+        50
+      ).catch(() => [])
+    }
     if (existingLines && existingLines.length > 0) {
       const taxByProduct = new Map<number, number[]>()
       let fallbackTaxIds: number[] | null = null
 
       for (const el of existingLines) {
         const prodId = Array.isArray(el.product_id) ? el.product_id[0] : (typeof el.product_id === 'number' ? el.product_id : null)
-        const taxes = Array.isArray(el.tax_id) ? el.tax_id.map(Number).filter((n: number) => !isNaN(n) && n > 0) : []
+        const rawTaxes = el.tax_ids ?? el.tax_id ?? el[taxField]
+        const taxes = Array.isArray(rawTaxes) ? rawTaxes.map(Number).filter((n: number) => !isNaN(n) && n > 0) : []
         if (prodId) {
           taxByProduct.set(prodId, taxes)
         }
@@ -1073,7 +1089,9 @@ async function normalizeOrderLinesForUpdate(
       }
 
       const zidTaxTotal = Number((zidData as any)?.tax_total ?? (zidData as any)?.total_tax ?? (zidData as any)?.order_tax ?? -1)
-      const orderHasZeroTaxInZid = zidTaxTotal === 0
+      const destCountry = resolveOrderCountryCode(zidData).toUpperCase()
+      const isExportOrder = !isSaudiShippingAddress(zidData) || (destCountry !== 'SA' && destCountry !== '')
+      const orderHasZeroTaxInZid = zidTaxTotal === 0 || isExportOrder
 
       for (const createCmd of creates) {
         const line = createCmd[2]
@@ -1087,7 +1105,7 @@ async function normalizeOrderLinesForUpdate(
             console.info(`[SyncEngine] Preserved existing Odoo taxes ${JSON.stringify(existingTaxes)} for product #${prodId} on order #${odooRecordId} update`)
           } else if (orderHasZeroTaxInZid) {
             line.tax_ids = [[6, 0, []]]
-            console.info(`[SyncEngine] Explicitly cleared taxes for order #${odooRecordId} line (Zid tax_total is 0)`)
+            console.info(`[SyncEngine] Explicitly cleared taxes for order #${odooRecordId} line (Zid tax_total is 0 / export order)`)
           } else if (fallbackTaxIds) {
             line.tax_ids = [[6, 0, fallbackTaxIds]]
             console.info(`[SyncEngine] Preserved existing order tax ${JSON.stringify(fallbackTaxIds)} on order #${odooRecordId} update`)
@@ -7896,7 +7914,10 @@ async function executeOdooOperation(params: {
     // mapping settings (add_shipping_as_line / add_discount_as_line, product ids).
     // Built for create AND update; update writes convert the (0,0) creates into a
     // full replace [(5,0,0), ...] via normalizeOrderLinesForUpdate (mirror Zid, no dups).
-    if ((odooOperation === 'create' || odooOperation === 'update') && !('order_line' in effectiveOdooValues)) {
+    // Pure status-change events (e.g. order.status.update) on an existing order must NOT
+    // rebuild or replace lines, protecting existing line items, taxes, pricelists, and discounts.
+    const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update'
+    if ((odooOperation === 'create' || (odooOperation === 'update' && !isStatusUpdateEvent)) && !('order_line' in effectiveOdooValues)) {
       let orderStdSettings: Record<string, any> | null = null
       if (mapping.workspace_id && platform) {
         try {
