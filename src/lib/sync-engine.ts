@@ -1697,16 +1697,20 @@ export async function buildOrderLineItems(
   }
 
   // When discountMode is 'percent', apply discount directly to product lines.
-  // If individual lines did not have explicit discounts, distribute the overall order discount % across lines
+  // If individual lines did not have explicit discounts, distribute the overall order discount % across lines.
+  // Note: Only distribute if there is an explicit order-level discount (effectiveOrderDiscount > 0).
+  // Line-level discounts belong strictly to their own items and must never be applied to other non-discounted products!
   if (addDiscountAsLine && discountMode === 'percent' && totalDiscountAmount > 0 && subtotalBeforeDiscount > 0) {
-    const overallDiscountPercent = Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
-    if (overallDiscountPercent > 0) {
-      for (const l of lines) {
-        if (!l['discount'] || Number(l['discount']) <= 0) {
-          l['discount'] = overallDiscountPercent
+    if (effectiveOrderDiscount > 0) {
+      const overallDiscountPercent = Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
+      if (overallDiscountPercent > 0) {
+        for (const l of lines) {
+          if (!l['discount'] || Number(l['discount']) <= 0) {
+            l['discount'] = overallDiscountPercent
+          }
         }
+        console.info(`[SyncEngine] Applied ${overallDiscountPercent}% discount to sale order lines`)
       }
-      console.info(`[SyncEngine] Applied ${overallDiscountPercent}% discount to sale order lines`)
     }
   }
 

@@ -46,15 +46,22 @@ export const COMMON_RATES_TO_SAR: Record<string, number> = {
 export function extractOrderCurrency(zidData: Record<string, unknown>, platform?: string): string {
   if (!zidData || typeof zidData !== 'object') return 'SAR'
 
-  // 1. Zid explicit currency keys
+  // 1. Explicit currency keys (string or nested object)
   const candidates = [
     'currency_code',
     'currency',
+    'currency.code',
+    'currency.currency_code',
     'amounts.currency',
+    'amounts.currency.code',
     'payment.currency',
+    'payment.currency.code',
     'payment_summary.currency',
+    'payment_summary.currency.code',
     'order.currency_code',
     'order.currency',
+    'order.currency.code',
+    'order.amounts.currency',
   ]
 
   for (const path of candidates) {
@@ -62,13 +69,43 @@ export function extractOrderCurrency(zidData: Record<string, unknown>, platform?
     if (typeof val === 'string' && val.trim()) {
       return val.trim().toUpperCase()
     }
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      const obj = val as Record<string, unknown>
+      const sub = obj.code || obj.currency_code || obj.name
+      if (typeof sub === 'string' && sub.trim()) {
+        return sub.trim().toUpperCase()
+      }
+    }
   }
 
-  // 2. Platform-specific fallbacks
+  // 2. Extract 3-letter currency code from formatted amount strings (e.g. "183.00 SAR", "90.97 AED")
+  const stringCandidates = [
+    'order_total_string',
+    'transaction_amount_string',
+    'products_sum_total_string',
+    'amounts.total_string',
+    'total_string',
+  ]
+  for (const path of stringCandidates) {
+    const strVal = resolvePath(zidData, path)
+    if (typeof strVal === 'string') {
+      const match = strVal.trim().match(/\b([A-Za-z]{3})\b$/)
+      if (match && match[1]) {
+        return match[1].toUpperCase()
+      }
+    }
+  }
+
+  // 3. Platform-specific fallbacks
   if (platform === 'shopify') {
     const shopifyCurr = resolvePath(zidData, 'presentment_currency') || resolvePath(zidData, 'currency')
     if (typeof shopifyCurr === 'string' && shopifyCurr.trim()) {
       return shopifyCurr.trim().toUpperCase()
+    }
+  } else if (platform === 'salla') {
+    const sallaCurr = resolvePath(zidData, 'currency') || resolvePath(zidData, 'price.currency')
+    if (typeof sallaCurr === 'string' && sallaCurr.trim()) {
+      return sallaCurr.trim().toUpperCase()
     }
   }
 

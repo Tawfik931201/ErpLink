@@ -27,6 +27,28 @@ describe('Multi-Currency Order Sync & Conversion', () => {
       expect(extractOrderCurrency({ presentment_currency: 'BHD' }, 'shopify')).toBe('BHD')
     })
 
+    it('extracts currency from nested currency object or formatted amount string', () => {
+      expect(extractOrderCurrency({ currency: { code: 'AED' } })).toBe('AED')
+      expect(extractOrderCurrency({ order_total_string: '183.00 SAR' })).toBe('SAR')
+      expect(extractOrderCurrency({ order_total_string: '90.97 AED' })).toBe('AED')
+    })
+
+    it('determines currency strictly from order payload and NEVER from shipping address', () => {
+      // Order is in SAR even though shipping is to UAE (الإمارات العربية المتحدة)
+      const uaeShippingPayload = {
+        currency_code: 'SAR',
+        order_total_string: '183.00 SAR',
+        shipping: {
+          address: {
+            country: { id: 221, name: 'الإمارات العربية المتحدة' },
+            city: { name: 'أبوظبي' },
+          },
+        },
+      }
+      expect(extractOrderCurrency(uaeShippingPayload)).toBe('SAR')
+      expect(resolveOrderExchangeRate(uaeShippingPayload, 'SAR', 'SAR')).toBe(1.0)
+    })
+
     it('defaults to SAR when no currency is specified', () => {
       expect(extractOrderCurrency({})).toBe('SAR')
       expect(extractOrderCurrency(null as unknown as Record<string, unknown>)).toBe('SAR')
@@ -209,6 +231,77 @@ describe('Multi-Currency Order Sync & Conversion', () => {
       const codLine = lines.find(l => l.product_id === 77)
       expect(codLine).toBeDefined()
       expect(codLine?.price_unit).toBe(15.3)
+    })
+
+    it('does NOT distribute line-level discount of one item to non-discounted items when orderLevelDiscount is 0', async () => {
+      const mockClient = {
+        execute: jest.fn().mockImplementation((model, method) => {
+          if (method === 'fields_get') {
+            return Promise.resolve({
+              price_unit: { type: 'monetary' },
+              product_uom_qty: { type: 'float' },
+              discount: { type: 'float' },
+              product_id: { type: 'many2one', relation: 'product.product' },
+            })
+          }
+          return Promise.resolve([])
+        }),
+        searchRead: jest.fn().mockResolvedValue([]),
+      } as unknown as OdooClient
+
+      const mapping = {
+        id: 'test-map',
+        workspace_id: 'ws-1',
+        action: 'order.create',
+        odoo_model: 'sale.order',
+        merchant_id: 'm1',
+        store_id: 's1',
+        erp_connection_id: null,
+        name: 'Order Map',
+        mappings: {
+          'sale.order.line': [
+            { id: '1', erpField: 'product_id', staticValue: '10' },
+            { id: '2', erpField: 'price_unit', zidField: 'price' },
+            { id: '3', erpField: 'product_uom_qty', zidField: 'quantity' },
+          ],
+        },
+      } as FieldMappingRow
+
+      const zidData = {
+        currency_code: 'SAR',
+        products: [
+          // Item 1: price_before 100, price 90 (10 SAR discount)
+          { id: 'p1', sku: 'SKU-1', quantity: 1, price_before: 100, price: 90, net_price: 100, net_sale_price: 90 },
+          // Item 2: price 45, no discount
+          { id: 'p2', sku: 'SKU-2', quantity: 1, price: 45, net_price: 45, net_sale_price: 45 },
+        ],
+        // No coupon or order-level discount
+        payment: { invoice: [{ code: 'sub_totals', value: 135 }] },
+      }
+
+      const stdSettings = {
+        add_discount_as_line: true,
+        discount_mode: 'percent',
+      }
+
+      const lines = await buildOrderLineItems(
+        mockClient,
+        mapping,
+        zidData,
+        new Map(),
+        {},
+        'zid',
+        stdSettings
+      )
+
+      expect(lines).toHaveLength(2)
+      // Item 1 has 10% discount
+      expect(lines[0].discount).toBe(10)
+      expect(lines[0].price_unit).toBe(100)
+
+      // Item 2 must NOT have any phantom discount!
+      expect(lines[1].discount).toBeUndefined()
+      expect(lines[1].price_unit).toBe(45)
     })
   })
 
