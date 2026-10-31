@@ -119,6 +119,51 @@ describe('resolveOrderVatTax helper', () => {
     expect(nonSaudiRes.taxId).toBe(2)
     expect(nonSaudiRes.appliedCountryCode).toBe('OTHER')
   })
+
+  it('skips resolving tax when event is a status update or non-creation event', () => {
+    const res = resolveOrderVatTax(
+      { shipping_address: { country: 'AE' } },
+      {
+        enableVat: true,
+        vatCountryRules: [
+          { country_code: 'SA', tax_id: 5 },
+          { country_code: 'AE', tax_id: 8 },
+        ],
+        event: 'order.status.update',
+      }
+    )
+    expect(res.taxId).toBeNull()
+    expect(res.appliedCountryCode).toBeNull()
+
+    const res2 = resolveOrderVatTax(
+      { shipping_address: { country: 'AE' } },
+      {
+        enableVat: true,
+        vatCountryRules: [
+          { country_code: 'SA', tax_id: 5 },
+          { country_code: 'AE', tax_id: 8 },
+        ],
+        event: 'order.updated',
+      }
+    )
+    expect(res2.taxId).toBeNull()
+  })
+
+  it('resolves tax when event is order.create or order.created', () => {
+    const res = resolveOrderVatTax(
+      { shipping_address: { country: 'AE' } },
+      {
+        enableVat: true,
+        vatCountryRules: [
+          { country_code: 'SA', tax_id: 5 },
+          { country_code: 'AE', tax_id: 8 },
+        ],
+        event: 'order.create',
+      }
+    )
+    expect(res.taxId).toBe(8)
+    expect(res.appliedCountryCode).toBe('AE')
+  })
 })
 
 describe('buildOrderLineItems with Country VAT Rules', () => {

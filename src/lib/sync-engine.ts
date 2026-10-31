@@ -59,6 +59,7 @@ import { notifySyncResult } from '@/lib/telegram-notifier'
 import type { SyncRecordSummary } from '@/lib/telegram-notifier'
 import { ttlCache } from '@/lib/ttl-cache'
 import {
+  isOrderCreationEvent,
   isSaudiShippingAddress,
   resolveEffectiveTaxRate,
   resolveOrderCountryCode,
@@ -1160,8 +1161,11 @@ async function prepareSaleOrderForUpdate(
     state = ''
   }
 
-  // Never re-write partner_id on an existing sale.order:
+  // Never re-write partner or address references on an existing sale.order (prevents Odoo recomputing fiscal position & taxes):
   delete effectiveOdooValues.partner_id
+  delete effectiveOdooValues.partner_invoice_id
+  delete effectiveOdooValues.partner_shipping_id
+  delete effectiveOdooValues.fiscal_position_id
 
   // Never modify taxes or order lines on an existing sale.order:
   // Taxes and line items are established ONLY at order creation.
@@ -1266,6 +1270,8 @@ export async function buildOrderLineItems(
   platform?: 'zid' | 'salla' | 'shopify',
   orderStdSettings?: Record<string, any> | null,
   storeId = '',
+  event = '',
+  odooOperation = 'create',
 ): Promise<Record<string, unknown>[]> {
   const lines: Record<string, unknown>[] = []
 
@@ -1338,11 +1344,16 @@ export async function buildOrderLineItems(
   const vatSaudiTaxId = orDefault('vatSaudiTaxId', null) ? Number(orDefault('vatSaudiTaxId', null)) : null
   const vatNonSaudiTaxId = orDefault('vatNonSaudiTaxId', null) ? Number(orDefault('vatNonSaudiTaxId', null)) : null
 
+  const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update' || event === 'order.updated' || event.endsWith('.updated') || event === 'order.update' || odooOperation === 'update'
+  const isCreation = (odooOperation === 'create' || !odooOperation) && !isStatusUpdateEvent && isOrderCreationEvent(event)
+
   const { taxId: resolvedVatTaxId, appliedCountryCode, destinationCountryCode } = resolveOrderVatTax(zidData, {
     enableVat,
     vatCountryRules,
     vatSaudiTaxId,
     vatNonSaudiTaxId,
+    event,
+    isOrderCreate: isCreation,
   })
 
   if (enableVat) {
@@ -1371,9 +1382,9 @@ export async function buildOrderLineItems(
     fallbackTaxRatePercent: fallbackTaxRate,
   })
 
-  const defaultLineTaxCmd: [number, number, number[]] | null = enableVat && resolvedVatTaxId
+  const defaultLineTaxCmd: [number, number, number[]] | null = isCreation && enableVat && resolvedVatTaxId
     ? [6, 0, [resolvedVatTaxId]]
-    : (pricesIncludeTax && taxRatePercent === 0 ? [6, 0, []] : null)
+    : (isCreation && pricesIncludeTax && taxRatePercent === 0 ? [6, 0, []] : null)
 
   if (pricesIncludeTax) {
     if (taxRatePercent > 0) {
@@ -1633,10 +1644,12 @@ export async function buildOrderLineItems(
           console.warn(`[SyncEngine] Failed to resolve tax for "${zidTaxName}":`, err)
         }
       }
-      if (resolvedMappingTaxId) {
-        line[lineTaxField] = [[6, 0, [resolvedMappingTaxId]]]
-      } else if (defaultLineTaxCmd) {
-        line[lineTaxField] = [defaultLineTaxCmd]
+      if (isCreation) {
+        if (resolvedMappingTaxId) {
+          line[lineTaxField] = [[6, 0, [resolvedMappingTaxId]]]
+        } else if (defaultLineTaxCmd) {
+          line[lineTaxField] = [defaultLineTaxCmd]
+        }
       }
     }
 
@@ -1870,7 +1883,7 @@ export async function buildOrderLineItems(
       product_uom_qty: 1,
       price_unit: finalShippingCost,
     }
-    if (defaultLineTaxCmd) {
+    if (isCreation && defaultLineTaxCmd) {
       shippingLine[lineTaxField] = [defaultLineTaxCmd]
     }
 
@@ -1929,7 +1942,7 @@ export async function buildOrderLineItems(
       product_uom_qty: 1,
       price_unit: discountValue,
     }
-    if (defaultLineTaxCmd) {
+    if (isCreation && defaultLineTaxCmd) {
       discountLine[lineTaxField] = [defaultLineTaxCmd]
     }
 
@@ -1974,7 +1987,7 @@ export async function buildOrderLineItems(
       product_uom_qty: 1,
       price_unit: finalCodFee,
     }
-    if (defaultLineTaxCmd) {
+    if (isCreation && defaultLineTaxCmd) {
       codLine[lineTaxField] = [defaultLineTaxCmd]
     }
     if (codProductId) {
@@ -5607,8 +5620,9 @@ export async function processSingleMapping(
   platform = (platformHint || getPlatformFromEvent(event)) as 'zid' | 'salla' | 'shopify'
   const odooValues = await buildOdooValues(client, mappingItems, zidData, fieldMeta, platform, mapping.workspace_id, storeId)
 
-  // ——— 5a. If this is sale.order, build order_line items with discount/shipping —
-  if (odooModel === 'sale.order') {
+  // ——— 5a. If this is sale.order, build order_line items with discount/shipping strictly on creation —
+  const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update' || event === 'order.updated' || event.endsWith('.updated') || event === 'order.update' || odooOperation === 'update'
+  if (odooModel === 'sale.order' && odooOperation === 'create' && !isStatusUpdateEvent) {
     // Load standard mapping settings once (avoid duplicate DB query inside buildOrderLineItems)
     let orderStdSettings: Record<string, any> | null = null
     if (mapping.workspace_id && platform) {
@@ -5627,7 +5641,9 @@ export async function processSingleMapping(
         odooValues,
         platform,
         orderStdSettings,
-        storeId
+        storeId,
+        event,
+        odooOperation
       )
       if (orderLines.length > 0) {
         odooValues['order_line'] = orderLines.map(item => [0, 0, item])
@@ -7974,7 +7990,9 @@ async function executeOdooOperation(params: {
           effectiveOdooValues,
           platform,
           orderStdSettings,
-          storeId
+          storeId,
+          event,
+          odooOperation
         )
         if (orderLines.length > 0) {
           effectiveOdooValues.order_line = orderLines.map(item => [0, 0, item])
@@ -8218,7 +8236,9 @@ async function executeOdooOperation(params: {
               effectiveOdooValues,
               execPlatform,
               orderStdSettings,
-              storeId
+              storeId,
+              event,
+              'create'
             )
             if (orderLines.length > 0) {
               effectiveOdooValues.order_line = orderLines.map(item => [0, 0, item])

@@ -553,6 +553,23 @@ export interface VatCountryRule {
  * 3. Falls back to legacy vatSaudiTaxId (for SA) / vatNonSaudiTaxId (for others).
  * 4. If no tax is selected or matched, returns taxId: null (allowing Odoo to apply default tax).
  */
+export function isOrderCreationEvent(event?: string | null): boolean {
+  if (!event) return true
+  const ev = event.toLowerCase().trim()
+  return (
+    ev === 'order.create' ||
+    ev === 'order.created' ||
+    ev === 'order_create' ||
+    ev === 'order_created' ||
+    ev === 'orders/create' ||
+    ev === 'order/create' ||
+    ev === 'shopify:orders_create' ||
+    ev === 'shopify:order_create' ||
+    ev.endsWith('.order.create') ||
+    ev.endsWith('.order.created')
+  )
+}
+
 export function resolveOrderVatTax(
   orderPayload: Record<string, unknown>,
   options: {
@@ -560,12 +577,19 @@ export function resolveOrderVatTax(
     vatCountryRules?: VatCountryRule[] | null
     vatSaudiTaxId?: number | string | null
     vatNonSaudiTaxId?: number | string | null
+    event?: string | null
+    isOrderCreate?: boolean
   }
 ): {
   taxId: number | null
   appliedCountryCode: string | null
   destinationCountryCode: string
 } {
+  if (options.isOrderCreate === false || (options.event && !isOrderCreationEvent(options.event))) {
+    console.info(`[resolveOrderVatTax] Skipped: event "${options.event || 'unknown'}" is not an order creation event. Taxes are established strictly at initial order creation.`)
+    return { taxId: null, appliedCountryCode: null, destinationCountryCode: '' }
+  }
+
   if (!options.enableVat) {
     return { taxId: null, appliedCountryCode: null, destinationCountryCode: '' }
   }

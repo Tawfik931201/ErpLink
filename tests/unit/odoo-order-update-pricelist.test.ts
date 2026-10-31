@@ -34,6 +34,9 @@ describe('Odoo sale.order update multi-currency and partner safety', () => {
     expect(src).toContain("const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update'")
     expect(src).toContain('delete effectiveOdooValues.tax_ids')
     expect(src).toContain('delete effectiveOdooValues.order_line')
+    expect(src).toContain('delete effectiveOdooValues.partner_invoice_id')
+    expect(src).toContain('delete effectiveOdooValues.partner_shipping_id')
+    expect(src).toContain('delete effectiveOdooValues.fiscal_position_id')
   })
 
   it('pins that account.payment uses memo for Odoo 17+ and ref for Odoo <= 16', () => {
