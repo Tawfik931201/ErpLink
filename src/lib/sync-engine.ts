@@ -1739,17 +1739,27 @@ export async function buildOrderLineItems(
             else if (prodStd.price.rounding === 'floor') price = Math.floor(price)
           }
 
-          // Resolve product type from standard mapping ('consu' | 'service')
+          // Resolve product type and storable settings from standard mapping
           const rawType = typeof prodStd?.product_type === 'object'
             ? prodStd?.product_type?.default_type
             : prodStd?.product_type
-          const validType = (rawType && typeof rawType === 'string' && rawType !== 'product') ? rawType : 'consu'
+          const majorVer = await client.getMajorVersion().catch(() => 17)
+          const wantsStorable = prodStd?.inventory?.track_inventory !== undefined
+            ? Boolean(prodStd.inventory.track_inventory)
+            : (rawType === 'product')
 
           const prodVals: Record<string, any> = {
             name: newName || (sku ? `Product ${sku}` : 'Unnamed Product'),
-            type: validType,
             sale_ok: true,
             purchase_ok: true,
+          }
+          if (majorVer >= 18) {
+            prodVals.type = rawType === 'service' ? 'service' : 'consu'
+            if (rawType !== 'service') {
+              prodVals.is_storable = wantsStorable
+            }
+          } else {
+            prodVals.type = rawType === 'service' ? 'service' : (wantsStorable ? 'product' : 'consu')
           }
           if (sku) prodVals.default_code = sku
           if (barcode) prodVals.barcode = barcode
@@ -1774,8 +1784,14 @@ export async function buildOrderLineItems(
               prodVals.company_id = Number(prodStd.company_id)
             }
             // Tracking (lots/serials)
+            // Odoo 20+ changed tracking: 'none' removed from selection ('lot', 'serial' only).
+            // Tracked by quantity is tracking = false.
             if (prodStd.inventory?.tracking && prodStd.inventory.tracking !== 'none') {
               prodVals.tracking = prodStd.inventory.tracking
+            } else if (majorVer >= 20) {
+              if (wantsStorable) prodVals.tracking = false
+            } else if (wantsStorable) {
+              prodVals.tracking = 'none'
             }
             // Match field
             if (prodStd.match_odoo_field) {
@@ -2247,7 +2263,9 @@ export async function applyFixedSettingsToValues(
   platform?: 'zid' | 'salla' | 'shopify',
   odooModel?: string,
 ): Promise<Record<string, unknown>> {
-  if (!settings || Object.keys(settings).length === 0) return odooValues
+  const safeSettings = settings || {}
+  const isProductModel = odooModel === 'product.template' || odooModel === 'product.product' || !odooModel
+  if (!isProductModel && Object.keys(safeSettings).length === 0) return odooValues
 
   const values = { ...odooValues }
 
@@ -2312,14 +2330,17 @@ export async function applyFixedSettingsToValues(
     return values
   }
 
-  // ── Product type ────────────────────────────────────────────────────────────
-  // Odoo 18+ changed type selection: 'product' removed, 'consu' means "Goods".
-  // Use is_storable + tracking fields instead.  Skip if values.type is already
-  // provided by a row-level field mapping.
+  // ── Product type & tracking ──────────────────────────────────────────────────
+  // Version matrix (Odoo 14 to 20):
+  // - Odoo 14: type=('consu','service','product'). No is_storable. tracking=('none','lot','serial').
+  // - Odoo 15-17: type=('consu','service','product'), detailed_type mirrors type. No is_storable. tracking=('none','lot','serial').
+  // - Odoo 18-19: 'product' removed from type. type=('consu','service'). is_storable=True for goods. tracking=('none','lot','serial').
+  // - Odoo 20: type=('consu','service'). is_storable=True. tracking=('lot','serial') ONLY ('none' removed!). Untracked/quantity is tracking=False.
   const isV18Plus = (odooMajorVersion ?? 0) >= 18
+  const isV20Plus = (odooMajorVersion ?? 0) >= 20
   const inventoryCfg = settings.inventory
 
-  if (odooModel === 'product.template' && !values.type) {
+  if (odooModel === 'product.template' || odooModel === 'product.product' || !odooModel) {
     const defaultType = typeof settings.product_type === 'string'
       ? settings.product_type
       : settings.product_type?.default_type
@@ -2327,34 +2348,76 @@ export async function applyFixedSettingsToValues(
     // Determine whether inventory should be tracked
     let wantsStorable: boolean
     if (inventoryCfg?.track_inventory !== undefined) {
-      wantsStorable = inventoryCfg.track_inventory
+      wantsStorable = Boolean(inventoryCfg.track_inventory)
     } else {
       wantsStorable = (defaultType === 'product')
     }
 
-    if (isV18Plus) {
-      if (defaultType === 'service') {
-        values.type = 'service'
-        values.is_storable = false
+    if (!values.type) {
+      if (isV18Plus) {
+        if (defaultType === 'service') {
+          values.type = 'service'
+          values.is_storable = false
+        } else {
+          values.type = 'consu'
+          values.is_storable = wantsStorable
+        }
       } else {
-        values.type = 'consu'
-        values.is_storable = wantsStorable
-        if (wantsStorable) {
-          values.tracking = 'none'
-          if (inventoryCfg?.tracking && inventoryCfg.tracking !== 'none') {
-            values.tracking = inventoryCfg.tracking
-          }
-          if (inventoryCfg?.route_ids && Array.isArray(inventoryCfg.route_ids) && inventoryCfg.route_ids.length > 0) {
-            values.route_ids = [[6, 0, inventoryCfg.route_ids]]
-          }
+        if (defaultType === 'service') {
+          values.type = 'service'
+        } else {
+          values.type = wantsStorable ? 'product' : 'consu'
         }
       }
     } else {
-      if (defaultType === 'service') {
-        values.type = 'service'
-      } else {
-        values.type = wantsStorable ? 'product' : 'consu'
+      // Normalize values.type if already mapped
+      if (isV18Plus && values.type === 'product') {
+        values.type = 'consu'
+        if (values.is_storable === undefined) {
+          values.is_storable = true
+        }
+      } else if (!isV18Plus && values.type === 'consu' && wantsStorable) {
+        values.type = 'product'
       }
+    }
+
+    // Ensure is_storable is set only on Odoo 18+ and purged on Odoo 14-17
+    if (isV18Plus) {
+      if (values.type === 'service') {
+        values.is_storable = false
+      } else if (values.is_storable === undefined) {
+        values.is_storable = wantsStorable
+      }
+    } else {
+      delete values.is_storable
+    }
+
+    // ── Tracking (Traceability) ──
+    const configuredTracking = inventoryCfg?.tracking
+    if (wantsStorable) {
+      if (configuredTracking && configuredTracking !== 'none') {
+        values.tracking = configuredTracking
+      } else {
+        if (isV20Plus) {
+          values.tracking = false
+        } else {
+          values.tracking = 'none'
+        }
+      }
+      if (inventoryCfg?.route_ids && Array.isArray(inventoryCfg.route_ids) && inventoryCfg.route_ids.length > 0) {
+        values.route_ids = [[6, 0, inventoryCfg.route_ids]]
+      }
+    } else {
+      if (isV20Plus) {
+        values.tracking = false
+      } else {
+        values.tracking = 'none'
+      }
+    }
+
+    // Strict guard for Odoo 20+: 'none' is rejected by Odoo 20 ORM selection validation
+    if (isV20Plus && values.tracking === 'none') {
+      values.tracking = false
     }
   }
 
@@ -2668,6 +2731,18 @@ async function safeCreateOdooRecord(
       }
     }
 
+    // If error is from an invalid selection value (e.g. ValueError: Wrong value for product.template.tracking: 'none')
+    const wrongValueMatch = String(err?.message || '').match(/Wrong value for (?:[a-zA-Z0-9_]+\.)*([a-zA-Z0-9_]+):/i)
+    if (wrongValueMatch && wrongValueMatch[1]) {
+      const badField = wrongValueMatch[1]
+      if (badField in values) {
+        console.warn(`[SyncEngine] ⚠️ Pruning invalid selection value for field "${badField}" from ${model} create and retrying: ${err.message}`)
+        const cleanValues = { ...values }
+        delete cleanValues[badField]
+        return await safeCreateOdooRecord(client, model, cleanValues, _fallbackValues)
+      }
+    }
+
     // If error is due to incompatible companies on a specific relational field (e.g. pricelist_id belongs to another company), prune and retry
     const isCompanyIncompatible = String(err?.message || '').toLowerCase().includes('incompatible companies on records')
     if (isCompanyIncompatible) {
@@ -2735,6 +2810,18 @@ async function safeWriteOdooRecord(
       const badField = invalidFieldMatch[1]
       if (badField in values) {
         console.warn(`[SyncEngine] ⚠️ Pruning invalid field "${badField}" from ${model} write and retrying: ${err.message}`)
+        const cleanValues = { ...values }
+        delete cleanValues[badField]
+        return await safeWriteOdooRecord(client, model, id, cleanValues, _fallbackValues)
+      }
+    }
+
+    // If error is from an invalid selection value (e.g. ValueError: Wrong value for product.template.tracking: 'none')
+    const wrongValueMatch = String(err?.message || '').match(/Wrong value for (?:[a-zA-Z0-9_]+\.)*([a-zA-Z0-9_]+):/i)
+    if (wrongValueMatch && wrongValueMatch[1]) {
+      const badField = wrongValueMatch[1]
+      if (badField in values) {
+        console.warn(`[SyncEngine] ⚠️ Pruning invalid selection value for field "${badField}" from ${model} write and retrying: ${err.message}`)
         const cleanValues = { ...values }
         delete cleanValues[badField]
         return await safeWriteOdooRecord(client, model, id, cleanValues, _fallbackValues)
@@ -5850,11 +5937,11 @@ async function syncAsSeparateProducts(
   let mainRecordId: number | null = null
   if (mainDuplicateId !== null) {
     console.info(`[SyncEngine] 🔄 المنتج الرئيسي موجود بالفعل (ID: #${mainDuplicateId}). جاري تحديث البيانات...`)
-    await client.write('product.template', [mainDuplicateId], odooValues)
+    await safeWriteOdooRecord(client, 'product.template', mainDuplicateId, odooValues, odooValues)
     mainRecordId = mainDuplicateId
   } else {
     console.info(`[SyncEngine] ➕ جاري إنشاء المنتج الرئيسي "${mainProductName}" في أودو...`)
-    mainRecordId = await client.create('product.template', odooValues)
+    mainRecordId = await safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)
     if (zidData.id) {
       await persistPlatformIdOnRecord(client, 'product.template', mainRecordId, platform, String(zidData.id))
     }
@@ -5919,11 +6006,11 @@ async function syncAsSeparateProducts(
 
     let recordId: number
     if (duplicateId !== null) {
-      await client.write('product.template', [duplicateId], variantOdooValues)
+      await safeWriteOdooRecord(client, 'product.template', duplicateId, variantOdooValues, variantOdooValues)
       recordId = duplicateId
     } else {
       console.info(`[SyncEngine] ➕ جاري إنشاء متغير كمنتج منفصل "${variantName}" في أودو...`)
-      recordId = await client.create('product.template', variantOdooValues)
+      recordId = await safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)
       if (variant.id) {
         await persistPlatformIdOnRecord(client, 'product.template', recordId, platform, String(variant.id))
       }
@@ -6008,11 +6095,11 @@ async function syncAsVariants(
   let templateId: number
   if (duplicateId !== null) {
     console.info(`[SyncEngine] 🔄 المنتج الرئيسي موجود بالفعل (ID: #${duplicateId}). جاري تحديث البيانات...`)
-    await client.write('product.template', [duplicateId], odooValues)
+    await safeWriteOdooRecord(client, 'product.template', duplicateId, odooValues, odooValues)
     templateId = duplicateId
   } else {
     console.info(`[SyncEngine] ➕ جاري إنشاء المنتج الرئيسي في أودو...`)
-    templateId = await client.create('product.template', odooValues)
+    templateId = await safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)
     if (zidData.id) {
       await persistPlatformIdOnRecord(client, 'product.template', templateId, platform, String(zidData.id))
     if (mapping.workspace_id && zidData.id) {
