@@ -8706,18 +8706,21 @@ export async function findExistingOdooRecord(
         for (const logRow of previousLogs) {
           const idNum = Number(logRow?.odoo_record_id)
           if (Number.isInteger(idNum) && idNum > 0) {
-            try {
-              const recs = await client.searchRead<any>(model, [['id', '=', idNum]], ['id', 'amount_total'], 1)
-              if (recs.length > 0) {
-                // Ignore return orders (amount_total < 0) for normal updates
-                if (model !== 'sale.order' || Number(recs[0].amount_total) >= 0) {
-                  console.info(`[SyncEngine] Resolved ${model} #${idNum} from sync_logs for zid_entity_id="${zidId}"`)
-                  return idNum
+              try {
+                // Only check amount_total for sale.order to avoid crashes on models without it
+                const fieldsToRead = model === 'sale.order' ? ['id', 'amount_total'] : ['id']
+                const recs = await client.searchRead<any>(model, [['id', '=', idNum]], fieldsToRead, 1)
+                if (recs.length > 0) {
+                  // Ignore return orders (amount_total < 0) for normal updates
+                  if (model !== 'sale.order' || Number(recs[0].amount_total) >= 0) {
+                    console.info(`[SyncEngine] Resolved ${model} #${idNum} from sync_logs for zid_entity_id="${zidId}"`)
+                    return idNum
+                  }
                 }
+              } catch (e) {
+                console.warn(`[SyncEngine] Failed to verify ${model} #${idNum} during sync_logs lookup:`, e)
+                // Record might have been deleted or field error, continue with other candidates
               }
-            } catch {
-              // Record might have been deleted in Odoo, continue with other candidates
-            }
           }
         }
       }
@@ -8747,7 +8750,8 @@ export async function findExistingOdooRecord(
       })
       if (linkedId) {
         try {
-          const recs = await client.searchRead<any>(model, [['id', '=', linkedId]], ['id', 'amount_total'], 1)
+          const fieldsToRead = model === 'sale.order' ? ['id', 'amount_total'] : ['id']
+          const recs = await client.searchRead<any>(model, [['id', '=', linkedId]], fieldsToRead, 1)
           if (recs.length > 0) {
             if (model !== 'sale.order' || Number(recs[0].amount_total) >= 0) {
               console.info(`[SyncEngine] Resolved ${model} #${linkedId} from odoo_entity_links for store "${mapping.merchant_id}" entity "${zidId}"`)
@@ -9118,13 +9122,25 @@ async function syncProductBom(
 
       if (!compId && !compSku && !compBarcode) continue
 
-      // Search matching product.product in Odoo
+      // Search matching product.product in Odoo using findExistingOdooRecord
+      // (which safely checks sync_logs, entity_links, SKU, barcode, and verifies custom fields via fieldMeta)
       let matchedId: number | null = null
-
-      if (compId) {
-        const ids = await client.search('product.product', [[idField, '=', String(compId)]], 1)
-        if (ids.length > 0) matchedId = ids[0]
+      try {
+        matchedId = await findExistingOdooRecord(
+          client,
+          'product.product',
+          { id: compId, sku: compSku, barcode: compBarcode },
+          { default_code: compSku, barcode: compBarcode },
+          undefined,
+          undefined,
+          undefined,
+          workspaceId,
+          platform
+        )
+      } catch {
+        // Fallback to standard search if findExistingOdooRecord fails
       }
+
       if (!matchedId && compSku) {
         const ids = await client.search('product.product', [['default_code', '=', String(compSku)]], 1)
         if (ids.length > 0) matchedId = ids[0]
