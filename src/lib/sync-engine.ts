@@ -5935,7 +5935,8 @@ async function syncAsSeparateProducts(
   defaultLocationId?: number,
   infiniteValue?: number,
   fixedMatch?: { odoo_field: string; zid_field: string },
-  priceSettings?: { markup_percent: number; rounding: string; decimal_places: number }
+  priceSettings?: { markup_percent: number; rounding: string; decimal_places: number },
+  mergedSettings?: Record<string, any>
 ): Promise<SyncEngineResult['records'][number]> {
   console.info(`[SyncEngine] 📦 مزامنة ${variants.length} متغيرات كمنتجات منفصلة في أودو.`)
 
@@ -5957,6 +5958,12 @@ async function syncAsSeparateProducts(
     }
   }
   results.push(mainRecordId)
+
+  if (mergedSettings && mainRecordId) {
+    await syncProductBom(client, mainRecordId, zidData, mergedSettings, platform, mapping.workspace_id).catch(err => {
+      console.warn(`[SyncEngine] Failed to sync BoM in syncAsSeparateProducts:`, err)
+    })
+  }
 
   for (const variant of variants) {
     const attributeValues = Object.values(variant.attributes)
@@ -7435,7 +7442,8 @@ async function executeOdooOperation(params: {
           defaultLocationId,
           infiniteValue,
           fixedMatch,
-          pSettings
+          pSettings,
+          mergedSettings
         )
       } else {
         return await syncAsVariants(
