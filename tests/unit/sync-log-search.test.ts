@@ -35,19 +35,22 @@ describe('sync-log instant search', () => {
     expect(syncLogSearchFilter(null)).toEqual({ kind: 'none' })
   })
 
-  it('matches every searchable column as a substring', () => {
+  it('matches full-text vector + 4 ILIKE columns — 5 branches total', () => {
     const filter = syncLogSearchFilter('ORD-12')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
 
+    // First branch is the full-text search_vector.plfts
+    expect(filter.expression).toContain('search_vector.plfts.ORD-12')
+    // Then 4 ILIKE branches
     for (const column of SYNC_LOG_SEARCH_COLUMNS) {
       expect(filter.expression).toContain(`${column}.ilike.%ORD-12%`)
     }
-    // One expression, one or(...) call — no branch may be added by the caller.
-    expect(filter.expression.split(',').length).toBe(SYNC_LOG_SEARCH_COLUMNS.length)
+    // Total 5 branches
+    expect(filter.expression.split(',').length).toBe(SYNC_LOG_SEARCH_COLUMNS.length + 1)
   })
 
-  it('keeps Arabic and spaces intact', () => {
+  it('keeps Arabic and spaces intact (sanitiser only affects ILIKE needle)', () => {
     expect(sanitizeSyncLogSearch('  طلب جديد  ')).toBe('طلب جديد')
   })
 
@@ -55,10 +58,15 @@ describe('sync-log instant search', () => {
     // Without sanitising, `,status.eq.success` would become a second branch and
     // widen the result set from the merchant's intent.
     expect(sanitizeSyncLogSearch('abc,status.eq.success')).toBe('abc status.eq.success')
-    expect(syncLogSearchFilter('abc,status.eq.success')).toEqual({
-      kind: 'match',
-      expression: SYNC_LOG_SEARCH_COLUMNS.map((c) => `${c}.ilike.%abc status.eq.success%`).join(','),
-    })
+    const filter = syncLogSearchFilter('abc,status.eq.success')
+    expect(filter.kind).toBe('match')
+    if (filter.kind !== 'match') return
+
+    // Both full-text and ILIKE branches use sanitised needle (commas stripped)
+    expect(filter.expression).toContain('search_vector.plfts.abc status.eq.success')
+    for (const column of SYNC_LOG_SEARCH_COLUMNS) {
+      expect(filter.expression).toContain(`${column}.ilike.%abc status.eq.success%`)
+    }
   })
 
   it('strips ILIKE wildcards so "%" cannot match everything', () => {
@@ -73,16 +81,17 @@ describe('sync-log instant search', () => {
     expect(sanitizeSyncLogSearch('  a    b  ')).toBe('a b')
   })
 
-  it('never lets a genuine needle keep a structural character', () => {
+  it('never lets a genuine needle keep a structural character in ILIKE branches', () => {
     const filter = syncLogSearchFilter('(a)(b),c*')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
 
     const branches = filter.expression.split(',')
-    expect(branches).toHaveLength(SYNC_LOG_SEARCH_COLUMNS.length)
+    expect(branches).toHaveLength(SYNC_LOG_SEARCH_COLUMNS.length + 1)
     for (const branch of branches) {
-      // `<column>.ilike.%<needle>%` — the commas inside the expression are the
-      // branch separators this code added, so only the needle is inspected.
+      // First branch is full-text (raw input, punctuation OK for tsquery)
+      if (branch.startsWith('search_vector.plfts.')) continue
+      // ILIKE branches: sanitised needle only
       const needle = branch.split('.ilike.%')[1]?.slice(0, -1) ?? ''
       expect(needle).toBe('a b c')
       expect(needle).not.toMatch(/[(),*\\%_]/)

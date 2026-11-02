@@ -42,6 +42,9 @@ export interface SyncLogRow {
   resolved_manually: boolean | null
   payload?: unknown
   field_mappings: { name: string } | null
+  // GIN-indexed full-text column — the instant search reaches into payload and
+  // error_message through it (migration 20261103_sync_logs_search_vector.sql).
+  search_vector?: string | null
 }
 
 /** A valid UUID that no row carries: how "match nothing" is expressed. */
@@ -117,7 +120,7 @@ export async function getSyncLogs(params: {
     // (`getSyncLogById`) carries it. Full mode keeps `*` for the mapping-center
     // modal, which renders the expandable payload view.
     const baseSelect = params.lean
-      ? 'id,event,status,store_id,zid_entity_id,odoo_model,odoo_record_id,field_mapping_id,trigger_type,created_at,resolved_manually,field_mappings(name)'
+      ? 'id,event,status,store_id,zid_entity_id,odoo_model,odoo_record_id,field_mapping_id,trigger_type,created_at,resolved_manually,field_mappings(name),search_vector'
       : '*, field_mappings(name)'
 
     // We want to fetch the logs and join with field_mappings if possible to get mapping names.
