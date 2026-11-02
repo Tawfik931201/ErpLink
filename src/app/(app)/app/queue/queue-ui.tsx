@@ -3,6 +3,7 @@
 import { AlertTriangle, Archive, Clock, HelpCircle } from 'lucide-react'
 
 import { useLanguage } from '@/components/language-provider'
+import { QUEUE_KINDS, isQueueKind, type QueueKind } from '@/lib/queue-item'
 
 /**
  * Queue rows live in three tables, so the list and the record page share the
@@ -10,13 +11,13 @@ import { useLanguage } from '@/components/language-provider'
  *
  * The pill intentionally mirrors `SyncStatusBadge` in `../logs/log-ui.tsx` — the
  * two list pages must look like one product without either importing the other.
+ *
+ * The kind vocabulary itself lives in `@/lib/queue-item` (a plain module) so the
+ * server action that reads one row and this client module agree on one
+ * definition instead of two that can drift.
  */
-export type QueueKind = 'pending' | 'frozen' | 'orphans' | 'dead'
-
-export const QUEUE_KINDS: QueueKind[] = ['pending', 'frozen', 'orphans', 'dead']
-
-export const isQueueKind = (value: string | null | undefined): value is QueueKind =>
-  value === 'pending' || value === 'frozen' || value === 'orphans' || value === 'dead'
+export { QUEUE_KINDS, isQueueKind }
+export type { QueueKind }
 
 /** Short label — used by the status chips and the filter dropdown. */
 export function queueKindLabel(kind: QueueKind, ar: boolean): string {

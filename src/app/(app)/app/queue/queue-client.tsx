@@ -235,9 +235,10 @@ export default function QueueClient() {
   const orphanCount = overview?.orphans ?? 0
 
   const openItem = (id: string) => {
-    // `kind` + `p` are hints so the record page can fetch the exact page the row
-    // came from (the list is paginated 20 at a time); it falls back to scanning.
-    router.push(`/app/queue/${id}?kind=${kind}&p=${offset}`)
+    // `kind` is only a hint: the record page falls back to the other tables, so
+    // a direct URL still opens. The record itself is fetched by id, not from the
+    // list page, so paging does not have to be reproduced there.
+    router.push(`/app/queue/${id}?kind=${kind}`)
   }
 
   const isFirstPage = offset === 0

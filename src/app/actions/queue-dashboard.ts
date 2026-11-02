@@ -3,6 +3,11 @@
 import { revalidatePath } from 'next/cache'
 
 import { getActiveWorkspaceId } from '@/lib/auth'
+import {
+  queueItemKindFromNextRetry,
+  queueItemLookupOrder,
+  type QueueKind,
+} from '@/lib/queue-item'
 import { supabase } from '@/lib/supabase'
 import { extractEntityId, FROZEN_SENTINEL } from '@/lib/sync-queue'
 
@@ -226,7 +231,159 @@ export async function getDeadItems(params: { limit?: number; offset?: number }) 
   }
 }
 
+// ─── سجلّ واحد (صفحة /app/queue/<id>) ─────────────────────────────────────
+
+/**
+ * صفّ واحد كامل **بحمولته** لصفحة السجل.
+ *
+ * لماذا إجراء منفصل: شاشة القائمة تقرأ 20 صفاً في المرة، وضمّ `payload` إلى
+ * استعلامها يعني تحميل 20 حمولة JSON كاملة — بعضها طلبات ببنود كثيرة — لعرض
+ * عمودين نصيين فقط. القائمة تبقى خفيفة (كما في `/app/logs`)، وهذه الدالة تقرأ
+ * الصف المطلوب وحده كاملاً.
+ *
+ * الأمان: كل قراءة مقيدة بمساحة العمل النشطة؛ والأيتام مقيدون بمعرّفات متاجر
+ * المساحة (`.in('store_id', …)`) لا بالرقم وحده، وإلا صار الرقم مفتاحاً لبيانات
+ * تاجر آخر.
+ */
+export interface QueueItemDetail {
+  kind: QueueKind
+  id: string
+  platform: string | null
+  event: string | null
+  store_id: string | null
+  entity_id: string | null
+  retry_count: number | null
+  max_retries: number | null
+  error_message: string | null
+  next_retry_at: string | null
+  created_at: string | null
+  received_at: string | null
+  died_at: string | null
+  original_id: string | null
+  dedup_key: string | null
+  attempts: number | null
+  payload: Record<string, unknown> | null
+}
+
+function asText(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+  return String(value)
+}
+
+function asCount(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function toQueueItemDetail(r: Record<string, unknown>, kind: QueueKind): QueueItemDetail {
+  const payload =
+    r.payload && typeof r.payload === 'object' && !Array.isArray(r.payload)
+      ? (r.payload as Record<string, unknown>)
+      : null
+
+  let entityId: string | null = null
+  try {
+    entityId = extractEntityId(payload ?? {}) || null
+  } catch {
+    entityId = null
+  }
+
+  return {
+    kind,
+    id: asText(r.id) ?? '',
+    platform: asText(r.platform),
+    event: asText(r.event),
+    store_id: asText(r.store_id),
+    entity_id: entityId,
+    retry_count: asCount(r.retry_count),
+    max_retries: asCount(r.max_retries),
+    error_message: asText(r.error_message),
+    next_retry_at: asText(r.next_retry_at),
+    created_at: asText(r.created_at),
+    received_at: asText(r.received_at),
+    died_at: asText(r.died_at),
+    original_id: asText(r.original_id),
+    dedup_key: asText(r.dedup_key),
+    attempts: asCount(r.attempts),
+    payload,
+  }
+}
+
+export async function getQueueItemById(id: string, hint?: string | null) {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+    if (!id) return { success: false, error: 'Missing id' }
+
+    for (const source of queueItemLookupOrder(hint)) {
+      if (source === 'queue') {
+        const { data, error } = await supabase
+          .from('sync_queue')
+          .select(
+            'id,platform,event,store_id,payload,retry_count,max_retries,error_message,next_retry_at,created_at'
+          )
+          .eq('workspace_id', workspaceId)
+          .eq('id', id)
+          .maybeSingle()
+        if (error) return { success: false, error: error.message }
+        if (data) {
+          const row = data as Record<string, unknown>
+          return {
+            success: true,
+            item: toQueueItemDetail(
+              row,
+              queueItemKindFromNextRetry(asText(row.next_retry_at), FROZEN_SENTINEL)
+            ),
+          }
+        }
+        continue
+      }
+
+      if (source === 'dead') {
+        const { data, error } = await supabase
+          .from('sync_queue_dead')
+          .select(
+            'id,original_id,platform,event,store_id,payload,error_message,retry_count,died_at'
+          )
+          .eq('workspace_id', workspaceId)
+          .eq('id', id)
+          .maybeSingle()
+        if (error) return { success: false, error: error.message }
+        if (data) {
+          return { success: true, item: toQueueItemDetail(data as Record<string, unknown>, 'dead') }
+        }
+        continue
+      }
+
+      // الإيصال: لا `workspace_id` فيه (قد يكون وصل قبل الربط)، فالقيد الحقيقي
+      // هو متاجر هذه المساحة.
+      const storeIds = await getWorkspaceStoreIds(workspaceId)
+      if (storeIds.size === 0) continue
+
+      const { data, error } = await supabase
+        .from('webhook_inbox')
+        .select('id,platform,store_id,event,dedup_key,received_at,attempts,payload')
+        .eq('id', id)
+        .in('store_id', [...storeIds])
+        .maybeSingle()
+      if (error) return { success: false, error: error.message }
+      if (data) {
+        return { success: true, item: toQueueItemDetail(data as Record<string, unknown>, 'orphans') }
+      }
+    }
+
+    return { success: false, error: 'Not found' }
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Failed to load queue item',
+    }
+  }
+}
+
 // ─── الأزرار اليدوية (P2-2) ───────────────────────────────────────────────
+
 
 /** "إرسال الآن": يصرف مستحقات هذه المساحة فوراً بنفس ضوابط الطابور. */
 export async function sendNowWorkspace() {
