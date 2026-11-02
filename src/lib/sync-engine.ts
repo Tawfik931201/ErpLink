@@ -8402,13 +8402,14 @@ async function executeOdooOperation(params: {
     existingId = Number((mergedSettings).odoo_category_id)
     console.info(`[SyncEngine] Using manual category mapping Odoo ID for update: ${existingId}`)
   } else {
-    // Zid child product delete: search product.product (not template) since variants are product.product records
-    if (odooOperation === 'delete' && odooModel === 'product.template' && (zidData.parent_id || (zidData.parent as any)?.id)) {
-      const childId = await findExistingOdooRecord(client, 'product.product', zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
-      if (childId !== null) {
-        existingId = childId
+    // Product / variant delete or update: when model is product.template, variants are product.product records in Odoo.
+    // Even if parent_id is missing in the payload, try searching product.product first for delete/update.
+    if (odooModel === 'product.template' && (odooOperation === 'delete' || zidData.parent_id || (zidData.parent as any)?.id || zidData.sku || zidData.barcode)) {
+      const variantId = await findExistingOdooRecord(client, 'product.product', zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
+      if (variantId !== null) {
+        existingId = variantId
         deleteModel = 'product.product'
-        console.info(`[SyncEngine] Resolved child product delete to product.product #${childId}`)
+        console.info(`[SyncEngine] Resolved product/variant operation to product.product #${variantId}`)
       }
     }
     if (existingId === null) {
