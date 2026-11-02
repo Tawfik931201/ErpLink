@@ -8,10 +8,12 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Tag,
+  X,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { getFieldMappings } from '@/app/actions/field-mappings'
 import {
@@ -27,6 +29,7 @@ import { cn } from '@/lib/utils'
 
 import {
   eventEntity,
+  getDeletionCountdown,
   SyncStatusBadge,
   SyncTriggerBadge,
 } from './log-ui'
@@ -35,6 +38,38 @@ const LIMIT = 20
 const ALL_STATUSES = ['success', 'manual', 'failed', 'skipped']
 const ALL_PLATFORMS = ['zid', 'salla', 'shopify']
 const ENTITY_KEYS = ['product', 'order', 'customer', 'category'] as const
+
+/** The search box waits this long after the last keystroke — long enough to
+ *  coalesce typing, short enough to feel instant. */
+const SEARCH_DEBOUNCE_MS = 300
+
+/**
+ * Column visibility is a browser preference, not server state: it is kept in
+ * `localStorage` so the list opens exactly as the merchant left it, on this
+ * device, without a write per toggle.
+ */
+const COLUMNS_STORAGE_KEY = 'erplink.logs.columns.v1'
+
+type ColumnKey =
+  | 'status'
+  | 'event'
+  | 'entity'
+  | 'model'
+  | 'trigger'
+  | 'entityItemId'
+  | 'odooRecordId'
+  | 'mapping'
+  | 'storeId'
+  | 'logId'
+  | 'time'
+  | 'autoDelete'
+
+interface ColumnDef {
+  key: ColumnKey
+  label: string
+  /** Shown before the merchant opens the columns menu for the first time. */
+  defaultVisible: boolean
+}
 
 interface MappingOption {
   id: string
@@ -60,17 +95,24 @@ export default function LogsClient() {
   const [mappingsList, setMappingsList] = useState<MappingOption[]>([])
   const [selectedMappingIds, setSelectedMappingIds] = useState<string[]>([])
   const [mappingsLoaded, setMappingsLoaded] = useState(false)
-  const [entityIdInput, setEntityIdInput] = useState('')
-  const [appliedEntityId, setAppliedEntityId] = useState('')
 
-  const [isStatusOpen, setIsStatusOpen] = useState(false)
+  /** What the merchant is typing right now… */
+  const [searchInput, setSearchInput] = useState('')
+  /** …and what the last request actually used (debounced). */
+  const [appliedSearch, setAppliedSearch] = useState('')
+
   const [isPlatformOpen, setIsPlatformOpen] = useState(false)
   const [isMappingOpen, setIsMappingOpen] = useState(false)
   const [isEntityOpen, setIsEntityOpen] = useState(false)
-  const statusRef = useRef<HTMLDivElement>(null)
   const platformRef = useRef<HTMLDivElement>(null)
   const mappingRef = useRef<HTMLDivElement>(null)
   const entityRef = useRef<HTMLDivElement>(null)
+
+  const columnsButtonRef = useRef<HTMLButtonElement>(null)
+  const [isColumnsOpen, setIsColumnsOpen] = useState(false)
+  const [columnsPos, setColumnsPos] = useState<{ top: number; left: number } | null>(null)
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>([])
+  const [columnsLoaded, setColumnsLoaded] = useState(false)
 
   const entityLabels: Record<string, string> = {
     product: t('log.entityProduct'),
@@ -87,9 +129,30 @@ export default function LogsClient() {
     return p
   }
 
+  /**
+   * Every field the record page (`/app/logs/<id>`) shows can be shown here as a
+   * column. `error_message` is deliberately absent: the lean list select omits
+   * it because it can hold a multi-KB stack trace — see `getSyncLogs`.
+   */
+  const COLUMNS: ColumnDef[] = [
+    { key: 'status', label: t('log.status'), defaultVisible: true },
+    { key: 'event', label: ar ? 'الحدث' : 'Event', defaultVisible: true },
+    { key: 'entity', label: t('log.entity'), defaultVisible: true },
+    { key: 'model', label: t('log.model'), defaultVisible: true },
+    { key: 'trigger', label: t('log.triggerType'), defaultVisible: true },
+    { key: 'entityItemId', label: t('log.entityItemId'), defaultVisible: false },
+    { key: 'odooRecordId', label: t('log.recordId'), defaultVisible: false },
+    { key: 'mapping', label: t('log.mapping'), defaultVisible: false },
+    { key: 'storeId', label: t('log.storeId'), defaultVisible: false },
+    { key: 'logId', label: t('log.logNumber'), defaultVisible: false },
+    { key: 'time', label: t('log.time'), defaultVisible: true },
+    { key: 'autoDelete', label: t('log.autoDelete'), defaultVisible: false },
+  ]
+  const DEFAULT_VISIBLE = COLUMNS.filter((c) => c.defaultVisible).map((c) => c.key)
+  const activeColumns = COLUMNS.filter((c) => visibleColumns.includes(c.key))
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (statusRef.current && !statusRef.current.contains(event.target as Node)) setIsStatusOpen(false)
       if (platformRef.current && !platformRef.current.contains(event.target as Node)) setIsPlatformOpen(false)
       if (mappingRef.current && !mappingRef.current.contains(event.target as Node)) setIsMappingOpen(false)
       if (entityRef.current && !entityRef.current.contains(event.target as Node)) setIsEntityOpen(false)
@@ -97,6 +160,81 @@ export default function LogsClient() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // ── Column preference: read once on mount, then persist on every change ──
+  useEffect(() => {
+    let next: ColumnKey[] = DEFAULT_VISIBLE
+    try {
+      const raw = window.localStorage.getItem(COLUMNS_STORAGE_KEY)
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          const known = COLUMNS.map((c) => c.key as string)
+          const picked = parsed.filter(
+            (k): k is ColumnKey => typeof k === 'string' && known.includes(k)
+          )
+          // An empty/invalid stored value must not hide the whole table.
+          if (picked.length > 0) next = picked
+        }
+      }
+    } catch {
+      // A blocked/absent localStorage is not a failure — defaults still work.
+    }
+    setVisibleColumns(next)
+    setColumnsLoaded(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!columnsLoaded) return
+    // Never persist an empty table (happens mid-toggle if a write races a read).
+    if (visibleColumns.length === 0) return
+    try {
+      window.localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns))
+    } catch {
+      // Storage full/blocked: the columns still work for this visit.
+    }
+  }, [visibleColumns, columnsLoaded])
+
+  /** Fixed positioning keeps the menu out of the table's scroll clipping. */
+  const openColumnsMenu = () => {
+    const el = columnsButtonRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const width = 230
+    const left = Math.min(
+      Math.max(8, rect.right - width),
+      Math.max(8, window.innerWidth - width - 8)
+    )
+    setColumnsPos({ top: rect.bottom + 4, left })
+    setIsColumnsOpen(true)
+  }
+
+  // The menu is anchored to a button that scrolls with the page, so any scroll
+  // (or a resize) closes it rather than letting it float away from its anchor.
+  useEffect(() => {
+    if (!isColumnsOpen) return
+    const close = () => setIsColumnsOpen(false)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('resize', close)
+    return () => {
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('resize', close)
+    }
+  }, [isColumnsOpen])
+
+  const toggleColumn = (key: ColumnKey) => {
+    setVisibleColumns((prev) => {
+      if (prev.includes(key)) {
+        // Keep at least one column: an empty table looks like a broken page.
+        if (prev.length === 1) return prev
+        return prev.filter((k) => k !== key)
+      }
+      return COLUMNS.filter((c) => c.key === key || prev.includes(c.key)).map((c) => c.key)
+    })
+  }
+
+  const resetColumns = () => setVisibleColumns(DEFAULT_VISIBLE)
 
   const loadStats = async () => {
     const res = await getSyncLogStats()
@@ -132,7 +270,7 @@ export default function LogsClient() {
       platform: platformParam,
       mappingId: mappingParam,
       entity,
-      entityId: appliedEntityId,
+      search: appliedSearch,
       limit: LIMIT,
       offset: offsetToUse,
       lean: true,
@@ -163,7 +301,7 @@ export default function LogsClient() {
     [...selectedPlatforms].sort().join(','),
     [...selectedMappingIds].sort().join(','),
     entity,
-    appliedEntityId,
+    appliedSearch,
   ].join('|')
 
   useEffect(() => {
@@ -177,11 +315,13 @@ export default function LogsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey, mappingsLoaded])
 
-  const toggleStatus = (status: string) => {
-    setSelectedStatuses(prev =>
-      prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
-    )
-  }
+  // Instant search: the value is applied as the merchant types, debounced.
+  useEffect(() => {
+    const next = searchInput.trim()
+    if (next === appliedSearch) return
+    const timer = setTimeout(() => setAppliedSearch(next), SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [searchInput, appliedSearch])
 
   const togglePlatform = (plat: string) => {
     setSelectedPlatforms(prev =>
@@ -197,16 +337,6 @@ export default function LogsClient() {
 
   const applyStatusPreset = (statuses: string[]) => {
     setSelectedStatuses(statuses)
-  }
-
-  const applyEntityIdSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    setAppliedEntityId(entityIdInput.trim())
-  }
-
-  const clearEntityIdSearch = () => {
-    setEntityIdInput('')
-    setAppliedEntityId('')
   }
 
   const openLog = (id: string) => {
@@ -239,17 +369,72 @@ export default function LogsClient() {
     })
   }
 
+  /** One cell per visible column — the header and the row use the same order. */
+  const renderCell = (key: ColumnKey, log: SyncLogRow) => {
+    switch (key) {
+      case 'status':
+        return <SyncStatusBadge status={log.status} resolvedManually={log.resolved_manually} />
+      case 'event':
+        return (
+          <div
+            className="font-mono font-semibold text-foreground max-w-[220px] truncate"
+            title={log.field_mappings?.name ? `${log.event} · ${log.field_mappings.name}` : (log.event || '')}
+          >
+            {log.event || '—'}
+          </div>
+        )
+      case 'entity':
+        return <span className="text-muted-foreground">{entityLabels[eventEntity(log.event)] || '—'}</span>
+      case 'model':
+        return <span className="font-mono text-foreground">{log.odoo_model || '—'}</span>
+      case 'trigger':
+        return <SyncTriggerBadge triggerType={log.trigger_type} />
+      case 'entityItemId':
+        return (
+          <div className="max-w-[200px] truncate font-mono text-muted-foreground" dir="ltr" title={log.zid_entity_id || ''}>
+            {log.zid_entity_id || '—'}
+          </div>
+        )
+      case 'odooRecordId':
+        return (
+          <span className="font-mono text-muted-foreground">
+            {log.odoo_record_id != null && log.odoo_record_id !== '' ? `#${log.odoo_record_id}` : '—'}
+          </span>
+        )
+      case 'mapping':
+        return (
+          <div className="max-w-[180px] truncate text-muted-foreground" title={log.field_mappings?.name || ''}>
+            {log.field_mappings?.name || '—'}
+          </div>
+        )
+      case 'storeId':
+        return (
+          <div className="max-w-[160px] truncate font-mono text-muted-foreground" dir="ltr" title={log.store_id || ''}>
+            {log.store_id || '—'}
+          </div>
+        )
+      case 'logId':
+        return (
+          <div className="max-w-[140px] truncate font-mono text-muted-foreground" dir="ltr" title={log.id}>
+            {log.id}
+          </div>
+        )
+      case 'time':
+        return <span className="text-muted-foreground">{formatDate(log.created_at)}</span>
+      case 'autoDelete':
+        return (
+          <span className="text-[10px] text-muted-foreground">
+            {getDeletionCountdown(log.created_at, log.status, ar) || '—'}
+          </span>
+        )
+    }
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-base font-bold text-foreground">{t('log.title')}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{t('log.subtitle')}</p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => fetchAt(offset)} disabled={isLoading}>
-          <RefreshCw className={cn('h-3.5 w-3.5 me-1', isLoading && 'animate-spin')} />
-          {t('log.refresh')}
-        </Button>
+      <div>
+        <h2 className="text-base font-bold text-foreground">{t('log.title')}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">{t('log.subtitle')}</p>
       </div>
 
       {notice && (
@@ -258,6 +443,7 @@ export default function LogsClient() {
         </div>
       )}
 
+      {/* Status chips (= the status filter) + instant search + refresh, one row. */}
       <div className="flex flex-wrap items-center gap-1.5">
         {statCards.map(c => {
           const isActive = c.key === 'total'
@@ -281,58 +467,48 @@ export default function LogsClient() {
             </button>
           )
         })}
+
+        <div className="ms-auto flex flex-wrap items-center gap-1.5">
+          <div className="relative">
+            <Search className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder={t('log.searchPlaceholder')}
+              aria-label={t('log.search')}
+              className="h-7 w-56 border-border/70 bg-muted/60 ps-7 pe-7 text-xs"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                title={ar ? 'مسح البحث' : 'Clear search'}
+                aria-label={ar ? 'مسح البحث' : 'Clear search'}
+                className="absolute inset-y-0 end-0 my-auto flex h-5 w-5 items-center justify-center text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              loadStats()
+              fetchAt(offset)
+            }}
+            disabled={isLoading}
+            className="h-7 rounded-none px-3 text-[10px] font-bold"
+          >
+            {/* No spin: the table greys out while loading, the icon stays still. */}
+            <RefreshCw className="h-3 w-3 me-1" />
+            {t('log.refresh')}
+          </Button>
+        </div>
       </div>
 
+      {/* Remaining filters (status lives in the chips above, so it is not here). */}
       <div className="border border-border bg-card px-3 py-2.5 flex flex-wrap items-center gap-3">
-        <FilterSelect
-          label={t('log.status')}
-          buttonRef={statusRef}
-          isOpen={isStatusOpen}
-          onToggle={() => setIsStatusOpen(!isStatusOpen)}
-          triggerText={
-            selectedStatuses.length === ALL_STATUSES.length
-              ? t('log.all')
-              : selectedStatuses.length === 0
-                ? (ar ? 'لا شيء' : 'None')
-                : selectedStatuses.map(s => {
-                    if (s === 'success') return t('log.success')
-                    if (s === 'manual') return (ar ? 'حل يدوي' : 'Manual')
-                    if (s === 'failed') return t('log.failed')
-                    if (s === 'skipped') return t('log.skipped')
-                    return s
-                  }).join(', ')
-          }
-        >
-          <label className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted text-xs font-bold cursor-pointer text-muted-foreground select-none transition-colors">
-            <input
-              type="checkbox"
-              checked={selectedStatuses.length === ALL_STATUSES.length}
-              onChange={() => setSelectedStatuses(
-                selectedStatuses.length === ALL_STATUSES.length ? [] : [...ALL_STATUSES]
-              )}
-              className="rounded border-border/70 text-primary focus:ring-primary/30 h-3.5 w-3.5"
-            />
-            <span>{t('log.all')}</span>
-          </label>
-          <div className="border-t border-border/50 mx-2 my-1" />
-          <CheckRow checked={selectedStatuses.includes('success')} onChange={() => toggleStatus('success')}>
-            <span className="h-1.5 w-1.5 rounded-full bg-success" />
-            {t('log.success')}
-          </CheckRow>
-          <CheckRow checked={selectedStatuses.includes('manual')} onChange={() => toggleStatus('manual')}>
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            {ar ? 'حل يدوي' : 'Manual Resolve'}
-          </CheckRow>
-          <CheckRow checked={selectedStatuses.includes('failed')} onChange={() => toggleStatus('failed')} danger>
-            <span className="h-1.5 w-1.5 rounded-full bg-destructive" />
-            {t('log.failed')}
-          </CheckRow>
-          <CheckRow checked={selectedStatuses.includes('skipped')} onChange={() => toggleStatus('skipped')}>
-            <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
-            {t('log.skipped')}
-          </CheckRow>
-        </FilterSelect>
-
         <FilterSelect
           label={t('log.filterByPlatform')}
           buttonRef={platformRef}
@@ -446,36 +622,6 @@ export default function LogsClient() {
             </button>
           ))}
         </FilterSelect>
-
-        <form onSubmit={applyEntityIdSearch} className="flex items-center gap-1.5 ms-auto">
-          <Input
-            value={entityIdInput}
-            onChange={e => setEntityIdInput(e.target.value)}
-            placeholder={t('log.searchEntityId')}
-            className="h-7 w-44 text-xs border-border/70 bg-muted/60"
-          />
-          <Button
-            type="submit"
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 rounded-none text-muted-foreground hover:text-foreground"
-            title={t('log.search')}
-          >
-            <Search className="h-3.5 w-3.5" />
-          </Button>
-          {appliedEntityId && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={clearEntityIdSearch}
-              className="h-7 text-[10px] px-2 text-muted-foreground hover:text-foreground"
-            >
-              ✕
-            </Button>
-          )}
-        </form>
-
       </div>
 
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
@@ -483,20 +629,36 @@ export default function LogsClient() {
         <table className="w-full border-collapse text-[11px]">
           <thead>
             <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.status')}</th>
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'الحدث' : 'Event'}</th>
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.entity')}</th>
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.model')}</th>
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.triggerType')}</th>
-              <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{t('log.time')}</th>
-              <th className="px-2 py-2.5 w-8" />
+              {activeColumns.map(col => (
+                <th key={col.key} className="px-2 py-2.5 text-start font-bold whitespace-nowrap">
+                  {col.label}
+                </th>
+              ))}
+              <th className="px-2 py-2.5 w-10 text-end">
+                <button
+                  ref={columnsButtonRef}
+                  type="button"
+                  onClick={() => (isColumnsOpen ? setIsColumnsOpen(false) : openColumnsMenu())}
+                  title={t('log.columns')}
+                  aria-label={t('log.columns')}
+                  aria-expanded={isColumnsOpen}
+                  className={cn(
+                    'inline-flex h-6 w-6 items-center justify-center transition-colors',
+                    isColumnsOpen
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
             {isLoading && logs.length === 0
               ? Array.from({ length: 8 }).map((_, i) => (
                   <tr key={`skeleton-${i}`}>
-                    {Array.from({ length: 7 }).map((__, j) => (
+                    {Array.from({ length: activeColumns.length + 1 }).map((__, j) => (
                       <td key={j} className="px-2 py-3">
                         <div className="h-3 bg-muted/60 animate-pulse" />
                       </td>
@@ -504,7 +666,6 @@ export default function LogsClient() {
                   </tr>
                 ))
               : logs.map(log => {
-                  const logEntity = eventEntity(log.event)
                   return (
                     <tr
                       key={log.id}
@@ -519,29 +680,17 @@ export default function LogsClient() {
                       }}
                       className="cursor-pointer transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                     >
-                      <td className="px-2 py-2.5 whitespace-nowrap">
-                        <SyncStatusBadge status={log.status} resolvedManually={log.resolved_manually} />
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap">
-                        <div
-                          className="font-mono font-semibold text-foreground max-w-[220px] truncate"
-                          title={log.field_mappings?.name ? `${log.event} · ${log.field_mappings.name}` : (log.event || '')}
+                      {activeColumns.map(col => (
+                        <td
+                          key={col.key}
+                          className={cn(
+                            'px-2 py-2.5',
+                            (col.key === 'event' || col.key === 'mapping') ? '' : 'whitespace-nowrap'
+                          )}
                         >
-                          {log.event || '—'}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {entityLabels[logEntity] || '—'}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap font-mono text-foreground">
-                        {log.odoo_model || '—'}
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap">
-                        <SyncTriggerBadge triggerType={log.trigger_type} />
-                      </td>
-                      <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
-                        {formatDate(log.created_at)}
-                      </td>
+                          {renderCell(col.key, log)}
+                        </td>
+                      ))}
                       <td className="px-2 py-2.5 text-end text-muted-foreground">
                         <OpenIcon className="h-3.5 w-3.5 inline-block" />
                       </td>
@@ -556,11 +705,19 @@ export default function LogsClient() {
             <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center mb-3">
               <AlertCircle className="h-5 w-5 text-muted-foreground" />
             </div>
-            <p className="text-xs font-bold text-muted-foreground">{t('log.noLogs')}</p>
+            <p className="text-xs font-bold text-muted-foreground">
+              {appliedSearch
+                ? (ar ? `لا نتائج لـ «${appliedSearch}»` : `No results for "${appliedSearch}"`)
+                : t('log.noLogs')}
+            </p>
             <p className="text-[10px] text-muted-foreground mt-1 max-w-xs leading-relaxed">
-              {ar
-                ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.'
-                : 'No sync operations match the selected filters.'}
+              {appliedSearch
+                ? (ar
+                    ? 'جرّب كلمة أقصر، أو امسح البحث لعرض كل السجلات.'
+                    : 'Try a shorter term, or clear the search to see every log.')
+                : ar
+                  ? 'لم يتم تسجيل أي عمليات مزامنة مطابقة للشروط المحددة حتى الآن.'
+                  : 'No sync operations match the selected filters.'}
             </p>
           </div>
         )}
@@ -571,6 +728,63 @@ export default function LogsClient() {
           </div>
         )}
       </div>
+
+      {/* Column menu — fixed, so the table's horizontal scroll cannot clip it. */}
+      {isColumnsOpen && columnsPos && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsColumnsOpen(false)} />
+          <div
+            className="fixed z-50 w-[230px] border border-border bg-card shadow-lg"
+            style={{ top: columnsPos.top, left: columnsPos.left }}
+            role="dialog"
+            aria-label={t('log.columns')}
+          >
+            <div className="flex items-center justify-between border-b border-border px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-foreground/70">
+                {t('log.columns')}
+              </span>
+              <button
+                type="button"
+                onClick={resetColumns}
+                className="text-[10px] font-bold text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {t('log.columnsReset')}
+              </button>
+            </div>
+            <ul className="max-h-72 overflow-y-auto py-1">
+              {COLUMNS.map(col => {
+                const isOn = visibleColumns.includes(col.key)
+                // The last visible column cannot be switched off.
+                const isLastOne = isOn && visibleColumns.length === 1
+                return (
+                  <li key={col.key}>
+                    <label
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors',
+                        isLastOne
+                          ? 'cursor-not-allowed opacity-50'
+                          : 'cursor-pointer hover:bg-muted/60'
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isOn}
+                        disabled={isLastOne}
+                        onChange={() => toggleColumn(col.key)}
+                        className="h-3.5 w-3.5 cursor-pointer rounded border-border/70 accent-foreground disabled:cursor-not-allowed"
+                      />
+                      <span className="font-medium text-foreground">{col.label}</span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+            <p className="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+              {t('log.columnsHint')}
+            </p>
+          </div>
+        </>
+      )}
 
       {totalCount > 0 && (
         <div className="flex items-center justify-between flex-wrap gap-2">

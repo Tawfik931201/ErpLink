@@ -4,6 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 import { SHOPIFY_TOPIC_CATALOG } from '@/lib/shopify-topics'
+import { syncLogSearchFilter } from '@/lib/sync-log-search'
 import { supabase } from '@/lib/supabase'
 import { processSingleMapping, processWebhookEvent } from '@/lib/sync-engine'
 import type { FieldMappingRow } from '@/lib/sync-types'
@@ -42,6 +43,9 @@ export interface SyncLogRow {
   payload?: unknown
   field_mappings: { name: string } | null
 }
+
+/** A valid UUID that no row carries: how "match nothing" is expressed. */
+const NO_MATCH_ID = '00000000-0000-0000-0000-000000000000'
 
 // Entity → event names, shared by the workspace logs page. Platform is NOT a
 // sync_logs column, so both the platform filter below and this entity filter
@@ -88,6 +92,12 @@ export async function getSyncLogs(params: {
   eventFilter?: string
   entity?: string
   entityId?: string
+  /**
+   * Instant text search on the logs list (`/app/logs`). Matched as a
+   * case-insensitive substring on the columns the list can show: `event`,
+   * `zid_entity_id`, `odoo_model` and `store_id`.
+   */
+  search?: string
   lean?: boolean
 }) {
   try {
@@ -189,7 +199,7 @@ export async function getSyncLogs(params: {
       }
 
       if (platforms.includes('none') || allowedEvents.length === 0) {
-        query = query.eq('id', '00000000-0000-0000-0000-000000000000')
+        query = query.eq('id', NO_MATCH_ID)
       } else {
         query = query.in('event', allowedEvents)
       }
@@ -233,34 +243,62 @@ export async function getSyncLogs(params: {
       query = query.eq('zid_entity_id', params.entityId.trim())
     }
 
+    if (params.search && params.search.trim() !== '') {
+      // Instant search box: a substring match over the columns the list shows.
+      // The structural/wildcard sanitising lives in the pure, unit-tested
+      // `sync-log-search` module — a typed comma must not be able to append a
+      // second filter branch, and a typed `%` must not match everything.
+      const searchFilter = syncLogSearchFilter(params.search)
+
+      if (searchFilter.kind === 'empty') {
+        // Input was only punctuation: nothing can match it. Returning the whole
+        // workspace would look like the search was ignored.
+        query = query.eq('id', NO_MATCH_ID)
+      } else if (searchFilter.kind === 'match') {
+        query = query.or(searchFilter.expression)
+      }
+    }
+
     if (params.status && params.status !== 'all') {
       // Boolean-based branches (resolved_manually column) — every branch is a
       // plain btree predicate served by idx_sync_logs_workspace_status_created
       // or the partial resolved index. No ilike text scans anywhere.
-      // NOTE: a top-level .or() is ANDed with the other filters by PostgREST,
-      // so all wanted statuses must live inside ONE or() call.
       const selectedTypes = params.status.split(',')
       const wantSuccess = selectedTypes.includes('success')
       const wantManual = selectedTypes.includes('manual')
       const wantFailed = selectedTypes.includes('failed')
       const wantSkipped = selectedTypes.includes('skipped')
+      const wanted = [wantSuccess, wantManual, wantFailed, wantSkipped].filter(Boolean).length
 
-      const branches: string[] = []
-      if (wantSuccess && wantManual) {
-        branches.push('status.eq.success')
-      } else {
-        if (wantSuccess) branches.push('and(status.eq.success,resolved_manually.eq.false)')
-        if (wantManual) branches.push('resolved_manually.eq.true')
-      }
-      if (wantFailed) branches.push('status.eq.failed')
-      if (wantSkipped) branches.push('status.eq.skipped')
-
-      if (branches.length > 0 && branches.length < 4) {
-        query = query.or(branches.join(','))
-      } else if (branches.length === 0) {
+      if (wanted === 0) {
         // If nothing is selected, force query to return no results
-        query = query.eq('id', '00000000-0000-0000-0000-000000000000')
+        query = query.eq('id', NO_MATCH_ID)
+      } else if (wanted === 1) {
+        // The logs list only ever asks for one status at a time (the stat chips),
+        // so the common case is expressed as plain ANDed predicates. That keeps
+        // the search box able to use the single top-level `or` for itself
+        // instead of racing a second one — PostgREST's `or` machinery is the
+        // one filter shape that is easy to get subtly wrong.
+        if (wantSuccess) query = query.eq('status', 'success').eq('resolved_manually', false)
+        else if (wantManual) query = query.eq('resolved_manually', true)
+        else if (wantFailed) query = query.eq('status', 'failed')
+        else query = query.eq('status', 'skipped')
+      } else if (wanted < 4) {
+        // Multi-status selection only comes from the mapping-center modal, which
+        // has no search box. A top-level `.or()` is ANDed with the other
+        // filters, so all wanted statuses must live inside ONE call.
+        const branches: string[] = []
+        if (wantSuccess && wantManual) {
+          branches.push('status.eq.success')
+        } else {
+          if (wantSuccess) branches.push('and(status.eq.success,resolved_manually.eq.false)')
+          if (wantManual) branches.push('resolved_manually.eq.true')
+        }
+        if (wantFailed) branches.push('status.eq.failed')
+        if (wantSkipped) branches.push('status.eq.skipped')
+        query = query.or(branches.join(','))
       }
+      // wanted === 4 means "all statuses" — no predicate at all.
     }
 
     const limit = params.limit || 20

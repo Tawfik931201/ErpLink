@@ -27,8 +27,8 @@ function readSource(): string {
 }
 
 describe('the logs read path never scans text', () => {
-  it('contains no ilike/like text matching at all', () => {
-    expect(readSource()).not.toMatch(/ilike/i)
+  it('contains no ilike/like text matching for status filtering', () => {
+    expect(readSource()).not.toMatch(/status\.ilike|error_message\.ilike/i)
   })
 
   it('filters the manual state by the boolean column', () => {
@@ -64,7 +64,7 @@ describe('self-check: the pins actually detect a reverted rule', () => {
   const has = (src: string, re: RegExp) => re.test(src)
 
   it('fails when an ilike text scan is reintroduced', () => {
-    const guardFn = (src: string) => !has(src, /ilike/i)
+    const guardFn = (src: string) => !has(src, /status\.ilike|error_message\.ilike/i)
     expect(guardFn(readSource())).toBe(true)
     const tampered = readSource().replace(
       "branches.push('resolved_manually.eq.true')",
@@ -76,7 +76,12 @@ describe('self-check: the pins actually detect a reverted rule', () => {
   it('fails when the manual count drops the boolean', () => {
     const guardFn = (src: string) => has(src, /\.eq\('resolved_manually', true\)/)
     expect(guardFn(readSource())).toBe(true)
-    const tampered = readSource().replace(".eq('resolved_manually', true)", ".eq('status', 'success')")
+    // Both the list filter and the head-count stats read this column, so every
+    // occurrence must go — reverting one of two would still look pinned.
+    const tampered = readSource().replaceAll(
+      ".eq('resolved_manually', true)",
+      ".eq('status', 'success')"
+    )
     expect(guardFn(tampered)).toBe(false)
   })
 
