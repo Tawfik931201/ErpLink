@@ -6033,10 +6033,23 @@ async function syncAsSeparateProducts(
       }
     }
 
+    // In AS_SEPARATE_PRODUCTS mode, Odoo auto-creates a product.product variant for each template.
+    // We need to find that variant to update stock (stock operations require product.product, not product.template).
+    let variantProductId = recordId
+    try {
+      const productVariantIds = await client.search('product.product', [['product_tmpl_id', '=', recordId]], 1)
+      if (productVariantIds.length > 0) {
+        variantProductId = productVariantIds[0]
+        console.info(`[SyncEngine] Found product.product #${variantProductId} for template #${recordId}`)
+      }
+    } catch (err: any) {
+      console.warn(`[SyncEngine] Could not find product.product for template #${recordId}: ${err?.message ?? err}`)
+    }
+
     // Trigger stock/inventory update if quantity is provided
     if (variant.quantity !== undefined) {
-      await updateOdooStock(client, recordId, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
-        console.warn(`[SyncEngine] Failed to update stock for standalone variant #${recordId}:`, err)
+      await updateOdooStock(client, variantProductId, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
+        console.warn(`[SyncEngine] Failed to update stock for standalone variant #${variantProductId} (template #${recordId}):`, err)
       })
     }
 
@@ -6082,6 +6095,161 @@ async function syncAsSeparateProducts(
     status: 'success', 
     odooRecordId: results[0], 
     message: msg 
+  }
+}
+
+async function syncChildAsSeparateProduct(
+  client: OdooClient,
+  mapping: FieldMappingRow,
+  event: string,
+  storeId: string,
+  zidEntityId: string,
+  zidData: Record<string, unknown>,
+  odooValues: Record<string, unknown>,
+  platform: 'zid' | 'salla' | 'shopify',
+  triggerType?: 'automatic' | 'manual',
+  existingLogId?: string,
+  matchStrategy?: string,
+  defaultLocationId?: number,
+  infiniteValue?: number,
+  fixedMatch?: { odoo_field: string; zid_field: string },
+  priceSettings?: { markup_percent: number; rounding: string; decimal_places: number },
+  mergedSettings?: Record<string, any>
+): Promise<SyncEngineResult['records'][number]> {
+  console.info(`[SyncEngine] 📦 مزامنة منتج فرعي (child) كمنتج منفصل في أودو: ${zidEntityId}`)
+
+  const childName = toNameString(zidData.name || odooValues.name)
+  const attributes = extractGenericVariants(zidData, platform)
+  // For child products, use the child's own attributes for the name if available
+  const variantAttrs = attributes.length > 0 ? attributes[0].attributes : {}
+  const attrValues = Object.values(variantAttrs)
+  const finalName = attrValues.length > 0 ? `${childName} - ${attrValues.join(' - ')}` : childName
+
+  const childOdooValues: Record<string, any> = {
+    ...odooValues,
+    name: finalName,
+    default_code: zidData.sku || undefined,
+  }
+
+  if (zidData.barcode) {
+    childOdooValues.barcode = zidData.barcode
+  }
+  const costVal = typeof zidData.cost === 'number' ? zidData.cost : parseFloat(String(zidData.cost || '0'))
+  if (!isNaN(costVal) && costVal > 0) {
+    childOdooValues.standard_price = costVal
+  }
+  const rawWeight = zidData.weight
+  let weightVal = 0
+  if (typeof rawWeight === 'object' && rawWeight !== null) {
+    weightVal = parseFloat((rawWeight as any).value || (rawWeight as any).weight || '0') || 0
+  } else {
+    weightVal = parseFloat(String(rawWeight || '0')) || 0
+  }
+  if (weightVal > 0) childOdooValues.weight = weightVal
+  if (zidData.description) {
+    childOdooValues.description_sale = toNameString(zidData.description)
+  }
+
+  let childPrice = parseFloat(String(zidData.price || zidData.sale_price || '0'))
+  if (childPrice > 0 && priceSettings) {
+    if (priceSettings.markup_percent !== 0) {
+      childPrice = childPrice * (1 + priceSettings.markup_percent / 100)
+    }
+    if (priceSettings.rounding && priceSettings.decimal_places !== undefined) {
+      const factor = Math.pow(10, priceSettings.decimal_places)
+      if (priceSettings.rounding === 'nearest') childPrice = Math.round(childPrice * factor) / factor
+      else if (priceSettings.rounding === 'ceil') childPrice = Math.ceil(childPrice * factor) / factor
+      else if (priceSettings.rounding === 'floor') childPrice = Math.floor(childPrice * factor) / factor
+    }
+  }
+  if (childPrice > 0) {
+    childOdooValues.list_price = childPrice
+  }
+
+  // Resolve variant image
+  const variantImgUrl = (zidData as any).image?.src || (zidData as any).main_image || (zidData as any).image_url
+    || (Array.isArray((zidData as any).images) ? (zidData as any).images[0]?.url : null) || ''
+  if (variantImgUrl) {
+    const imgBase64 = await resolveBinaryField(variantImgUrl).catch(() => null)
+    if (imgBase64) childOdooValues.image_1920 = imgBase64
+  }
+
+  // Check if this specific child product already exists in Odoo
+  const childMockData = {
+    ...zidData,
+    id: zidData.id,
+    sku: zidData.sku,
+    barcode: zidData.barcode
+  }
+
+  const duplicateId = await findExistingOdooRecord(
+    client, 'product.template', childMockData, childOdooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, platform
+  )
+
+  let recordId: number
+  if (duplicateId !== null) {
+    console.info(`[SyncEngine] 🔄 المنتج الفرعي موجود بالفعل (ID: #${duplicateId}). جاري تحديث البيانات...`)
+    await safeWriteOdooRecord(client, 'product.template', duplicateId, childOdooValues, childOdooValues)
+    recordId = duplicateId
+  } else {
+    console.info(`[SyncEngine] ➕ جاري إنشاء المنتج الفرعي "${finalName}" في أودو...`)
+    recordId = await safeCreateOdooRecord(client, 'product.template', childOdooValues, childOdooValues)
+    if (zidData.id) {
+      await persistPlatformIdOnRecord(client, 'product.template', recordId, platform, String(zidData.id))
+    }
+  }
+
+  // Find the auto-created product.product variant for stock operations
+  let variantProductId = recordId
+  try {
+    const productVariantIds = await client.search('product.product', [['product_tmpl_id', '=', recordId]], 1)
+    if (productVariantIds.length > 0) {
+      variantProductId = productVariantIds[0]
+      console.info(`[SyncEngine] Found product.product #${variantProductId} for template #${recordId}`)
+    }
+  } catch (err: any) {
+    console.warn(`[SyncEngine] Could not find product.product for template #${recordId}: ${err?.message ?? err}`)
+  }
+
+  // Trigger stock/inventory update if quantity is provided
+  const qtyVal = zidData.quantity !== undefined ? Number(zidData.quantity)
+    : (zidData.stock_quantity !== undefined ? Number(zidData.stock_quantity)
+      : (zidData.qty !== undefined ? Number(zidData.qty) : undefined))
+  if (qtyVal !== undefined && !isNaN(qtyVal)) {
+    await updateOdooStock(client, variantProductId, qtyVal, defaultLocationId, infiniteValue, mapping.workspace_id).catch(err => {
+      console.warn(`[SyncEngine] Failed to update stock for standalone child product #${variantProductId} (template #${recordId}):`, err)
+    })
+  }
+
+  if (mergedSettings && recordId) {
+    await syncProductBom(client, recordId, zidData, mergedSettings, platform, mapping.workspace_id).catch(err => {
+      console.warn(`[SyncEngine] Failed to sync BoM for child product #${recordId}:`, err)
+    })
+  }
+
+  const msg = `Successfully synced child product as standalone product.template #${recordId} (product.product #${variantProductId})`
+  await logSync({
+    id: existingLogId,
+    workspace_id: mapping.workspace_id,
+    field_mapping_id: mapping.id,
+    event,
+    store_id: storeId,
+    zid_entity_id: zidEntityId,
+    odoo_model: 'product.template',
+    odoo_record_id: recordId,
+    status: 'success',
+    error_message: null,
+    payload: zidData,
+    trigger_type: triggerType
+  })
+
+  return {
+    mappingId: mapping.id,
+    mappingName: mapping.name,
+    model: 'product.template',
+    status: 'success',
+    odooRecordId: recordId,
+    message: msg
   }
 }
 
@@ -7395,31 +7563,28 @@ async function executeOdooOperation(params: {
     }
 
     if (isChild && variantSyncMode === 'AS_SEPARATE_PRODUCTS') {
-      // Zid child products (structure='child') are already included in the parent's
-      // variants array, which syncAsSeparateProducts handles as standalone templates.
-      // Processing the child event through the generic path would create a duplicate template.
-      const childSkipMsg = `Skipping Zid child product (ID: ${zidEntityId}, Parent: ${String(zidData.parent_id || (zidData.parent as any)?.id)}): variants are synced as separate products via the parent's variants array.`
-      console.info(`[SyncEngine] ${childSkipMsg}`)
-      await logSync({
-        id: existingLogId,
-        workspace_id: mapping.workspace_id,
-        field_mapping_id: mapping.id,
+      // In AS_SEPARATE_PRODUCTS mode, each variant is a separate product.template.
+      // When a child product webhook comes in, we need to sync it individually
+      // by finding/creating its corresponding product.template.
+      console.info(`[SyncEngine] Processing Zid child product (ID: ${zidEntityId}) in AS_SEPARATE_PRODUCTS mode — syncing as standalone product.template.`)
+      return await syncChildAsSeparateProduct(
+        client,
+        mapping,
         event,
-        store_id: storeId,
-        zid_entity_id: zidEntityId,
-        odoo_model: 'product.template',
-        status: 'skipped',
-        error_message: childSkipMsg,
-        payload: zidData,
-        trigger_type: triggerType
-      })
-      return {
-        mappingId: mapping.id,
-        mappingName: mapping.name,
-        model: 'product.template',
-        status: 'skipped',
-        message: childSkipMsg
-      }
+        storeId,
+        zidEntityId,
+        zidData,
+        effectiveOdooValues,
+        platform,
+        triggerType,
+        existingLogId,
+        matchStrategy,
+        defaultLocationId,
+        infiniteValue,
+        fixedMatch,
+        pSettings,
+        mergedSettings
+      )
     }
 
     const variants = extractGenericVariants(zidData, platform)
