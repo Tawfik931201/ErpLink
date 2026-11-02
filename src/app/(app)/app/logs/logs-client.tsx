@@ -109,6 +109,7 @@ export default function LogsClient() {
   const entityRef = useRef<HTMLDivElement>(null)
 
   const columnsButtonRef = useRef<HTMLButtonElement>(null)
+  const columnsMenuRef = useRef<HTMLDivElement>(null)
   const [isColumnsOpen, setIsColumnsOpen] = useState(false)
   const [columnsPos, setColumnsPos] = useState<{ top: number; left: number } | null>(null)
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>([])
@@ -210,16 +211,22 @@ export default function LogsClient() {
     setIsColumnsOpen(true)
   }
 
-  // The menu is anchored to a button that scrolls with the page, so any scroll
+  // The menu is anchored to a button that scrolls with the page, so any page scroll
   // (or a resize) closes it rather than letting it float away from its anchor.
+  // Scrolls originating INSIDE the menu itself are ignored so the merchant can scroll the list.
   useEffect(() => {
     if (!isColumnsOpen) return
-    const close = () => setIsColumnsOpen(false)
-    window.addEventListener('scroll', close, true)
-    window.addEventListener('resize', close)
+    const handleScroll = (event: Event) => {
+      if (columnsMenuRef.current && columnsMenuRef.current.contains(event.target as Node)) {
+        return
+      }
+      setIsColumnsOpen(false)
+    }
+    window.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', handleScroll)
     return () => {
-      window.removeEventListener('scroll', close, true)
-      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', handleScroll)
     }
   }, [isColumnsOpen])
 
@@ -734,6 +741,7 @@ export default function LogsClient() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsColumnsOpen(false)} />
           <div
+            ref={columnsMenuRef}
             className="fixed z-50 w-[230px] border border-border bg-card shadow-lg"
             style={{ top: columnsPos.top, left: columnsPos.left }}
             role="dialog"

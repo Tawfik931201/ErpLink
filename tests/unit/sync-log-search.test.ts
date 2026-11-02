@@ -124,6 +124,11 @@ describe('/app/logs column picker', () => {
     expect(readClient()).toMatch(/if \(prev\.length === 1\) return prev/)
   })
 
+  it('ignores scroll events originating inside the popup menu itself', () => {
+    const src = readClient()
+    expect(src).toMatch(/columnsMenuRef\.current\.contains\(event\.target/)
+  })
+
   it('never persists an empty column set', () => {
     expect(readClient()).toMatch(/if \(visibleColumns\.length === 0\) return/)
   })
