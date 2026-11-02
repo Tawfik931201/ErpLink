@@ -244,10 +244,10 @@ export async function getSyncLogs(params: {
     }
 
     if (params.search && params.search.trim() !== '') {
-      // Instant search box: a substring match over the columns the list shows.
-      // The structural/wildcard sanitising lives in the pure, unit-tested
-      // `sync-log-search` module — a typed comma must not be able to append a
-      // second filter branch, and a typed `%` must not match everything.
+      // Instant search box: exact substring match on the generated search_text
+      // column (trigram GIN index). Avoids PostgREST or() parser issues with
+      // % wildcards. Matches PayloadViewer behaviour: exact substring on
+      // concatenated payload + all text fields.
       const searchFilter = syncLogSearchFilter(params.search)
 
       if (searchFilter.kind === 'empty') {
@@ -255,7 +255,7 @@ export async function getSyncLogs(params: {
         // workspace would look like the search was ignored.
         query = query.eq('id', NO_MATCH_ID)
       } else if (searchFilter.kind === 'match') {
-        query = query.or(searchFilter.expression)
+        query = query.filter(searchFilter.column, searchFilter.operator, searchFilter.value)
       }
     }
 

@@ -6,9 +6,10 @@
  *     append a PostgREST filter branch and a `%` must not match everything.
  *   - Input that is only punctuation matches nothing, rather than silently
  *     returning the whole workspace (which reads as "the search was ignored").
- *   - Search uses EXACT SUBSTRING MATCHING (ILIKE) on the text representation of
- *     each column, matching the PayloadViewer's client-side behaviour:
- *     JSON.stringify(payload).toLowerCase().includes(query). No full-text stemming.
+ *   - Search uses a SINGLE generated column `search_text` (trigram GIN index)
+ *     with exact substring matching (ILIKE), matching the PayloadViewer's
+ *     client-side behaviour: JSON.stringify(payload).toLowerCase().includes(query).
+ *   - No more PostgREST `or()` parser errors with % wildcards.
  *   - Column visibility is a browser preference persisted under a versioned key,
  *     with sensible defaults and a guard against hiding every column.
  *   - The refresh button does not rotate (the table shows loading state instead).
@@ -19,7 +20,6 @@ import path from 'path'
 
 import {
   sanitizeSyncLogSearch,
-  SYNC_LOG_SEARCH_COLUMNS,
   syncLogSearchFilter,
 } from '../../src/lib/sync-log-search'
 
@@ -38,39 +38,26 @@ describe('sync-log instant search', () => {
     expect(syncLogSearchFilter(null)).toEqual({ kind: 'none' })
   })
 
-  it('matches exact substring on 6 columns (payload::text + error_message + 4 visible)', () => {
+  it('matches exact substring on single search_text column (trigram index)', () => {
     const filter = syncLogSearchFilter('ORD-12')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
 
-    // All 6 branches use ILIKE with sanitised needle
-    expect(filter.expression).toContain('payload::text.ilike.%ORD-12%')
-    expect(filter.expression).toContain('error_message.ilike.%ORD-12%')
-    for (const column of ['event', 'zid_entity_id', 'odoo_model', 'store_id']) {
-      expect(filter.expression).toContain(`${column}.ilike.%ORD-12%`)
-    }
-    // Total 6 branches
-    expect(filter.expression.split(',').length).toBe(SYNC_LOG_SEARCH_COLUMNS.length)
+    expect(filter.column).toBe('search_text')
+    expect(filter.operator).toBe('ilike')
+    expect(filter.value).toBe('%ORD-12%')
   })
 
-  it('keeps Arabic and spaces intact (sanitiser only affects ILIKE needle)', () => {
+  it('keeps Arabic and spaces intact', () => {
     expect(sanitizeSyncLogSearch('  طلب جديد  ')).toBe('طلب جديد')
   })
 
   it('strips PostgREST structure so typed text cannot append a branch', () => {
-    // Without sanitising, `,status.eq.success` would become a second branch and
-    // widen the result set from the merchant's intent.
     expect(sanitizeSyncLogSearch('abc,status.eq.success')).toBe('abc status.eq.success')
     const filter = syncLogSearchFilter('abc,status.eq.success')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
-
-    // All branches use sanitised needle (commas stripped)
-    expect(filter.expression).toContain('payload::text.ilike.%abc status.eq.success%')
-    expect(filter.expression).toContain('error_message.ilike.%abc status.eq.success%')
-    for (const column of SYNC_LOG_SEARCH_COLUMNS) {
-      expect(filter.expression).toContain(`${column}.ilike.%abc status.eq.success%`)
-    }
+    expect(filter.value).toBe('%abc status.eq.success%')
   })
 
   it('strips ILIKE wildcards so "%" cannot match everything', () => {
@@ -85,19 +72,15 @@ describe('sync-log instant search', () => {
     expect(sanitizeSyncLogSearch('  a    b  ')).toBe('a b')
   })
 
-  it('never lets a genuine needle keep a structural character in ILIKE branches', () => {
+  it('never lets a genuine needle keep a structural character', () => {
     const filter = syncLogSearchFilter('(a)(b),c*')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
-
-    const branches = filter.expression.split(',')
-    expect(branches).toHaveLength(SYNC_LOG_SEARCH_COLUMNS.length)
-    for (const branch of branches) {
-      // All branches are ILIKE: `<column>.ilike.%<needle>%`
-      const needle = branch.split('.ilike.%')[1]?.slice(0, -1) ?? ''
-      expect(needle).toBe('a b c')
-      expect(needle).not.toMatch(/[(),*\\%_]/)
-    }
+    // The filter wraps the sanitised needle with % for ILIKE substring match.
+    // The needle itself (without the wrapping %) must be clean.
+    expect(filter.value).toBe('%a b c%')
+    const needle = filter.value.slice(1, -1) // strip wrapping %
+    expect(needle).not.toMatch(/[(),*\\%_]/)
   })
 })
 
@@ -127,7 +110,6 @@ describe('/app/logs column picker', () => {
     ]) {
       expect(src).toMatch(new RegExp(`key: '${key}'`))
     }
-    // The lean list select omits it (multi-KB stack traces) — it cannot be a column.
     expect(src).not.toMatch(/key: 'errorMessage'|key: 'error_message'/)
   })
 
@@ -161,8 +143,6 @@ describe('/app/logs toolbar', () => {
 
   it('does not spin the refresh icon', () => {
     const src = readClient()
-    // The only spinner left is the in-table loading row; the refresh button's
-    // icon is static.
     const refreshBlock = src.slice(src.indexOf("t('log.refresh')") - 400, src.indexOf("t('log.refresh')"))
     expect(refreshBlock).toContain('RefreshCw')
     expect(refreshBlock).not.toContain('animate-spin')
