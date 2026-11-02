@@ -4,6 +4,14 @@ import { revalidatePath } from 'next/cache'
 
 import { getActiveWorkspaceId } from '@/lib/auth'
 import {
+  groupQueueSelection,
+  normaliseQueueSelection,
+  queueArchiveExpiresAt,
+  queueSourceTable,
+  QUEUE_ARCHIVE_BATCH_LIMIT,
+  QUEUE_ARCHIVES_TABLE,
+} from '@/lib/queue-archive'
+import {
   queueItemKindFromNextRetry,
   queueItemLookupOrder,
   type QueueKind,
@@ -32,44 +40,23 @@ async function countExact(table: string, build: (q: any) => any): Promise<number
   }
 }
 
-/** نظرة عامة: معلق / مجمد / يتيم خاص بمتاجري / أرشيف + عمر أقدم معلق. */
+/** نظرة عامة: معلق / مجمد / يتيم خاص بمتاجري / إجمالي الأرشيف (موتى + مؤرشف يدوياً). */
 export async function getQueueOverview() {
   try {
     const workspaceId = await getActiveWorkspaceId()
     if (!workspaceId) return authError()
 
-    const [pending, frozen, dead, skipped24h] = await Promise.all([
+    const [pending, frozen, dead, archived, orphans] = await Promise.all([
       countExact('sync_queue', (q: any) => q.eq('workspace_id', workspaceId).not('next_retry_at', 'is', null)),
       countExact('sync_queue', (q: any) =>
         q.eq('workspace_id', workspaceId).or(`next_retry_at.is.null,next_retry_at.eq.${FROZEN_SENTINEL}`)
       ),
       countExact('sync_queue_dead', (q: any) => q.eq('workspace_id', workspaceId)),
-      countExact('sync_logs', (q: any) =>
-        q
-          .eq('workspace_id', workspaceId)
-          .eq('status', 'skipped')
-          .eq('trigger_type', 'webhook-ingress')
-          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-      ),
+      // الأرشيف اليدوي (7 أيام) يُعرض داخل تبويب "الأرشيف" نفسه، فعدّاده يُضاف
+      // إليه في الواجهة. يُقرأ منفصلاً حتى يبقى معنى `dead` (أرشيف الموتى) واضحاً.
+      countExact(QUEUE_ARCHIVES_TABLE, (q: any) => q.eq('workspace_id', workspaceId)),
+      getOrphanItems(1),
     ])
-
-    let oldestPendingAgeSec: number | null = null
-    try {
-      const { data } = await supabase
-        .from('sync_queue')
-        .select('next_retry_at')
-        .eq('workspace_id', workspaceId)
-        .not('next_retry_at', 'is', null)
-        .order('next_retry_at', { ascending: true })
-        .limit(1)
-        .maybeSingle()
-      const ts = (data as { next_retry_at?: string } | null)?.next_retry_at
-      if (ts) oldestPendingAgeSec = Math.max(0, Math.round((Date.now() - new Date(ts).getTime()) / 1000))
-    } catch {
-      oldestPendingAgeSec = null
-    }
-
-    const orphans = await getOrphanItems(1)
 
     return {
       success: true,
@@ -78,8 +65,7 @@ export async function getQueueOverview() {
         frozen,
         orphans: orphans.success ? orphans.totalCount : null,
         dead,
-        ingressSkipped24h: skipped24h,
-        oldestPendingAgeSec,
+        archived,
       },
     }
   } catch (err: any) {
@@ -559,3 +545,323 @@ export async function replayDeadItem(deadId: string) {
     return { success: false, error: err?.message || 'Replay failed' }
   }
 }
+
+// ─── الأرشفة اليدوية: نسخٌ كامل ثم حذف، واستعادة خلال 7 أيام ─────────────
+
+export interface QueueArchiveRow {
+  id: string
+  source_kind: string
+  source_table: string
+  source_id: string
+  platform: string | null
+  event: string | null
+  store_id: string | null
+  entity_id: string | null
+  error_message: string | null
+  retry_count: number | null
+  original_id: string | null
+  archived_at: string | null
+  expires_at: string | null
+}
+
+function toQueueArchiveRow(r: Record<string, unknown>): QueueArchiveRow {
+  let entityId: string | null = null
+  try {
+    const payload = r.payload
+    entityId = extractEntityId(
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : {}
+    ) || null
+  } catch {
+    entityId = null
+  }
+  return {
+    id: asText(r.id) ?? '',
+    source_kind: asText(r.source_kind) ?? 'pending',
+    source_table: asText(r.source_table) ?? '',
+    source_id: asText(r.source_id) ?? '',
+    platform: asText(r.platform),
+    event: asText(r.event),
+    store_id: asText(r.store_id),
+    entity_id: entityId,
+    error_message: asText(r.error_message),
+    retry_count: asCount(r.retry_count),
+    original_id: asText(r.original_id),
+    archived_at: asText(r.archived_at),
+    expires_at: asText(r.expires_at),
+  }
+}
+
+/**
+ * أرشفة عناصر الطابور: **نسخ الصف كاملاً ثم حذفه من مصدره**.
+ *
+ * لماذا بهذا الترتيب: لو حُذف أولاً ثم فشل الإدراج، اختفى الصف بلا أثر — وهو
+ * بالضبط عكس الغرض من الأرشفة. الاختبار يُثبّت الترتيب
+ * (`tests/unit/queue-archive.test.ts`).
+ *
+ * الأمان:
+ *   - القراءة والحذف مقيدان بمساحة العمل النشطة؛
+ *   - الإيصالات (`webhook_inbox`) لا `workspace_id` فيها، فقيدها معرّفات متاجر
+ *     هذه المساحة (`.in('store_id', …)`) — وإلا صار رقم الصف مفتاحاً لبيانات
+ *     تاجر آخر؛
+ *   - تكرار (23505) على فهرس `(source_table, source_id)` يعني "أُرشف مسبقاً"،
+ *     فنتابع إلى الحذف بدل اعتباره فشلاً — النسخة موجودة فعلاً.
+ */
+export async function archiveQueueItems(items: Array<{ id: string; kind: string }>) {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+
+    const selected = normaliseQueueSelection(Array.isArray(items) ? items : [])
+    if (selected.length === 0) return { success: true, archived: 0, failed: 0, skipped: 0 }
+
+    const batch = selected.slice(0, QUEUE_ARCHIVE_BATCH_LIMIT)
+    const grouped = groupQueueSelection(batch)
+    const archivedAt = new Date()
+    const archivedAtIso = archivedAt.toISOString()
+    const expiresAtIso = queueArchiveExpiresAt(archivedAt)
+
+    const storeIds =
+      grouped.webhook_inbox.length > 0 ? await getWorkspaceStoreIds(workspaceId) : new Set<string>()
+
+    let archived = 0
+    let failed = 0
+    let skipped = 0
+
+    /** يُدرج النسخة؛ `true` تعني «النسخة موجودة» (جديدة أو مسبقة). */
+    async function snapshot(row: Record<string, unknown>, kind: QueueKind): Promise<boolean> {
+      const sourceId = asText(row.id) ?? ''
+      if (!sourceId) return false
+      const { error } = await supabase.from(QUEUE_ARCHIVES_TABLE).insert({
+        workspace_id: workspaceId,
+        source_kind: kind,
+        source_table: queueSourceTable(kind),
+        source_id: sourceId,
+        platform: asText(row.platform),
+        event: asText(row.event),
+        store_id: asText(row.store_id),
+        dedup_key: asText(row.dedup_key),
+        // `webhook_inbox` يسمّي العمود `last_error`، والطابور يسميه
+        // `error_message` — النسخة المؤرشفة تحمل السبب في الحالتين.
+        error_message: asText(row.error_message ?? row.last_error),
+        retry_count: asCount(row.retry_count),
+        max_retries: asCount(row.max_retries),
+        next_retry_at: asText(row.next_retry_at),
+        original_id: asText(row.original_id),
+        payload:
+          row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : {},
+        // الصف كاملاً كما قُرئ — أعمدة قد تُضاف لاحقاً لجدول المصدر تبقى محفوظة.
+        row_data: row,
+        archived_at: archivedAtIso,
+        expires_at: expiresAtIso,
+      })
+      if (!error) return true
+      // 23505 = unique_violation على `uq_queue_archives_source`.
+      return (error as { code?: string }).code === '23505'
+    }
+
+    if (grouped.sync_queue.length > 0) {
+      const ids = grouped.sync_queue.map((i) => i.id)
+      const kindById = new Map(grouped.sync_queue.map((i) => [i.id, i.kind]))
+      const { data, error } = await supabase
+        .from('sync_queue')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .in('id', ids)
+      if (error) {
+        failed += ids.length
+      } else {
+        const found = new Set<string>()
+        for (const raw of (data ?? []) as Array<Record<string, unknown>>) {
+          const id = asText(raw.id) ?? ''
+          if (!id) continue
+          found.add(id)
+          const kind =
+            kindById.get(id) ??
+            queueItemKindFromNextRetry(asText(raw.next_retry_at), FROZEN_SENTINEL)
+          if (!(await snapshot(raw, kind))) {
+            failed += 1
+            continue
+          }
+          const { error: delErr } = await supabase
+            .from('sync_queue')
+            .delete()
+            .eq('workspace_id', workspaceId)
+            .eq('id', id)
+          if (delErr) failed += 1
+          else archived += 1
+        }
+        skipped += ids.filter((id) => !found.has(id)).length
+      }
+    }
+
+    if (grouped.sync_queue_dead.length > 0) {
+      const ids = grouped.sync_queue_dead.map((i) => i.id)
+      const { data, error } = await supabase
+        .from('sync_queue_dead')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .in('id', ids)
+      if (error) {
+        failed += ids.length
+      } else {
+        const found = new Set<string>()
+        for (const raw of (data ?? []) as Array<Record<string, unknown>>) {
+          const id = asText(raw.id) ?? ''
+          if (!id) continue
+          found.add(id)
+          if (!(await snapshot(raw, 'dead'))) {
+            failed += 1
+            continue
+          }
+          const { error: delErr } = await supabase
+            .from('sync_queue_dead')
+            .delete()
+            .eq('workspace_id', workspaceId)
+            .eq('id', id)
+          if (delErr) failed += 1
+          else archived += 1
+        }
+        skipped += ids.filter((id) => !found.has(id)).length
+      }
+    }
+
+    if (grouped.webhook_inbox.length > 0) {
+      // بلا متاجر معروفة لا يوجد إيصال يخص هذه المساحة ⇒ لا قراءة ولا حذف.
+      if (storeIds.size === 0) {
+        skipped += grouped.webhook_inbox.length
+      } else {
+        const ids = grouped.webhook_inbox.map((i) => i.id)
+        const { data, error } = await supabase
+          .from('webhook_inbox')
+          .select('*')
+          .eq('status', 'pending')
+          .is('workspace_id', null)
+          .in('store_id', [...storeIds])
+          .in('id', ids)
+        if (error) {
+          failed += ids.length
+        } else {
+          const found = new Set<string>()
+          for (const raw of (data ?? []) as Array<Record<string, unknown>>) {
+            const id = asText(raw.id) ?? ''
+            if (!id) continue
+            found.add(id)
+            if (!(await snapshot(raw, 'orphans'))) {
+              failed += 1
+              continue
+            }
+            const { error: delErr } = await supabase
+              .from('webhook_inbox')
+              .delete()
+              .eq('id', id)
+              .in('store_id', [...storeIds])
+            if (delErr) failed += 1
+            else archived += 1
+          }
+          skipped += ids.filter((id) => !found.has(id)).length
+        }
+      }
+    }
+
+    revalidatePath('/app/queue')
+    return { success: failed === 0, archived, failed, skipped }
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Archive failed',
+      archived: 0,
+      failed: 0,
+      skipped: 0,
+    }
+  }
+}
+
+/** الأرشيف اليدوي لمساحة العمل — يُعرض داخل تبويب "الأرشيف" (أحدث أولاً). */
+export async function getQueueArchives(limit = 100) {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+
+    const cap = Math.min(200, Math.max(1, limit))
+    const { data, error } = await supabase
+      .from(QUEUE_ARCHIVES_TABLE)
+      .select(
+        'id,source_kind,source_table,source_id,platform,event,store_id,error_message,retry_count,original_id,archived_at,expires_at,payload'
+      )
+      .eq('workspace_id', workspaceId)
+      .order('archived_at', { ascending: false })
+      .limit(cap)
+
+    if (error) return { success: false, error: error.message }
+    return {
+      success: true,
+      rows: ((data ?? []) as Array<Record<string, unknown>>).map(toQueueArchiveRow),
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to load archives' }
+  }
+}
+
+/**
+ * استعادة صف مؤرشف إلى الطابور قبل انتهاء مدته.
+ *
+ * الاستعادة = إدخال في `sync_queue` بمفتاح `dedup_key` جديد (كما في الأزرار
+ * اليدوية الأخرى) حتى لا يصطدم الفهرس الجزئي، ثم حذف صف الأرشيف. ماذا يُرسل
+ * فعلاً يظل قرار محرّك المزامنة: `findExistingOdooRecord` يحدّث بدل أن يُنشئ
+ * عند وجود السجل، فالمكرر الآمن محفوظ.
+ */
+export async function restoreQueueArchive(archiveId: string) {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+    if (!archiveId) return { success: false, error: 'Missing id' }
+
+    const { data, error } = await supabase
+      .from(QUEUE_ARCHIVES_TABLE)
+      .select('id,source_kind,platform,event,store_id,payload,error_message,original_id')
+      .eq('workspace_id', workspaceId)
+      .eq('id', archiveId)
+      .maybeSingle()
+
+    if (error) return { success: false, error: error.message }
+    if (!data) return { success: false, error: 'Not found' }
+
+    const row = data as Record<string, unknown>
+    const { error: insertErr } = await supabase.from('sync_queue').insert({
+      workspace_id: workspaceId,
+      store_id: asText(row.store_id),
+      event: asText(row.event),
+      platform: asText(row.platform) ?? 'zid',
+      payload:
+        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
+          ? (row.payload as Record<string, unknown>)
+          : {},
+      retry_count: 0,
+      max_retries: 5,
+      next_retry_at: new Date().toISOString(),
+      dedup_key: `restore:${archiveId}:${Date.now()}`,
+      error_message: null,
+    })
+    if (insertErr) return { success: false, error: insertErr.message }
+
+    const { error: delErr } = await supabase
+      .from(QUEUE_ARCHIVES_TABLE)
+      .delete()
+      .eq('workspace_id', workspaceId)
+      .eq('id', archiveId)
+    if (delErr) return { success: false, error: delErr.message }
+
+    revalidatePath('/app/queue')
+    return { success: true }
+  } catch (err: unknown) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : 'Restore failed',
+    }
+  }
+}
+

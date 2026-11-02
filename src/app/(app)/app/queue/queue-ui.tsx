@@ -170,14 +170,3 @@ export function formatQueueDate(
         minute: '2-digit',
       })
 }
-
-/** "منذ 12 د" — the age readout under the chips. */
-export function formatQueueAge(sec: number | null | undefined, ar: boolean): string {
-  if (sec === null || sec === undefined || Number.isNaN(sec)) return '—'
-  if (sec < 60) return ar ? `منذ ${sec} ث` : `${sec}s ago`
-  const m = Math.round(sec / 60)
-  if (m < 60) return ar ? `منذ ${m} د` : `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return ar ? `منذ ${h} س` : `${h}h ago`
-  return ar ? `منذ ${Math.round(h / 24)} ي` : `${Math.round(h / 24)}d ago`
-}

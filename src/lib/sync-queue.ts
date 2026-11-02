@@ -1276,6 +1276,7 @@ let lastCleanupAt = 0
  * تنظيف دوري مخنوق (مرة/ساعة). يشمل أرشفة الصفوف المستنفدة، وحذف سجلات
  * `sync_logs` المنتهية، وتقليم `webhook_inbox` — بدون هذا الأخير ينمو جدول
  * الاستلام بلا حد لأن `pruneProcessedInbox` لا يُستدعى من أي مكان آخر.
+ * ويشمل أيضاً حذف صفوف `queue_archives` التي انتهت مدتها (7 أيام).
  */
 async function maybeCleanup() {
   if (Date.now() - lastCleanupAt < CLEANUP_THROTTLE_MS) return
@@ -1290,6 +1291,11 @@ async function maybeCleanup() {
     // بدون هذا ينمو الجدول بلا حد (رسالة لكل طلب).
     const { pruneTelegramOutbox } = await import('./telegram-outbox')
     await pruneTelegramOutbox().catch(() => {})
+    // أرشيف الطابور اليدوي: الصف المؤرشف يُحذف نهائياً بعد 7 أيام
+    // (`queue_archives.expires_at`). المدة المعلنة للتاجر يجب أن تُنفَّذ فعلاً،
+    // وإلا صار "سيُحذف بعد 7 أيام" وعداً بلا مفعول.
+    const { pruneExpiredQueueArchives } = await import('./queue-archive-prune')
+    await pruneExpiredQueueArchives().catch(() => {})
   } catch {
     // غير قاتل.
   }

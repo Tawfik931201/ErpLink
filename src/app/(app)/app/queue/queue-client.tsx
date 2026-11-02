@@ -2,32 +2,38 @@
 
 import {
   AlertCircle,
+  Archive,
   ChevronLeft,
   ChevronRight,
   Loader2,
   RefreshCw,
+  RotateCcw,
+  X,
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
+  archiveQueueItems,
   getDeadItems,
   getOrphanItems,
+  getQueueArchives,
   getQueueItems,
   getQueueOverview,
   replayAllDeadItems,
   replayOrphanItems,
+  restoreQueueArchive,
   retryFrozenItems,
   sendNowWorkspace,
+  type QueueArchiveRow,
   type QueueRow,
 } from '@/app/actions/queue-dashboard'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
-import { ChoiceRow, FilterSelect } from '@/components/ui/filter-select'
+import { queueArchiveDaysLeft } from '@/lib/queue-archive'
 import { cn } from '@/lib/utils'
 
 import {
-  formatQueueAge,
   formatQueueDate,
   QUEUE_KINDS,
   QueueStatusBadge,
@@ -54,14 +60,16 @@ interface QueueOverview {
   frozen: number | null
   orphans: number | null | undefined
   dead: number | null
-  ingressSkipped24h: number | null
-  oldestPendingAgeSec: number | null
+  archived: number | null | undefined
 }
 
 /**
  * طابور الإرسال — نفس تصميم شاشة السجلات (Odoo-style list):
- * شرائح حالة قابلة للنقر ⇒ شريط فلاتر ⇒ جدول بلا حدود خلايا ⇒ ترقيم صفحات،
+ * شرائح حالة + أزرار على نفس الصف ⇒ جدول بلا حدود خلايا ⇒ ترقيم صفحات،
  * وكل صف يفتح سجلّه الخاص على `/app/queue/<id>`.
+ *
+ * الأرشفة: الصف لا يُحذف مباشرة — يُنسخ إلى `queue_archives` ثم يُحذف من
+ * مصدره، ويبقى قابلاً للاستعادة 7 أيام (يظهر داخل تبويب «الأرشيف»).
  */
 export default function QueueClient() {
   const { lang, dir } = useLanguage()
@@ -77,25 +85,20 @@ export default function QueueClient() {
   const [sending, setSending] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [replaying, setReplaying] = useState<string | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [restoring, setRestoring] = useState<string | null>(null)
+
+  /** الصفوف المحدَّدة — معرّفات الجدول المعروض فقط (التبويب الواحد). */
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [archives, setArchives] = useState<QueueArchiveRow[]>([])
 
   const [notice, setNotice] = useState('')
   const [noticeIsError, setNoticeIsError] = useState(false)
-
-  const [isKindOpen, setIsKindOpen] = useState(false)
-  const kindRef = useRef<HTMLDivElement>(null)
 
   const notify = (text: string, isError = false) => {
     setNotice(text)
     setNoticeIsError(isError)
   }
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (kindRef.current && !kindRef.current.contains(event.target as Node)) setIsKindOpen(false)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
 
   async function loadTab(t: QueueKind, offsetToUse: number): Promise<{ rows: Row[]; total: number }> {
     if (t === 'pending' || t === 'frozen') {
@@ -124,19 +127,29 @@ export default function QueueClient() {
 
   async function loadOverview() {
     const ov = await getQueueOverview()
-    if (ov.success) setOverview(ov.overview ?? null)
+    if (ov.success) setOverview((ov.overview ?? null) as QueueOverview | null)
     else notify(ov.error || '', true)
+  }
+
+  /** الأرشيف اليدوي يُعرض داخل تبويب «الأرشيف» فقط — لا تبويب خامس. */
+  async function loadArchives() {
+    const res = await getQueueArchives(100)
+    if (res.success) setArchives((res.rows || []) as QueueArchiveRow[])
+    else setArchives([])
   }
 
   async function fetchAt(t: QueueKind, offsetToUse: number, clearNotice = true) {
     setLoading(true)
     if (clearNotice) setNotice('')
-    // الأرشيف واليتائم لا يدعمان ترقيم صفحات حقيقياً في الإجراء الحالي.
+    // يتيمة لا تدعم ترقيم صفحات حقيقياً (تُقرأ بدفعة واحدة).
     const safeOffset = t === 'orphans' ? 0 : Math.max(0, offsetToUse)
     const items = await loadTab(t, safeOffset)
     setRows(items.rows)
     setTotal(items.total)
     setOffset(safeOffset)
+    setSelected(new Set())
+    if (t === 'dead') await loadArchives()
+    else setArchives([])
     setLoading(false)
   }
 
@@ -149,7 +162,6 @@ export default function QueueClient() {
   async function switchKind(t: QueueKind) {
     if (t === kind) return
     setKind(t)
-    setIsKindOpen(false)
     await fetchAt(t, 0)
   }
 
@@ -225,11 +237,60 @@ export default function QueueClient() {
     }
   }
 
+  /** أرشفة صف واحد أو المحدَّد — نسخة كاملة تبقى 7 أيام ثم تُحذف. */
+  async function handleArchive(ids: string[]) {
+    const list = ids.filter(Boolean)
+    if (list.length === 0) return
+    const message = ar
+      ? `أرشفة ${list.length} عنصر؟\n\nسيخرج من الطابور فوراً ولن يُرسل إلى أودوو. تبقى نسخة كاملة في الأرشيف 7 أيام (قابلة للاستعادة)، ثم تُحذف نهائياً تلقائياً.\n\nأرشِف فقط ما تعرف أنه مكرر أو أُرسل سابقاً.`
+      : `Archive ${list.length} item(s)?\n\nThey leave the queue immediately and will not be sent to Odoo. A full copy stays in the archive for 7 days (restorable), then is permanently deleted automatically.\n\nArchive only what you know is a duplicate or was already sent.`
+    if (!confirm(message)) return
+
+    setArchiving(true)
+    setNotice('')
+    const res = await archiveQueueItems(list.map((id) => ({ id, kind })))
+    setArchiving(false)
+
+    if (res.success && 'archived' in res) {
+      setSelected(new Set())
+      await afterMutation(
+        ar
+          ? `أُرشف ${res.archived} عنصر — يمكن استعادته من تبويب "الأرشيف" خلال 7 أيام.`
+          : `Archived ${res.archived} item(s) — restorable from the "Archive" tab for 7 days.`
+      )
+    } else {
+      notify(res.error || (ar ? 'فشلت الأرشفة' : 'Archive failed'), true)
+    }
+  }
+
+  async function handleRestore(archiveId: string) {
+    const message = ar
+      ? 'استعادة هذا العنصر إلى الطابور؟ سيُرسل إلى أودوو في الدورة القادمة.'
+      : 'Restore this item to the queue? It will be sent to Odoo on the next run.'
+    if (!confirm(message)) return
+
+    setRestoring(archiveId)
+    const res = await restoreQueueArchive(archiveId)
+    setRestoring(null)
+    if (res.success) {
+      setSelected(new Set())
+      await loadOverview()
+      await loadArchives()
+      notify(ar ? 'أُعيد العنصر إلى الطابور.' : 'The item was restored to the queue.')
+    } else {
+      notify(('error' in res && res.error) || (ar ? 'فشلت الاستعادة' : 'Restore failed'), true)
+    }
+  }
+
   const counts: Record<QueueKind, number | null | undefined> = {
     pending: overview?.pending,
     frozen: overview?.frozen,
     orphans: overview?.orphans,
-    dead: overview?.dead,
+    // تبويب «الأرشيف» يعرض أرشيف الموتى + ما أرشفه التاجر يدوياً.
+    dead:
+      overview?.dead == null && overview?.archived == null
+        ? null
+        : (overview?.dead ?? 0) + (overview?.archived ?? 0),
   }
   const frozenCount = overview?.frozen ?? 0
   const orphanCount = overview?.orphans ?? 0
@@ -241,35 +302,47 @@ export default function QueueClient() {
     router.push(`/app/queue/${id}?kind=${kind}`)
   }
 
+  const pageIds = rows.map((r) => r.id)
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id))
+  const someOnPageSelected = pageIds.some((id) => selected.has(id))
+  const selectedCount = selected.size
+
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllOnPage = () => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allOnPageSelected) pageIds.forEach((id) => next.delete(id))
+      else pageIds.forEach((id) => next.add(id))
+      return next
+    })
+  }
+
   const isFirstPage = offset === 0
   const isLastPage = kind === 'orphans' || offset + rows.length >= total
   const PrevIcon = dir === 'rtl' ? ChevronRight : ChevronLeft
   const NextIcon = dir === 'rtl' ? ChevronLeft : ChevronRight
   const OpenIcon = dir === 'rtl' ? ChevronLeft : ChevronRight
-  const tabColSpan = 8
+  const tabColSpan = 9
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-base font-bold text-foreground">
-            {ar ? 'طابور الإرسال إلى أودوو' : 'Odoo Send Queue'}
-          </h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {ar
-              ? 'كل طلب وصلك من المتجر يظهر هنا حتى يُسجَّل في أودوو — لا شيء يضيع بصمت.'
-              : 'Every store order appears here until registered in Odoo — nothing is lost silently.'}
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => refreshAll()}
-          disabled={loading}
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5 me-1', loading && 'animate-spin')} />
-          {ar ? 'تحديث' : 'Refresh'}
-        </Button>
+      <div>
+        <h2 className="text-base font-bold text-foreground">
+          {ar ? 'طابور الإرسال إلى أودوو' : 'Odoo Send Queue'}
+        </h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {ar
+            ? 'كل طلب وصلك من المتجر يظهر هنا حتى يُسجَّل في أودوو — لا شيء يضيع بصمت.'
+            : 'Every store order appears here until registered in Odoo — nothing is lost silently.'}
+        </p>
       </div>
 
       {notice && (
@@ -285,7 +358,7 @@ export default function QueueClient() {
         </div>
       )}
 
-      {/* Status chips — one per queue table, click to switch. */}
+      {/* Status chips + every action on the same row. */}
       <div className="flex flex-wrap items-center gap-1.5">
         {QUEUE_KINDS.map(k => {
           const isActive = kind === k
@@ -307,40 +380,8 @@ export default function QueueClient() {
             </button>
           )
         })}
-      </div>
 
-      <div className="border border-border bg-card px-3 py-2.5 flex flex-wrap items-center gap-3">
-        <FilterSelect
-          label={ar ? 'العرض:' : 'View:'}
-          buttonRef={kindRef}
-          isOpen={isKindOpen}
-          onToggle={() => setIsKindOpen(!isKindOpen)}
-          triggerText={queueKindLabel(kind, ar)}
-          minWidth="min-w-[120px]"
-        >
-          {QUEUE_KINDS.map(k => (
-            <ChoiceRow key={k} selected={kind === k} onClick={() => switchKind(k)}>
-              <span className="flex items-center gap-2">
-                <span className={cn('h-1.5 w-1.5 rounded-full', queueKindDot(k))} />
-                {queueKindLabel(k, ar)}
-                <span className="text-muted-foreground">({counts[k] ?? '—'})</span>
-              </span>
-            </ChoiceRow>
-          ))}
-        </FilterSelect>
-
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-          <span>
-            {ar ? 'أقدم معلق: ' : 'Oldest pending: '}
-            <b className="text-foreground">{formatQueueAge(overview?.oldestPendingAgeSec, ar)}</b>
-          </span>
-          <span>
-            {ar ? 'تخطيات الاستلام (24 س): ' : 'Ingress skips (24h): '}
-            <b className="text-foreground">{overview?.ingressSkipped24h ?? '—'}</b>
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-1.5 ms-auto">
+        <div className="ms-auto flex flex-wrap items-center gap-1.5">
           {kind === 'dead' && total > 1 && (
             <Button
               size="sm"
@@ -382,6 +423,17 @@ export default function QueueClient() {
           )}
           <Button
             size="sm"
+            variant="outline"
+            onClick={() => refreshAll()}
+            disabled={loading}
+            className="h-7 rounded-none px-3 text-[10px] font-bold"
+          >
+            {/* No spin: the list greys out while loading, the icon stays still. */}
+            <RefreshCw className="h-3 w-3 me-1" />
+            {ar ? 'تحديث' : 'Refresh'}
+          </Button>
+          <Button
+            size="sm"
             onClick={handleSendNow}
             disabled={sending}
             className="h-7 rounded-none px-3 text-[10px] font-bold"
@@ -391,11 +443,120 @@ export default function QueueClient() {
         </div>
       </div>
 
+      {/* Selection bar — only while something is ticked. */}
+      {selectedCount > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border border-border bg-muted/40 px-3 py-2">
+          <span className="text-[11px] font-bold text-foreground">
+            {ar ? `محدَّد: ${selectedCount}` : `Selected: ${selectedCount}`}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleArchive([...selected])}
+            disabled={archiving}
+            className="h-7 rounded-none px-3 text-[10px] font-bold"
+          >
+            <Archive className="h-3 w-3 me-1" />
+            {archiving
+              ? (ar ? 'جارٍ الأرشفة…' : 'Archiving…')
+              : (ar ? `أرشفة المحدد (${selectedCount})` : `Archive selected (${selectedCount})`)}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSelected(new Set())}
+            disabled={archiving}
+            className="h-7 rounded-none px-2 text-[10px] font-bold text-muted-foreground"
+          >
+            <X className="h-3 w-3 me-1" />
+            {ar ? 'إلغاء التحديد' : 'Clear'}
+          </Button>
+          <span className="text-[10px] text-muted-foreground">
+            {ar
+              ? 'الأرشفة تُخرج العنصر من الطابور وتُبقيه 7 أيام قابلاً للاستعادة.'
+              : 'Archiving removes the item from the queue and keeps it restorable for 7 days.'}
+          </span>
+        </div>
+      )}
+
+      {/* Manually archived rows live in the Archive tab (7-day window). */}
+      {kind === 'dead' && archives.length > 0 && (
+        <div className="border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground/70">
+              {ar ? 'مؤرشف يدوياً — يُحذف نهائياً بعد 7 أيام' : 'Archived by hand — deleted after 7 days'}
+            </span>
+            <span className="text-[10px] font-bold tabular-nums text-muted-foreground">{archives.length}</span>
+          </div>
+          <ul className="divide-y divide-border">
+            {archives.map((a) => {
+              const daysLeft = queueArchiveDaysLeft(a.expires_at)
+              const ref = a.entity_id || a.original_id || a.source_id
+              return (
+                <li
+                  key={a.id}
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[11px]"
+                >
+                  <span className="inline-flex items-center gap-1 border border-border bg-muted px-2 py-0.5 text-[10px] font-bold text-muted-foreground">
+                    <Archive className="h-3 w-3" />
+                    {ar ? 'مؤرشف' : 'Archived'}
+                  </span>
+                  <span className="max-w-[220px] truncate font-mono font-semibold text-foreground" title={a.event || ''}>
+                    {a.event || '—'}
+                  </span>
+                  <span className="max-w-[200px] truncate font-mono text-muted-foreground" dir="ltr" title={ref}>
+                    {ref}
+                  </span>
+                  <span className="text-muted-foreground">{formatQueueDate(a.archived_at, ar)}</span>
+                  <span
+                    className={cn(
+                      'tabular-nums',
+                      daysLeft === 0 ? 'text-destructive' : 'text-muted-foreground'
+                    )}
+                  >
+                    {daysLeft === null
+                      ? '—'
+                      : ar
+                        ? `يُحذف بعد ${daysLeft} يوم`
+                        : `${daysLeft}d left`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRestore(a.id)}
+                    disabled={restoring === a.id}
+                    className="ms-auto h-6 rounded-none px-2 text-[10px] font-bold"
+                  >
+                    <RotateCcw className="h-3 w-3 me-1" />
+                    {restoring === a.id
+                      ? (ar ? 'جارٍ…' : 'Working…')
+                      : (ar ? 'استعادة' : 'Restore')}
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[11px]">
           <thead>
             <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
+              <th className="w-8 px-2 py-2.5 text-start">
+                <input
+                  type="checkbox"
+                  aria-label={ar ? 'تحديد كل ما في الصفحة' : 'Select all on this page'}
+                  checked={allOnPageSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someOnPageSelected && !allOnPageSelected
+                  }}
+                  onChange={toggleAllOnPage}
+                  disabled={rows.length === 0}
+                  className="h-3.5 w-3.5 cursor-pointer accent-foreground disabled:opacity-40"
+                />
+              </th>
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'الحالة' : 'Status'}</th>
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'المنصة' : 'Platform'}</th>
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'الحدث' : 'Event'}</th>
@@ -403,7 +564,7 @@ export default function QueueClient() {
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'المحاولات' : 'Retries'}</th>
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'السبب / الخطأ' : 'Reason / error'}</th>
               <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{ar ? 'الوقت' : 'Time'}</th>
-              <th className="px-2 py-2.5 w-8" />
+              <th className="w-16 px-2 py-2.5" />
             </tr>
           </thead>
           <tbody>
@@ -421,6 +582,7 @@ export default function QueueClient() {
                   const itemRef = row.entity_id || row.original_id || row.dedup_key || ''
                   const retries = row.retry_count ?? row.attempts ?? null
                   const stamp = row.created_at ?? row.received_at ?? row.died_at ?? null
+                  const isChecked = selected.has(row.id)
                   return (
                     <tr
                       key={row.id}
@@ -433,8 +595,21 @@ export default function QueueClient() {
                           openItem(row.id)
                         }
                       }}
-                      className="cursor-pointer transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
+                      className={cn(
+                        'cursor-pointer transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none',
+                        isChecked && 'bg-muted/50'
+                      )}
                     >
+                      <td className="px-2 py-2.5">
+                        <input
+                          type="checkbox"
+                          aria-label={ar ? 'تحديد العنصر' : 'Select item'}
+                          checked={isChecked}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleRow(row.id)}
+                          className="h-3.5 w-3.5 cursor-pointer accent-foreground"
+                        />
+                      </td>
                       <td className="px-2 py-2.5 whitespace-nowrap">
                         <QueueStatusBadge kind={kind} />
                       </td>
@@ -476,8 +651,23 @@ export default function QueueClient() {
                       <td className="px-2 py-2.5 whitespace-nowrap text-muted-foreground">
                         {formatQueueDate(stamp, ar)}
                       </td>
-                      <td className="px-2 py-2.5 text-end text-muted-foreground">
-                        <OpenIcon className="h-3.5 w-3.5 inline-block" />
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleArchive([row.id])
+                            }}
+                            disabled={archiving}
+                            title={ar ? 'أرشفة (تُستعاد خلال 7 أيام)' : 'Archive (restorable for 7 days)'}
+                            aria-label={ar ? 'أرشفة العنصر' : 'Archive item'}
+                            className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+                          >
+                            <Archive className="h-3.5 w-3.5" />
+                          </button>
+                          <OpenIcon className="h-3.5 w-3.5 inline-block text-muted-foreground" />
+                        </div>
                       </td>
                     </tr>
                   )
