@@ -4625,7 +4625,7 @@ export async function processWebhookEvent(
             const apiOptions = Array.isArray((productData as any).options) && (productData as any).options.length > 0 ? (productData as any).options : null
             const apiAttributes = Array.isArray(productData.attributes) && productData.attributes.length > 0 ? productData.attributes : null
             const apiStructure = productData.structure && productData.structure !== 'standalone' ? productData.structure : null
-            const apiHasOptions = productData.has_options === true
+            const apiHasOptions = (productData as any).has_options === true
             //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
             data = isLegacyDelivery
               ? { ...data, ...productData }
@@ -4633,6 +4633,16 @@ export async function processWebhookEvent(
                   ...productData,
                   ...data,
                 }
+            // Force API-fetched fields for grouped/bundle product detection.
+            // Webhook payloads are often minimal; we must preserve bundle data from the API.
+            const pClass = (productData as any).product_class
+            if (pClass === 'grouped_product' || pClass === 'dynamic_bundle' || pClass === 'bundle' || pClass === 'grouped') {
+              if ((productData as any).group_products) (data as any).group_products = (productData as any).group_products
+              if ((productData as any).grouped_products) (data as any).grouped_products = (productData as any).grouped_products
+              if ((productData as any).components) (data as any).components = (productData as any).components
+              if ((productData as any).bundle_products) (data as any).bundle_products = (productData as any).bundle_products
+              if (pClass) (data as any).product_class = pClass
+            }
             if (apiVariants) data.variants = apiVariants
             if (apiOptions) data.options = apiOptions
             if (apiAttributes) data.attributes = apiAttributes
