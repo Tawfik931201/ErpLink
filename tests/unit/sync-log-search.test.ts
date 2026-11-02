@@ -1,11 +1,14 @@
 /**
- * Pins the `/app/logs` list behaviour added on 2026-11-02:
+ * Pins the `/app/logs` list behaviour added on 2026-11-02, updated 2026-11-03:
  *
  *   - The instant search box filters server-side across the whole workspace, not
  *     just the 20 rows on screen, and the typed text is *data*: a comma must not
  *     append a PostgREST filter branch and a `%` must not match everything.
  *   - Input that is only punctuation matches nothing, rather than silently
  *     returning the whole workspace (which reads as "the search was ignored").
+ *   - Search uses EXACT SUBSTRING MATCHING (ILIKE) on the text representation of
+ *     each column, matching the PayloadViewer's client-side behaviour:
+ *     JSON.stringify(payload).toLowerCase().includes(query). No full-text stemming.
  *   - Column visibility is a browser preference persisted under a versioned key,
  *     with sensible defaults and a guard against hiding every column.
  *   - The refresh button does not rotate (the table shows loading state instead).
@@ -35,19 +38,19 @@ describe('sync-log instant search', () => {
     expect(syncLogSearchFilter(null)).toEqual({ kind: 'none' })
   })
 
-  it('matches full-text vector + 4 ILIKE columns — 5 branches total', () => {
+  it('matches exact substring on 6 columns (payload::text + error_message + 4 visible)', () => {
     const filter = syncLogSearchFilter('ORD-12')
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
 
-    // First branch is the full-text search_vector.plfts
-    expect(filter.expression).toContain('search_vector.plfts.ORD-12')
-    // Then 4 ILIKE branches
-    for (const column of SYNC_LOG_SEARCH_COLUMNS) {
+    // All 6 branches use ILIKE with sanitised needle
+    expect(filter.expression).toContain('payload::text.ilike.%ORD-12%')
+    expect(filter.expression).toContain('error_message.ilike.%ORD-12%')
+    for (const column of ['event', 'zid_entity_id', 'odoo_model', 'store_id']) {
       expect(filter.expression).toContain(`${column}.ilike.%ORD-12%`)
     }
-    // Total 5 branches
-    expect(filter.expression.split(',').length).toBe(SYNC_LOG_SEARCH_COLUMNS.length + 1)
+    // Total 6 branches
+    expect(filter.expression.split(',').length).toBe(SYNC_LOG_SEARCH_COLUMNS.length)
   })
 
   it('keeps Arabic and spaces intact (sanitiser only affects ILIKE needle)', () => {
@@ -62,8 +65,9 @@ describe('sync-log instant search', () => {
     expect(filter.kind).toBe('match')
     if (filter.kind !== 'match') return
 
-    // Both full-text and ILIKE branches use sanitised needle (commas stripped)
-    expect(filter.expression).toContain('search_vector.plfts.abc status.eq.success')
+    // All branches use sanitised needle (commas stripped)
+    expect(filter.expression).toContain('payload::text.ilike.%abc status.eq.success%')
+    expect(filter.expression).toContain('error_message.ilike.%abc status.eq.success%')
     for (const column of SYNC_LOG_SEARCH_COLUMNS) {
       expect(filter.expression).toContain(`${column}.ilike.%abc status.eq.success%`)
     }
@@ -87,11 +91,9 @@ describe('sync-log instant search', () => {
     if (filter.kind !== 'match') return
 
     const branches = filter.expression.split(',')
-    expect(branches).toHaveLength(SYNC_LOG_SEARCH_COLUMNS.length + 1)
+    expect(branches).toHaveLength(SYNC_LOG_SEARCH_COLUMNS.length)
     for (const branch of branches) {
-      // First branch is full-text (raw input, punctuation OK for tsquery)
-      if (branch.startsWith('search_vector.plfts.')) continue
-      // ILIKE branches: sanitised needle only
+      // All branches are ILIKE: `<column>.ilike.%<needle>%`
       const needle = branch.split('.ilike.%')[1]?.slice(0, -1) ?? ''
       expect(needle).toBe('a b c')
       expect(needle).not.toMatch(/[(),*\\%_]/)

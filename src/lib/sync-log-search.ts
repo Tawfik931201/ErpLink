@@ -2,20 +2,22 @@
  * The `/app/logs` instant search rule, kept pure and import-free so it can be
  * unit-tested without a database (the action file is `'use server'`).
  *
- * Search is a case-insensitive match across the whole log row, not just the
- * columns the list can show. A merchant typing an order name wants every log
- * that mentions it — and an order name usually lives inside the `payload`
- * JSON or the `error_message`, neither of which the list selects. So the
- * query is a single PostgREST `or(...)` of:
+ * Search is a case-insensitive exact substring match across the whole log row,
+ * matching the behaviour of the PayloadViewer in the detail page.
  *
- *   - `search_vector.plfts.<needle>` — full-text over the GIN-indexed
- *     `search_vector` column, which every write path keeps in sync
- *     (migration `20261103_sync_logs_search_vector.sql`). This is what reaches
- *     into `payload` and `error_message`.
- *   - `event.ilike` / `zid_entity_id.ilike` / `odoo_model.ilike` /
- *     `store_id.ilike` — substring fallback for the four columns the list
- *     renders, in case the full-text normaliser strips something (digits,
- *     underscores, Arabic stems).
+ * The query is a single PostgREST `or(...)` of ILIKE branches on the text
+ * representation of each searchable column:
+ *
+ *   - `payload::text.ilike.%<needle>%` — exact substring inside the JSON payload
+ *   - `error_message.ilike.%<needle>%` — exact substring inside error messages
+ *   - `event.ilike.%<needle>%` — event name
+ *   - `zid_entity_id.ilike.%<needle>%` — store-side entity ID
+ *   - `odoo_model.ilike.%<needle>%` — ERP model name
+ *   - `store_id.ilike.%<needle>%` — store identifier
+ *
+ * This avoids the `plfts` full-text search (which does stemming, stop-word
+ * removal, and normalization) and instead does literal substring matching,
+ * which is what users expect when typing an order name, SKU, phone number, etc.
  *
  * The two escaping rules are the whole point of this module:
  *
@@ -31,8 +33,10 @@
  * `1 2`, which is a truthful (if narrow) search rather than a silent widening.
  */
 
-/** Columns the substring (ILIKE) half of the search matches. */
+/** Columns the substring (ILIKE) search matches. Order is the display order. */
 export const SYNC_LOG_SEARCH_COLUMNS = [
+  'payload::text',     // JSON payload as text — exact substring like PayloadViewer
+  'error_message',     // Error/skip message text
   'event',
   'zid_entity_id',
   'odoo_model',
@@ -72,13 +76,11 @@ export function syncLogSearchFilter(input: string | null | undefined): SyncLogSe
   const needle = sanitizeSyncLogSearch(input)
   if (!needle) return { kind: 'empty' }
 
-  // Both branches use the sanitised needle — plainto_tsquery works fine with it
-  // and this prevents commas in the input from being interpreted as branch
-  // separators in PostgREST's `or(...)` expression.
-  const branches: string[] = [`search_vector.plfts.${needle}`]
-  for (const column of SYNC_LOG_SEARCH_COLUMNS) {
-    branches.push(`${column}.ilike.%${needle}%`)
-  }
+  // All branches use the sanitised needle for exact substring matching (ILIKE).
+  // This matches the PayloadViewer client-side behaviour: JSON.stringify(payload).toLowerCase().includes(query)
+  const branches: string[] = SYNC_LOG_SEARCH_COLUMNS.map(
+    (column) => `${column}.ilike.%${needle}%`
+  )
 
   return {
     kind: 'match',
