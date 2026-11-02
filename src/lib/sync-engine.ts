@@ -6218,9 +6218,9 @@ async function syncAsVariants(
 
   const ptavs = await client.searchRead<any>('product.template.attribute.value', [
     ['product_tmpl_id', '=', templateId]
-  ], ['attribute_id', 'product_attribute_value_id', 'name'])
+  ], ['id', 'attribute_id', 'product_attribute_value_id', 'name', 'price_extra'])
 
-  const ptavMap: Record<string, { attribute: string; value: string }> = {}
+  const ptavMap: Record<string, { attribute: string; value: string; price_extra: number }> = {}
   for (const ptav of ptavs) {
     const attrName = Array.isArray(ptav.attribute_id) ? ptav.attribute_id[1] : ''
     let valName = Array.isArray(ptav.product_attribute_value_id) ? ptav.product_attribute_value_id[1] : ptav.name
@@ -6230,8 +6230,15 @@ async function syncAsVariants(
         valName = valName.substring(prefix.length)
       }
     }
-    ptavMap[ptav.id] = { attribute: attrName, value: valName }
+    ptavMap[ptav.id] = { attribute: attrName, value: valName, price_extra: ptav.price_extra ?? 0 }
   }
+
+  // Fetch current template base list_price (shared by all variants in Odoo)
+  const templateRecords = await client.searchRead<any>('product.template', [
+    ['id', '=', templateId]
+  ], ['list_price'])
+  const templateBasePrice: number = templateRecords.length > 0 ? (Number(templateRecords[0].list_price) || 0) : 0
+  console.info(`[SyncEngine] Template #${templateId} base list_price = ${templateBasePrice}`)
 
   for (const odooVar of generatedVariants) {
     const odooVarAttrs: Record<string, string> = {}
@@ -6315,21 +6322,53 @@ async function syncAsVariants(
       if (variant.barcode) {
         updatePayload.barcode = variant.barcode
       }
-      let variantPrice = variant.price
-      if (variantPrice > 0 && priceSettings) {
-        if (priceSettings.markup_percent !== 0) {
-          variantPrice = variantPrice * (1 + priceSettings.markup_percent / 100)
+
+      // ── Per-variant price via price_extra ────────────────────────────────────
+      // In Odoo, writing list_price to product.product writes to the shared
+      // product.template, overwriting ALL variants' prices with the same value.
+      // The correct approach is:
+      //   final_price = template.list_price + sum(ptav.price_extra)
+      // So we set price_extra on each product.template.attribute.value (PTAV)
+      // that belongs to this variant.  The template list_price is kept at the
+      // price of the FIRST variant (base) so the UI always shows a sensible
+      // base price; every other variant is expressed as a delta.
+      if (variant.price > 0) {
+        let variantPrice = variant.price
+        if (priceSettings) {
+          if (priceSettings.markup_percent !== 0) {
+            variantPrice = variantPrice * (1 + priceSettings.markup_percent / 100)
+          }
+          if (priceSettings.rounding && priceSettings.decimal_places !== undefined) {
+            const factor = Math.pow(10, priceSettings.decimal_places)
+            if (priceSettings.rounding === 'nearest') variantPrice = Math.round(variantPrice * factor) / factor
+            else if (priceSettings.rounding === 'ceil') variantPrice = Math.ceil(variantPrice * factor) / factor
+            else if (priceSettings.rounding === 'floor') variantPrice = Math.floor(variantPrice * factor) / factor
+          }
         }
-        if (priceSettings.rounding && priceSettings.decimal_places !== undefined) {
-          const factor = Math.pow(10, priceSettings.decimal_places)
-          if (priceSettings.rounding === 'nearest') variantPrice = Math.round(variantPrice * factor) / factor
-          else if (priceSettings.rounding === 'ceil') variantPrice = Math.ceil(variantPrice * factor) / factor
-          else if (priceSettings.rounding === 'floor') variantPrice = Math.floor(variantPrice * factor) / factor
+
+        // Get PTAV IDs linked to this odoo variant
+        const varPtavIds: number[] = matchingOdooVar.product_template_attribute_value_ids || []
+        if (varPtavIds.length > 0) {
+          // price_extra = variant_price - template_base_price, split equally among
+          // the attribute dimensions of this variant (Odoo sums them).
+          // If the variant has N attribute dimensions, each gets (delta / N).
+          const delta = variantPrice - templateBasePrice
+          const priceExtraPerPtav = varPtavIds.length > 0 ? delta / varPtavIds.length : delta
+          for (const ptavId of varPtavIds) {
+            await client.write('product.template.attribute.value', [ptavId], {
+              price_extra: priceExtraPerPtav
+            }).catch((err: any) => {
+              console.warn(`[SyncEngine] Failed to update price_extra on PTAV #${ptavId}: ${err?.message ?? err}`)
+            })
+          }
+          console.info(`[SyncEngine] Set price_extra=${priceExtraPerPtav} on PTAVs [${varPtavIds.join(',')}] for variant #${matchingOdooVar.id} (target price: ${variantPrice}, base: ${templateBasePrice})`)
+        } else {
+          // No PTAVs (single-variant template) — safe to write list_price directly
+          updatePayload.list_price = variantPrice
         }
       }
-      if (variantPrice > 0) {
-        updatePayload.list_price = variantPrice
-      }
+      // ─────────────────────────────────────────────────────────────────────────
+
       if (variant.cost !== undefined && variant.cost > 0) {
         updatePayload.standard_price = variant.cost
       }
@@ -6381,9 +6420,8 @@ async function syncAsVariants(
         if (variant.barcode) {
           createVariantPayload.barcode = variant.barcode
         }
-        if (variant.price > 0) {
-          createVariantPayload.list_price = variant.price
-        }
+        // NOTE: Do NOT set list_price here — it writes to the shared template.
+        // price_extra is set after creation via PTAVs (same logic as update path).
         if (variant.cost !== undefined && variant.cost > 0) {
           createVariantPayload.standard_price = variant.cost
         }
@@ -6395,6 +6433,18 @@ async function syncAsVariants(
         }
         const createdVarId = await client.create('product.product', createVariantPayload)
         console.info(`[SyncEngine] Created missing Odoo variant product.product #${createdVarId} under template #${templateId}`)
+        // Set per-variant price via price_extra on PTAVs after creation
+        if (variant.price > 0 && matchedPtavIds.length > 0) {
+          const delta = variant.price - templateBasePrice
+          const priceExtraPerPtav = matchedPtavIds.length > 0 ? delta / matchedPtavIds.length : delta
+          for (const ptavId of matchedPtavIds) {
+            await client.write('product.template.attribute.value', [ptavId], {
+              price_extra: priceExtraPerPtav
+            }).catch((err: any) => {
+              console.warn(`[SyncEngine] Failed to set price_extra on PTAV #${ptavId} for new variant: ${err?.message ?? err}`)
+            })
+          }
+        }
         if (variant.quantity !== undefined) {
           await updateOdooStock(client, createdVarId, variant.quantity, defaultLocationId, infiniteValue, mapping.workspace_id).catch(() => {})
         }
@@ -6665,9 +6715,9 @@ async function syncChildVariantAsVariant(
 
   const ptavs = await client.searchRead<any>('product.template.attribute.value', [
     ['product_tmpl_id', '=', templateId]
-  ], ['attribute_id', 'product_attribute_value_id', 'name'])
+  ], ['id', 'attribute_id', 'product_attribute_value_id', 'name', 'price_extra'])
 
-  const ptavMap: Record<string, { attribute: string; value: string }> = {}
+  const ptavMap: Record<string, { attribute: string; value: string; price_extra: number }> = {}
   for (const ptav of ptavs) {
     const attrName = Array.isArray(ptav.attribute_id) ? ptav.attribute_id[1] : ''
     let valName = Array.isArray(ptav.product_attribute_value_id) ? ptav.product_attribute_value_id[1] : ptav.name
@@ -6677,8 +6727,15 @@ async function syncChildVariantAsVariant(
         valName = valName.substring(prefix.length)
       }
     }
-    ptavMap[ptav.id] = { attribute: attrName, value: valName }
+    ptavMap[ptav.id] = { attribute: attrName, value: valName, price_extra: ptav.price_extra ?? 0 }
   }
+
+  // Fetch current template base list_price
+  const templateBaseRecs = await client.searchRead<any>('product.template', [
+    ['id', '=', templateId]
+  ], ['list_price'])
+  const childTemplateBasePrice: number = templateBaseRecs.length > 0 ? (Number(templateBaseRecs[0].list_price) || 0) : 0
+  console.info(`[SyncEngine] Child variant: template #${templateId} base list_price = ${childTemplateBasePrice}`)
 
   for (const odooVar of generatedVariants) {
     const odooVarAttrs: Record<string, string> = {}
@@ -6762,6 +6819,11 @@ async function syncChildVariantAsVariant(
     if (zidData.barcode) {
       updatePayload.barcode = zidData.barcode
     }
+
+    // ── Per-variant price via price_extra ────────────────────────────────────
+    // Writing list_price to product.product propagates to the shared template,
+    // so ALL variants would receive the same price.  Use price_extra on the
+    // product.template.attribute.value records tied to THIS variant instead.
     let priceVal = parseFloat(String(zidData.price || zidData.sale_price || '0'))
     if (priceVal > 0 && priceSettings) {
       if (priceSettings.markup_percent !== 0) {
@@ -6775,8 +6837,25 @@ async function syncChildVariantAsVariant(
       }
     }
     if (priceVal > 0) {
-      updatePayload.list_price = priceVal
+      const varPtavIds: number[] = matchingOdooVar.product_template_attribute_value_ids || []
+      if (varPtavIds.length > 0) {
+        const delta = priceVal - childTemplateBasePrice
+        const priceExtraPerPtav = varPtavIds.length > 0 ? delta / varPtavIds.length : delta
+        for (const ptavId of varPtavIds) {
+          await client.write('product.template.attribute.value', [ptavId], {
+            price_extra: priceExtraPerPtav
+          }).catch((err: any) => {
+            console.warn(`[SyncEngine] Failed to update price_extra on PTAV #${ptavId} (child variant): ${err?.message ?? err}`)
+          })
+        }
+        console.info(`[SyncEngine] Set price_extra=${priceExtraPerPtav} on PTAVs [${varPtavIds.join(',')}] for child variant #${matchingOdooVar.id} (target: ${priceVal}, base: ${childTemplateBasePrice})`)
+      } else {
+        // No PTAVs (e.g. single-variant template) — safe to write directly
+        updatePayload.list_price = priceVal
+      }
     }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (costVal > 0) {
       updatePayload.standard_price = costVal
     }
