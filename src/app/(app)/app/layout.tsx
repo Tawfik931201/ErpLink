@@ -103,6 +103,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // `mapping-center` would lose access the moment they open a record.
   const permissionKey = permissionMap[currentPath]
     ?? (currentPath.startsWith('/app/logs/') ? 'mapping-center' : undefined)
+    ?? (currentPath.startsWith('/app/queue/') ? 'mapping-center' : undefined)
     ?? (currentPath.startsWith('/app/mapping-center/custom/') ? 'mapping-center' : undefined)
     ?? (currentPath.startsWith('/app/mapping-center/add-field/') ? 'mapping-center' : undefined)
     ?? (currentPath.startsWith('/app/connect-store/') ? 'connect-store' : undefined)
