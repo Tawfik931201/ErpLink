@@ -5,6 +5,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { getAppBaseUrl } from '@/lib/app-url'
 import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
   const appUrl = getAppBaseUrl(request)
@@ -122,7 +123,7 @@ export async function GET(request: NextRequest) {
     return redirectToConnectStore(request, { error: 'no_active_workspace', description: AR.no_workspace })
   }
 
-  let workspaceId: string | null = userDb?.active_workspace_id ?? null
+  let workspaceId = await accessibleWorkspaceId(userId, userDb?.active_workspace_id)
   if (!workspaceId) {
     const { ensureDefaultWorkspace } = await import('@/lib/workspace-defaults')
     workspaceId = await ensureDefaultWorkspace(userId)

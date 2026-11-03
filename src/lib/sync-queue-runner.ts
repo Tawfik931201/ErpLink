@@ -108,7 +108,8 @@ async function runDrainCycle(): Promise<void> {
     const { checkAdminAlerts } = await import('./admin-alerts')
     await checkAdminAlerts().catch(() => {})
   } catch {
-    // الأخطاء مسجلة في عدادات الطابور — لا console لكل دورة.
+    // Keep worker failures visible without serializing provider/customer data.
+    console.error('[sync-queue] drain cycle failed; durable pending work will be retried on a later cycle')
   } finally {
     g.__syncQueueRunnerProcessing = false
   }

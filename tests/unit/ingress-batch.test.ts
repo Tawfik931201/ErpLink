@@ -33,7 +33,7 @@ describe('the ingress batcher', () => {
     expect(batch).toContain('insertReceipts')
     expect(batch).toContain('insertQueueRows')
     expect(queue).toContain('await insertReceipts([')
-    expect(queue).toContain('await insertQueueRows([')
+    expect(queue).toContain('await dispatchWebhookReceipt(receipt.id,')
     expect(batch).not.toMatch(/void insertReceipts\(/)
   })
 

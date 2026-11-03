@@ -231,20 +231,24 @@ describe('restore returns the item to the queue', () => {
     expect(body).toContain("eq('workspace_id', workspaceId)")
   })
 
-  it('inserts into sync_queue with a fresh dedup key', () => {
-    expect(body).toContain("from('sync_queue').insert(")
-    expect(body).toMatch(/dedup_key: `restore:/)
-    expect(body).toContain('next_retry_at: new Date().toISOString()')
+  it('restores the original pinned snapshot rather than inventing a new delivery identity', () => {
+    expect(body).toContain('row.row_data')
+    expect(body).toContain('await restorePinnedJob(original, workspaceId)')
+    const helper = flat(action.slice(action.indexOf('async function restorePinnedJob'), action.indexOf('// ─── الأرشفة اليدوية')))
+    expect(helper).toContain('id: originalId')
+    expect(helper).toContain('receipt_id: row.receipt_id')
+    expect(helper).toContain('validateExecutionTarget')
+    expect(helper).toContain('connection_generation: generation')
   })
 
-  it('removes the archive row only after the queue insert succeeded', () => {
-    const insert = body.indexOf("from('sync_queue').insert(")
+  it('removes the archive only after validated restoration succeeds', () => {
+    const restore = body.indexOf('await restorePinnedJob(original, workspaceId)')
     const del = body.indexOf('from(QUEUE_ARCHIVES_TABLE) .delete()')
-    expect(insert).toBeGreaterThan(-1)
-    expect(del).toBeGreaterThan(-1)
-    expect(insert).toBeLessThan(del)
-    expect(body).toContain('if (insertErr) return { success: false, error: insertErr.message }')
+    expect(restore).toBeGreaterThan(-1)
+    expect(del).toBeGreaterThan(restore)
+    expect(body).toContain('if (!restored.success) return restored')
   })
+
 })
 
 describe('the seven-day promise is actually enforced', () => {

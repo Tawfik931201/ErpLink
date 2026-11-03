@@ -17,6 +17,7 @@
  * نتجاوز سقف 60 طلب/دقيقة من زد.
  */
 
+import { resolveExecutionTarget } from './erp-execution-target'
 import { supabase } from './supabase'
 import { enqueueWebhookEvent } from './sync-queue'
 import { isWebhookEventEnabled } from './webhook-gate'
@@ -35,23 +36,31 @@ const MAX_ENQUEUED_PER_RUN = 100
 interface ReconcileState {
   lastSuccess: string | null
   lastError: string | null
+  lastAttempt: string | null
+  cursor: { from: string; to: string; page: number } | null
 }
 
 async function readState(scope: string): Promise<ReconcileState> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sync_reconcile_state')
-    .select('last_success, last_error')
+    .select('last_success, last_error, last_attempt, cursor')
     .eq('scope', scope)
     .maybeSingle()
+  if (error) throw new Error('Reconciliation state unavailable')
+  const row = data as { last_success?: string; last_error?: string; last_attempt?: string; cursor?: { from?: string; to?: string; page?: number } } | null
+  const cursor = row?.cursor
   return {
     lastSuccess: (data as { last_success?: string } | null)?.last_success ?? null,
     lastError: (data as { last_error?: string } | null)?.last_error ?? null,
+    lastAttempt: row?.last_attempt ?? null,
+    cursor: cursor?.from && cursor.to && Number.isInteger(cursor.page) && Number(cursor.page) > 0 && Number.isFinite(Date.parse(cursor.from)) && Number.isFinite(Date.parse(cursor.to))
+      ? { from: cursor.from, to: cursor.to, page: Number(cursor.page) } : null,
   }
 }
 
 async function writeState(
   scope: string,
-  patch: { lastSuccess?: string | null; lastError?: string | null; itemsSeen?: number }
+  patch: { lastSuccess?: string | null; lastError?: string | null; itemsSeen?: number; cursor?: ReconcileState['cursor'] }
 ): Promise<void> {
   const now = new Date().toISOString()
   const row: Record<string, unknown> = {
@@ -62,11 +71,11 @@ async function writeState(
   if (patch.lastSuccess !== undefined) row.last_success = patch.lastSuccess
   if (patch.lastError !== undefined) row.last_error = patch.lastError
   if (patch.itemsSeen !== undefined) row.items_seen = patch.itemsSeen
+  if (patch.cursor !== undefined) row.cursor = patch.cursor ?? {}
 
   const { error } = await supabase.from('sync_reconcile_state').upsert(row, { onConflict: 'scope' })
   if (error) {
-    // غير قاتل: التسوية تعمل بدون علامة مائية (ستعيد فحص نافذة أوسع).
-    console.warn('[Reconcile] failed to persist state:', error.message)
+    throw new Error(`Reconciliation state persistence failed: ${error.code || 'storage_error'}`)
   }
 }
 
@@ -119,31 +128,38 @@ export async function reconcileZidOrders(
     return result
   }
 
-  const state = await readState(result.scope)
-  // نبدأ من آخر نجاح، ونضيف تداخلاً generously حتى لا تفقدنا فجوة دقيقة واحدة.
-  const from = state.lastSuccess
-    ? new Date(new Date(state.lastSuccess).getTime() - OVERLAP_MINUTES * 60_000)
-    : new Date(now.getTime() - windowMinutes * 60_000)
-  const to = new Date(now.getTime() - 60_000) // استبعاد الدقيقة الأخيرة (قد تكون ناقصة)
-  result.windowFrom = from.toISOString()
+  type Merchant = { merchant_id?: string | number; store_id?: string | number; workspace_id: string }
+  const candidates: Array<{ row: Merchant; merchantKey: string; storeId: string; scope: string; state: ReconcileState }> = []
+  for (const row of (merchants ?? []) as Merchant[]) {
+    const merchantKey = String(row.merchant_id || row.store_id || '')
+    const storeId = String(row.store_id || row.merchant_id || '')
+    if (!merchantKey || !row.workspace_id) { result.merchantsSkipped++; continue }
+    try {
+      const target = await resolveExecutionTarget(row.workspace_id, 'zid', storeId)
+      const scope = JSON.stringify(['zid', 'orders', row.workspace_id, storeId, target.erpConnectionId, target.connectionGeneration])
+      candidates.push({ row, merchantKey, storeId, scope, state: await readState(scope) })
+    } catch (error) {
+      result.errors.push(`${storeId}: ${error instanceof Error ? error.message.slice(0, 150) : 'target unavailable'}`)
+    }
+  }
+  candidates.sort((a, b) => (Date.parse(a.state.lastAttempt || '') || 0) - (Date.parse(b.state.lastAttempt || '') || 0))
 
-  for (const row of (merchants ?? []) as Array<{
-    merchant_id?: string | number
-    store_id?: string | number
-    workspace_id: string
-  }>) {
-    if (result.apiCalls >= MAX_API_CALLS_PER_RUN) {
+  for (const { row, merchantKey, storeId, scope, state } of candidates) {
+    if (result.apiCalls >= MAX_API_CALLS_PER_RUN || result.enqueued + result.duplicates >= MAX_ENQUEUED_PER_RUN) {
       result.stopped = 'rate_ceiling'
       break
     }
-
-    const merchantKey = String(row.merchant_id || row.store_id || '')
-    if (!merchantKey) {
-      result.merchantsSkipped += 1
-      continue
-    }
-
+    const from = state.cursor?.from || (state.lastSuccess
+      ? new Date(new Date(state.lastSuccess).getTime() - OVERLAP_MINUTES * 60_000).toISOString()
+      : new Date(now.getTime() - windowMinutes * 60_000).toISOString())
+    const to = state.cursor?.to || new Date(now.getTime() - 60_000).toISOString()
+    const page = state.cursor?.page || 1
+    const cursor = { from, to, page }
+    if (!result.windowFrom || from < result.windowFrom) result.windowFrom = from
     try {
+      // Persist the fixed window before its first API call. A partial page may
+      // be replayed, but must never disappear as wall time advances.
+      await writeState(scope, { cursor, lastError: null })
       const token = await getAccessToken(merchantKey)
       if (!token) {
         result.merchantsSkipped += 1
@@ -165,55 +181,56 @@ export async function reconcileZidOrders(
 
       result.apiCalls += 1
       const listParams: ZidOrderListParams = {
-        page: 1,
+        page,
         per_page: 50,
         // نرتّب حسب وقت آخر تعديل: هذا ما يجعل النافذة المتزايدة دقيقة.
         date_attribute: 'updated_at',
-        date_from: from.toISOString(),
-        date_to: to.toISOString(),
+        date_from: from,
+        date_to: to,
         sort_by: 'asc',
         order_by: 'created_at',
       }
       const res = await ZidAPI.orders.list(creds, listParams)
 
       const resData = res?.data as { orders?: unknown[]; results?: unknown[] } | undefined
-      const orders = (Array.isArray(resData?.orders) ? resData?.orders : Array.isArray(resData?.results) ? resData?.results : []) ?? []
+      if (!Array.isArray(resData?.orders) && !Array.isArray(resData?.results)) throw new Error('Invalid reconciliation order list')
+      const orders = (Array.isArray(resData?.orders) ? resData.orders : resData?.results) ?? []
       result.merchantsChecked += 1
-
-      for (const order of orders.slice(0, MAX_ENQUEUED_PER_RUN)) {
+      let pageComplete = true
+      let seen = 0
+      for (const order of orders) {
+        if (result.enqueued + result.duplicates >= MAX_ENQUEUED_PER_RUN) { pageComplete = false; result.stopped = 'rate_ceiling'; break }
         const orderData = (order ?? {}) as Record<string, unknown>
         const orderId = String(orderData.id ?? orderData.order_number ?? '')
-        if (!orderId) continue
+        if (!orderId) throw new Error('Reconciliation order is missing identity')
 
         // dedup_key مبني على الطلب + وقت آخر تحديث: إعادة التسوية لا تُنتج
         // عملاً مكرراً، لكنها تضمن إعادة الدفع إن لم يصل الحدث أصلاً.
-        const updatedAt = String(orderData.updated_at ?? orderData.created_at ?? to.toISOString())
+        const updatedAt = String(orderData.updated_at ?? orderData.created_at ?? to)
         const queued = await enqueueWebhookEvent({
           workspaceId: row.workspace_id,
-          storeId: String(row.store_id),
+          storeId,
           event: 'order.updated',
           platform: 'zid',
           payload: orderData,
-          dedupKey: `reconcile:zid:${row.store_id}:${orderId}:${updatedAt}`,
+          dedupKey: `reconcile:zid:${scope}:${orderId}:${updatedAt}`,
         })
-
-        if (queued.error) result.errors.push(`${row.store_id}/${orderId}: ${queued.error}`)
+        if (queued.error || queued.skipped || (!queued.id && !queued.duplicate && !queued.coalesced)) throw new Error(`${orderId}: ${queued.error || 'dispatch not confirmed'}`)
         else if (queued.duplicate || queued.coalesced) result.duplicates += 1
         else result.enqueued += 1
+        seen++
+      }
+      if (pageComplete && orders.length < 50) {
+        await writeState(scope, { lastSuccess: to, cursor: null, lastError: null, itemsSeen: seen })
+      } else {
+        await writeState(scope, { cursor: { from, to, page: pageComplete ? page + 1 : page }, lastError: null, itemsSeen: seen })
       }
     } catch (err) {
-      result.errors.push(
-        `${row.store_id}: ${err instanceof Error ? err.message.slice(0, 150) : 'unknown error'}`
-      )
+      const message = `${storeId}: ${err instanceof Error ? err.message.slice(0, 150) : 'unknown error'}`
+      result.errors.push(message)
+      try { await writeState(scope, { lastError: message, cursor }) } catch { /* Existing persisted cursor remains recoverable. */ }
     }
   }
-
-  // العلامة المائية تتقدم فقط عند عدم وجود أخطاء — الخطأ يعيد الفحص.
-  await writeState(result.scope, {
-    lastSuccess: result.errors.length === 0 ? now.toISOString() : null,
-    lastError: result.errors.length > 0 ? result.errors[0].slice(0, 300) : null,
-    itemsSeen: result.enqueued + result.duplicates,
-  })
-
+  if (result.errors.length) result.stopped = 'error'
   return result
 }

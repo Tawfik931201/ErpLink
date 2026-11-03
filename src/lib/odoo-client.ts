@@ -29,6 +29,7 @@ import https from 'https'
 import xmlrpc from 'xmlrpc'
 
 import { checkImpersonationWriteBlock } from './auth'
+import { runErpCreateEffect } from './erp-effect-context'
 import { parseOdooVersionInfo, type OdooVersionInfo } from './odoo/version'
 
 export interface OdooConfig {
@@ -233,6 +234,24 @@ export class OdooClient {
 
   /** Generic model execute wrapper */
   async execute<T>(model: string, method: string, args: unknown[], kwargs: Record<string, unknown> = {}): Promise<T> {
+    if (method === 'create') {
+      const values = args[0]
+      if (!values || typeof values !== 'object' || Array.isArray(values)) {
+        throw new Error('ERP create requires an individual values object')
+      }
+      return runErpCreateEffect(model, values as Record<string, unknown>,
+        () => this.executeRequest<number>(model, method, args, kwargs),
+        error => !!error && typeof error === 'object' && 'faultCode' in error,
+        id => {
+          const result = Number(id)
+          if (!Number.isInteger(result) || result <= 0) throw new Error('ERP_OUTCOME_UNKNOWN: invalid persisted ERP record identity')
+          return result
+        }) as Promise<T>
+    }
+    return this.executeRequest<T>(model, method, args, kwargs)
+  }
+
+  private async executeRequest<T>(model: string, method: string, args: unknown[], kwargs: Record<string, unknown>): Promise<T> {
     // List of read-only XML-RPC methods in Odoo
     const readMethods = ['search', 'read', 'search_read', 'search_count', 'name_get', 'fields_get']
     if (!readMethods.includes(method)) {

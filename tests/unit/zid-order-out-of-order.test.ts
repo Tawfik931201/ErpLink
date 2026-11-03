@@ -20,9 +20,11 @@ describe('Zid out-of-order order webhooks', () => {
       expect(engine).toContain('order_status: orderData.order_status')
     })
 
-    it('intercepts non-existent sale.order updates to check pending order.create or auto-create', () => {
+    it('handles missing sale.order updates without stealing another queued create', () => {
       expect(engine).toContain("if (existingId === null && odooModel === 'sale.order' && odooOperation === 'update'")
-      expect(engine).toContain("Found pending order create in queue for order")
+      expect(engine).toContain('Pending creates remain owned by the fenced queue worker')
+      expect(engine).not.toContain(".delete().eq('id', matchCreate.id)")
+      expect(engine).not.toContain('await processWebhookEvent(\n          matchCreate.event')
       expect(engine).toContain("auto-creating order with available items")
     })
 

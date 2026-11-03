@@ -1,13 +1,8 @@
 /**
- * Durable webhook inbox.
- *
- * كل ويب هوك يُكتب هنا أولاً (عملية واحدة سريعة) قبل أي معالجة، وبجانبه
- * نُعيد للمنصة استجابة 200/202. هذا يضمن أن الويب هوك لا يضيع أبداً:
- * إذا فشل إدراجه في `sync_queue` (انقطاع شبكة، إعادة تشغيل السيرفر، خطأ
- * ترحيل قاعدة البيانات) يبقى السجل هنا في حالة `pending` وتقوم مهمة
- * `drainWebhookInbox` بإعادة دفعه إلى الطابور.
- *
- * المبدأ: ACK بعد الحفظ الدائم، وليس قبله.
+ * Durable receipt storage and atomic receipt-to-job dispatch.
+ * A permanent queue_id marker survives queue completion so dispatcher recovery
+ * cannot recreate an already-dispatched event. Unpinned and orphan receipts
+ * remain stored for controlled recovery; permanent new identities are retained.
  */
 
 import { supabase } from './supabase'
@@ -28,6 +23,8 @@ export interface WebhookReceipt {
   event: string
   dedupKey?: string | null
   payload: Record<string, unknown>
+  erpConnectionId?: string
+  connectionGeneration?: string
 }
 
 export interface ReceiptResult {
@@ -49,6 +46,8 @@ export async function recordWebhookReceipt(receipt: WebhookReceipt): Promise<Rec
     event: receipt.event,
     payload: receipt.payload ?? {},
     status: 'pending',
+    erp_connection_id: receipt.erpConnectionId ?? null,
+    connection_generation: receipt.connectionGeneration ?? null,
   }
   if (receipt.workspaceId) row.workspace_id = receipt.workspaceId
   if (receipt.dedupKey) row.dedup_key = receipt.dedupKey
@@ -158,61 +157,31 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
       continue
     }
 
-    const queueRow: Record<string, unknown> = {
-      workspace_id: row.workspace_id,
-      store_id: row.store_id,
-      event: row.event,
-      platform: row.platform,
-      payload: row.payload,
-      retry_count: 0,
-      // ⚠️ كان هذا الإدراج **لا يضع** max_retries ⇒ الصف كان يرث افتراضي
-      // قاعدة البيانات (3) بدل الخمسة المستخدمة في كل مكان آخر ⇒ حدث يصل
-      // عبر مسار الإنقاذ يستنفد محاولاته أسرع ويموت أبكر.
+    const dispatched = await dispatchWebhookReceipt(row.id, {
       max_retries: SYNC_QUEUE_MAX_RETRIES,
       next_retry_at: new Date().toISOString(),
-    }
-    if (row.dedup_key) queueRow.dedup_key = row.dedup_key
-
-    const { error: insertErr } = await supabase.from('sync_queue').insert(queueRow)
-
-    if (insertErr) {
-      if (isPostgrestErrorWithCode(insertErr, '23505')) {
-        // المهمة موجودة بالفعل في الطابور — لا حاجة لإعادة التنفيذ.
-        result.duplicates += 1
-        await markInboxProcessed(row.id)
-        continue
-      }
-      if (isPostgrestErrorWithCode(insertErr, '42703')) {
-        // عمود dedup_key غير موجود (ترحيل غير مطبَّق) — نعيد المحاولة بدونه.
-        const withoutKey: Record<string, unknown> = { ...queueRow }
-        delete withoutKey.dedup_key
-        const { error: retryErr } = await supabase.from('sync_queue').insert(withoutKey)
-        if (!retryErr) {
-          result.enqueued += 1
-          await markInboxProcessed(row.id)
-          continue
-        }
-        result.failed += 1
-        await markInboxFailed(row.id, retryErr.message, row.attempts)
-        continue
-      }
+    })
+    if (dispatched.error) {
       result.failed += 1
-      await markInboxFailed(row.id, insertErr.message, row.attempts)
-      continue
-    }
-
-    result.enqueued += 1
-    await markInboxProcessed(row.id)
+      await markInboxFailed(row.id, dispatched.error, row.attempts)
+    } else result.enqueued += 1
   }
 
   return result
 }
 
-async function markInboxProcessed(id: string): Promise<void> {
-  await supabase
-    .from('webhook_inbox')
-    .update({ status: 'done', processed_at: new Date().toISOString() })
-    .eq('id', id)
+/** Atomically insert one receipt-owned job and persist the dispatch marker. */
+export async function dispatchWebhookReceipt(
+  receiptId: string,
+  queueOptions: { max_retries: number; next_retry_at: string }
+): Promise<{ id?: string; error?: string }> {
+  try {
+    const { data, error } = await supabase.rpc('dispatch_webhook_receipt', {
+      p_receipt_id: receiptId, p_queue_row: queueOptions,
+    })
+    if (error || typeof data !== 'string') return { error: 'receipt_dispatch_unavailable' }
+    return { id: data }
+  } catch { return { error: 'receipt_dispatch_transport_failed' } }
 }
 
 /**
@@ -252,8 +221,7 @@ export async function completeWebhookReceipt(dedupKey: string): Promise<void> {
 }
 
 /**
- * ينقل السجلات القديمة المعالَجة إلى الأرشيف ثم يحذفها، حتى لا ينمو
- * `webhook_inbox` بلا حد مع بقاء السجل متاحاً للتدقيق.
+ * Deletes legacy completed receipts only. New durable identities are retained.
  */
 export async function pruneProcessedInbox(olderThanDays = 7): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString()
@@ -261,6 +229,7 @@ export async function pruneProcessedInbox(olderThanDays = 7): Promise<number> {
     .from('webhook_inbox')
     .delete()
     .eq('status', 'done')
+    .eq('durable_version', 1)
     .lt('processed_at', cutoff)
     .select('id')
   if (error) return 0

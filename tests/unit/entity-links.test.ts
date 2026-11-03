@@ -44,6 +44,8 @@ function readStripped(relativePath: string): string {
 }
 
 const LINK = {
+  erpConnectionId: 'conn-1',
+  connectionGeneration: 'generation-1',
   workspaceId: 'ws-1',
   platform: 'salla' as const,
   storeId: 'merchant-9',
@@ -116,6 +118,8 @@ describe('upsertEntityLink writes a fully-scoped row, best-effort', () => {
     expect(write).toBeDefined()
     const row = (write!.args[0] ?? {}) as Record<string, unknown>
     expect(row.workspace_id).toBe('ws-1')
+    expect(row.erp_connection_id).toBe('conn-1')
+    expect(row.connection_generation).toBe('generation-1')
     expect(row.platform).toBe('salla')
     expect(row.store_id).toBe('merchant-9')
     expect(row.odoo_model).toBe('sale.order')
@@ -152,6 +156,8 @@ describe('resolveEntityLinkId never guesses across scopes', () => {
     expect(read).toBeDefined()
     const filters = new Map(read!.filters)
     expect(filters.get('workspace_id')).toBe('ws-1')
+    expect(filters.get('erp_connection_id')).toBe('conn-1')
+    expect(filters.get('connection_generation')).toBe('generation-1')
     expect(filters.get('platform')).toBe('salla')
     expect(filters.get('store_id')).toBe('merchant-9')
     expect(filters.get('odoo_model')).toBe('sale.order')

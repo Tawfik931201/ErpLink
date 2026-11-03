@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { recordAudit } from '@/lib/audit-logs'
+import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { resolveEventOperation } from '@/lib/event-operation'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
@@ -29,7 +30,7 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set([
   'app/scopes_update',
 ])
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   const rawBody = await req.text()
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
@@ -458,4 +459,8 @@ export async function GET() {
     ok: true,
     message: 'Shopify webhook endpoint is ready.',
   })
+}
+
+export async function POST(req: NextRequest) {
+  return withDurableWebhookResponse('shopify', req, handlePost)
 }

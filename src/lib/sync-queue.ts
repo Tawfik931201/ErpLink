@@ -1,24 +1,10 @@
 /**
- * Sync Retry Queue — الطابور المركزي لكل المنصات (zid / salla / shopify).
- *
- * الدور: استقبال أحداث الويب هوك بسرعة (enqueue فقط) ثم معالجتها في الخلفية
- * بحد توازٍ وحجم دفعة محدودين، مع idempotency ودمج الأحداث المتكررة.
- *
- * المعالجة الفعلية تتم خارج مسار الطلب عبر:
- *   - GET /api/cron/sync-queue (مجدول خارجي — Vercel Cron أو ما يشابهه)
- *   - أو startSyncQueueRunner() من عملية طويلة العمر فقط (لا تُستدعى داخل request)
- *
- * ضمانات:
- *   - Idempotency ذرّي: `dedup_key` + فهرس فريد جزئي، فالتسليمات المكرّرة
- *     تنهار إلى صف واحد حتى مع تزامن عمليّن (وليس فحصاً فقط).
- *   - الدمج: نفس الكيان المعلّق (platform+event+store+entity) يُدمج في صف
- *     واحد (coalescing) — يمتص الدفعات ويلغي الضغط على Odoo.
- *   - حد توازٍ وحجم دفعة محسوبان من البيئة (5/20 افتراضياً، 10/50 حالياً).
- *   - Backoff أسّي مع حد أقصى + jitter، و max_retries لكل صف (افتراضي 5).
- *   - لا فقدان صامت: أي تنفيذ بلا نتيجة يُعامل كـ«فشل» ويُعاد جدولته.
- *   - لا حذف نهائي: الصفوف المستنفدة تُنقل إلى `sync_queue_dead` (صندوق
- *     الموتى) وتبقى قابلة للتدقيق وإعادة التشغيل.
- *   - تنظيف دوري مخنوق (مرة/ساعة) حتى لا يستهلك cron موارد على idle.
+ * Durable webhook processing backed by Supabase inbox receipts and queue jobs.
+ * New receipts pin the ERP connection generation. Atomic dispatch links each
+ * receipt to one job permanently; distinct accepted deliveries are retained.
+ * RPC claims separate retry scheduling from fenced, renewable worker leases.
+ * Unknown remote outcomes are quarantined for reconciliation, never replayed
+ * automatically. This is not an exactly-once guarantee across ERP systems.
  */
 
 import { createHash } from 'crypto'
@@ -53,7 +39,7 @@ const SYNC_QUEUE_ITEM_TIMEOUT_MS = Number(process.env.SYNC_QUEUE_ITEM_TIMEOUT_MS
 /**
  * يحيط عملاً بمهلة — **خالص**.
  * عند انتهاء المهلة يُرفض العمل، وتستمر المهمة الأصلية في الخلفية حتى تنتهي
- * (أثرها محدود: الكتابة في أودوو idempotent، والصف يُعاد جدولته).
+ * لذلك يُحجز ناتجها كغير مؤكد ولا تُعاد كتابة ERP تلقائياً.
  */
 export function withItemTimeout<T>(work: Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -360,6 +346,8 @@ interface EnqueueParams {
    * اتركه فارغاً إذا لم توفّر المنصة delivery id.
    */
   dedupKey?: string | null
+  nextRetryAt?: string
+  executionTarget?: { erpConnectionId: string; connectionGeneration: string }
 }
 
 /**
@@ -367,19 +355,19 @@ interface EnqueueParams {
  */
 export async function enqueueFailedSync(params: EnqueueParams & { errorMessage: string }) {
   if (!params.workspaceId) return
-  const backoffMinutes = seasonBaseMinutes()
-
-  await supabase.from('sync_queue').insert({
-    workspace_id: params.workspaceId,
-    store_id: params.storeId,
-    event: params.event,
-    platform: params.platform,
-    payload: params.payload,
-    error_message: params.errorMessage?.slice(0, 500),
-    retry_count: 0,
-    max_retries: SYNC_QUEUE_MAX_RETRIES,
-    next_retry_at: new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString(),
+  const { getErpExecutionScope } = await import('./erp-execution-target')
+  const scope = getErpExecutionScope()
+  const queued = await enqueueWebhookEvent({
+    ...params,
+    nextRetryAt: new Date(Date.now() + seasonBaseMinutes() * 60 * 1000).toISOString(),
+    executionTarget: scope ? { erpConnectionId: scope.erpConnectionId, connectionGeneration: scope.connectionGeneration } : undefined,
   })
+  if (queued.error) throw new Error(queued.error)
+  if (queued.id && /unknown.outcome|outcome.unknown|uncertain|in.progress/i.test(params.errorMessage)) {
+    await supabase.from('sync_queue').update({ outcome_unknown: true, next_retry_at: null,
+      error_message: 'ERP_OUTCOME_UNKNOWN: manual failure requires reconciliation',
+    }).eq('id', queued.id).is('lease_token', null)
+  }
 }
 
 export interface EnqueueResult {
@@ -414,221 +402,52 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
   }
 
   const metrics = getMetricsStore()
-  const entityId = extractEntityId(params.payload)
   const deliveryId = extractDeliveryId(params.payload)
-  // مفتاح التكرار يميّز **التسليم** لا **السجل**:
-  //   1) delivery id صريح من المنصة ⇒ تكرار حقيقي لنفس الرسالة ⇒ مكرّر.
-  //   2) لا delivery id (زد) ⇒ بصمة المحتوى. التحديثان المختلفان لنفس الطلب
-  //      يحملان `updated_at` مختلفاً ⇒ بصمتان مختلفتان ⇒ كلاهما يُعالَج.
-  //      أما إعادة إرسال نفس الرسالة فيعطي البصمة نفسها ⇒ تُدمجان.
-  const dedupKey =
-    params.dedupKey ??
-    (deliveryId
-      ? `delivery:${params.platform}:${params.storeId}:${params.event}:${deliveryId}`
-      : `fingerprint:${params.platform}:${params.storeId}:${params.event}:${fingerprintPayload(params.payload)}`)
-
-  // ── 0) الاستلام الدائم أولاً ───────────────────────────────────────────────
-  // نكتب الحدث في `webhook_inbox` قبل أي شيء آخر. إن فشل ذلك نُرجع error
-  // فيردّ المتصل بـ 5xx فتعيد المنصة الإرسال — لا تضيع.
-  //
-  // ⚠️ مسار أودوو **لا يُجمَّع**: Automated Action في أودوو لا يعيد الإرسال
-  // بعد خطأ، فنكتب فيه فوراً بلا انتظار. بقية المنصات تعيد الإرسال عند
-  // 5xx،⇒ التجميع الآمن فيها.
+  const dedupKey = params.dedupKey ?? (deliveryId
+    ? `delivery:${params.platform}:${params.storeId}:${params.event}:${deliveryId}`
+    : `fingerprint:${params.platform}:${params.storeId}:${params.event}:${fingerprintPayload(params.payload)}`)
+  const { resolveExecutionTarget, validateExecutionTarget } = await import('./erp-execution-target')
+  let target
+  try {
+    if (params.executionTarget) {
+      await validateExecutionTarget(params.workspaceId, params.platform, params.storeId, params.executionTarget)
+      target = params.executionTarget
+    } else target = await resolveExecutionTarget(params.workspaceId, params.platform, params.storeId)
+  } catch {
+    return { error: 'erp_execution_target_unavailable' }
+  }
+  const { recordWebhookReceipt, dispatchWebhookReceipt } = await import('./webhook-inbox')
+  // Odoo remains unbatched. Every admitted delivery is preserved individually;
+  // entity coalescing must not discard accepted business transitions.
   const useBatch = params.platform !== 'odoo'
-  const { recordWebhookReceipt, completeWebhookReceipt } = await import('@/lib/webhook-inbox')
-
-  let receipt: { ok: boolean; duplicate?: boolean; id?: string; error?: string }
+  let receipt
   if (useBatch) {
-    const { insertReceipts } = await import('@/lib/ingress-batch')
-    const [outcome] = await insertReceipts([
-      {
-        dedupKey,
-        platform: params.platform,
-        storeId: params.storeId,
-        workspaceId: params.workspaceId,
-        event: params.event,
-        payload: params.payload,
-      },
-    ])
-    receipt = outcome ?? { ok: false, error: 'inbox_insert_failed' }
+    const { insertReceipts } = await import('./ingress-batch')
+    ;[receipt] = await insertReceipts([{
+      dedupKey, platform: params.platform, storeId: params.storeId,
+      workspaceId: params.workspaceId, event: params.event, payload: params.payload,
+      erpConnectionId: target.erpConnectionId, connectionGeneration: target.connectionGeneration,
+    }])
   } else {
     receipt = await recordWebhookReceipt({
-      platform: params.platform,
-      storeId: params.storeId,
-      workspaceId: params.workspaceId,
-      event: params.event,
-      dedupKey,
-      payload: params.payload,
+      dedupKey, platform: params.platform, storeId: params.storeId,
+      workspaceId: params.workspaceId, event: params.event, payload: params.payload,
+      erpConnectionId: target.erpConnectionId, connectionGeneration: target.connectionGeneration,
     })
   }
-  if (!receipt.ok) {
-    metrics.lastError = `inbox write failed: ${receipt.error}`
-    return { error: receipt.error ?? 'inbox_write_failed' }
-  }
-  // نفس التسليم وصل من قبل — لا نكرّر العمل.
+  if (!receipt?.ok) return { error: receipt?.error ?? 'inbox_write_failed' }
   if (receipt.duplicate) {
     metrics.duplicates += 1
     return { duplicate: true }
   }
-  const settleReceipt = () => {
-    if (dedupKey) void completeWebhookReceipt(dedupKey).catch(() => {})
-  }
-
-  // ── 1) منع تكرار ذرّي إضافي داخل الطابور نفسه ─────────────────────────────
-  // ⚠️ الفحص مقيّد بصفوف pending (next_retry_at ليس NULL): الصف المجمّد
-  // (next_retry_at = NULL — كل المحاولات استُنفدت) يجب ألا يمنع إدراج حدث
-  // جديد، وإلا عاد الفيتو الذي أزاله الفهرس الجزئي في 20260928 — الصف
-  // المجمّد يعني «انتهى حظّه» لا «قيد المعالجة».
-  if (dedupKey) {
-    const { data: dup } = await supabase
-      .from('sync_queue')
-      .select('id')
-      .eq('dedup_key', dedupKey)
-      .not('next_retry_at', 'is', null)
-      .limit(1)
-      .maybeSingle()
-    if (dup) {
-      metrics.duplicates += 1
-      settleReceipt()
-      return { id: (dup as { id: string }).id, duplicate: true }
-    }
-  }
-
-  // ── 2) دمج الأحداث المتكرّرة لنفس الكيان داخل صف معلّق واحد ────────────────
-  // هذا يمتص الدفعات: تحديث واحد يصل إلى Odoo بدل N تحديثات.
-  if (entityId) {
-    try {
-      const { data: pending } = await supabase
-        .from('sync_queue')
-        .select('id,payload,created_at,updated_at')
-        .eq('workspace_id', params.workspaceId)
-        .eq('store_id', params.storeId)
-        .eq('event', params.event)
-        .eq('platform', params.platform)
-        .not('next_retry_at', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(5)
-
-      let coalesceTarget: string | null = null
-      // في مسار أودوو: الخريطتان المختلفتان على نفس السجل لا تدمجان. كل خريطة
-      // تكتب بمنطقها الخاص (حقول مختلفة) ⇒ دمجهما يُسقط كتابة إحداهما بصمت.
-      const mappingScoped = params.platform === 'odoo'
-      const newMappingId = mappingScoped ? extractFieldMappingId(params.payload) : ''
-      for (const row of (pending ?? []) as Array<{
-        id: string
-        payload: unknown
-        created_at: string
-        updated_at: string | null
-      }>) {
-        const rowPayload = (row.payload ?? {}) as Record<string, unknown>
-        if (extractEntityId(rowPayload) !== entityId) continue
-        if (mappingScoped && extractFieldMappingId(rowPayload) !== newMappingId) continue
-        const oldTs = extractPayloadUpdatedAt(rowPayload)
-        const newTs = extractPayloadUpdatedAt(params.payload)
-        const merged = newTs >= oldTs ? params.payload : rowPayload
-        // ⚠️ CAS: التحديث أشترط `updated_at` كما رأيناه للتو. بلا هذا
-        // الشرط يُستبدل payload صف محجوز من عامل آخر بنسخة أقَدم إذا
-        // وصل مدمِجان متتاليان (الأحدث يوسّع السجل ثم الأقدم يحمله عبره)،
-        // وحتى لو حُذف الصف بين القراءة والتحديث عاد التحديث ليُنشئ
-        // تحديثاً ذرياً على صف غير موجود (عدد 0) وتردد `coalesced:true`
-        // بلا شيء محفوظ فعلاً. CAS يفشل في الحالتين ⇒ نجري للإدراج.
-        const { data: updatedRows } = await supabase
-          .from('sync_queue')
-          .update({ payload: merged, updated_at: new Date().toISOString() })
-          .eq('id', row.id)
-          .eq('updated_at', row.updated_at ?? '')
-          .select('id')
-        if (updatedRows && updatedRows.length > 0) {
-          coalesceTarget = row.id
-          break
-        }
-        // CAS فشل (سباق) — جرب الصف التالي، وإلا الإدراج.
-      }
-      if (coalesceTarget) {
-        metrics.coalesced += 1
-        settleReceipt()
-        return { id: coalesceTarget, coalesced: true }
-      }
-    } catch {
-      // فشل فحص الدمج غير قاتل — تابع إلى الإدراج.
-    }
-  }
-
-  const baseRow: Record<string, unknown> = {
-    workspace_id: params.workspaceId,
-    store_id: params.storeId,
-    event: params.event,
-    platform: params.platform,
-    payload: params.payload,
-    retry_count: 0,
+  if (!receipt.id) return { error: 'inbox_receipt_id_missing' }
+  const dispatched = await dispatchWebhookReceipt(receipt.id, {
     max_retries: SYNC_QUEUE_MAX_RETRIES,
-    // نافذة الدمج: تأخير المعالجة قليلاً حتى تتكدّس تحديثات نفس الكيان
-    // فتُدمج في صف واحد (يكتب أودوو مرة واحدة بدل مرات). صفر خارج الموسم.
-    next_retry_at: new Date(Date.now() + coalesceWindowMs()).toISOString(),
-  }
-  if (dedupKey) baseRow.dedup_key = dedupKey
-
-  if (useBatch) {
-    // ── إدراج مجمَّع ───────────────────────────────────────────────────────
-    // الكتابة التي تحمل الحمولة كاملة هي أثمن ما في المسار. تجميعها يحوّل
-    // 50 كتابة ⇒ واحدة.
-    const { insertQueueRows } = await import('@/lib/ingress-batch')
-    const [outcome] = await insertQueueRows([baseRow as never])
-    if (!outcome || !outcome.ok) {
-      if (outcome?.duplicate) {
-        metrics.duplicates += 1
-        settleReceipt()
-        return { duplicate: true }
-      }
-      metrics.lastError = `queue insert failed: ${outcome?.error ?? 'queue_insert_failed'}`
-      return { error: outcome?.error ?? 'queue_insert_failed' }
-    }
-    metrics.enqueued += 1
-    settleReceipt()
-    return { id: outcome.id }
-  }
-
-  const { data, error } = await supabase
-    .from('sync_queue')
-    .insert(baseRow)
-    .select('id')
-    .maybeSingle()
-
-  if (error) {
-    const code = (error as { code?: string }).code
-    // فائز بالسباق: تسليم مطابق أُدرج بالتوازي → duplicate لا خطأ.
-    if (code === '23505') {
-      metrics.duplicates += 1
-      settleReceipt()
-      return { duplicate: true }
-    }
-    // عمود dedup_key غير موجود (ترحيل غير مطبَّق) — أعد الإدراج بدونه.
-    if (code === '42703' && dedupKey) {
-      const withoutKey: Record<string, unknown> = { ...baseRow }
-      delete withoutKey.dedup_key
-      const { data: retryData, error: retryErr } = await supabase
-        .from('sync_queue')
-        .insert(withoutKey)
-        .select('id')
-        .maybeSingle()
-      if (retryErr) {
-        // السجل ما زال في صندوق الاستقبال pending → cron سيعيد دفعه.
-        return { error: retryErr.message?.slice(0, 200) ?? 'queue_insert_failed' }
-      }
-      metrics.enqueued += 1
-      settleReceipt()
-      return { id: (retryData as { id?: string } | null)?.id }
-    }
-    // فشل الإدراج: نُبقي السجل في صندوق الاستقبال ونُبلغ المتصل بخطأ
-    // فيعيد الإرسال. هذا هو الفرق بين «فقدت الطلب» و«تأخرت الطلب».
-    metrics.lastError = `queue insert failed: ${error.message?.slice(0, 150)}`
-    return { error: error.message?.slice(0, 200) ?? 'queue_insert_failed' }
-  }
-
-  const myId = (data as { id?: string } | null)?.id
+    next_retry_at: params.nextRetryAt ?? new Date(Date.now() + coalesceWindowMs()).toISOString(),
+  })
+  if (dispatched.error) return { error: dispatched.error }
   metrics.enqueued += 1
-  settleReceipt()
-  return { id: myId }
+  return { id: dispatched.id }
 }
 
 // ─── Processing ──────────────────────────────────────────────────────────────
@@ -645,6 +464,11 @@ interface QueueItem {
   next_retry_at: string
   created_at: string
   updated_at: string | null
+  lease_token: string | null
+  lease_expires_at: string | null
+  outcome_unknown: boolean
+  erp_connection_id: string | null
+  connection_generation: string | null
 }
 
 /**
@@ -656,12 +480,16 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   metrics.lastRunAt = new Date().toISOString()
 
   const nowIso = new Date().toISOString()
+  const expired = await supabase.rpc('expire_sync_job_leases')
+  if (expired.error) { metrics.lastError = 'lease recovery unavailable'; return 0 }
   let items: QueueItem[] = []
   try {
     const { data, error } = await supabase
       .from('sync_queue')
       .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
       .not('next_retry_at', 'is', null)
+      .is('lease_token', null)
+      .eq('outcome_unknown', false)
       .lte('next_retry_at', nowIso)
       .order('next_retry_at', { ascending: true })
       .limit(Math.max(maxItems * 4, 100))
@@ -696,6 +524,8 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
             .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
             .eq('workspace_id', ws)
             .not('next_retry_at', 'is', null)
+      .is('lease_token', null)
+      .eq('outcome_unknown', false)
             .lte('next_retry_at', nowIso)
             .order('next_retry_at', { ascending: true })
             .limit(share)
@@ -717,49 +547,8 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
     return 0
   }
 
-  // ── Coalesce داخل الدفعة: احتفظ بالأحدث لكل كيان ──
-  const groups = new Map<string, QueueItem[]>()
-  for (const item of items) {
-    const entityId = extractEntityId(item.payload ?? {})
-    const deliveryId = extractDeliveryId(item.payload ?? {})
-    const key = entityId
-      ? buildDedupeKey({
-          platform: item.platform,
-          event: item.event,
-          storeId: item.store_id,
-          entityId,
-          fieldMappingId: extractFieldMappingId(item.payload ?? {}),
-        })
-      : deliveryId
-        ? `delivery:${item.platform}:${item.event}:${item.store_id}:${deliveryId}`
-        : `noid:${item.id}`
-    const list = groups.get(key)
-    if (list) list.push(item)
-    else groups.set(key, [item])
-  }
-
-  const toProcess: QueueItem[] = []
-  for (const [, group] of groups) {
-    if (group.length === 1) {
-      toProcess.push(group[0])
-      continue
-    }
-    // الأحدث حسب updated_at ثم created_at يفوز؛ البقية تُحذف دون معالجة.
-    const sorted = [...group].sort((a, b) => {
-      const tsDiff = extractPayloadUpdatedAt(b.payload ?? {}) - extractPayloadUpdatedAt(a.payload ?? {})
-      if (tsDiff !== 0) return tsDiff
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
-    toProcess.push(sorted[0])
-    const staleIds = sorted.slice(1).map((r) => r.id)
-    try {
-      await supabase.from('sync_queue').delete().in('id', staleIds)
-      metrics.coalesced += staleIds.length
-    } catch {
-      // غير قاتل — ستُعالج لاحقاً.
-      toProcess.push(...sorted.slice(1))
-    }
-  }
+  // Preserve all accepted deliveries; receipt identity is the dedup boundary.
+  const toProcess = items
 
   // ── توزيع عادل (Fair-Share Round-Robin) بين مساحات العمل ──
   // يمنع أي متجر أو عميل واحد من احتكار الطابور وحرمان بقية العملاء
@@ -818,25 +607,9 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   // الحل: نفس التحديث المشروط (يبقى ذرّياً **لكل صف** — الشرط
   // `.lte('next_retry_at', now)` هو ما يمنع العاملين من التقاط الصف
   // نفسه)، لكن **بالتوازي** وبحدّ تزامن صغير. رحلة واحدة بدل 50.
-  const CLAIM_LEASE_MS = 15 * 60 * 1000
   const CLAIM_CONCURRENCY = 10
   const claimed: QueueItem[] = []
-  const claimOne = async (item: QueueItem) => {
-    try {
-      const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
-      const { data: locked } = await supabase
-        .from('sync_queue')
-        .update({ next_retry_at: leaseUntil })
-        .eq('id', item.id)
-        .not('next_retry_at', 'is', null)
-        .lte('next_retry_at', new Date().toISOString())
-        .select('id')
-      return locked && locked.length > 0 ? item : null
-    } catch {
-      // فشل الحجز غير قاتل — تخطَّ هذا الصف في هذه الدفعة.
-      return null
-    }
-  }
+  const claimOne = (item: QueueItem) => claimQueueItem(item.id, false)
   for (let offset = 0; offset < batch.length; offset += CLAIM_CONCURRENCY) {
     const slice = batch.slice(offset, offset + CLAIM_CONCURRENCY)
     const results = await Promise.all(slice.map(claimOne))
@@ -896,6 +669,8 @@ export async function processWorkspaceQueue(
       .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
       .eq('workspace_id', workspaceId)
       .not('next_retry_at', 'is', null)
+      .is('lease_token', null)
+      .eq('outcome_unknown', false)
 
     if (!forceImmediate) {
       query = query.lte('next_retry_at', nowIso)
@@ -917,26 +692,10 @@ export async function processWorkspaceQueue(
   }
   if (items.length === 0) return empty
 
-  const CLAIM_LEASE_MS = 15 * 60 * 1000
   const claimed: QueueItem[] = []
   for (const item of items) {
-    try {
-      const leaseUntil = new Date(Date.now() + CLAIM_LEASE_MS).toISOString()
-      let lockQuery = supabase
-        .from('sync_queue')
-        .update({ next_retry_at: leaseUntil })
-        .eq('id', item.id)
-        .not('next_retry_at', 'is', null)
-
-      if (!forceImmediate) {
-        lockQuery = lockQuery.lte('next_retry_at', new Date().toISOString())
-      }
-
-      const { data: locked } = await lockQuery.select('id')
-      if (locked && locked.length > 0) claimed.push(item)
-    } catch {
-      // فشل الحجز غير قاتل — تخطَّ هذا الصف.
-    }
+    const locked = await claimQueueItem(item.id, forceImmediate)
+    if (locked) claimed.push(locked)
   }
   if (claimed.length === 0) return empty
 
@@ -1005,45 +764,68 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
   })
 }
 
-/**
- * تسوية صف ناجح بأمان — إغلاق سباق الدمج مع المعالجة:
- * أثناء الحجز (lease) قد يُدمج payload أحدث في الصف ذاته عبر coalescing.
- * الحذف غير المشروط كان يطمس ذلك payload الأحدث ويُرجع 2xx لمصدره — فقدان
- * صامت. الحل: نَقرأ الصف ونقارن `updated_at` بما رأيناه عند الجلب:
- *  - الصف حُذف (لا نتيجة) → لا شيء.
- *  - `updated_at` كما كان → قيمة الحدث نُفّذت بنجاح الآن، يُحذف (لا تحديث أحدث
- *    في الصف، فلا شيء يضيع).
- *  - `updated_at` تغيّر أثناء معالجتنا (coalescing بقيمة أحدث) → لا حذف:
- *    يُعاد الصف استحقاقاً فوراً ليعالَج بالقيمة الأحدث.
- */
-async function settleSuccessfulItem(item: QueueItem): Promise<void> {
-  const { data: row } = await supabase
-    .from('sync_queue')
-    .select('id,updated_at')
-    .eq('id', item.id)
-    .maybeSingle()
-  if (!row) return
-  const rowUpdatedAt = (row as { updated_at?: string | null }).updated_at ?? null
-  if (rowUpdatedAt !== null && item.updated_at !== null && rowUpdatedAt !== item.updated_at) {
-    // دُمج payload أحدث أثناء المعالجة — نُعيد برمجته فوراً بدل الحذف.
-    await supabase
-      .from('sync_queue')
-      .update({ next_retry_at: new Date().toISOString() })
-      .eq('id', item.id)
-    return
-  }
-  await supabase.from('sync_queue').delete().eq('id', item.id)
+/** Claim tokens fence all settlement; a stale worker cannot settle another lease. */
+async function claimQueueItem(id: string, forceImmediate: boolean): Promise<QueueItem | null> {
+  try {
+    const { data, error } = await supabase.rpc('claim_sync_job', {
+      p_job_id: id, p_force: forceImmediate, p_lease_seconds: 900,
+    })
+    if (error) { getMetricsStore().lastError = 'queue claim unavailable'; return null }
+    const item = (Array.isArray(data) ? data[0] : data) as QueueItem | undefined
+    return item?.lease_token ? item : null
+  } catch { getMetricsStore().lastError = 'queue claim transport failed'; return null }
+}
+
+async function settleSuccessfulItem(item: QueueItem): Promise<boolean> {
+  const { data, error } = await supabase.from('sync_queue').delete()
+    .eq('id', item.id).eq('lease_token', item.lease_token)
+    .select('id')
+  if (error) throw new Error('Queue success settlement failed')
+  return (data?.length ?? 0) > 0
+}
+
+async function parkUnknownOutcome(item: QueueItem): Promise<void> {
+  const { error } = await supabase.from('sync_queue').update({
+    next_retry_at: null, outcome_unknown: true, lease_token: null,
+    lease_expires_at: null, error_message: 'unknown outcome: reconciliation required',
+    last_error_at: new Date().toISOString(),
+  }).eq('id', item.id).eq('lease_token', item.lease_token)
+  if (error) getMetricsStore().lastError = 'unknown outcome quarantine failed; lease expiry recovery required'
 }
 
 async function processOneItem(item: QueueItem) {
   const metrics = getMetricsStore()
   metrics.processed += 1
+  if (!item.erp_connection_id || !item.connection_generation || !item.lease_token) {
+    await parkUnknownOutcome(item)
+    return
+  }
+  const heartbeat = setInterval(() => {
+    void (async () => {
+      try {
+        const { error } = await supabase.from('sync_queue').update({
+          lease_expires_at: new Date(Date.now() + 900_000).toISOString(),
+        }).eq('id', item.id).eq('lease_token', item.lease_token)
+          .gt('lease_expires_at', new Date().toISOString())
+        if (error) metrics.lastError = 'queue heartbeat failed'
+      } catch { metrics.lastError = 'queue heartbeat transport failed' }
+    })()
+  }, 30_000)
+  heartbeat.unref?.()
   try {
+    const { validateExecutionTarget, withErpTarget } = await import('./erp-execution-target')
+    await validateExecutionTarget(item.workspace_id, item.platform, item.store_id, {
+      erpConnectionId: item.erp_connection_id, connectionGeneration: item.connection_generation,
+    })
     // isQueueExecution=true لمنع إعادة الإدراج المكررة من داخل المحرك.
     // ── مهلة لكل حدث ───────────────────────────────────────────────────────
     // بلاها: حدث فيه 15 نداء متتالي وأحدها بطيء = 150 ثانية يحتجز عاملاً
     // من أصل 10. عشرة أحداث سيئة = الطابور كله يقف.
-    const work = (async () => {
+    const work = withErpTarget({
+      workspaceId: item.workspace_id, platform: item.platform as 'zid' | 'salla' | 'shopify' | 'odoo',
+      storeId: item.store_id, eventId: item.id,
+      erpConnectionId: item.erp_connection_id, connectionGeneration: item.connection_generation,
+    }, async () => {
       if (item.platform === 'odoo') {
         if (item.event === 'odoo.model.sync') {
           const { runBackgroundSync } = await import('@/app/api/webhooks/odoo/route')
@@ -1064,9 +846,10 @@ async function processOneItem(item: QueueItem) {
         item.platform as 'zid' | 'salla' | 'shopify',
         true,
         item.workspace_id,
-        item.id
+        item.id,
+        { erpConnectionId: item.erp_connection_id!, connectionGeneration: item.connection_generation! }
       )
-    })()
+    })
 
     const result = (await withItemTimeout(work, SYNC_QUEUE_ITEM_TIMEOUT_MS)) as
       | { ok: boolean; message?: string }
@@ -1075,16 +858,16 @@ async function processOneItem(item: QueueItem) {
 
     if (result && typeof result === 'object' && 'ok' in result) {
       if (result.ok) {
-        await settleSuccessfulItem(item)
-        metrics.succeeded += 1
-        noteWorkspaceSuccess(item.workspace_id)
+        if (await settleSuccessfulItem(item)) {
+          metrics.succeeded += 1
+          noteWorkspaceSuccess(item.workspace_id)
+        }
       } else {
         metrics.retried += 1
         await incrementRetry(item, result.message || 'Sync failed')
       }
     } else if (result && 'failed' in result && result.failed === 0) {
-      await settleSuccessfulItem(item)
-      metrics.succeeded += 1
+      if (await settleSuccessfulItem(item)) metrics.succeeded += 1
     } else if (result && typeof result === 'object' && 'records' in result) {
       const errorRecord = result.records.find((r: { status: string }) => r.status === 'failed')
       metrics.retried += 1
@@ -1092,16 +875,20 @@ async function processOneItem(item: QueueItem) {
     } else {
       // ── لا نتيجة على الإطلاق (undefined / early return) ──
       // كان الكود السابق يعتبر هذا «نجاحاً» ويحذف الصف، فتفقد المهمة بصمت.
-      // الآن يُعاد جدولتها لإعادة المحاولة؛ بعد استنفاد المحاولات تنتقل
-      // إلى صندوق الموتى (sync_queue_dead) ولا تُحذف أبداً.
+      // No result cannot prove that remote effects did not happen; quarantine it.
       metrics.retried += 1
       metrics.lastError = `no result for ${item.platform}:${item.event}`
-      await incrementRetry(item, `no result returned for ${item.platform}:${item.event}`)
+      await parkUnknownOutcome(item) // no result returned for this event
     }
   } catch (err: unknown) {
     metrics.retried += 1
     metrics.lastError = err instanceof Error ? err.message.slice(0, 300) : 'item failed'
-    await incrementRetry(item, err instanceof Error ? err.message : 'Sync failed')
+    const message = err instanceof Error ? err.message : 'Sync failed'
+    if (/exceeded|unknown.outcome|outcome.unknown|uncertain|in.progress|reconciliation required|execution.target|connection.generation/i.test(message)) {
+      await parkUnknownOutcome(item)
+    } else await incrementRetry(item, message)
+  } finally {
+    clearInterval(heartbeat)
   }
 }
 
@@ -1184,6 +971,8 @@ async function noteWorkspaceFailure(
         error_message: `circuit-breaker parked after ${count} consecutive failures: ${(errorMessage || '').slice(0, 200)}`,
       })
       .eq('workspace_id', workspaceId)
+      .is('lease_token', null)
+      .eq('outcome_unknown', false)
       .not('next_retry_at', 'is', null)
       .lte('next_retry_at', new Date(now).toISOString())
     getMetricsStore().lastError = `circuit-breaker parked workspace ${workspaceId.slice(0, 8)}… for ${Math.round(cbCooldownMs() / 60000)}min`
@@ -1194,6 +983,10 @@ async function noteWorkspaceFailure(
 
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const metrics = getMetricsStore()
+  if (/unknown.outcome|outcome.unknown|uncertain|in.progress|reconciliation required/i.test(errorMessage ?? '')) {
+    await parkUnknownOutcome(item)
+    return
+  }
   const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
 
@@ -1214,12 +1007,15 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
       .from('sync_queue')
       .update({
         retry_count: newCount,
+        lease_token: null,
+        lease_expires_at: null,
         last_error_at: new Date().toISOString(),
         next_retry_at: null,
         error_message: (errorMessage || '').slice(0, 500),
       })
       .eq('id', item.id)
       .eq('retry_count', item.retry_count || 0)
+      .eq('lease_token', item.lease_token)
       .select('id')
 
     if (freezeErr) {
@@ -1230,12 +1026,15 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
         .from('sync_queue')
         .update({
           retry_count: newCount,
+        lease_token: null,
+        lease_expires_at: null,
           last_error_at: new Date().toISOString(),
           next_retry_at: FROZEN_SENTINEL,
           error_message: (errorMessage || '').slice(0, 500),
         })
         .eq('id', item.id)
         .eq('retry_count', item.retry_count || 0)
+      .eq('lease_token', item.lease_token)
     } else if (Array.isArray(frozenRows) && frozenRows.length === 0) {
       // سباق: الصف حُذف/تغيّر تحتنا — لا تكرار العد ولا العد مرتين.
       metrics.lastError = `freeze skipped (row changed): ${item.platform}:${item.event}`
@@ -1259,12 +1058,15 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
       .from('sync_queue')
       .update({
         retry_count: newCount,
+        lease_token: null,
+        lease_expires_at: null,
         last_error_at: new Date().toISOString(),
         next_retry_at: new Date(Date.now() + backoffMinutes * 60 * 1000 + jitterMs).toISOString(),
         error_message: (errorMessage || '').slice(0, 500),
       })
       .eq('id', item.id)
       .eq('retry_count', item.retry_count || 0)
+      .eq('lease_token', item.lease_token)
   }
 }
 
@@ -1321,8 +1123,10 @@ export async function archiveExhaustedSyncJobs(olderThanDays = EXHAUSTED_RETENTI
 
   const { data, error } = await supabase
     .from('sync_queue')
-    .select('id,workspace_id,store_id,event,platform,dedup_key,payload,error_message,retry_count')
+    .select('id,workspace_id,store_id,event,platform,dedup_key,payload,error_message,retry_count,receipt_id,erp_connection_id,connection_generation,execution_key')
     .is('next_retry_at', null)
+    .eq('outcome_unknown', false)
+    .is('lease_token', null)
     .lt('last_error_at', cutoff)
     .limit(200)
 
@@ -1337,6 +1141,10 @@ export async function archiveExhaustedSyncJobs(olderThanDays = EXHAUSTED_RETENTI
     .upsert(
       rows.map((r) => ({
         original_id: r.id,
+        receipt_id: r.receipt_id ?? null,
+        erp_connection_id: r.erp_connection_id ?? null,
+        connection_generation: r.connection_generation ?? null,
+        execution_key: r.execution_key ?? null,
         workspace_id: r.workspace_id ?? null,
         store_id: r.store_id ?? null,
         event: r.event,
@@ -1355,10 +1163,15 @@ export async function archiveExhaustedSyncJobs(olderThanDays = EXHAUSTED_RETENTI
     return 0
   }
 
-  const { error: deleteErr } = await supabase
+  const { data: deletedRows, error: deleteErr } = await supabase
     .from('sync_queue')
     .delete()
     .in('id', rows.map((r) => r.id as string))
+    .is('next_retry_at', null)
+    .eq('outcome_unknown', false)
+    .is('lease_token', null)
+    .lt('last_error_at', cutoff)
+    .select('id')
 
-  return deleteErr ? 0 : rows.length
+  return deleteErr ? 0 : (deletedRows?.length ?? 0)
 }

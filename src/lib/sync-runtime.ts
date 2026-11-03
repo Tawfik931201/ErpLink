@@ -10,6 +10,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { upsertEntityLink } from './entity-links'
+import { getErpExecutionScope } from './erp-execution-target'
 
 // ─── Supabase admin client (bypasses RLS) ─────────────────────────────────────
 // Webhook requests have NO Clerk auth session, so the standard supabase client
@@ -45,12 +46,19 @@ export async function logSync(entry: {
 }) {
   console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}" trigger_type="${entry.trigger_type || 'automatic'}" id="${entry.id || 'new'}"`)
   try {
+    const executionScope = getErpExecutionScope()
+    if (executionScope && executionScope.workspaceId !== entry.workspace_id) throw new Error('Sync log execution workspace mismatch')
     // field_mapping_id must be a valid UUID or null — non-UUID strings (e.g.
     // "fixed_zid_product_create") cause 22P02 errors in the UUID column.
     const rawId = entry.field_mapping_id
     const isUuid = typeof rawId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId)
     const logData: Record<string, any> = {
       workspace_id: entry.workspace_id,
+      ...(executionScope ? {
+        erp_connection_id: executionScope.erpConnectionId,
+        connection_generation: executionScope.connectionGeneration,
+        platform: executionScope.platform,
+      } : {}),
       field_mapping_id: isUuid ? rawId : null,
       event: entry.event,
       store_id: entry.store_id,
@@ -70,6 +78,7 @@ export async function logSync(entry: {
         .from('sync_logs')
         .select('status, odoo_record_id, error_message, field_mapping_id')
         .eq('id', entry.id)
+        .eq('workspace_id', entry.workspace_id)
         .maybeSingle()
 
       if (currentLog) {
@@ -114,7 +123,7 @@ export async function logSync(entry: {
         logData.field_mapping_id = finalMappingId
       }
 
-      query = supabaseAdmin.from('sync_logs').update(logData).eq('id', entry.id)
+      query = supabaseAdmin.from('sync_logs').update(logData).eq('id', entry.id).eq('workspace_id', entry.workspace_id)
     } else {
       query = supabaseAdmin.from('sync_logs').insert([logData])
     }
@@ -146,7 +155,7 @@ export async function logSync(entry: {
 
         let retryQuery
         if (entry.id) {
-          retryQuery = supabaseAdmin.from('sync_logs').update(safeLogData).eq('id', entry.id)
+          retryQuery = supabaseAdmin.from('sync_logs').update(safeLogData).eq('id', entry.id).eq('workspace_id', entry.workspace_id)
         } else {
           retryQuery = supabaseAdmin.from('sync_logs').insert([safeLogData])
         }

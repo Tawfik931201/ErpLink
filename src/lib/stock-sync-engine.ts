@@ -24,6 +24,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 import { decrypt } from './crypto'
+import { connectionGeneration, getErpExecutionScope } from './erp-execution-target'
 import { getInventorySyncSettings, isInventorySyncActive, type InventorySyncSettings } from './inventory-sync-settings'
 import { getEffectiveStandardMappingSettings } from './mapping-settings'
 import { OdooClient } from './odoo-client'
@@ -103,6 +104,8 @@ function describeError(err: unknown): string {
 
 export async function processOdooStockEvent(payload: Record<string, unknown>): Promise<ProcessResult> {
   const workspaceId = String(payload.workspace_id || '')
+  const executionScope = getErpExecutionScope()
+  if (executionScope && executionScope.workspaceId !== workspaceId) throw new Error('Stock ERP execution workspace mismatch')
   if (!workspaceId) return { ok: true, skipped: true }
 
   // Load per-platform dispatch gates — a platform runs when its default OR
@@ -127,6 +130,7 @@ export async function processOdooStockEvent(payload: Record<string, unknown>): P
     console.warn('[StockSync] No ERP connection for workspace', workspaceId)
     return { ok: true, skipped: true }
   }
+  if (executionScope && (executionScope.erpConnectionId !== erpConn.id || connectionGeneration(erpConn) !== executionScope.connectionGeneration)) throw new Error('Stock ERP execution target changed; controlled recovery required')
   const client = new OdooClient({
     url: erpConn.url,
     db: erpConn.db_name || '',

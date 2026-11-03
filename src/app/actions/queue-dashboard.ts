@@ -165,6 +165,25 @@ async function getWorkspaceStoreIds(workspaceId: string): Promise<Set<string>> {
   return ids
 }
 
+/** Platform IDs are separate namespaces: a Zid ID never authorizes a Salla orphan. */
+async function getWorkspaceStoreFilter(workspaceId: string): Promise<string> {
+  const [zid, salla, shopify] = await Promise.all([
+    supabase.from('merchant_tokens').select('store_id,merchant_id').eq('workspace_id', workspaceId),
+    supabase.from('salla_tokens').select('merchant_id').eq('workspace_id', workspaceId),
+    supabase.from('shopify_tokens').select('shop_domain').eq('workspace_id', workspaceId),
+  ])
+  if (zid.error || salla.error || shopify.error) throw new Error('Store authorization unavailable')
+  const scopes = new Set<string>()
+  const add = (platform: string, id: unknown) => {
+    const value = String(id ?? '')
+    if (/^[a-zA-Z0-9_.:-]+$/.test(value)) scopes.add(`and(platform.eq.${platform},store_id.eq.${value})`)
+  }
+  for (const row of zid.data ?? []) { add('zid', row.store_id); add('zid', row.merchant_id) }
+  for (const row of salla.data ?? []) add('salla', row.merchant_id)
+  for (const row of shopify.data ?? []) add('shopify', row.shop_domain)
+  return [...scopes].join(',') || 'platform.eq.__no_authorized_store__'
+}
+
 /**
  * إيصالات يتيمة تخص متاجر هذه المساحة (وصلت قبل الربط أو بعده بخلل).
  * قابلة للاسترداد اليدوي فور مراجعتها — لا تُصرف تلقائياً عمداً.
@@ -184,6 +203,7 @@ export async function getOrphanItems(limit = 25) {
       .eq('status', 'pending')
       .is('workspace_id', null)
       .in('store_id', [...storeIds])
+      .or(await getWorkspaceStoreFilter(workspaceId))
       .order('received_at', { ascending: false })
       .limit(lim)
 
@@ -352,6 +372,7 @@ export async function getQueueItemById(id: string, hint?: string | null) {
         .select('id,platform,store_id,event,dedup_key,received_at,attempts,payload')
         .eq('id', id)
         .in('store_id', [...storeIds])
+      .or(await getWorkspaceStoreFilter(workspaceId))
         .maybeSingle()
       if (error) return { success: false, error: error.message }
       if (data) {
@@ -400,6 +421,10 @@ export async function retryFrozenItems() {
       .update({ retry_count: 0, next_retry_at: new Date().toISOString() })
       .eq('workspace_id', workspaceId)
       .or(`next_retry_at.is.null,next_retry_at.eq.${FROZEN_SENTINEL}`)
+      .eq('outcome_unknown', false)
+      .is('lease_token', null)
+      .not('erp_connection_id', 'is', null)
+      .not('connection_generation', 'is', null)
       .select('id')
 
     if (error) return { success: false, error: error.message }
@@ -427,7 +452,7 @@ export async function replayAllDeadItems(limit = 100) {
 
     const { data: rows, error: readErr } = await supabase
       .from('sync_queue_dead')
-      .select('id,store_id,event,platform,payload,error_message')
+      .select('id,original_id,store_id,event,platform,payload,error_message,receipt_id,erp_connection_id,connection_generation,execution_key')
       .eq('workspace_id', workspaceId)
       .order('died_at', { ascending: true })
       .limit(capped)
@@ -435,25 +460,15 @@ export async function replayAllDeadItems(limit = 100) {
     if (readErr) return { success: false, error: readErr.message }
     if (!rows || rows.length === 0) return { success: true, replayed: 0 }
 
-    const now = Date.now()
-    const inserts = (rows as Array<Record<string, any>>).map((row) => ({
-      workspace_id: workspaceId,
-      store_id: row.store_id,
-      event: row.event,
-      platform: row.platform,
-      payload: (row.payload ?? {}) as Record<string, unknown>,
-      retry_count: 0,
-      max_retries: 5,
-      next_retry_at: new Date().toISOString(),
-      dedup_key: `replay:${row.id}:${now}`,
-      error_message: `replayed from dead-letter: ${String(row.error_message ?? '').slice(0, 200)}`,
-    }))
-
-    const { error: insertErr } = await supabase.from('sync_queue').insert(inserts)
-    if (insertErr) return { success: false, error: insertErr.message }
+    let replayed = 0
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const result = await restorePinnedJob(row, workspaceId)
+      if (!result.success) return { success: false, error: result.error, replayed }
+      replayed += 1
+    }
 
     revalidatePath('/app/queue')
-    return { success: true, replayed: inserts.length }
+    return { success: true, replayed }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Replay failed' }
   }
@@ -494,8 +509,10 @@ export async function replayOrphanItems() {
         replayed += 1
         await supabase
           .from('webhook_inbox')
-          .update({ status: 'done', processed_at: new Date().toISOString() })
+          .update({ status: 'done', queue_id: queued.id, processed_at: new Date().toISOString() })
           .eq('id', orphan.id)
+          .is('workspace_id', null)
+          .or(await getWorkspaceStoreFilter(workspaceId))
       }
     }
     revalidatePath('/app/queue')
@@ -518,32 +535,47 @@ export async function replayDeadItem(deadId: string) {
 
     const { data: row, error: readErr } = await supabase
       .from('sync_queue_dead')
-      .select('id,workspace_id,store_id,event,platform,payload,error_message,retry_count')
+      .select('id,original_id,workspace_id,store_id,event,platform,payload,error_message,retry_count,receipt_id,erp_connection_id,connection_generation,execution_key')
       .eq('id', deadId)
       .eq('workspace_id', workspaceId)
       .maybeSingle()
 
     if (readErr || !row) return { success: false, error: 'Not found' }
 
-    const { error: insertErr } = await supabase.from('sync_queue').insert({
-      workspace_id: workspaceId,
-      store_id: (row as any).store_id,
-      event: (row as any).event,
-      platform: (row as any).platform,
-      payload: ((row as any).payload ?? {}) as Record<string, unknown>,
-      retry_count: 0,
-      max_retries: 5,
-      next_retry_at: new Date().toISOString(),
-      dedup_key: `replay:${(row as any).id}:${Date.now()}`,
-      error_message: `replayed from dead-letter: ${String((row as any).error_message ?? '').slice(0, 200)}`,
-    })
-
-    if (insertErr) return { success: false, error: insertErr.message }
+    const result = await restorePinnedJob(row as Record<string, unknown>, workspaceId)
+    if (!result.success) return result
     revalidatePath('/app/queue')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Replay failed' }
   }
+}
+
+/** Restore only the original verified target and identity, never the current default. */
+async function restorePinnedJob(row: Record<string, unknown>, workspaceId: string) {
+  const originalId = asText(row.original_id ?? row.id)
+  const erpConnectionId = asText(row.erp_connection_id)
+  const generation = asText(row.connection_generation)
+  if (!originalId || !erpConnectionId || !generation || !row.execution_key || row.outcome_unknown) {
+    return { success: false, error: 'Unpinned or uncertain job requires controlled reconciliation' }
+  }
+  const { validateExecutionTarget } = await import('@/lib/erp-execution-target')
+  try {
+    await validateExecutionTarget(workspaceId, String(row.platform), String(row.store_id), {
+      erpConnectionId, connectionGeneration: generation,
+    })
+  } catch { return { success: false, error: 'Original ERP destination is no longer valid' } }
+  const { error } = await supabase.from('sync_queue').insert({
+    id: originalId, workspace_id: workspaceId, store_id: row.store_id,
+    event: row.event, platform: row.platform, payload: row.payload ?? {},
+    receipt_id: row.receipt_id ?? null, erp_connection_id: erpConnectionId,
+    connection_generation: generation, execution_key: row.execution_key,
+    retry_count: 0, max_retries: 5, outcome_unknown: false,
+    next_retry_at: new Date().toISOString(), dedup_key: row.dedup_key ?? null,
+    lease_token: null, lease_expires_at: null,
+  })
+  if (error && (error as { code?: string }).code !== '23505') return { success: false, error: 'Pinned job restore failed' }
+  return { success: true }
 }
 
 // ─── الأرشفة اليدوية: نسخٌ كامل ثم حذف، واستعادة خلال 7 أيام ─────────────
@@ -679,6 +711,7 @@ export async function archiveQueueItems(items: Array<{ id: string; kind: string 
           const id = asText(raw.id) ?? ''
           if (!id) continue
           found.add(id)
+          if (raw.lease_token || raw.outcome_unknown) { skipped += 1; continue }
           const kind =
             kindById.get(id) ??
             queueItemKindFromNextRetry(asText(raw.next_retry_at), FROZEN_SENTINEL)
@@ -691,6 +724,9 @@ export async function archiveQueueItems(items: Array<{ id: string; kind: string 
             .delete()
             .eq('workspace_id', workspaceId)
             .eq('id', id)
+            .is('lease_token', null)
+            .eq('outcome_unknown', false)
+            .eq('updated_at', raw.updated_at)
           if (delErr) failed += 1
           else archived += 1
         }
@@ -741,6 +777,7 @@ export async function archiveQueueItems(items: Array<{ id: string; kind: string 
           .eq('status', 'pending')
           .is('workspace_id', null)
           .in('store_id', [...storeIds])
+      .or(await getWorkspaceStoreFilter(workspaceId))
           .in('id', ids)
         if (error) {
           failed += ids.length
@@ -750,6 +787,7 @@ export async function archiveQueueItems(items: Array<{ id: string; kind: string 
             const id = asText(raw.id) ?? ''
             if (!id) continue
             found.add(id)
+            if (raw.durable_version === 2) { skipped += 1; continue }
             if (!(await snapshot(raw, 'orphans'))) {
               failed += 1
               continue
@@ -759,6 +797,7 @@ export async function archiveQueueItems(items: Array<{ id: string; kind: string 
               .delete()
               .eq('id', id)
               .in('store_id', [...storeIds])
+      .or(await getWorkspaceStoreFilter(workspaceId))
             if (delErr) failed += 1
             else archived += 1
           }
@@ -822,7 +861,7 @@ export async function restoreQueueArchive(archiveId: string) {
 
     const { data, error } = await supabase
       .from(QUEUE_ARCHIVES_TABLE)
-      .select('id,source_kind,platform,event,store_id,payload,error_message,original_id')
+      .select('id,source_kind,platform,event,store_id,payload,error_message,original_id,row_data')
       .eq('workspace_id', workspaceId)
       .eq('id', archiveId)
       .maybeSingle()
@@ -831,22 +870,10 @@ export async function restoreQueueArchive(archiveId: string) {
     if (!data) return { success: false, error: 'Not found' }
 
     const row = data as Record<string, unknown>
-    const { error: insertErr } = await supabase.from('sync_queue').insert({
-      workspace_id: workspaceId,
-      store_id: asText(row.store_id),
-      event: asText(row.event),
-      platform: asText(row.platform) ?? 'zid',
-      payload:
-        row.payload && typeof row.payload === 'object' && !Array.isArray(row.payload)
-          ? (row.payload as Record<string, unknown>)
-          : {},
-      retry_count: 0,
-      max_retries: 5,
-      next_retry_at: new Date().toISOString(),
-      dedup_key: `restore:${archiveId}:${Date.now()}`,
-      error_message: null,
-    })
-    if (insertErr) return { success: false, error: insertErr.message }
+    const original = row.row_data as Record<string, unknown> | undefined
+    if (!original) return { success: false, error: 'Legacy archive requires controlled reconciliation' }
+    const restored = await restorePinnedJob(original, workspaceId)
+    if (!restored.success) return restored
 
     const { error: delErr } = await supabase
       .from(QUEUE_ARCHIVES_TABLE)

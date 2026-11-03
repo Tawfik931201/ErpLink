@@ -32,6 +32,7 @@ import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { recordAudit } from '@/lib/audit-logs'
+import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
@@ -147,7 +148,7 @@ async function recordSallaWebhookMetric(storeId: string, event: string): Promise
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   // In development, ensure the background queue runner is running so a webhook
   // is observable without waiting for an external scheduler.
   if (process.env.NODE_ENV !== 'production') {
@@ -556,4 +557,8 @@ export async function GET() {
     message: 'Salla webhook endpoint is ready.',
     events: SALLA_DEFAULT_WEBHOOK_EVENTS,
   })
+}
+
+export async function POST(req: NextRequest) {
+  return withDurableWebhookResponse('salla', req, handlePost)
 }

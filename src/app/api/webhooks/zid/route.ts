@@ -19,6 +19,7 @@
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
@@ -61,7 +62,7 @@ function isUninstallEvent(event: string): boolean {
   return n.includes('uninstall')
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   // In development, ensure the background queue runner is running
   if (process.env.NODE_ENV !== 'production') {
     import('@/lib/sync-queue-runner').then(({ startSyncQueueRunner }) => {
@@ -1072,4 +1073,8 @@ async function handleAbandonedCartEvent(
       .catch(() => {})
   }
   return 'enqueued'
+}
+
+export async function POST(req: NextRequest) {
+  return withDurableWebhookResponse('zid', req, handlePost)
 }

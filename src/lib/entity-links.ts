@@ -22,6 +22,7 @@
  * replaces, so tests assert on `supabase.calls` without touching a database.
  */
 
+import { getErpExecutionScope } from '@/lib/erp-execution-target'
 import { supabase } from '@/lib/supabase'
 
 export type EntityLinkPlatform = 'zid' | 'salla' | 'shopify'
@@ -39,6 +40,8 @@ export const ENTITY_LINK_PLATFORMS: readonly EntityLinkPlatform[] = ['zid', 'sal
 export const STORED_ODOO_ID_FIELD = '__odoo_record_id'
 
 export interface EntityLinkKey {
+  erpConnectionId?: string
+  connectionGeneration?: string
   workspaceId: string
   platform: EntityLinkPlatform
   /** merchant_id (zid/salla) or shop_domain (shopify). */
@@ -92,11 +95,18 @@ export async function upsertEntityLink(
   odooRecordId: number | string
 ): Promise<boolean> {
   try {
+    const scope = getErpExecutionScope()
+    const erpConnectionId = link.erpConnectionId ?? scope?.erpConnectionId
+    const connectionGeneration = link.connectionGeneration ?? scope?.connectionGeneration
+    if (scope && (scope.workspaceId !== link.workspaceId || scope.platform !== link.platform || scope.storeId !== link.storeId)) return false
+    if (!erpConnectionId || !connectionGeneration) return false
     if (!isValidLinkInput(link, odooRecordId)) return false
     const id = Number(odooRecordId)
     const { error } = await supabase.from('odoo_entity_links').upsert(
       {
         workspace_id: link.workspaceId,
+        erp_connection_id: erpConnectionId,
+        connection_generation: connectionGeneration,
         platform: link.platform,
         store_id: link.storeId,
         entity_type: inferEntityType(link.odooModel),
@@ -107,7 +117,7 @@ export async function upsertEntityLink(
         updated_at: new Date().toISOString(),
       },
       {
-        onConflict: 'workspace_id,platform,store_id,odoo_model,store_entity_id',
+        onConflict: 'workspace_id,platform,store_id,erp_connection_id,connection_generation,odoo_model,store_entity_id',
       }
     )
     if (error) {
@@ -129,12 +139,19 @@ export async function upsertEntityLink(
  */
 export async function resolveEntityLinkId(link: EntityLinkKey): Promise<number | null> {
   try {
+    const scope = getErpExecutionScope()
+    const erpConnectionId = link.erpConnectionId ?? scope?.erpConnectionId
+    const connectionGeneration = link.connectionGeneration ?? scope?.connectionGeneration
+    if (scope && (scope.workspaceId !== link.workspaceId || scope.platform !== link.platform || scope.storeId !== link.storeId)) return null
+    if (!erpConnectionId || !connectionGeneration) return null
     if (!link.workspaceId || !link.storeId || !link.odooModel || !link.storeEntityId) return null
     if (!(ENTITY_LINK_PLATFORMS as readonly string[]).includes(link.platform)) return null
     const { data, error } = await supabase
       .from('odoo_entity_links')
       .select('odoo_record_id')
       .eq('workspace_id', link.workspaceId)
+      .eq('erp_connection_id', erpConnectionId)
+      .eq('connection_generation', connectionGeneration)
       .eq('platform', link.platform)
       .eq('store_id', link.storeId)
       .eq('odoo_model', link.odooModel)

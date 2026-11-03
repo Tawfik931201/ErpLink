@@ -3,7 +3,18 @@ import { buildOrderLineItems } from '@/lib/sync-engine'
 import type { FieldMappingRow } from '@/lib/sync-types'
 import { resolveEffectiveTaxRate, resolveOrderCountryCode } from '@/lib/zid/order-helpers'
 
+import { supabase } from '../mocks/supabase'
+
+// sync-runtime constructs a separate admin client, outside the supabase.ts
+// alias mapper. Shipping carrier fallback must use fixtures here too.
+jest.mock('../../src/lib/sync-runtime', () => ({
+  supabaseAdmin: jest.requireActual('../mocks/supabase').supabase,
+  logSync: jest.fn(),
+}))
+
 describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across ALL line types', () => {
+  beforeEach(() => supabase.reset())
+
   const baseMapping: FieldMappingRow = {
     id: 'map-1',
     workspace_id: '00000000-0000-0000-0000-000000000001',
@@ -247,6 +258,18 @@ describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across 
     expect(codLine?.name).toBe('Cash on Delivery (الدفع عند الاستلام)')
     expect(codLine?.price_unit).toBe(10)
     expect(codLine?.tax_ids).toEqual([[6, 0, [5]]])
+
+    // resolvePath('shipping.title') currently falls back to the shipping
+    // object; preserve that lookup while proving it stays on the DB mock.
+    expect(supabase.calls).toContainEqual(expect.objectContaining({
+      table: 'shipping_method_mappings',
+      op: 'select',
+      filters: expect.arrayContaining([
+        ['workspace_id', baseMapping.workspace_id],
+        ['source_method_name', '[object Object]'],
+        ['platform', 'zid'],
+      ]),
+    }))
   })
 
   describe('Country-specific tax rate table and export order handling', () => {

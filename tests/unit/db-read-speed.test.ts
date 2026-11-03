@@ -161,7 +161,7 @@ describe('admin client list is scoped and paginatable', () => {
 describe('retry path fetches lean log columns', () => {
   it("retrySyncLog never selects '*' for the log", () => {
     const code = src('app', 'actions', 'sync-logs.ts')
-    expect(code).toContain("'id,event,store_id,payload,field_mapping_id'")
+      expect(code).toContain("'id,event,store_id,payload,field_mapping_id,erp_connection_id,connection_generation,platform'")
   })
 })
 

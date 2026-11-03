@@ -147,12 +147,12 @@ describe('the coalescing identity distinguishes two Odoo mappings', () => {
     expect(extractFieldMappingId({ field_mapping_id: '' })).toBe('')
   })
 
-  it('uses the scoped key in both coalescing passes', () => {
+  it('preserves each receipt rather than merging different mapping deliveries', () => {
     const queue = read('lib', 'sync-queue.ts')
     // The enqueue-time merge.
-    expect(queue).toContain('extractFieldMappingId(rowPayload) !== newMappingId')
+    expect(queue.includes('coalesceTarget')).toBe(false)
     // The in-batch merge.
-    expect(queue).toContain('fieldMappingId: extractFieldMappingId(item.payload ?? {})')
+    expect(queue.includes('const toProcess = items')).toBe(true)
   })
 })
 

@@ -173,15 +173,13 @@ describe('the claim is parallel but still atomic per row', () => {
   })
 
   it('keeps the per-row conditional update — the atomicity guarantee', () => {
-    // The `.lte('next_retry_at', now)` guard is what stops two workers from
-    // taking the same row. Parallelising must not remove it.
-    const claim = queue.slice(queue.indexOf('const claimOne = async'))
-    expect(claim).toContain(".lte('next_retry_at'")
-    expect(claim).toContain(".not('next_retry_at', 'is', null)")
+    const sql = readFileSync(join(__dirname, '..', '..', 'supabase', 'migrations', '20261103155209_durable_webhook_execution.sql'), 'utf8')
+    expect(sql.includes('q.lease_token IS NULL AND NOT q.outcome_unknown')).toBe(true)
+    expect(queue.includes("supabase.rpc('claim_sync_job'")).toBe(true)
   })
 
   it('skips a row whose claim failed instead of crashing the cycle', () => {
-    const claim = queue.slice(queue.indexOf('const claimOne = async'))
+    const claim = queue.slice(queue.indexOf('async function claimQueueItem'))
     expect(claim).toContain('catch')
     expect(claim).toContain('return null')
   })

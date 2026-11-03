@@ -12,6 +12,8 @@
  *   - sync-runtime.ts — supabaseAdmin client + logSync writer
  */
 
+import { runErpCreateEffect } from '@/lib/erp-effect-context'
+import { pickExistingIdField, type PlatformKey } from '@/lib/platform-fields'
 import { resolvePath, toNameString } from '@/lib/sync-helpers'
 import { logSync } from '@/lib/sync-runtime'
 import type {
@@ -57,6 +59,12 @@ export class ErpNextClient {
   }
 
   async create(docType: string, values: any): Promise<string> {
+    return runErpCreateEffect(docType, values, () => this.createRequest(docType, values),
+      error => !!error && typeof error === 'object' && 'erpRejected' in error,
+      id => id)
+  }
+
+  private async createRequest(docType: string, values: any): Promise<string> {
     const url = `${this.url}/api/resource/${docType}`
     
     const res = await fetch(url, {
@@ -72,7 +80,10 @@ export class ErpNextClient {
 
     if (!res.ok) {
       const errText = await res.text()
-      throw new Error(`ERPNext create failed with HTTP ${res.status}: ${errText || res.statusText}`)
+      const error = new Error(`ERPNext create failed with HTTP ${res.status}: ${errText || res.statusText}`)
+      // A 5xx/proxy timeout cannot establish whether the write committed.
+      if ([400, 401, 403, 404, 409, 417, 422].includes(res.status)) Object.assign(error, { erpRejected: true })
+      throw error
     }
 
     const json = await res.json()
@@ -454,7 +465,8 @@ async function findExistingErpNextRecord(
   model: string,
   zidData: Record<string, unknown>,
   erpValues: Record<string, unknown>,
-  mapping?: { odoo_match_field?: string | null; zid_match_field?: string | null }
+  mapping?: { odoo_match_field?: string | null; zid_match_field?: string | null },
+  platform: PlatformKey = 'zid',
 ): Promise<string | null> {
   const candidates: any[][] = []
 
@@ -478,13 +490,9 @@ async function findExistingErpNextRecord(
     if (zidId) {
       try {
         const relationFields = await fetchErpNextFieldMeta(client, model)
-        // Cross-platform priority chain, NOT platform-gated: it probes the
-        // Zid column then Salla regardless of which platform the event came
-        // from. pickExistingIdField is platform-scoped, so it is not equivalent.
-        if (relationFields.has('x_zid_id')) candidates.push(['x_zid_id', '=', zidId])
-      else if (relationFields.has('zid_id')) candidates.push(['zid_id', '=', zidId])
-      else if (relationFields.has('x_salla_id')) candidates.push(['x_salla_id', '=', zidId])
-      else if (relationFields.has('salla_id')) candidates.push(['salla_id', '=', zidId])
+      // The same source ID may exist on another platform in this ERP.
+      const idField = pickExistingIdField(relationFields, platform)
+      if (idField) candidates.push([idField, '=', zidId])
     } catch {}
   }
 
@@ -541,6 +549,7 @@ export async function executeErpNextOperation(params: {
   values: Record<string, unknown>
   triggerType?: 'automatic' | 'manual'
   existingLogId?: string
+  platform?: PlatformKey
 }): Promise<SyncEngineResult['records'][number]> {
   const {
     client,
@@ -554,10 +563,11 @@ export async function executeErpNextOperation(params: {
     values,
     triggerType,
     existingLogId,
+    platform = 'zid',
   } = params
 
   if (operation === 'create') {
-    const duplicateId = await findExistingErpNextRecord(client, docType, zidData, values, mapping)
+    const duplicateId = await findExistingErpNextRecord(client, docType, zidData, values, mapping, platform)
     if (duplicateId !== null) {
       const msg = `Matching ${docType} "${duplicateId}" already exists in ERPNext; create skipped`
       console.info(`[SyncEngine] ${msg}`)
@@ -578,7 +588,7 @@ export async function executeErpNextOperation(params: {
     return { mappingId: mapping.id, mappingName: mapping.name, model: docType, status: 'success', message: `Created record: ${newName}` }
   }
 
-  const existingId = await findExistingErpNextRecord(client, docType, zidData, values, mapping)
+  const existingId = await findExistingErpNextRecord(client, docType, zidData, values, mapping, platform)
   if (existingId === null) {
     const msg = `No matching ${docType} record found in ERPNext for ${operation}`
     console.warn(`[SyncEngine] ${msg}`)

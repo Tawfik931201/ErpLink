@@ -90,8 +90,19 @@ export async function GET() {
   // صندوق التليجرام — ترحيل 20261022. منفصل عن البقية لأن فائدته
   // "الإشعارات" فقط، بينما البقية تمنع **فقد الطلبات**.
   const telegramOutbox = await checkTable('telegram_outbox')
+  const durableQueue = await checkTable('sync_queue', 'receipt_id,lease_token,lease_expires_at,outcome_unknown,erp_connection_id,connection_generation')
+  const effectLedger = await checkTable('erp_effects', 'id,status')
+  const acceptanceLedger = await checkTable('webhook_acceptances', 'id')
+  const targetBindings = await checkTable('erp_workspace_bindings', 'workspace_id')
   const migrationsOk =
-    inbox.ok && queueDedup.ok && inboxDedup.ok && dead.ok && reconcileState.ok
+    inbox.ok && queueDedup.ok && inboxDedup.ok && dead.ok && reconcileState.ok &&
+    durableQueue.ok && effectLedger.ok && acceptanceLedger.ok && targetBindings.ok
+  const [unknownOutcomes, activeLeases, uncertainEffects, accepted24h] = await Promise.all([
+    countRows('sync_queue', q => q.eq('outcome_unknown', true)),
+    countRows('sync_queue', q => q.not('lease_token', 'is', null)),
+    countRows('erp_effects', q => q.in('status', ['uncertain', 'in_progress'])),
+    countRows('webhook_acceptances', q => q.gte('received_at', new Date(Date.now() - 86_400_000).toISOString())),
+  ])
 
   // ── عمق الطابور ──────────────────────────────────────────────────
   const [pending, frozen, orphans, deadCount, skipped24h, inboxPending, inboxFailed, telegramPending, telegramFailed] =
@@ -231,6 +242,7 @@ export async function GET() {
     },
     migrations: {
       ok: migrationsOk,
+      durableQueue, effectLedger, acceptanceLedger, targetBindings,
       webhook_inbox: inbox,
       sync_queue_dedup_key: queueDedup,
       webhook_inbox_dedup_key: inboxDedup,
@@ -239,6 +251,7 @@ export async function GET() {
       telegram_outbox: telegramOutbox,
     },
     depth: {
+      unknownOutcomes, activeLeases, uncertainEffects, accepted24h,
       pending,
       frozen,
       orphans,

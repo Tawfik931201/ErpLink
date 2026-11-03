@@ -1564,3 +1564,46 @@ read, so only the native signature was ever accepted. Both halves are fixed in
   Zid redirect to them and they are stateless entry points. The real boundary
   is each `callback`, which now resolves the Clerk session and the active
   workspace **before** spending the single-use authorization code.
+
+## Architecture navigation and safe refactoring (2026-11-03)
+
+This section supplies current code navigation; retain the historical rules above.
+Use inspected source and SQL for actual behavior when chronological notes disagree.
+Start at `docs/architecture/overview.md`, `module-map.md`, and
+`development-guide.md`. Audit evidence, deferred risks, API contracts and validation
+live alongside them. The inventory is explicit about review and scan limitations.
+
+- UI freeze: do not change JSX, styling, labels, navigation, component APIs, routes,
+  backend response shapes, schema, environment names or dependency versions during
+  internal reorganization. Import changes must preserve existing consumers.
+- Bounded domain helpers: `src/lib/products/variants.ts` normalizes variants;
+  `customers/company-fields.ts` fills unmapped partner company fields;
+  `categories/mapping-overrides.ts` reads per-store/default category overrides;
+  `orders/fulfillment-items.ts` parses delivered items. These paths are under
+  `src/lib/`. They must never import `sync-engine.ts` back.
+- `src/lib/sync-engine.ts` remains the integration orchestrator. Sales Order
+  creation is in `executeOdooOperation`'s `safeCreateOdooRecord` path; order lines
+  are built by `buildOrderLineItems`. A full order-service split is deferred until
+  mocked orchestration tests prove financial, matching, state and retry behavior.
+- Manual imports follow `src/app/actions/transfers.ts`; importing Salla customers
+  uses `listSallaCustomers` in `src/lib/salla-client.ts`, not actions/salla.ts.
+- Keep platform clients/auth/token refresh separate. Keep existing Shopify and
+  ERPNext paths even when the task focuses on Zid/Salla/Odoo. Odoo XML-RPC
+  `odoo-client.ts` and support JSON-RPC `odoo.ts` serve different consumers.
+- Preserve Odoo version/field probes and exception-driven fallbacks, platform IDs,
+  explicit mapping precedence, store/workspace filters, stock authority, raw webhook
+  body verification, durable receipts, dedup and retry order. Do not normalize
+  different platform policies as stylistic cleanup.
+- Tests: `npm run type-check`, `npm run lint`, `npm test -- --ci`, `npm run build`
+  remain the four gates. New characterization suites: `product-variants`,
+  `customer-company-fields`, `category-overrides`, `order-fulfillment-items` under
+  `tests/unit/`. Never run tests against merchant services or a real database;
+  use mocks and process-local CI placeholders. Do not invoke admin pipeline
+  self-tests, refresh endpoints or queue drains against production for validation.
+  `sync-runtime.ts` constructs a separate `supabaseAdmin` client outside the
+  `supabase.ts` alias mapper: mock that module explicitly when exercising its
+  database-dependent paths (see `order-tax-inclusive-sync.test.ts`).
+- Existing runtime dependency cycles and uncovered flows are documented, not
+  implicitly fixed. Fixing matching isolation, shadowed fulfillment parsing,
+  billing dates, registration strategy or retry behavior requires a separate
+  functional task. No deployment/push/schema migration is authorized by an audit.

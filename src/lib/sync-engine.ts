@@ -10,8 +10,12 @@
  */
 
 import { getSmartDefaultOrderState } from '@/lib/auto-bootstrap'
+import { applyCategoryMappingOverrides } from '@/lib/categories/mapping-overrides'
 import { decrypt } from '@/lib/crypto'
+import { injectCustomerCompanyFields } from '@/lib/customers/company-fields'
 import { resolveEntityLinkId, STORED_ODOO_ID_FIELD, upsertEntityLink } from '@/lib/entity-links'
+import { withErpExecutionContext } from '@/lib/erp-effect-context'
+import { getErpExecutionScope, resolveExecutionTarget, validateExecutionTarget, withErpTarget, type ExecutionTarget } from '@/lib/erp-execution-target'
 import {
   buildErpNextValues,
   ErpNextClient,
@@ -34,6 +38,7 @@ import {
 } from '@/lib/odoo/order-currency'
 import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import { OdooClient } from '@/lib/odoo-client'
+import { extractFulfilledItems } from '@/lib/orders/fulfillment-items'
 import {
   allPlatformIdFieldNames,
   pickExistingIdField,
@@ -41,6 +46,8 @@ import {
   platformIdFieldNames,
   platformLegacyIdField,
 } from '@/lib/platform-fields'
+import { extractGenericVariants } from '@/lib/products/variants'
+import type { GenericVariant } from '@/lib/products/variants'
 import { extractSallaRefundedLines, isReturnSignal, type StoreReturnLine } from '@/lib/returns/detect'
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
@@ -87,79 +94,7 @@ export type {
 // client + logSync moved to sync-runtime.ts (shared with erpnext-engine.ts).
 // Re-exported here: this was their original path.
 export { resolvePath, toNameString }
-
-/**
- * Look up per-category overrides from the category_mappings table
- * and return an override object matching the standard_mapping_settings shape.
- */
-async function applyCategoryMappingOverrides(
-  workspaceId: string,
-  platform: string,
-  zidData: Record<string, unknown>,
-  storeId = '',
-): Promise<Record<string, any>> {
-  try {
-    // Extract a category name from zidData using known field paths
-    let catName = ''
-    const flatName = resolvePath(zidData, 'flat_name')
-    if (flatName && typeof flatName === 'string') { catName = flatName.trim() }
-    if (!catName) {
-      const nameVal = zidData.name ?? (zidData as any).names ?? zidData.title
-      catName = toNameString(nameVal)
-    }
-    if (!catName) return {}
-
-    // Per-store row first, platform default ('') as fallback — two stores
-    // of one platform may map the same category name differently.
-    const { data: rows } = await supabaseAdmin
-      .from('category_mappings')
-      .select('*')
-      .eq('workspace_id', workspaceId)
-      .eq('platform', platform)
-      .ilike('source_category_name', catName)
-      .in('store_id', storeId ? [storeId, ''] : [''])
-
-    const row = (rows ?? []).find((r: any) => (r.store_id || '') === storeId)
-      ?? (rows ?? []).find((r: any) => !r.store_id)
-      ?? (rows ?? [])[0]
-    if (!row) return {}
-
-    const override: Record<string, any> = {}
-    if (row.property_cost_method || row.property_valuation) {
-      override.inventory_valuation = {}
-      if (row.property_cost_method) override.inventory_valuation.property_cost_method = row.property_cost_method
-      if (row.property_valuation) override.inventory_valuation.property_valuation = row.property_valuation
-    }
-    if (row.income_account_id || row.expense_account_id || row.stock_valuation_account_id) {
-      override.accounting = {}
-      if (row.income_account_id && Number(row.income_account_id) > 0) override.accounting.income_account_id = row.income_account_id
-      if (row.expense_account_id && Number(row.expense_account_id) > 0) override.accounting.expense_account_id = row.expense_account_id
-      if (row.stock_valuation_account_id && Number(row.stock_valuation_account_id) > 0) override.accounting.stock_valuation_account_id = row.stock_valuation_account_id
-    }
-    if (row.stock_journal_id && Number(row.stock_journal_id) > 0) {
-      if (!override.accounting) override.accounting = {}
-      override.accounting.stock_journal_id = row.stock_journal_id
-    }
-    if (row.stock_input_account_id && Number(row.stock_input_account_id) > 0) {
-      if (!override.accounting) override.accounting = {}
-      override.accounting.stock_input_account_id = row.stock_input_account_id
-    }
-    if (row.stock_output_account_id && Number(row.stock_output_account_id) > 0) {
-      if (!override.accounting) override.accounting = {}
-      override.accounting.stock_output_account_id = row.stock_output_account_id
-    }
-    if (row.odoo_category_id && Number(row.odoo_category_id) > 0) {
-      override.odoo_category_id = Number(row.odoo_category_id)
-    }
-    if (Object.keys(override).length > 0) {
-      console.info(`[SyncEngine] Applied per-category mapping for "${catName}":`, override)
-    }
-    return override
-  } catch (err) {
-    console.warn('[SyncEngine] applyCategoryMappingOverrides error:', err)
-    return {}
-  }
-}
+export { extractGenericVariants } from '@/lib/products/variants'
 
 async function fetchAndBase64(url: string): Promise<string | null> {
   try {
@@ -805,118 +740,6 @@ export async function resolveSingleRelationId(
   }
 
   return null
-}
-
-interface GenericVariant {
-  id: string | number
-  sku: string
-  price: number
-  barcode?: string
-  quantity?: number
-  product_id?: string | number
-  attributes: Record<string, string> // e.g. { Color: "Red", Size: "Large" }
-  cost?: number
-  weight?: number
-  description?: string
-  image?: string // URL or base64 of variant image
-}
-
-export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' | 'shopify'): GenericVariant[] {
-  if (!payload) return []
-
-  // Locate the variants array (could be variants, options, or other variations)
-  // NOTE: For Zid, payload.options contains option definitions, not variant products,
-  // so Zid must strictly read payload.variants.
-  let rawVariants = Array.isArray(payload.variants) && payload.variants.length > 0
-    ? payload.variants
-    : (platform !== 'zid' && Array.isArray(payload.options) && payload.options.length > 0 ? payload.options : [])
-
-  // Shopify options check
-  if (platform === 'shopify' && !Array.isArray(rawVariants)) {
-    rawVariants = payload.variants || []
-  }
-
-  if (!Array.isArray(rawVariants) || rawVariants.length === 0) {
-    return []
-  }
-
-  return rawVariants.map((v: any) => {
-    const variantId = v.id || v.uuid || v.variant_id || ''
-    const sku = v.sku || v.default_code || v.sku_code || ''
-    const price = parseFloat(v.sale_price || v.price || v.regular_price || v.price_after_discount || '0') || 0
-    const barcode = v.barcode || v.gtin || v.upc || undefined
-    
-    // Quantity mapping across platforms
-    const quantity = v.quantity !== undefined 
-      ? Number(v.quantity) 
-      : (v.stock_quantity !== undefined 
-        ? Number(v.stock_quantity) 
-        : (v.inventory_quantity !== undefined 
-          ? Number(v.inventory_quantity) 
-          : undefined))
-
-    const attributes: Record<string, string> = {}
-
-    if (platform === 'shopify') {
-      const options = payload.options || []
-      if (v.option1 && options[0]) attributes[options[0].name] = v.option1
-      if (v.option2 && options[1]) attributes[options[1].name] = v.option2
-      if (v.option3 && options[2]) attributes[options[2].name] = v.option3
-    } else {
-      const rawAttrs = v.attributes || v.features || v.option_values || []
-      if (Array.isArray(rawAttrs)) {
-        rawAttrs.forEach((attr: any) => {
-          const attrName = toNameString(attr.name || attr.label || attr.option_name || attr.option_label || attr.slug)
-          const attrVal = toNameString(attr.value || attr.value_name || attr.option_value || attr.option_value_name || attr.val || attr.text)
-          if (attrName && attrVal) {
-            attributes[attrName] = attrVal
-          }
-        })
-      } else if (rawAttrs && typeof rawAttrs === 'object') {
-        Object.entries(rawAttrs).forEach(([key, val]) => {
-          const attrName = key
-          const attrVal = toNameString(val)
-          if (attrName && attrVal) {
-            attributes[attrName] = attrVal
-          }
-        })
-      }
-    }
-
-    const cost = parseFloat(v.cost || v.cost_price || '0') || 0
-    
-    const rawWeight = v.weight ?? payload.weight
-    let weight = 0
-    if (typeof rawWeight === 'object' && rawWeight !== null) {
-      weight = parseFloat((rawWeight as any).value ?? (rawWeight as any).weight ?? '0') || 0
-    } else {
-      weight = parseFloat(String(rawWeight ?? '0')) || 0
-    }
-
-    const description = toNameString(v.description || payload.description || payload.short_description || payload.body_html || '')
-
-    // Extract variant image URL from platform-specific formats
-    const variantImage = v.image?.src || v.main_image || v.image_url
-      || (Array.isArray(v.images) && v.images[0]?.url)
-      || (Array.isArray(v.images) && typeof v.images[0] === 'string' ? v.images[0] : null)
-      || (typeof v.image === 'string' ? v.image : null)
-      || (typeof v.image?.url === 'string' ? v.image.url : null)
-      || ''
-
-    return {
-      id: variantId,
-      sku,
-      price,
-      barcode,
-      quantity: isNaN(quantity as number) ? undefined : quantity,
-      product_id: v.product_id || payload.id || payload.product_id || undefined,
-      attributes,
-      cost,
-      weight,
-      description,
-      image: variantImage || undefined
-    }
-  })
 }
 
 export async function updateOdooStock(client: OdooClient, productId: number, qty: number, locationId?: number, infiniteValue?: number, workspaceId?: string): Promise<boolean> {
@@ -2710,7 +2533,21 @@ export async function applyFixedSettingsToValues(
 }
 
 // ─── Helper: safe Odoo create with field-level error fallback ──────────────────
-async function safeCreateOdooRecord(
+export async function safeCreateOdooRecord(
+  client: OdooClient,
+  model: string,
+  values: Record<string, unknown>,
+  _fallbackValues: Record<string, unknown>,
+  effectIdentity?: string,
+): Promise<number> {
+  if (effectIdentity) {
+    const { withErpCreateIdentity } = await import('./erp-effect-context')
+    return withErpCreateIdentity(effectIdentity, () => safeCreateOdooRecord(client, model, values, _fallbackValues))
+  }
+  return createOdooRecordWithFallback(client, model, values, _fallbackValues)
+}
+
+async function createOdooRecordWithFallback(
   client: OdooClient,
   model: string,
   values: Record<string, unknown>,
@@ -2766,7 +2603,10 @@ async function safeCreateOdooRecord(
       'company_id',
     ]
     const hasSettingsFields = settingsKeys.some(k => k in values)
-    if (hasSettingsFields) {
+    // A transport failure may follow a committed create. Only a confirmed
+    // XML-RPC fault establishes that Odoo rejected the request; never issue a
+    // second create merely because a timeout/network error carried settings.
+    if (hasSettingsFields && err?.faultCode !== undefined && err?.faultCode !== null) {
       const cleanValues = { ...values }
       for (const k of settingsKeys) {
         delete cleanValues[k]
@@ -3791,37 +3631,6 @@ async function maybeApplyOrderStatusAction(
   }
 }
 
-// ─── Helper: extract fulfilled items from platform payload ───────────────────
-function extractFulfilledItems(zidData: Record<string, unknown>): Array<{ sku: string; qty: number }> {
-  // Try multiple common payload structures for fulfillment items
-  const candidates = ['fulfilled_items', 'items', 'line_items', 'order_items', 'fulfillments']
-  for (const key of candidates) {
-    const raw = (zidData as any)[key]
-    if (Array.isArray(raw) && raw.length > 0) {
-      return raw.map((item: any) => {
-        const sku = String(item.sku || item.default_code || item.product_id || item.id || '')
-        const qty = parseFloat(String(item.quantity || item.qty || item.fulfilled_qty || 0)) || 0
-        return { sku, qty }
-      }).filter((i: { sku: string; qty: number }) => i.sku && i.qty > 0)
-    }
-  }
-  // Try nested fulfillment structure (Shopify-style)
-  const fulfillments = (zidData as any)?.fulfillments
-  if (Array.isArray(fulfillments)) {
-    const items: Array<{ sku: string; qty: number }> = []
-    for (const f of fulfillments) {
-      const fItems = f.line_items || f.items || []
-      for (const fi of fItems) {
-        const sku = String(fi.sku || fi.product_id || fi.id || '')
-        const qty = parseFloat(String(fi.quantity || fi.qty || 0)) || 0
-        if (sku && qty > 0) items.push({ sku, qty })
-      }
-    }
-    return items
-  }
-  return []
-}
-
 // ─── Helper: process partial delivery in Odoo ────────────────────────────────
 async function processPartialDelivery(
   client: OdooClient,
@@ -4471,6 +4280,20 @@ async function isEntityOperationAllowed(
  * Finds matching field_mappings and pushes data to Odoo.
  */
 export async function processWebhookEvent(
+  event: string, storeId: number | string, data: Record<string, unknown>,
+  platformHint?: 'zid' | 'salla' | 'shopify', isQueueExecution = false,
+  workspaceIdParam?: string, queueItemId?: string | null, executionTarget?: ExecutionTarget
+): Promise<SyncEngineResult> {
+  if (!workspaceIdParam || !platformHint) throw new Error('Trusted workspace and platform required for ERP execution')
+  const store = String(storeId)
+  if (isQueueExecution && !executionTarget) throw new Error('Unpinned ERP execution target requires controlled recovery')
+  const target = executionTarget ?? await resolveExecutionTarget(workspaceIdParam, platformHint, store)
+  await validateExecutionTarget(workspaceIdParam, platformHint, store, target)
+  return withErpTarget({ ...target, workspaceId: workspaceIdParam, platform: platformHint, storeId: store, eventId: queueItemId || `manual:${event}` },
+    () => processWebhookEventInternal(event, storeId, data, platformHint, isQueueExecution, workspaceIdParam, queueItemId))
+}
+
+async function processWebhookEventInternal(
   event: string,
   storeId: number | string,
   data: Record<string, unknown>,
@@ -5020,6 +4843,18 @@ export async function processWebhookEvent(
 // ثم تعمل field_mappings (الكاستوم) بعده بالترتيب. يرجع null لو معطّل
 // عبر standard_mapping_settings (الحارس داخله) فلا يضيف شيئاً.
 async function processFixedMappingFallback(
+  presetKey: string, event: string, storeIdStr: string, zidData: Record<string, unknown>,
+  platform: 'zid' | 'salla' | 'shopify', existingMappings: FieldMappingRow[] | null,
+  deliveryWorkspaceId?: string | null
+): Promise<SyncEngineResult['records'][number] | null> {
+  const scope = getErpExecutionScope()
+  if (!scope || scope.workspaceId !== deliveryWorkspaceId || scope.platform !== platform || scope.storeId !== storeIdStr) throw new Error('Preset ERP execution scope mismatch')
+  const rootModel = presetKey.includes('category') ? 'product.category' : presetKey.includes('product') ? 'product.template' : presetKey.includes('customer') ? 'res.partner' : 'sale.order'
+  return withErpExecutionContext({ ...scope, storeEntityId: String(zidData.id ?? zidData.category_id ?? zidData.customer_id ?? zidData.order_id ?? ''), rootModel },
+    () => processFixedMappingFallbackInternal(presetKey, event, storeIdStr, zidData, platform, existingMappings, deliveryWorkspaceId))
+}
+
+async function processFixedMappingFallbackInternal(
   presetKey: string,
   event: string,
   storeIdStr: string,
@@ -5371,6 +5206,11 @@ async function processFixedMappingFallback(
   }
 
   // Resolve Odoo connection
+  const pinnedScope = getErpExecutionScope()
+  if (pinnedScope) {
+    if (erpConnectionId && erpConnectionId !== pinnedScope.erpConnectionId) throw new Error('Preset ERP connection changed')
+    erpConnectionId = pinnedScope.erpConnectionId
+  }
   if (!erpConnectionId) {
     const { data: conn } = await supabaseAdmin
       .from('erp_connections')
@@ -5389,12 +5229,16 @@ async function processFixedMappingFallback(
     .from('erp_connections')
     .select('id, url, db_name, username, password, erp_type')
     .eq('id', erpConnectionId)
+    .eq('workspace_id', workspaceId)
     .single()
 
   if (!odooConn) {
     console.warn(`[FixedMapping] ERP connection ${erpConnectionId} not found`)
     return null
   }
+  // Standard presets are Odoo model definitions. ERPNext remains supported
+  // through its explicit custom mappings, never through the XML-RPC client.
+  if (odooConn.erp_type && odooConn.erp_type !== 'odoo') return null
 
   const decryptedPassword = decrypt(odooConn.password)
   const client = new OdooClient({
@@ -5550,6 +5394,26 @@ async function skipNoFieldItems(args: {
 }
 
 export async function processSingleMapping(
+  mapping: FieldMappingRow, event: string, storeId: string, zidData: Record<string, unknown>,
+  triggerType: 'automatic' | 'manual' = 'automatic', existingLogId?: string,
+  platformHint?: 'zid' | 'salla' | 'shopify'
+): Promise<SyncEngineResult['records'][number]> {
+  try {
+  const platform = platformHint ?? getPlatformFromEvent(event)
+  const inherited = getErpExecutionScope()
+  const target = inherited ?? await resolveExecutionTarget(mapping.workspace_id, platform, storeId)
+  if (inherited && (inherited.workspaceId !== mapping.workspace_id || inherited.storeId !== storeId || inherited.platform !== platform)) throw new Error('Mapping ERP execution scope mismatch')
+  if (mapping.erp_connection_id && mapping.erp_connection_id !== target.erpConnectionId) throw new Error('Mapping ERP execution connection changed')
+  await validateExecutionTarget(mapping.workspace_id, platform, storeId, target)
+  const scope = { ...target, workspaceId: mapping.workspace_id, platform, storeId, eventId: inherited?.eventId || existingLogId || `manual:${event}` }
+  return await withErpTarget(scope, () => withErpExecutionContext({ ...scope, storeEntityId: String(zidData.id ?? zidData.category_id ?? zidData.category_uuid ?? zidData.customer_id ?? zidData.order_id ?? ''), rootModel: mapping.odoo_model },
+    () => processSingleMappingInternal(mapping, event, storeId, zidData, triggerType, existingLogId, platformHint)))
+  } catch (error) {
+    return { mappingId: mapping.id, mappingName: mapping.name, model: mapping.odoo_model, status: 'failed', message: error instanceof Error ? error.message : 'ERP execution trust validation failed' }
+  }
+}
+
+async function processSingleMappingInternal(
   mapping: FieldMappingRow,
   event: string,
   storeId: string,
@@ -5608,6 +5472,7 @@ export async function processSingleMapping(
 
   // ——— Create or Update Initial Log Entry (status: processing) ——————————————
   let logId = existingLogId
+  const logExecutionScope = getErpExecutionScope()
 
   if (!logId && zidEntityId && event) {
     try {
@@ -5616,6 +5481,9 @@ export async function processSingleMapping(
         .from('sync_logs')
         .select('id')
         .eq('workspace_id', mapping.workspace_id)
+        .eq('erp_connection_id', logExecutionScope?.erpConnectionId ?? '')
+        .eq('connection_generation', logExecutionScope?.connectionGeneration ?? '')
+        .eq('platform', logExecutionScope?.platform ?? '')
         .eq('store_id', storeId)
         .eq('zid_entity_id', zidEntityId)
         .eq('event', event)
@@ -5636,6 +5504,9 @@ export async function processSingleMapping(
   try {
     const logData = {
       workspace_id: mapping.workspace_id,
+      erp_connection_id: logExecutionScope?.erpConnectionId,
+      connection_generation: logExecutionScope?.connectionGeneration,
+      platform: logExecutionScope?.platform,
       field_mapping_id: mapping.id,
       event,
       store_id: storeId,
@@ -5655,10 +5526,11 @@ export async function processSingleMapping(
         .from('sync_logs')
         .select('status')
         .eq('id', logId)
+        .eq('workspace_id', mapping.workspace_id)
         .maybeSingle()
 
       if (!currentLog || !['success', 'failed'].includes(currentLog.status)) {
-        await supabaseAdmin.from('sync_logs').update(logData).eq('id', logId)
+        await supabaseAdmin.from('sync_logs').update(logData).eq('id', logId).eq('workspace_id', mapping.workspace_id)
       } else {
         console.info(`[SyncEngine] Log ID="${logId}" has status "${currentLog.status}" - skipping initial processing update`)
       }
@@ -5706,18 +5578,23 @@ export async function processSingleMapping(
 
   // ——— 2. Resolve Odoo connection ——————————————————————————————————————————
   let odooConn: OdooConnectionRow | null = null
+  const targetScope = getErpExecutionScope()
+  if (targetScope) odooConn = await validateExecutionTarget(mapping.workspace_id, targetScope.platform, storeId, targetScope) as OdooConnectionRow
 
-  if (mapping.erp_connection_id) {
+  if (!odooConn && mapping.erp_connection_id && mapping.workspace_id) {
     const { data: conn, error: connErr } = await supabaseAdmin
       .from('erp_connections')
       .select('id, url, db_name, username, password, erp_type')
       .eq('id', mapping.erp_connection_id)
+      .eq('workspace_id', mapping.workspace_id)
       .maybeSingle()
     console.info(`[SyncEngine] erp_connection by id: found=${!!conn} error=${connErr?.message ?? 'none'}`)
     odooConn = conn as any
   }
 
-  if (!odooConn && mapping.workspace_id) {
+  // An explicit missing/foreign connection is an error, never a request to
+  // redirect pending work to a different ERP database in this workspace.
+  if (!odooConn && !mapping.erp_connection_id && mapping.workspace_id) {
     const { data: conn, error: connErr } = await supabaseAdmin
       .from('erp_connections')
       .select('id, url, db_name, username, password, erp_type')
@@ -5760,7 +5637,9 @@ export async function processSingleMapping(
       return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'All mapped Zid fields were empty or missing' }
     }
 
-    console.info(`[SyncEngine] Values to send to ERPNext:`, JSON.stringify(erpValues, null, 2))
+    console.info('[SyncEngine] ERPNext values prepared', {
+      mappingId: mapping.id, platform, model: odooModel, fieldCount: Object.keys(erpValues).length,
+    })
 
     try {
       return await executeErpNextOperation({
@@ -5773,6 +5652,7 @@ export async function processSingleMapping(
         docType: odooModel,
         operation: odooOperation,
         values: erpValues,
+        platform,
         triggerType,
         existingLogId: logId,
       })
@@ -5860,7 +5740,9 @@ export async function processSingleMapping(
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message: 'All mapped Zid fields were empty or missing' }
   }
 
-  console.info(`[SyncEngine] Values to send to Odoo:`, JSON.stringify(odooValues, null, 2))
+  console.info('[SyncEngine] Odoo values prepared', {
+    mappingId: mapping.id, platform, model: odooModel, fieldCount: Object.keys(odooValues).length,
+  })
 
   // ——— 6. Execute the configured generic Odoo operation —————————————————————
   try {
@@ -6027,7 +5909,8 @@ async function syncAsSeparateProducts(
       recordId = duplicateId
     } else {
       console.info(`[SyncEngine] ➕ جاري إنشاء متغير كمنتج منفصل "${variantName}" في أودو...`)
-      recordId = await safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)
+      recordId = await safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues,
+        `variant:${String(variant.id || variant.sku || JSON.stringify(variant.attributes))}`)
       if (variant.id) {
         await persistPlatformIdOnRecord(client, 'product.template', recordId, platform, String(variant.id))
       }
@@ -7152,46 +7035,6 @@ async function syncChildVariantAsVariant(
       message: errorMsg
     }
   }
-}
-
-function readNonEmptyString(...values: unknown[]): string {
-  for (const v of values) {
-    if (v === undefined || v === null) continue
-    const s = String(v).trim()
-    if (s && s !== 'None' && s !== 'null' && s !== 'undefined') return s
-  }
-  return ''
-}
-
-/**
- * Auto-inject company/tax fields from the platform payload onto a res.partner
- * write, so tax number (الرقم الضريبي) + commercial registry (السجل التجاري)
- * always reach Odoo even when the workspace has no mapping row for them.
- * Explicitly-mapped values win — this only fills gaps.
- */
-function injectCustomerCompanyFields(
-  odooValues: Record<string, unknown>,
-  zidData: Record<string, unknown>
-): Record<string, unknown> {
-  const values = { ...odooValues }
-  const taxNumber = readNonEmptyString(zidData.tax_number, zidData.vat, zidData.tax_id, zidData.vat_number)
-  const commercialReg = readNonEmptyString(
-    zidData.commercial_registration,
-    zidData.cr_number,
-    zidData.commercial_registration_number,
-    zidData.company_registry
-  )
-  const businessName = readNonEmptyString(zidData.business_name, zidData.company_name)
-
-  if (taxNumber && values.vat === undefined) values.vat = taxNumber
-  if (commercialReg && values.company_registry === undefined) values.company_registry = commercialReg
-  if (businessName && values.company_name === undefined) values.company_name = businessName
-
-  const isCompany = !!taxNumber || !!commercialReg || !!businessName
-  if (isCompany && values.company_type === undefined) {
-    values.company_type = 'company'
-  }
-  return values
 }
 
 async function executeOdooOperation(params: {
@@ -8584,45 +8427,12 @@ async function executeOdooOperation(params: {
 
   // ── Out-of-order resolution for sale.order updates ───────────────────────
   // When an order status update arrives before the order is created in Odoo:
-  // 1) Look for a pending order.create in sync_queue and execute it first.
-  // 2) If not in queue, but full order details (items) are present, auto-create (Upsert).
-  // 3) If creation is not possible yet, return 'failed' so the queue retries it
+  // Pending creates remain owned by the fenced queue worker. Never execute or
+  // delete another job opportunistically from an update operation.
+  // 1) With full order details (items), auto-create through the effect ledger.
+  // 2) If creation is not possible yet, return 'failed' so the queue retries it
   //    (rather than 'skipped' which permanently deletes the event).
   if (existingId === null && odooModel === 'sale.order' && odooOperation === 'update' && mapping.workspace_id) {
-    try {
-      const { data: pendingRows } = await supabaseAdmin
-        .from('sync_queue')
-        .select('id, event, store_id, payload, platform, workspace_id')
-        .eq('workspace_id', mapping.workspace_id)
-        .in('event', ['order.create', 'order.created', 'order_create', 'order_created'])
-        .not('next_retry_at', 'is', null)
-        .limit(10)
-
-      const targetOrderRef = String(zidEntityId || zidData.id || zidData.order_id || '')
-      const matchCreate = (pendingRows ?? []).find(r => {
-        const p = (r.payload ?? {}) as Record<string, unknown>
-        const entId = String(p.id ?? p.order_id ?? (p.order as any)?.id ?? '')
-        return entId && targetOrderRef && (entId === targetOrderRef || String(p.code ?? '') === String(zidData.code ?? ''))
-      })
-
-      if (matchCreate) {
-        console.info(`[SyncEngine] Found pending order create in queue for order #${targetOrderRef}. Executing create first...`)
-        await processWebhookEvent(
-          matchCreate.event,
-          matchCreate.store_id,
-          matchCreate.payload as Record<string, unknown>,
-          matchCreate.platform as 'zid' | 'salla' | 'shopify',
-          true,
-          matchCreate.workspace_id,
-          matchCreate.id
-        )
-        try { await supabaseAdmin.from('sync_queue').delete().eq('id', matchCreate.id) } catch {}
-        existingId = await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform)
-      }
-    } catch (queueLookupErr) {
-      console.warn(`[SyncEngine] Failed to check/process pending order create from queue:`, queueLookupErr)
-    }
-
     // 2. Upsert: auto-create order if items are available
     if (existingId === null) {
       const hasOrderItems = ['products', 'items', 'order_items', 'order_items_list', 'line_items']
@@ -8852,12 +8662,16 @@ export async function findExistingOdooRecord(
   // Multi-store: when the mapping carries its own store (merchant_id), the
   // lookup is additionally scoped by store_id — two Salla stores under one
   // workspace that both have order "1234" must never resolve to each other.
-  if (zidId && workspaceId) {
+  const matchingScope = getErpExecutionScope()
+  if (zidId && workspaceId && matchingScope && platform && mapping?.merchant_id) {
     try {
       const prevLogBase = supabaseAdmin
         .from('sync_logs')
         .select('odoo_record_id')
         .eq('workspace_id', workspaceId)
+        .eq('erp_connection_id', matchingScope.erpConnectionId)
+        .eq('connection_generation', matchingScope.connectionGeneration)
+        .eq('platform', platform)
         .eq('zid_entity_id', zidId)
         .eq('odoo_model', model)
         .eq('status', 'success')

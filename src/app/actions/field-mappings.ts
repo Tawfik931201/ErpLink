@@ -99,6 +99,11 @@ export async function saveFieldMapping(data: {
     if (!data.name || !data.name.trim()) {
       throw new Error('اسم إعداد الربط مطلوب (Field mapping name is required)')
     }
+    if (data.id) {
+      const { data: ownedMapping, error } = await supabase.from('field_mappings')
+        .select('id').eq('id', data.id).eq('workspace_id', user.active_workspace_id).maybeSingle()
+      if (error || !ownedMapping) throw new Error('Field mapping not found in active workspace')
+    }
 
     // Fetch connection info
     const { data: odooConn } = await supabase
@@ -191,6 +196,7 @@ export async function saveFieldMapping(data: {
           .from('field_mappings')
           .select('odoo_webhook_id, odoo_server_action_id')
           .eq('id', data.id)
+          .eq('workspace_id', user.active_workspace_id)
           .maybeSingle()
 
         if (oldMapping?.odoo_webhook_id) {
@@ -327,6 +333,7 @@ export async function deleteFieldMapping(id: string) {
         .from('erp_connections')
         .select('*')
         .eq('id', mapping.erp_connection_id)
+        .eq('workspace_id', user.active_workspace_id)
         .maybeSingle()
 
       if (odooConn) {

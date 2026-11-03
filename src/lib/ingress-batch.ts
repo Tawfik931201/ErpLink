@@ -26,6 +26,8 @@ const MAX_BATCH = 50
 const FLUSH_DELAY_MS = 150
 
 export interface ReceiptRow {
+  erpConnectionId?: string
+  connectionGeneration?: string
   dedupKey: string
   platform: string
   storeId: string
@@ -72,6 +74,8 @@ async function insertReceiptsViaSupabase(rows: ReceiptRow[]): Promise<ReceiptOut
     dedup_key: row.dedupKey,
     payload: row.payload,
     status: 'pending',
+    erp_connection_id: row.erpConnectionId ?? null,
+    connection_generation: row.connectionGeneration ?? null,
   }))
 
   if (rows.length === 1) {
@@ -198,26 +202,26 @@ export function insertReceipts(rows: ReceiptRow[]): Promise<ReceiptOutcome[]> {
   if (rows.length === 0) return Promise.resolve([])
   // صف واحد: بلا تجميع — نفس تكلفة اليوم تماماً.
   if (rows.length === 1) {
-    return insertReceiptsViaSupabase(rows).then((outcomes) => (outcomes[0] ? [outcomes[0]] : []))
+    return insertReceiptsViaSupabase(rows).catch(() => [{ ok: false, duplicate: false, error: 'inbox_transport_failed' }])
   }
-  return new Promise<ReceiptOutcome[]>((resolve) => {
-    receiptBatch.requests.push(
-      ...rows.map((row) => ({
-        row,
-        resolve: (outcome: unknown) => resolve([outcome as ReceiptOutcome]),
-      }))
-    )
+  return Promise.all(rows.map((row) => new Promise<ReceiptOutcome>((resolve) => {
+    receiptBatch.requests.push({
+      row,
+      resolve: (outcome: unknown) => resolve(outcome as ReceiptOutcome),
+    })
     const flush = () => {
       const batch = receiptBatch.requests.splice(0, MAX_BATCH)
       if (batch.length === 0) return
       void insertReceiptsViaSupabase(batch.map((r) => r.row as ReceiptRow)).then((outcomes) => {
         batch.forEach((request, index) => request.resolve(outcomes[index]))
+      }).catch(() => {
+        batch.forEach((request) => request.resolve({ ok: false, duplicate: false, error: 'inbox_transport_failed' }))
       })
       // بقيت صفوف؟ نُفرّغها فوراً (لا ننتظر حدثاً جديداً).
       if (receiptBatch.requests.length > 0) scheduleFlush(receiptBatch, flush)
     }
     scheduleFlush(receiptBatch, flush)
-  })
+  })))
 }
 
 /**
@@ -226,25 +230,25 @@ export function insertReceipts(rows: ReceiptRow[]): Promise<ReceiptOutcome[]> {
 export function insertQueueRows(rows: QueueRow[]): Promise<QueueOutcome[]> {
   if (rows.length === 0) return Promise.resolve([])
   if (rows.length === 1) {
-    return insertQueueRowsViaSupabase(rows).then((outcomes) => (outcomes[0] ? [outcomes[0]] : []))
+    return insertQueueRowsViaSupabase(rows).catch(() => [{ ok: false, duplicate: false, error: 'queue_transport_failed' }])
   }
-  return new Promise<QueueOutcome[]>((resolve) => {
-    queueBatch.requests.push(
-      ...rows.map((row) => ({
-        row,
-        resolve: (outcome: unknown) => resolve([outcome as QueueOutcome]),
-      }))
-    )
+  return Promise.all(rows.map((row) => new Promise<QueueOutcome>((resolve) => {
+    queueBatch.requests.push({
+      row,
+      resolve: (outcome: unknown) => resolve(outcome as QueueOutcome),
+    })
     const flush = () => {
       const batch = queueBatch.requests.splice(0, MAX_BATCH)
       if (batch.length === 0) return
       void insertQueueRowsViaSupabase(batch.map((r) => r.row as QueueRow)).then((outcomes) => {
         batch.forEach((request, index) => request.resolve(outcomes[index]))
+      }).catch(() => {
+        batch.forEach((request) => request.resolve({ ok: false, duplicate: false, error: 'queue_transport_failed' }))
       })
       if (queueBatch.requests.length > 0) scheduleFlush(queueBatch, flush)
     }
     scheduleFlush(queueBatch, flush)
-  })
+  })))
 }
 
 /**

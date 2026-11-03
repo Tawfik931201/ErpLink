@@ -16,6 +16,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 
 import { getAppBaseUrl } from '@/lib/app-url'
 import { supabase } from '@/lib/supabase'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 import { getZidConfig } from '@/lib/zid/config'
 import { exchangeAuthorizationCodeForResponse, toStoredTokens } from '@/lib/zid/token'
 import { ZidOAuthError } from '@/lib/zid/types'
@@ -195,7 +196,7 @@ export async function GET(request: NextRequest) {
     return redirectToConnectZid(request, { error: 'workspace_lookup_failed' })
   }
 
-  let workspaceId: string | null = userDb?.active_workspace_id ?? null
+  let workspaceId = await accessibleWorkspaceId(userId, userDb?.active_workspace_id)
   if (!workspaceId) {
     const { ensureDefaultWorkspace } = await import('@/lib/workspace-defaults')
     workspaceId = await ensureDefaultWorkspace(userId)

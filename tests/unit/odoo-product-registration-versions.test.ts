@@ -1,7 +1,13 @@
 import fs from 'fs'
 import path from 'path'
 
-import { applyFixedSettingsToValues } from '../../src/lib/sync-engine'
+import type { OdooClient } from '../../src/lib/odoo-client'
+import { applyFixedSettingsToValues, safeCreateOdooRecord } from '../../src/lib/sync-engine'
+
+jest.mock('../../src/lib/sync-runtime', () => ({
+  supabaseAdmin: jest.requireActual('../mocks/supabase').supabase,
+  logSync: jest.fn(),
+}))
 
 describe('Odoo Product Registration Across Versions 14 to 20', () => {
   const dummyZidData = { id: 12345, name: 'Test Product', sku: 'SKU-001' }
@@ -200,7 +206,12 @@ describe('Odoo Product Registration Across Versions 14 to 20', () => {
       expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', mainDuplicateId, odooValues, odooValues)")
       expect(syncEngineSrc).toContain("safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)")
       expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, variantOdooValues, variantOdooValues)")
-      expect(syncEngineSrc).toContain("safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)")
+      const variantCreate = /safeCreateOdooRecord\(client, 'product.template', variantOdooValues, variantOdooValues,\s*`variant:\$\{String\(variant\.id \|\| variant\.sku \|\| JSON\.stringify\(variant\.attributes\)\)\}`\)/
+      expect(syncEngineSrc).toMatch(variantCreate)
+      // Removing the source identity must fail this pin: otherwise distinct
+      // same-model variants would share the parent's durable create effect.
+      expect(syncEngineSrc.replace(variantCreate, "safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)"))
+        .not.toMatch(variantCreate)
       expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, odooValues, odooValues)")
       expect(syncEngineSrc).toContain("safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)")
     })
@@ -208,6 +219,20 @@ describe('Odoo Product Registration Across Versions 14 to 20', () => {
     it('pins that order line auto-creation handles Odoo 18+ is_storable and Odoo 20+ tracking', () => {
       expect(syncEngineSrc).toContain('prodVals.is_storable = wantsStorable')
       expect(syncEngineSrc).toContain('prodVals.tracking = false')
+    })
+  })
+
+  describe('Executable validation fallback', () => {
+    it.each([
+      ["Invalid field 'is_storable' on model 'product.template'", 'is_storable', true],
+      ["Wrong value for product.template.tracking: 'none'", 'tracking', 'none'],
+    ])('preserves field pruning after confirmed ORM rejection: %s', async (message, field, value) => {
+      const rejection = Object.assign(new Error(String(message)), { faultCode: 1 })
+      const create = jest.fn().mockRejectedValueOnce(rejection).mockResolvedValueOnce(42)
+      const client = { create } as unknown as OdooClient
+      await expect(safeCreateOdooRecord(client, 'product.template', { name: 'Fixture', [String(field)]: value }, {})).resolves.toBe(42)
+      expect(create).toHaveBeenCalledTimes(2)
+      expect(create.mock.calls[1]).toEqual(['product.template', { name: 'Fixture' }])
     })
   })
 })

@@ -3,10 +3,11 @@
 import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
+import { validateExecutionTarget, withErpTarget } from '@/lib/erp-execution-target'
 import { SHOPIFY_TOPIC_CATALOG } from '@/lib/shopify-topics'
-import { syncLogSearchFilter } from '@/lib/sync-log-search'
 import { supabase } from '@/lib/supabase'
 import { processSingleMapping, processWebhookEvent } from '@/lib/sync-engine'
+import { syncLogSearchFilter } from '@/lib/sync-log-search'
 import type { FieldMappingRow } from '@/lib/sync-types'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 
@@ -435,7 +436,7 @@ export async function retrySyncLog(logId: string) {
     // 1. Fetch log — lean columns only (the fields re-run below needs).
     const { data: log, error: logErr } = await supabase
       .from('sync_logs')
-      .select('id,event,store_id,payload,field_mapping_id')
+      .select('id,event,store_id,payload,field_mapping_id,erp_connection_id,connection_generation,platform')
       .eq('id', logId)
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
@@ -446,6 +447,11 @@ export async function retrySyncLog(logId: string) {
     if (!log.event) {
       throw new Error('لا يوجد نوع حدث مسجل لهذا السجل (Log does not contain an event type)')
     }
+    if (!log.erp_connection_id || !log.connection_generation) throw new Error('Legacy sync log has no pinned ERP target; controlled reconciliation is required before retry')
+    const retryPlatform = log.platform || await resolveLogPlatform(log.store_id, user.active_workspace_id)
+    if (retryPlatform !== 'zid' && retryPlatform !== 'salla' && retryPlatform !== 'shopify') throw new Error('Cannot verify retry store platform')
+    const retryTarget = { erpConnectionId: log.erp_connection_id, connectionGeneration: log.connection_generation }
+    await validateExecutionTarget(user.active_workspace_id, retryPlatform, log.store_id || '', retryTarget)
 
     const payload = (log.payload && typeof log.payload === 'object' && !Array.isArray(log.payload))
       ? (log.payload as Record<string, unknown>)
@@ -478,14 +484,15 @@ export async function retrySyncLog(logId: string) {
 
     if (mapping) {
       // 3a. Re-run custom mapping
-      const result = await processSingleMapping(
+      const result = await withErpTarget({ ...retryTarget, workspaceId: user.active_workspace_id, platform: retryPlatform, storeId: log.store_id || '', eventId: logId }, () => processSingleMapping(
         mapping,
         log.event,
         log.store_id || '',
         payload,
         'manual', // triggerType
-        logId // existingLogId
-      )
+        logId, // existingLogId
+        retryPlatform
+      ))
 
       status = result.status
       message = result.message || ''
@@ -493,14 +500,15 @@ export async function retrySyncLog(logId: string) {
     } else {
       // 3b. Standard Mapping (preset / webhook event fallback where field_mapping_id is null or mapping was removed)
       const retryStartTime = new Date(Date.now() - 2000).toISOString()
-      const platform = await resolveLogPlatform(log.store_id, user.active_workspace_id)
       const result = await processWebhookEvent(
         log.event,
         log.store_id || '',
         payload,
-        platform || undefined,
+        retryPlatform,
         true, // isQueueExecution
-        user.active_workspace_id
+        user.active_workspace_id,
+        logId,
+        retryTarget
       )
 
       if (!result.records || result.records.length === 0) {

@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { decrypt } from '@/lib/crypto'
+import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
+import { connectionGeneration, getErpExecutionScope, resolveOwnedStorePlatform } from '@/lib/erp-execution-target'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { authorizeOdooWebhook, odooRecordSecretScope } from '@/lib/odoo/webhook-secret'
 import { OdooClient } from '@/lib/odoo-client'
@@ -69,7 +71,7 @@ async function logOdooSkip(params: {
   }
 }
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   const getHeader = (name: string) => req.headers.get(name)
   // حد الاستقبال: للمجهولين فقط. أودوو يرسل السر المشتق في `?secret=` أو
   // `x-odoo-secret` — فكل طلب حقيقي موثّق ولا يخضع لحد الـIP. حد 120/دقيقة
@@ -253,16 +255,22 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
   }
 
   // 2. Fetch Odoo Connection
+  const executionScope = getErpExecutionScope()
+  if (executionScope && (executionScope.workspaceId !== mapping.workspace_id || executionScope.erpConnectionId !== mapping.erp_connection_id)) {
+    throw new Error('Outbound mapping ERP execution target changed')
+  }
   const { data: odooConn, error: connErr } = await supabaseAdmin
     .from('erp_connections')
     .select('*')
     .eq('id', mapping.erp_connection_id)
+    .eq('workspace_id', mapping.workspace_id)
     .maybeSingle()
 
   if (connErr || !odooConn) {
     console.warn('[Odoo Webhook Bg] Odoo connection not found')
     return FAIL('Odoo connection not found for this mapping')
   }
+  if (executionScope && connectionGeneration(odooConn) !== executionScope.connectionGeneration) throw new Error('Outbound ERP execution generation changed; controlled recovery required')
 
   if (odooConn.erp_type && odooConn.erp_type !== 'odoo') {
     console.warn(`[Odoo Webhook Bg] Webhook sync for non-Odoo ERP (${odooConn.erp_type}) is not supported yet.`)
@@ -405,28 +413,8 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
     return SKIP(`Odoo record ${model}#${odooRecordId} no longer exists`)
   }
 
-  // 4. Determine platform from event naming convention
-  const platform: 'zid' | 'salla' | 'shopify' = (() => {
-    const action = mapping.action
-    // Shopify events use "/" syntax (products/create, orders/create) or "shopify:" prefix
-    if (action.includes('/') || action.startsWith('shopify:')) return 'shopify'
-    // Salla events use dot notation with past-tense suffixes: product.created, order.cancelled
-    if (
-      action.startsWith('product.') ||
-      action.startsWith('order.') ||
-      action.startsWith('customer.') ||
-      action.startsWith('category.') ||
-      action.startsWith('store.branch.') ||
-      action.startsWith('store.settings.') ||
-      action.startsWith('abandoned.cart') ||
-      action.startsWith('coupon.') ||
-      action.startsWith('brand.') ||
-      action.startsWith('special.offer.') ||
-      action.startsWith('app.')
-    ) return 'salla'
-    // Zid events use dot notation with present-tense: product.create, order.update
-    return 'zid'
-  })()
+  // Platform authority comes from the owned store token, never an event-name guess.
+  const platform = await resolveOwnedStorePlatform(mapping.workspace_id, String(mapping.merchant_id || ''))
 
   // ——— Read product standard mapping settings (applies to Odoo → Zid too) ———
   // standard_mapping_settings (store_type=zid, entity_type=products) is the source
@@ -1309,3 +1297,7 @@ export async function GET() {
   return NextResponse.json({ ok: true, message: 'Odoo Webhook Receiver is ready.' })
 }
 
+
+export async function POST(req: NextRequest) {
+  return withDurableWebhookResponse('odoo', req, handlePost)
+}

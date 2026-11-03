@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { cache } from 'react'
 
 import { supabase } from './supabase'
+import { accessibleWorkspaceId } from './workspace-access'
 
 /**
  * Checks if the given userId is an admin user.
@@ -70,7 +71,7 @@ export const getActiveWorkspaceId = safeCache(async (): Promise<string | null> =
     return null
   }
 
-  return (data?.active_workspace_id as string | null) ?? null
+  return accessibleWorkspaceId(userId, data?.active_workspace_id)
 })
 
 /**

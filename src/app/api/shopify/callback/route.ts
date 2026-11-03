@@ -12,6 +12,7 @@ import {
   verifyShopifyCallbackHmac,
 } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
   const appUrl =
@@ -75,7 +76,7 @@ export async function GET(request: NextRequest) {
     return redirectToConnectStore(request, { error: 'no_active_workspace' })
   }
 
-  const activeWorkspaceId: string | null = userDb?.active_workspace_id ?? null
+  const activeWorkspaceId = await accessibleWorkspaceId(userId, userDb?.active_workspace_id)
   if (!activeWorkspaceId) {
     return redirectToConnectStore(request, { error: 'no_active_workspace' })
   }

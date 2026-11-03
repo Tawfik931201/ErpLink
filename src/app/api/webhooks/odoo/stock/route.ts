@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import {
   authorizeOdooWebhook,
@@ -31,7 +32,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * closing that needs a per-tenant secret, which is a deployment change
  * (each customer's Automated Action must be reconfigured).
  */
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   const getHeader = (name: string) => req.headers.get(name)
   // حد الاستقبال: للمجهولين فقط (الس السر المشتق في `?secret=` أو
   // `x-odoo-secret`). حد 120/دقيقة كان يحوّل ذروة العميل إلى ضياع صامت
@@ -213,4 +214,7 @@ function toId(v: unknown): number | null {
 
 export async function GET() {
   return NextResponse.json({ ok: true, message: 'Odoo Stock Webhook Receiver is ready.' })
+}
+export async function POST(req: NextRequest) {
+  return withDurableWebhookResponse('odoo/stock', req, handlePost)
 }

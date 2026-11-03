@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
 /**
  * Ensures that a new user has a default workspace named "Default".
@@ -34,14 +35,9 @@ export async function ensureDefaultWorkspace(userId: string): Promise<string | n
     }
 
     if (user?.active_workspace_id) {
-      const { data: wsExists } = await supabase
-        .from('workspaces')
-        .select('id')
-        .eq('id', user.active_workspace_id)
-        .maybeSingle()
-
-      if (wsExists?.id) {
-        return wsExists.id
+      const accessible = await accessibleWorkspaceId(userId, user.active_workspace_id)
+      if (accessible) {
+        return accessible
       }
     }
 

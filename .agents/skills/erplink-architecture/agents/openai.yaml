@@ -1,0 +1,4 @@
+interface:
+  display_name: "ERPlink Architecture"
+  short_description: "Navigate ERPlink architecture and refactor safely"
+  default_prompt: "Use $erplink-architecture to locate the code for my ERPlink task and choose safe changes and relevant tests."

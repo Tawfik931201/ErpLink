@@ -27,8 +27,12 @@ jest.mock('../../src/lib/sync-engine', () => ({
 }))
 
 import { retrySyncLog } from '@/app/actions/sync-logs'
+import { connectionGeneration } from '@/lib/erp-execution-target'
 
 import { supabase } from '../mocks/supabase'
+
+const retryConnection = { id: 'erp-123', workspace_id: 'ws-123', url: 'https://erp.example', db_name: 'db', username: 'user', password: 'cipher', erp_type: 'odoo', status: 'connected' }
+const retryPin = { erp_connection_id: retryConnection.id, connection_generation: connectionGeneration(retryConnection), platform: 'zid' }
 
 function readStripped(relativePath: string): string {
   const raw = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8')
@@ -42,6 +46,9 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
     mockProcessSingleMapping.mockReset()
     mockProcessWebhookEvent.mockReset()
     mockAuth.mockResolvedValue({ userId: 'user-1' })
+    supabase.addMock('merchant_tokens', [{ workspace_id: 'ws-123', merchant_id: 'store-99' }])
+    supabase.addMock('erp_connections', [retryConnection])
+    supabase.addMock('erp_workspace_bindings', [{ workspace_id: 'ws-123', erp_connection_id: 'erp-123', erp_type: 'odoo', url: retryConnection.url, db_name: 'db' }])
   })
 
   it('safely retries a Standard Mapping log where field_mapping_id is null via processWebhookEvent', async () => {
@@ -51,6 +58,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
         return {
           data: {
             id: 'log-uuid-1',
+            ...retryPin,
             workspace_id: 'ws-123',
             event: 'order.create',
             store_id: 'store-99',
@@ -61,7 +69,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
           error: null,
         }
       }
-      return { data: null, error: null }
+      return undefined
     })
 
     // Mock successful processWebhookEvent
@@ -97,9 +105,11 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
       'order.create',
       'store-99',
       { id: 101, total: 250 },
-      undefined,
+      'zid',
       true,
-      'ws-123'
+      'ws-123',
+      'log-uuid-1',
+      { erpConnectionId: retryPin.erp_connection_id, connectionGeneration: retryPin.connection_generation }
     )
 
     // Proves the existing log was updated in place
@@ -120,6 +130,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
         return {
           data: {
             id: 'log-uuid-2',
+            ...retryPin,
             workspace_id: 'ws-123',
             event: 'product.update',
             store_id: 'store-99',
@@ -141,7 +152,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
           error: null,
         }
       }
-      return { data: null, error: null }
+      return undefined
     })
 
     mockProcessSingleMapping.mockResolvedValue({
@@ -170,7 +181,8 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
       'store-99',
       { id: 202, name: 'T-Shirt' },
       'manual',
-      'log-uuid-2'
+      'log-uuid-2',
+      'zid'
     )
   })
 
@@ -180,6 +192,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
         return {
           data: {
             id: 'log-uuid-3',
+            ...retryPin,
             workspace_id: 'ws-123',
             event: 'order.create',
             store_id: 'store-99',
@@ -190,7 +203,7 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
           error: null,
         }
       }
-      return { data: null, error: null }
+      return undefined
     })
 
     mockProcessWebhookEvent.mockResolvedValue({
@@ -221,5 +234,24 @@ describe('retrySyncLog — handles null field_mapping_id without Postgres UUID e
     expect(code).toMatch(/isUuid\s*=\s*typeof log\.field_mapping_id === 'string'/)
     expect(code).toMatch(/if \(isUuid\)/)
     expect(code).toContain('processWebhookEvent(')
+  })
+
+  it('refuses an unpinned legacy log instead of guessing a replacement ERP', async () => {
+    supabase.addMock('sync_logs', [{ id: 'legacy', workspace_id: 'ws-123', event: 'order.create', store_id: 'store-99', payload: {} }])
+    const result = await retrySyncLog('legacy')
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/controlled reconciliation/)
+    expect(mockProcessWebhookEvent).not.toHaveBeenCalled()
+    expect(mockProcessSingleMapping).not.toHaveBeenCalled()
+  })
+
+  it('rejects a changed credential generation before any retry effect', async () => {
+    supabase.addMock('sync_logs', [{ id: 'pinned', ...retryPin, workspace_id: 'ws-123', event: 'order.create', store_id: 'store-99', payload: {} }])
+    supabase.addMock('erp_connections', [{ ...retryConnection, password: 'rotated' }])
+    const result = await retrySyncLog('pinned')
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/generation changed/)
+    expect(mockProcessWebhookEvent).not.toHaveBeenCalled()
+    expect(mockProcessSingleMapping).not.toHaveBeenCalled()
   })
 })

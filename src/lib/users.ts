@@ -2,6 +2,7 @@ import { currentUser } from '@clerk/nextjs/server'
 import { cache } from 'react'
 
 import { supabase } from '@/lib/supabase'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
 
 export const getOrCreateDbUser = cache(async (userId: string) => {
@@ -29,7 +30,7 @@ export const getOrCreateDbUser = cache(async (userId: string) => {
         dbUser.active_workspace_id = activeId
       }
     }
-    return dbUser
+    return { ...dbUser, active_workspace_id: await accessibleWorkspaceId(userId, dbUser.active_workspace_id) }
   }
 
   const clerkUser = await currentUser()
@@ -92,5 +93,5 @@ export const getOrCreateDbUser = cache(async (userId: string) => {
     }
   }
 
-  return createdUser
+  return { ...createdUser, active_workspace_id: await accessibleWorkspaceId(userId, createdUser.active_workspace_id) }
 })

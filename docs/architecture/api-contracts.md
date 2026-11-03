@@ -1,0 +1,84 @@
+# Existing API and integration contracts
+
+Source inspection: 2026-11-03. This is a preservation baseline, not a proposed API. No live endpoint, database or merchant API was called for this document. Examples show shapes rather than customer data. Optional properties with `undefined` values are omitted by JSON serialization. Exact branch implementation remains authoritative in the referenced route.
+
+## Webhook ingress
+
+Routes live under `src/app/api/webhooks/`. Do not normalize their different response shapes or HTTP codes during internal refactoring.
+
+| Endpoint | Existing input and authentication | Main successful response |
+| --- | --- | --- |
+| `POST /api/webhooks/zid` | Platform event/body with store identity resolved by the route, including `store_id` URL hints; HTTP Basic credential from `src/lib/zid/webhook-auth.ts`. Classification is `ok`, `invalid`, `legacy`, or `unconfigured`; migration compatibility accepts legacy deliveries. | HTTP 200 `{ received: true, queued: boolean }` (`zid/route.ts:717`). `queued` reports the handler result, not completion in Odoo. |
+| `POST /api/webhooks/salla` | JSON event envelope, merchant resolved by `extractSallaMerchantId`, event data, optional delivery id. Raw body preserved for native HMAC. Native signature/token and derived `x-erplink-webhook-secret` are handled in `src/lib/salla/webhook-auth.ts`. | HTTP 200 `{ received: true, queued: !enqueued.duplicate, coalesced: enqueued.coalesced }` (`salla/route.ts:546`). No API enrichment in request; worker enriches later. |
+| `POST /api/webhooks/shopify` | Raw JSON body, HMAC header, valid `x-shopify-shop-domain`, topic and optional webhook delivery id. Shared configured secret, no derived fallback. | HTTP 200 `{ received: true, queued: true }`; merge branch adds `merged: true`; duplicate branch `{ received: true, processed: false, reason: 'duplicate' }`. |
+| `POST /api/webhooks/odoo` | Object or array body; first array element is used. `field_mapping_id` from query/body; model aliases `_model`, `model`, `_name`, otherwise mapping model; record aliases `_id`, `id`, `odooRecordId`. Per-mapping derived credential from query/header/authorization/token via `authorizeOdooWebhook`. | HTTP 202 `{ success: true, queued: true, duplicate: boolean, message: 'Webhook received and queued for sync.' }` (`odoo/route.ts:211`). |
+| `POST /api/webhooks/odoo/stock` | Object/array body; UUID `workspace_id` from query/body. `product_id` or quant `_id`/`id` required; `location_id` optional. IDs accept scalar or many2one arrays; positive finite values are truncated. Per-workspace derived credential. | HTTP 202 `{ success: true, queued: true, message: 'Stock webhook received and queued for sync.' }` (`odoo/stock/route.ts:201`). Starts a fire-and-forget drain after durable enqueue even in production. |
+| `POST /api/webhooks/clerk` | Raw payload; signature headers, timestamp window and `CLERK_WEBHOOK_SECRET` checked in route. Handles user lifecycle events. | HTTP 200 `{ received: true }`. |
+
+Webhook GET methods are readiness JSON endpoints: Zid/Salla/Shopify report `ok`, message and event/topic information; Odoo record and stock report `ok` and message; Clerk reports `ok` and message.
+
+### Terminal and failure branches that must remain distinct
+
+- Zid/Salla/Shopify unlinked stores: save an orphan receipt with null workspace, then HTTP 202 `{ received: true, processed: false, queued: false, reason: 'store_not_linked' }`. Receipt failure instead returns 503 with `{ received: false, processed: false, error }`.
+- Disabled Salla/Shopify events: HTTP 200 `{ received: true, processed: false, reason: 'disabled_in_settings', detail: reason }` plus skip logging. Zid handlers return `skipped`, producing the normal response with `queued: false`.
+- Uninstall events have separate token-deletion branches. Unauthenticated Zid/Salla uninstall is refused; accepting legacy non-destructive events does not authorize uninstall. Shopify acknowledges uninstall/GDPR/scope-update separately.
+- Invalid credentials: 401; unconfigured production verifier: 500. Anonymous-only ingress buckets may return 429. Credential presence bypasses that bucket, then actual verification decides authenticity. Do not replace this with a blanket rate limit.
+- Size limits: 413. Malformed JSON and missing required identifiers can return 400. Some malformed/sentinel events are durably recorded before their existing 400 response; do not convert all malformed requests into ordinary queued jobs.
+- Odoo record mapping not found: 404; missing mapping/model/id/workspace: 400. Odoo stock invalid workspace UUID: 400, unknown workspace: 404, workspace lookup failure: 503.
+- Durable enqueue failure: Odoo returns 503 `{ error: 'Failed to persist webhook', detail }`; Salla returns 503 `{ received: false, processed: false, error: 'durable_storage_failed' }`; other routes retain their own error body.
+- Salla stale events older than 15 minutes are saved with null workspace and acknowledged as stale without enqueue; Shopify has its own stale-event branch. Do not let the regular inbox drain process these orphan rows automatically.
+
+### Internal queue contract
+
+`enqueueWebhookEvent` in `src/lib/sync-queue.ts:401` accepts `{ workspaceId, storeId, event, platform, payload, dedupKey? }`. The result can carry `id`, `duplicate`, `coalesced`, `skipped`, or `error` (see `EnqueueResult`). It is not a guarantee of completed synchronization.
+
+1. Missing workspace/store/event returns `{ skipped: true }`.
+2. Admission overload returns `{ error: 'ingress_overloaded' }`; authenticated traffic over its workspace share is otherwise deferred, not rejected.
+3. Durable receipt precedes queue insert. Odoo writes immediately; store deliveries may use the 50-row/150ms write batcher. Awaiting the batch result is required before acknowledging durability.
+4. Explicit delivery id wins; otherwise canonical payload fingerprint forms the dedup identity. Mapping identity participates in Odoo coalescing. Do not substitute an entity id for delivery identity.
+5. Queue execution dispatches Odoo record events to `runBackgroundSync`, Odoo stock to `processOdooStockEvent`, and store events to `processWebhookEvent(..., true, workspace_id, queue_id)`.
+6. Record worker result `{ ok: false, message }` retries; `{ ok: true, skipped?: true, message? }` settles. Store result with `failed === 0` settles. Missing result retries, not silent success.
+
+The queue payload for Odoo records is `{ field_mapping_id, model, odooRecordId: number, payloadData, auth_status, updated_at? }`. Preserve `auth_status`: an absent Odoo record may trigger deletion only for authenticated deliveries. The stock payload carries `{ workspace_id, product_id, location_id, quant_id, updated_at?, ...quantityFingerprintFields }`; body quantities are fingerprints, never authoritative stock values.
+
+## OAuth and compatibility routes
+
+| Routes | Preservation contract |
+| --- | --- |
+| `GET /api/{zid,salla,shopify}/connect` | Stateless OAuth entry points. Do not add session enforcement merely to make them look consistent with callbacks. |
+| `GET /api/zid/callback` | Exact state/cookie equality (`zid_oauth_state`), code validation, Clerk session and active/default workspace before spending code. Supports JSON-mode branches as well as redirects. Writes tokens for real store identity without deleting other stores; clears state cookie on success. See `src/app/api/zid/callback/route.ts:116`. |
+| `GET /api/salla/callback` | Exact `salla_oauth_state`, code, session and active/default workspace before token exchange; configured redirect URI must match connect. Redirect responses carry existing error/success query fields; success clears cookie. See `src/app/api/salla/callback/route.ts:73`. |
+| `GET /api/shopify/callback` | Shop validation, exact `shopify_oauth_state`, code, session and workspace, HMAC/token exchange; existing redirects retained. No automatic default workspace creation in this callback. See `src/app/api/shopify/callback/route.ts:29`. |
+| `GET /api/auth/zid/authorize`, `GET /api/auth/zid/callback` | Compatibility forwarding shims, retain query handling and target routes. |
+| `GET /api/sign-up-intent/set` | Redirect shim to `/sign-up`. |
+| `GET` / `POST /api/auth/[...nextauth]` | Deliberate plain-text `Not Found` response with 404; presence of this shim does not mean NextAuth is active. |
+
+## Browser-facing data and downloads
+
+`GET /api/mapping-center/settings?store=<zid|salla|shopify>&entity=<categories|products|customers|orders>&storeId=<optional>` is session/active-workspace scoped. Returns HTTP 200 `{ settings: object|null, orderStatusMappings: Record<string,{state,enabled}>|null }` and `Cache-Control: private, no-store`. Explicit store settings override platform defaults. Invalid request: 400 `{error}`; unauthenticated: 401; timeout/lookup failure: 503. No workspace returns both fields null. Each read is bounded by a 5-second timeout (`src/app/api/mapping-center/settings/route.ts:30`).
+
+`GET /api/tickets/attachments?id=<positive integer>` returns binary content, not JSON. Clerk user/email ticket ownership is checked (admin exempt). Existing headers include content type, encoded attachment filename, `private, max-age=3600`, and `nosniff`. Plain-text errors use 400/401/403/404/413/429/500. The body limit is 10 MiB. Uses the separate helpdesk JSON-RPC client `src/lib/odoo.ts`, not a workspace integration connection.
+
+Server Actions in `src/app/actions/` are also external boundaries consumed by components. Preserve exported async names, argument/default shapes, return unions and error strings. Do not move exports into a plain module and expose previously private mutation helpers as browser-callable actions. Domain-specific action signatures remain documented by their TypeScript declarations; no wholesale contract rename is part of this work.
+
+## Schedulers and admin operations
+
+`GET /api/cron/sync-queue`: `Authorization: Bearer ...` or `x-cron-secret`; missing configured secret is 500 in production, mismatch 401. `batch` is parsed/clamped to 1..100 (including current JavaScript `Number(null)` behavior); IP limit 60/min. Drains inbox then time-boxed queue batches. HTTP 200 `{ success: true, timestamp, inbox, batchesRun, totalProcessed, durationMs, orphanInbox, metrics }`; processing exception is 500 `{ success: false, error }`. POST is 405 `{ error: 'Method not allowed' }`.
+
+`GET /api/cron/reconcile`: bearer or query `key`; `window` parsed/clamped to 1..1440 minutes, limit 20/min. Returns `{ success, timestamp, result }`, 500 when `result.stopped === 'error'`; thrown error is 500 `{ success: false, error }`. POST is 405. Only Zid orders are reconciled by the actual implementation, despite broad comments mentioning other platforms.
+
+Admin routes re-check Clerk and `isAdmin`; their existing choice of 401 versus 403 is part of the contract:
+
+| Endpoint | Request and response |
+| --- | --- |
+| `GET /api/admin/workspaces` | 401 if unauthorized; 200 `{ success: true, workspaces: [{id,name}] }`, up to 200; failures 500 `{error}`. |
+| `POST /api/admin/pipeline-selftest` | `{workspaceId, confirm:true}` required; 401/400/404 failures. Returns `{success,runId,totalMs,steps,notes,workspace}`. Writes synthetic database rows and audit data; do not run during an offline audit. |
+| `POST /api/admin/load-rehearsal` | `{workspaceId,count,confirm:true,mode?,allowProductionDrain?}`; count 1..20000, default mode enqueue. Production drain requires explicit flag. Returns `{success,mode,count,inserted,insertMs,insertsPerSec,drained,drainSucceeded,drainRetried,cleaned,note}`. This route can perform real integration work in drain mode. |
+| `GET /api/admin/queue-health` | Admin-only operational snapshot including readiness and ingress/queue information; retain the full route-defined object (`src/app/api/admin/queue-health/route.ts:203`). 401 unauthorized. |
+| `GET` / `POST /api/admin/webhook-legacy-status` | 403 unauthorized. GET returns durable legacy counters; POST optionally accepts `platform`, resets selected/all counters and returns `{ok:true,reset,legacyCounters}`. |
+| `GET /api/admin/webhook-orphans/replay` | 403 unauthorized; `{orphans,message}`. |
+| `POST /api/admin/webhook-orphans/replay` | Optional `{limit}`, default 25, clamp 1..100. Returns `{replayed,duplicate,unlinked,skipped,failed,scanned}`. Excludes uninstall/sentinel events; can enqueue real work. |
+| `POST /api/admin/{zid,salla,odoo}-webhooks/refresh` | 403 unauthorized; refuses without derivable credential; mutates external registrations. Zid deletes then recreates, Salla subscribes/upserts, Odoo creates before deleting. Returns platform-specific reports; Odoo `{ok,refreshed,failed,workspaces}`. GET responds with method guidance/405 as defined in each route. |
+| `GET` / `POST /api/admin/impersonate` | Admin/target validation, existing GET/query and POST form/JSON compatibility, cookie/redirect handling in `src/app/api/admin/impersonate/route.ts`. Keep routes and write-block behavior intact. |
+
+No request to any mutating admin endpoint above was made. A successful local build does not validate real webhook registrations, token refresh, merchant permissions, or Odoo method availability.
