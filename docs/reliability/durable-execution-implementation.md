@@ -1,6 +1,6 @@
 # Durable webhook execution: implementation and verification
 
-Date: 2026-11-03. This is the functional follow-up authorized after the user confirmed that the Supabase data, ERP connections and stores are test resources. It supersedes the proposal-only status in the initial audit. Application changes remain local until deployed; three migrations were applied to the application's verified Supabase project, `bnzkmoorrvtellesgvbq`. The other configured MCP project's database was not changed.
+Date: 2026-11-03. This is the functional follow-up authorized after the user confirmed that the Supabase data, ERP connections and stores are test resources. It supersedes the proposal-only status in the initial audit. Three migrations were applied to the application's verified Supabase project, `bnzkmoorrvtellesgvbq`. The other configured MCP project's database was not changed. Code commit `37546c60ad83fa4b1dd9b367ac7d588f60bf5403` was subsequently pushed to GitHub main and live application behavior was verified at `https://erplink.bizsahla.com`; see the deployment verification below.
 
 ## Implemented boundaries
 
@@ -54,3 +54,19 @@ The effect ledger covers trusted queued ERP creates. Related-create replay ident
 Automatic recovery of unknown effects is not guessed. Inspect the owned target, worker liveness, effect status/remote ID, source receipt and external stable references before clearing a quarantine. Resource replacement requires explicit mapping reconciliation rather than editing a baseline to bypass the guard. Original retained legacy jobs remain reviewable.
 
 Remaining security work includes complete SSRF/DNS/redirect egress enforcement and broad log redaction. Encrypted recovery data and permanent delivery identities now need a documented retention/export policy. Keep `ENCRYPTION_KEY` stable and backed up; an ephemeral development key cannot provide restart-safe decryption. The deployed scheduler/worker configuration and actual host behavior must be verified after deployment; a local build does not deploy these changes.
+
+## Authorized live deployment verification
+
+The user explicitly requested GitHub publication, deployment monitoring and live tests, and supplied the deployed hostname. `main` and `codex/architecture-safe-refactor` were pushed to `Tawfik931201/ErpLink` at code commit `37546c6`. No environment values or credentials were committed; the staged additions were checked against configured secret values. Local whitespace-only cleanup preceded that commit.
+
+Live checks on 2026-11-03 around 22:46–22:53 Cairo:
+
+- The public site returned 200 and the real ErpLink application. Invalid Zid Basic credentials returned 401. A correctly authenticated unknown-event probe returned 200 and produced both a durable orphan receipt and its encrypted response copy, demonstrating that the new response fence was active on the deployed app.
+- Two signed-equivalent Zid Basic requests and one Salla derived-header request created uniquely labelled synthetic customer fixtures across three workspaces, deliberately using the same source customer ID. Requests were repeated immediately and again after completion.
+- Final database assertions: exactly **3 retained receipts**, **3 completed dispatch links**, **3 succeeded create effects**, **0 remaining fixture queue jobs**, **0 failed/unknown fixture create effects**. Expected connection IDs matched each workspace. Background processing occurred without a manual cron/drain invocation.
+- Read-only XML-RPC verification of the configured Odoo instances confirmed one record with each fixture's expected name: record 10 in target A, record 31 in target B, record 32 in target C. The B and C connections intentionally point to the same external server/database in the test configuration, so both records are visible there; the application retained separate platform/workspace/connection effect identities. The test does not establish external database separation where configuration intentionally shares a database.
+- Fixtures are clearly named `ERPlink Deployment Test A/B/C` with run marker `live-customer-3601e4a1-4603-47a5-9fb0-b4c95173ebbb`. They were retained as test evidence. No sales order, payment, invoice or stock change was sent by this live rehearsal. Raw responses and sanitized readback evidence are local under `%TEMP%/erplink-deploy-20261103/`; secrets remain only in existing credential sources/process memory.
+
+Hostinger OAuth connection succeeded, but the connector's `hosting_websites_list` operation required an approval unavailable under the session's approval policy. No private Hostinger build/runtime log access is claimed. Deployment was established through the newly deployed HTTP behavior plus Supabase and direct ERP readback. GitHub separately reported a failed Vercel check; that check is not evidence of Hostinger failure, and the user-specified site completed the tests above. No unrelated Vercel configuration was changed.
+
+These results verify the tested live customer flows, replay handling and target selection. They do not prove every provider event, financial workflow, outage/restart scenario or unlimited throughput.
