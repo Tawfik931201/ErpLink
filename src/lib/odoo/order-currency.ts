@@ -49,6 +49,7 @@ export function extractOrderCurrency(zidData: Record<string, unknown>, platform?
   // 1. Explicit currency keys (string or nested object)
   const candidates = [
     'currency_code',
+    'currency.order_currency.code',
     'currency',
     'currency.code',
     'currency.currency_code',
@@ -110,6 +111,34 @@ export function extractOrderCurrency(zidData: Record<string, unknown>, platform?
   }
 
   return 'SAR'
+}
+
+/** Zid's order/settlement totals prove FX direction only for the declared store currency. */
+export function extractZidStoreCurrency(payload: Record<string, unknown>): string {
+  return String(resolvePath(payload, 'currency.order_store_currency.code')
+    ?? resolvePath(payload, 'order_store_currency.code') ?? '').trim().toUpperCase()
+}
+
+export function qualifiedZidExchangeRate(
+  payload: Record<string, unknown>, sourceCurrency: string, targetCurrency: string
+): number | null {
+  const declaredSource = resolvePath(payload, 'currency.order_currency.code')
+    ?? resolvePath(payload, 'currency_code')
+    ?? (typeof payload.currency === 'string' ? payload.currency : resolvePath(payload, 'currency.code'))
+  const totalCurrency = typeof payload.order_total_string === 'string'
+    ? payload.order_total_string.trim().match(/\b([A-Za-z]{3})\b$/)?.[1] : undefined
+  const source = String(declaredSource || totalCurrency || '').trim().toUpperCase()
+  const store = extractZidStoreCurrency(payload)
+  if (source !== sourceCurrency.toUpperCase() || store !== targetCurrency.toUpperCase()) return null
+  const transactionCurrency = typeof payload.transaction_amount_string === 'string'
+    ? payload.transaction_amount_string.trim().match(/\b([A-Za-z]{3})\b$/)?.[1]?.toUpperCase() : undefined
+  if (transactionCurrency && transactionCurrency !== store) throw new Error('Zid settlement currency conflicts with its transaction amount')
+  const total = Number(payload.order_total)
+  const transaction = Number(payload.transaction_amount)
+  if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(transaction) || transaction <= 0) return null
+  const rate = transaction / total
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  return rate
 }
 
 /**

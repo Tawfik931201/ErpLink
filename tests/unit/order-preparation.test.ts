@@ -21,6 +21,8 @@ const orderSchema = {
   order_line: { type: 'one2many', relation: 'sale.order.line' },
   warehouse_id: { type: 'many2one', relation: 'stock.warehouse' },
   company_id: { type: 'many2one', relation: 'res.company' },
+  currency_id: { type: 'many2one', relation: 'res.currency' },
+  pricelist_id: { type: 'many2one', relation: 'product.pricelist' },
 }
 const lineSchema = {
   product_id: { type: 'many2one', relation: 'product.product' },
@@ -56,8 +58,21 @@ function fixture(options: { customerFound?: boolean; missingModel?: string; fail
   const client = {
     url: 'https://odoo.test', db: 'test',
     getMajorVersion: jest.fn().mockResolvedValue(17),
-    execute: jest.fn(async (model: string, method: string, args: unknown[]) => {
+    execute: jest.fn(async (model: string, method: string, args: unknown[], kwargs?: Record<string, any>) => {
       if (method === 'default_get') return { company_id: 7 }
+      if (method === 'search_read' && model === 'res.currency') {
+        expect(kwargs?.context).toMatchObject({ allowed_company_ids: [7], company_id: 7 })
+        const domain = args[0] as unknown[][]
+        const requestedId = domain.find(term => term[0] === 'id')?.[2]
+        const requestedName = domain.find(term => term[0] === 'name')?.[2]
+        return requestedId === 4 || requestedName === 'SAR' ? [{ id: 4, name: 'SAR', active: true }] : []
+      }
+      if (method === 'search_read' && model === 'product.pricelist') {
+        expect(kwargs?.context).toMatchObject({ allowed_company_ids: [7], company_id: 7 })
+        const domain = args[0] as unknown[][]
+        expect(domain).toEqual(expect.arrayContaining([['currency_id', '=', 4], ['company_id', '=', 7], ['company_id', '=', false]]))
+        return [{ id: 20, currency_id: [4, 'SAR'], company_id: [7, 'Existing company'], active: true }]
+      }
       if (method === 'fields_get') return model === 'sale.order' ? orderSchema : model === 'sale.order.line' ? lineSchema : partnerSchema
       if (model === 'ir.model.fields') {
         const targetModel = (args[0] as string[][]).find(c => c[0] === 'model')?.[2]
@@ -73,8 +88,11 @@ function fixture(options: { customerFound?: boolean; missingModel?: string; fail
       return []
     }),
     searchRead: jest.fn(async (model: string, domain: unknown[][]) => {
-      if (model === 'sale.order') return [{ id: 50, partner_id: [11, 'Existing buyer'], company_id: [7, 'Existing company'], state: 'draft', amount_total: 200 }]
+      if (model === 'sale.order') return [{ id: 50, partner_id: [11, 'Existing buyer'], company_id: [7, 'Existing company'], currency_id: [4, 'SAR'], pricelist_id: [20, 'SAR pricelist'], state: 'draft', amount_total: 200 }]
       if (model === options.missingModel) return []
+      if (model === 'res.company' && domain.some(term => term[0] === 'id' && term[1] === '=' && term[2] === 7)) {
+        return [{ id: 7, currency_id: [4, 'SAR'] }]
+      }
       const ids = domain.find(c => c[0] === 'id' && c[1] === 'in')?.[2]
       return Array.isArray(ids) ? ids.map(id => ({ id, company_id: options.foreignTax && model === 'account.tax' ? [8, 'Foreign company'] : false })) : []
     }),
@@ -106,6 +124,7 @@ describe('complete order preparation from the linked Standard Mapping tabs', () 
     expect(client.search).toHaveBeenCalledWith('product.product', [['barcode', '=', 'MATCH-BARCODE']], 2)
     const written = (client.create.mock.calls as unknown as Array<[string, Record<string, unknown>]>).find(([model]) => model === 'sale.order')![1]
     expect(written).toMatchObject({ partner_id: 11, order_line: [[0, 0, { product_id: 22, product_uom_qty: 2, price_unit: 100, tax_id: [[6, 0, [5]]], analytic_distribution: { '9': 100 } }]] })
+    expect(written).toMatchObject({ company_id: 7, currency_id: 4, pricelist_id: 20 })
     expect(client.create).toHaveBeenCalledTimes(1)
   })
 

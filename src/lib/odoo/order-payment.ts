@@ -506,11 +506,25 @@ export async function syncOrderPayment(params: {
       const postedInvoices = await client.searchRead<any>(
         'account.move',
         [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice'], ['state', '=', 'posted']],
-        ['id']
+        ['id', 'payment_state', 'amount_residual']
       )
+      const isSettled = (invoice: { payment_state?: string; amount_residual?: unknown } | undefined): boolean =>
+        !!invoice && (['paid', 'in_payment'].includes(invoice.payment_state || '') ||
+          (typeof invoice.amount_residual === 'number' && invoice.amount_residual === 0))
       for (const inv of postedInvoices || []) {
+        // A replay after reconciliation has no unreconciled lines left. That
+        // is success, rather than a reason to retry or create another payment.
+        if (isSettled(inv)) { reconciled = true; continue }
         const ok = await reconcilePaymentWithInvoice(client, paymentId, inv.id)
-        if (ok) reconciled = true
+        if (ok) { reconciled = true; continue }
+        const [currentInvoice] = await client.searchRead<any>(
+          'account.move', [['id', '=', inv.id]], ['id', 'payment_state', 'amount_residual'], 1
+        )
+        if (isSettled(currentInvoice)) { reconciled = true; continue }
+        // Newer Odoo versions may accept action_post and leave a payment
+        // in_process without move_id (journal outstanding-account setup).
+        // With a posted, unpaid invoice this is not completed payment sync.
+        return { paymentId, reconciled, skippedReason: 'payment_invoice_reconciliation_failed', errorReason: 'payment_invoice_reconciliation_failed' }
       }
     }
 

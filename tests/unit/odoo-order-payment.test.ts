@@ -298,6 +298,115 @@ describe('reconcilePaymentWithInvoice', () => {
 })
 
 describe('syncOrderPayment and reconcilePendingPaymentsForOrder', () => {
+  it.each([
+    ['unpaid', 250, true],
+    ['partial', 50, true],
+    ['paid', 0, false],
+    ['in_payment', 0, false],
+  ])('reports missing payment journal entry for posted %s invoices without falsely failing settled replays', async (paymentState, residual, shouldFail) => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    const client: any = {
+      getMajorVersion: async () => 19,
+      searchRead: jest.fn(async (model: string) => model === 'sale.order'
+        ? [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [201] }]
+        : model === 'account.payment' ? [{ id: 101, state: 'in_process', company_id: [1, 'Company'], move_id: false }]
+        : model === 'account.move' ? [{ id: 201, state: 'posted', move_type: 'out_invoice', payment_state: paymentState, amount_residual: residual }] : []),
+      create: jest.fn(), execute: jest.fn(),
+    }
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result.paymentId).toBe(101)
+    if (shouldFail) {
+      expect(result.errorReason).toBe('payment_invoice_reconciliation_failed')
+      expect(result.reconciled).toBe(false)
+    } else {
+      expect(result.errorReason).toBeUndefined()
+      expect(result.reconciled).toBe(true)
+    }
+    expect(client.create).not.toHaveBeenCalled()
+    expect(client.execute).not.toHaveBeenCalled()
+  })
+
+  it('allows an in-process prepayment before any invoice exists', async () => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    const client: any = {
+      searchRead: jest.fn(async (model: string) => model === 'sale.order'
+        ? [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [] }]
+        : [{ id: 101, state: 'in_process', company_id: [1, 'Company'], move_id: false }]),
+      create: jest.fn(), execute: jest.fn(),
+    }
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result).toEqual({ paymentId: 101, reconciled: false })
+    expect(client.create).not.toHaveBeenCalled()
+    expect(client.execute).not.toHaveBeenCalled()
+  })
+
+  it('does not let a settled invoice conceal another unpaid invoice', async () => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    const client: any = {
+      searchRead: jest.fn(),
+      create: jest.fn(), execute: jest.fn(),
+    }
+    // Single-record invoice reads must not accidentally inspect its settled sibling.
+    client.searchRead.mockImplementation(async (model: string, domain: unknown[][]) => {
+      if (model === 'sale.order') return [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [201, 202] }]
+      if (model === 'account.payment') return [{ id: 101, state: 'in_process', company_id: [1, 'Company'], move_id: false }]
+      if (model === 'account.move') {
+        const rows = [{ id: 201, state: 'posted', move_type: 'out_invoice', payment_state: 'paid', amount_residual: 0 }, { id: 202, state: 'posted', move_type: 'out_invoice', payment_state: 'partial', amount_residual: 50 }]
+        const single = domain.find(term => term[0] === 'id' && term[1] === '=')
+        return single ? rows.filter(row => row.id === single[2]) : rows
+      }
+      return []
+    })
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result).toMatchObject({ paymentId: 101, reconciled: true, errorReason: 'payment_invoice_reconciliation_failed' })
+    expect(client.create).not.toHaveBeenCalled()
+  })
+
+  it('accepts an invoice settled concurrently after the reconciliation attempt', async () => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    let invoiceReads = 0
+    const client: any = {
+      searchRead: jest.fn(async (model: string) => {
+        if (model === 'sale.order') return [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [201] }]
+        if (model === 'account.payment') return [{ id: 101, state: 'in_process', company_id: [1, 'Company'], move_id: false }]
+        if (model === 'account.move') {
+          invoiceReads++
+          return [{ id: 201, state: 'posted', move_type: 'out_invoice', payment_state: invoiceReads >= 3 ? 'paid' : 'not_paid', amount_residual: invoiceReads >= 3 ? 0 : 250 }]
+        }
+        return []
+      }),
+      create: jest.fn(), execute: jest.fn(),
+    }
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result).toEqual({ paymentId: 101, reconciled: true })
+    expect(invoiceReads).toBe(3)
+    expect(client.create).not.toHaveBeenCalled()
+  })
+
   it('persists a new draft before posting and retries the same id after a posting failure', async () => {
     const settings = { order: { payment_journal_mappings: [{ zid_payment_method: 'zid_cod', odoo_journal_id: '8' }] } }
     jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce(settings as any).mockResolvedValueOnce(settings as any)

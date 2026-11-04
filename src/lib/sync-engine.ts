@@ -37,6 +37,7 @@ import {
   extractOrderCurrency,
   resolveOrderExchangeRate,
 } from '@/lib/odoo/order-currency'
+import { resolveOrderCurrencySettings } from '@/lib/odoo/order-currency-resolution'
 import { createOrderInvoice } from '@/lib/odoo/order-invoice'
 import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import { OdooClient } from '@/lib/odoo-client'
@@ -7880,7 +7881,28 @@ export async function executeOdooOperation(params: {
       const isMultiCurrencyEnabled = !!(orderSettings?.multi_currency_enabled ?? orderSettings?.order?.multi_currency_enabled)
       const baseCurrencyId = Number(orderSettings?.base_currency_id ?? orderSettings?.order?.base_currency_id) || null
 
-      if (isMultiCurrencyEnabled && sourceCurrency) {
+      if (execPlatform === 'zid') {
+        let mappedCurrencyId: number | undefined
+        let mappedConversionRate: number | undefined
+        if (!existingSaleOrderId && !isMultiCurrencyEnabled && !effectiveOdooValues.currency_id && !effectiveOdooValues.pricelist_id && !baseCurrencyId && !orderSettings.default_pricelist_id) {
+          const { data: currencyMapping, error } = await supabaseAdmin.from('currency_mappings')
+            .select('odoo_currency_id, conversion_rate, auto_update').eq('workspace_id', mapping.workspace_id)
+            .eq('platform', execPlatform).eq('source_currency', sourceCurrency).maybeSingle()
+          if (error) throw new Error(`Could not read configured order currency: ${error.message}`)
+          mappedCurrencyId = Number(currencyMapping?.odoo_currency_id) || undefined
+          if (currencyMapping?.auto_update === false && currencyMapping.conversion_rate !== null && currencyMapping.conversion_rate !== undefined) {
+            mappedConversionRate = Number(currencyMapping.conversion_rate)
+          }
+        }
+        const resolvedCurrency = await resolveOrderCurrencySettings({
+          client, payload: zidData, values: effectiveOdooValues, settings: orderSettings,
+          create: odooOperation === 'create', existingOrderId: existingSaleOrderId, mappedCurrencyId, mappedConversionRate,
+        })
+        effectiveOdooValues.company_id = resolvedCurrency.companyId
+        effectiveOdooValues.currency_id = resolvedCurrency.currencyId
+        effectiveOdooValues.pricelist_id = resolvedCurrency.pricelistId
+        resolvedConversionRate = resolvedCurrency.rate
+      } else if (isMultiCurrencyEnabled && sourceCurrency) {
         try {
           const odooCurrs = await client.searchRead<any>(
             'res.currency',
