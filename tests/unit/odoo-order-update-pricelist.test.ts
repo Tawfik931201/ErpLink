@@ -39,9 +39,9 @@ describe('Odoo sale.order update multi-currency and partner safety', () => {
     expect(src).toContain('delete effectiveOdooValues.fiscal_position_id')
   })
 
-  it('pins that account.payment uses memo for Odoo 17+ and ref for Odoo <= 16', () => {
+  it('pins that account.payment uses memo for Odoo 18+ and inherited ref for Odoo 14–17', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../../src/lib/odoo/order-payment.ts'), 'utf8')
-    expect(src).toContain("const refField = major >= 17 ? 'memo' : 'ref'")
+    expect(src).toMatch(/if \(major >= 18\) \{\s*paymentValues\.memo = params\.ref\s*\} else \{\s*paymentValues\.ref = params\.ref/)
     expect(src).toContain('paymentValues.memo = params.ref')
   })
 })

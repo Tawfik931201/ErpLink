@@ -18,6 +18,12 @@ The actual Sales Order write path remains in `src/lib/sync-engine.ts`, in `execu
 
 Use `src/lib/zid/order-helpers.ts` for Zid status/shipping/COD normalization; `src/lib/odoo/order-currency.ts`, `order-payment.ts` and `analytic-distribution.ts` for their existing dedicated responsibilities. Returns enter through `src/lib/returns/engine.ts` before ordinary writes. Do not combine order-create and order-update behavior or normalize configured analytic percentages during cleanup.
 
+The order audit adds `src/lib/zid/order-enrichment.ts` for workspace/store token resolution, snapshot validation and fresh payload merging; `src/lib/orders/matching.ts` for checking sale-order link ownership; and `src/lib/odoo/order-invoice.ts` for the public invoice wizard used by Odoo 14–17. The orchestrator still owns status, picking and invoice dispatch. See [zid-orders-standard-mapping-audit.md](../integrations/zid-orders-standard-mapping-audit.md) for changes, version evidence and remaining integration limits.
+
+Order references use `orders/related-matching.ts` to honor saved Customers/Products match fields even when their independent synchronization is disabled. `orders/line-product.ts` supplies scoped, bounded lookup caching. `orders/preflight.ts` validates the assembled Zid SO and batched related IDs before writing; `orders/customer-create.ts` shares a durable customer-create identity across orders. Zid writes do not retry after stripping rejected SO settings. `orders/action-results.ts` checks actual configured workflow outcomes; payment errors are surfaced rather than treated as an entirely successful sync. `processSingleMapping` delegates line preparation to the order executor so currency, VAT, fees and analytics are assembled once.
+
+When an explicitly selected matching key is absent from the order, `zid/order-related-data.ts` reads the customer's/product's details within the store pull budget and deduplicates identical reads per execution client and store. Only matching uses the hydrated source: catalog prices and quantities never replace order line amounts.
+
 ### Importing Salla customers
 
 `src/app/actions/transfers.ts`: `startInitialTransfer` validates workspace/ERP/store selection; `runTransferInBackground` paginates `listSallaCustomers` for customer imports. The actual merchant API reader is `listSallaCustomers` in `src/lib/salla-client.ts`, through its token/transport functions. Mapping, metadata and duplicate matching use `buildOdooValues`, `fetchFieldMeta` and `findExistingOdooRecord` from `src/lib/sync-engine.ts`.

@@ -16,8 +16,8 @@ import { resolvePath } from '@/lib/sync-helpers'
 
 /**
  * Zid order payloads put the delivery fee under different keys depending on the
- * payload version / store setup. Try every known path and return the first
- * non-zero value found.
+ * payload version / store setup. Explicit zero fees also stop the search so
+ * free shipping never falls through to the inferred totals difference.
  */
 export function resolveZidShippingCost(zidData: Record<string, unknown>): number {
   // Zid's official order schema carries the fee breakdown in payment.invoice[]
@@ -34,7 +34,9 @@ export function resolveZidShippingCost(zidData: Record<string, unknown>): number
           const raw = r.value ?? r.value_string
           if (raw !== undefined && raw !== null && typeof raw !== 'object') {
             const num = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
-            if (!isNaN(num) && num > 0) return num
+            // An explicit free-shipping row is authoritative: the difference
+            // between order/product totals may instead be VAT or COD fees.
+            if (Number.isFinite(num) && num >= 0) return num
           }
         }
       }
@@ -81,14 +83,12 @@ export function resolveZidShippingCost(zidData: Record<string, unknown>): number
   for (const path of candidates) {
     const raw = resolvePath(zidData, path)
     if (raw === undefined || raw === null) continue
-    let num = 0
-    if (typeof raw === 'object') {
-      const nested = resolvePath(raw as Record<string, unknown>, 'amount')
-      num = parseFloat(String(nested ?? '')) || 0
-    } else {
-      num = parseFloat(String(raw)) || 0
-    }
-    if (num > 0) return num
+    const value = typeof raw === 'object'
+      ? resolvePath(raw as Record<string, unknown>, 'amount')
+      : raw
+    if (value === undefined || value === null || typeof value === 'object') continue
+    const num = parseFloat(String(value))
+    if (Number.isFinite(num) && num >= 0) return num
   }
 
   // Derived fallback: when Zid webhook event (e.g. order.updated or manual merchant admin order)
@@ -191,9 +191,16 @@ export function resolveOrderDiscountAmount(zidData: Record<string, unknown>): nu
         const r = (row && typeof row === 'object') ? row as Record<string, unknown> : {}
         const code = String(r.code ?? '')
         const title = String(r.title ?? '')
+        // Zid's invoice includes `sub_totals_after_coupon_discount` as
+        // well as the actual `coupon` row. A subtotal is never a discount.
+        if (/sub[_ ]?totals?|total.*(?:before|after)|(?:before|after).*total/i.test(code)) continue
         if (/discount|خصم|coupon|كوبون/i.test(code) || /discount|خصم|coupon|كوبون/i.test(title)) {
-          const num = parseNum(r.value ?? r.value_string)
-          if (num > 0) return num
+          const raw = r.value ?? r.value_string
+          if (raw === undefined || raw === null || typeof raw === 'object') continue
+          // The documented coupon row is NEGATIVE (a deduction), whereas
+          // Odoo's discount calculation below consumes a positive amount.
+          const num = Math.abs(parseFloat(String(raw).replace(/[^0-9.\-]/g, '')))
+          if (Number.isFinite(num) && num > 0) return num
         }
       }
     }

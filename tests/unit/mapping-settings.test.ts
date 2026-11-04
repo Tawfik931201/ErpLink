@@ -38,7 +38,7 @@ type SettingsRow = {
   settings: Record<string, unknown>
 }
 
-type TokenRow = { store_id?: string; merchant_id?: string }
+type TokenRow = { store_id?: string; merchant_id?: string; workspace_id?: string }
 
 /**
  * Minimal chainable stand-in for the Supabase builder, recording the query so
@@ -69,11 +69,11 @@ function makeClient(opts: { settings?: SettingsRow[]; tokens?: TokenRow[] } = {}
       maybeSingle: async () => {
         if (table === 'merchant_tokens') {
           if (filters.store_id !== undefined) {
-            const hit = tokens.find(t => String(t.store_id) === String(filters.store_id))
+            const hit = tokens.find(t => String(t.store_id) === String(filters.store_id) && (!filters.workspace_id || t.workspace_id === filters.workspace_id))
             return { data: hit ? { merchant_id: hit.merchant_id } : null, error: null }
           }
           if (filters.merchant_id !== undefined) {
-            const hit = tokens.find(t => String(t.merchant_id) === String(filters.merchant_id))
+            const hit = tokens.find(t => String(t.merchant_id) === String(filters.merchant_id) && (!filters.workspace_id || t.workspace_id === filters.workspace_id))
             return { data: hit ? { merchant_id: hit.merchant_id } : null, error: null }
           }
           return { data: null, error: null }
@@ -214,12 +214,24 @@ describe('getEffectiveStandardMappingSettings', () => {
 
   it('resolves a Zid numeric store_id to the merchant row before matching', async () => {
     const { client } = makeClient({
-      tokens: [{ store_id: '3172448', merchant_id: '3236165' }],
+      tokens: [{ store_id: '3172448', merchant_id: '3236165', workspace_id: 'ws-1' }],
       settings: [row('', { mode: 'default' }), row('3236165', { mode: 'store' })],
     })
     // Caller only knows the numeric store_id; the merchant row must still win.
     const s = await getEffectiveStandardMappingSettings(client, 'ws-1', 'zid', 'products', '3172448')
     expect(s).toEqual({ mode: 'store' })
+  })
+
+  it('never translates a store key using a token owned by another workspace', async () => {
+    const { client, calls } = makeClient({
+      tokens: [
+        { store_id: '3172448', merchant_id: 'foreign', workspace_id: 'ws-2' },
+        { store_id: '3172448', merchant_id: 'own', workspace_id: 'ws-1' },
+      ],
+      settings: [row('foreign', { mode: 'wrong' }), row('own', { mode: 'correct' })],
+    })
+    expect(await getEffectiveStandardMappingSettings(client, 'ws-1', 'zid', 'products', '3172448')).toEqual({ mode: 'correct' })
+    expect(calls.filter(c => c.table === 'merchant_tokens').every(c => c.filters.workspace_id === 'ws-1')).toBe(true)
   })
 
   it('does not consult merchant_tokens for non-zid platforms', async () => {

@@ -40,9 +40,9 @@ async function resolveSettingsStoreKeyCached(
   if (storeType !== 'zid') return storeKey
   if (!/^\d+$/.test(storeKey)) return storeKey
   return ttlCache.get<string>(
-    `webhook-gate:merchant:zid:${storeKey}`,
+    `webhook-gate:merchant:${workspaceId}:zid:${storeKey}`,
     TTL_MS,
-    async () => resolveSettingsStoreKey(supabase, storeType, storeKey)
+    async () => resolveSettingsStoreKey(supabase, storeType, storeKey, workspaceId)
   )
 }
 

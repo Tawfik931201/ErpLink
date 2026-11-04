@@ -175,6 +175,14 @@ describe('saveStaticMapping', () => {
     const lookup = supabase.calls[0]
     expect(lookup.op).toBe('select')
     expect(lookup.filters).toContainEqual(['workspace_id', 'ws-1'])
+    expect(lookup.filters).toContainEqual(['platform', 'zid'])
+  })
+
+  it('cannot move an existing mapping from another platform', async () => {
+    supabase.addMock('tax_mappings', [{ id: 'salla-tax', workspace_id: 'ws-1', platform: 'salla' }])
+    const result = await saveStaticMapping('tax_mappings', { id: 'salla-tax', odoo_tax_id: 7 }, 'zid')
+    expect(result.success).toBe(false)
+    expect(supabase.calls.some(c => c.op === 'upsert')).toBe(false)
   })
 
   it('requires a signed-in user', async () => {

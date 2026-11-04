@@ -64,6 +64,16 @@ describe('resolveZidShippingCost', () => {
     expect(cost).toBe(0)
   })
 
+  it('preserves explicit free shipping instead of inferring VAT/COD as shipping', () => {
+    const totals = { order_total: 125, products_sum_total_string: '100 SAR' }
+    expect(resolveZidShippingCost({
+      ...totals,
+      payment: { invoice: [{ code: 'shipping', value: '0.00' }] },
+    })).toBe(0)
+    expect(resolveZidShippingCost({ ...totals, shipping_cost: 0 })).toBe(0)
+    expect(resolveZidShippingCost({ ...totals, amounts: { shipping_cost: { amount: 0 } } })).toBe(0)
+  })
+
   it('derives shipping cost from order_total minus products_sum_total when invoice is absent', () => {
     const cost = resolveZidShippingCost({
       order_total: '253.10000000000000',
@@ -149,6 +159,29 @@ describe('resolveZidCodAmount', () => {
 })
 
 describe('resolveOrderDiscountAmount', () => {
+  it('reads the negative coupon deduction from the published Zid order schema', () => {
+    // https://docs.zid.sa/view-order-12479054e0.md
+    expect(resolveOrderDiscountAmount({
+      payment: { invoice: [
+        { code: 'sub_totals_before_vat', title: 'Total without VAT', value: '5795.53332001970000' },
+        { code: 'coupon', title: 'Coupon', value: '-1159.10666400390000' },
+        { code: 'sub_totals_after_coupon_discount', title: 'Sub Totals after Coupon Discount', value: '4636.42665601580000' },
+      ] },
+    })).toBeCloseTo(1159.1066640039)
+  })
+
+  it('never interprets a post-discount subtotal as the discount itself', () => {
+    expect(resolveOrderDiscountAmount({
+      payment: { invoice: [
+        { code: 'sub_totals_after_coupon_discount', title: 'Sub Totals after Coupon Discount', value: 400 },
+        { code: 'coupon', title: 'Coupon', value: '-100.00' },
+      ] },
+    })).toBe(100)
+    expect(resolveOrderDiscountAmount({
+      payment: { invoice: [{ code: 'sub_totals_after_coupon_discount', value: 400 }] },
+    })).toBe(0)
+  })
+
   it('reads a discount row out of payment.invoice[]', () => {
     const discount = resolveOrderDiscountAmount({
       payment: { invoice: [{ code: 'discount', title: 'Coupon discount', value: 15 }] },

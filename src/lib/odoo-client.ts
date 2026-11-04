@@ -253,7 +253,7 @@ export class OdooClient {
 
   private async executeRequest<T>(model: string, method: string, args: unknown[], kwargs: Record<string, unknown>): Promise<T> {
     // List of read-only XML-RPC methods in Odoo
-    const readMethods = ['search', 'read', 'search_read', 'search_count', 'name_get', 'fields_get']
+    const readMethods = ['search', 'read', 'search_read', 'search_count', 'name_get', 'fields_get', 'default_get']
     if (!readMethods.includes(method)) {
       await checkImpersonationWriteBlock('Odoo ERP')
     }

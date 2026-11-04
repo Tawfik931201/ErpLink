@@ -83,6 +83,7 @@ export async function saveStandardMappingSettings(
     ttlCache.clear(`stdsets:${user.active_workspace_id}`)
     ttlCache.clear(`stdsets_all:${user.active_workspace_id}`)
     ttlCache.clear(`eng:stdsets:${user.active_workspace_id}:`)
+    ttlCache.clear(`webhook-gate:${user.active_workspace_id}:`)
 
     return { success: true, data }
   } catch (error: any) {

@@ -17,6 +17,7 @@ import type { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 
 import { normalizePaymentKey, paymentKeysFromOrder } from './analytic-distribution'
+import { extractOrderCurrency } from './order-currency'
 
 export interface PaymentJournalMapping {
   zid_payment_method: string
@@ -167,6 +168,9 @@ export async function createOdooPayment(
     date?: string
     ref?: string
     currencyId?: number
+    companyId?: number
+    /** Order sync persists the identity before posting so failures can be retried safely. */
+    post?: boolean
   }
 ): Promise<number> {
   const major = await client.getMajorVersion().catch(() => 17)
@@ -179,7 +183,8 @@ export async function createOdooPayment(
     date: params.date || new Date().toISOString().slice(0, 10),
   }
   if (params.ref) {
-    if (major >= 17) {
+    // Odoo 14–17 delegate ref to account.move; memo was introduced in 18.
+    if (major >= 18) {
       paymentValues.memo = params.ref
     } else {
       paymentValues.ref = params.ref
@@ -189,6 +194,7 @@ export async function createOdooPayment(
   if (params.currencyId) {
     paymentValues.currency_id = params.currencyId
   }
+  if (params.companyId) paymentValues.company_id = params.companyId
 
   // Odoo 15+: payment_method_line_id on journal
   if (major >= 15) {
@@ -223,6 +229,7 @@ export async function createOdooPayment(
   }
 
   const paymentId = await client.create('account.payment', paymentValues)
+  if (params.post === false) return paymentId
 
   // Post payment to generate move lines
   try {
@@ -261,13 +268,13 @@ export async function reconcilePaymentWithInvoice(
       ['id', 'state', 'payment_state', 'move_type']
     )
     const inv = invoices?.[0]
-    if (!inv || inv.state !== 'posted') {
+    if (!inv || inv.state !== 'posted' || inv.move_type !== 'out_invoice') {
       console.info(`[OrderPayment] Invoice #${invoiceId} is not in posted state (${inv?.state}), reconciliation deferred.`)
       return false
     }
 
     // Resolve payment move ID
-    let paymentMoveId = paymentId
+    let paymentMoveId: number | null = null
     try {
       const payments = await client.searchRead<any>(
         'account.payment',
@@ -275,11 +282,13 @@ export async function reconcilePaymentWithInvoice(
         ['id', 'move_id']
       )
       if (payments?.[0]?.move_id) {
-        paymentMoveId = Array.isArray(payments[0].move_id) ? payments[0].move_id[0] : payments[0].move_id
+        const rawMoveId = Array.isArray(payments[0].move_id) ? payments[0].move_id[0] : payments[0].move_id
+        if (Number.isInteger(Number(rawMoveId)) && Number(rawMoveId) > 0) paymentMoveId = Number(rawMoveId)
       }
     } catch {
-      // paymentMoveId remains paymentId
+      // Payment and journal-entry ids are independent sequences. Never guess.
     }
+    if (!paymentMoveId) return false
 
     // Fetch unreconciled lines for both moves
     const [invLines, payLines] = await Promise.all([
@@ -309,7 +318,7 @@ export async function reconcilePaymentWithInvoice(
         payLines.find(p => {
           const payAccId = Array.isArray(p.account_id) ? p.account_id[0] : p.account_id
           return invAccId === payAccId
-        }) || payLines[0]
+        })
 
       if (matchingPay) {
         try {
@@ -346,7 +355,7 @@ export async function syncOrderPayment(params: {
   platform: 'zid' | 'salla' | 'shopify'
   storeId: string
   zidEntityId: string
-}): Promise<{ paymentId?: number; reconciled?: boolean; skippedReason?: string }> {
+}): Promise<{ paymentId?: number; reconciled?: boolean; skippedReason?: string; errorReason?: string }> {
   const { client, saleOrderId, zidData, workspaceId, platform, storeId, zidEntityId } = params
 
   try {
@@ -400,22 +409,39 @@ export async function syncOrderPayment(params: {
     const orders = await client.searchRead<any>(
       'sale.order',
       [['id', '=', saleOrderId]],
-      ['id', 'name', 'partner_id', 'currency_id', 'invoice_ids']
+      ['id', 'name', 'partner_id', 'currency_id', 'invoice_ids', 'amount_total', 'company_id']
     )
     const order = orders?.[0]
     if (!order) {
-      return { skippedReason: 'sale_order_not_found' }
+      return { skippedReason: 'sale_order_not_found', errorReason: 'sale_order_not_found' }
     }
+    const companyId = Number(Array.isArray(order.company_id) ? order.company_id[0] : order.company_id)
+    if (!Number.isInteger(companyId) || companyId <= 0) return { skippedReason: 'missing_order_company', errorReason: 'missing_order_company' }
 
     const partnerId = Array.isArray(order.partner_id) ? order.partner_id[0] : order.partner_id
     if (!partnerId) {
-      return { skippedReason: 'missing_partner_id' }
+      return { skippedReason: 'missing_partner_id', errorReason: 'missing_partner_id' }
     }
 
     const currencyId = Array.isArray(order.currency_id) ? order.currency_id[0] : order.currency_id
-    const amount = extractPaymentAmount(zidData)
-    if (amount <= 0) {
-      return { skippedReason: 'invalid_payment_amount' }
+    let amount = extractPaymentAmount(zidData)
+    // Lines may have been converted into the configured fallback currency.
+    // A fully paid source total cannot be reused with a different currency id.
+    // Use Odoo's resulting total, preserving the exact conversion and rounding
+    // already applied to lines, shipping, discounts and taxes by the order sync.
+    if (currencyId) {
+      let orderCurrency = Array.isArray(order.currency_id) ? String(order.currency_id[1] || '').trim().toUpperCase() : ''
+      if (!/^[A-Z]{3}$/.test(orderCurrency)) {
+        const currencies = await client.searchRead<any>('res.currency', [['id', '=', currencyId]], ['name'], 1)
+        orderCurrency = String(currencies?.[0]?.name || '').trim().toUpperCase()
+      }
+      if (!orderCurrency) return { skippedReason: 'unknown_order_currency', errorReason: 'unknown_order_currency' }
+      if (extractOrderCurrency(zidData, platform) !== orderCurrency) {
+        amount = Number(order.amount_total)
+      }
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { skippedReason: 'invalid_payment_amount', errorReason: 'invalid_payment_amount' }
     }
 
     const paymentDate = extractPaymentDate(zidData)
@@ -426,6 +452,10 @@ export async function syncOrderPayment(params: {
       paymentId = existingPaymentId
       console.info(`[OrderPayment] Payment #${paymentId} already exists for Zid order "${zidEntityId}". Checking reconciliation...`)
     } else {
+      const journals = await client.searchRead<any>(
+        'account.journal', [['id', '=', journalId], ['company_id', '=', companyId], ['type', 'in', ['bank', 'cash']]], ['id'], 1
+      )
+      if (!journals?.[0]?.id) return { skippedReason: 'invalid_payment_journal_for_order_company', errorReason: 'invalid_payment_journal_for_order_company' }
       paymentId = await createOdooPayment(client, {
         partnerId,
         amount,
@@ -433,9 +463,11 @@ export async function syncOrderPayment(params: {
         date: paymentDate,
         ref: paymentRef,
         currencyId,
+        companyId,
+        post: false,
       })
 
-      await upsertEntityLink(
+      const linked = await upsertEntityLink(
         {
           workspaceId,
           platform: platform as EntityLinkPlatform,
@@ -445,6 +477,23 @@ export async function syncOrderPayment(params: {
         },
         paymentId
       )
+      if (!linked) return { paymentId, skippedReason: 'payment_link_persistence_failed', errorReason: 'payment_link_persistence_failed' }
+    }
+
+    // Save identity BEFORE posting. A posting failure must be observable and the
+    // next delivery must retry this same draft, rather than create another payment.
+    const readPayment = async () => (await client.searchRead<any>(
+      'account.payment', [['id', '=', paymentId]], ['id', 'state', 'company_id'], 1
+    ))?.[0]
+    let payment = await readPayment()
+    const paymentCompanyId = Number(Array.isArray(payment?.company_id) ? payment.company_id[0] : payment?.company_id)
+    if (paymentCompanyId !== companyId) return { paymentId, skippedReason: 'linked_payment_company_mismatch', errorReason: 'linked_payment_company_mismatch' }
+    if (payment.state === 'draft') {
+      await client.execute('account.payment', 'action_post', [[paymentId]])
+      payment = await readPayment()
+    }
+    if (!['posted', 'in_process', 'paid'].includes(payment?.state)) {
+      return { paymentId, skippedReason: 'payment_not_posted', errorReason: 'payment_not_posted' }
     }
 
     // Reconcile with invoice if invoice exists and is posted
@@ -468,7 +517,8 @@ export async function syncOrderPayment(params: {
     return { paymentId, reconciled }
   } catch (err: any) {
     console.error(`[OrderPayment] Failed to sync payment for order #${saleOrderId}:`, err)
-    return { skippedReason: err?.message || 'payment_sync_error' }
+    const errorReason = err?.message || 'payment_sync_error'
+    return { skippedReason: errorReason, errorReason }
   }
 }
 
@@ -484,10 +534,10 @@ export async function reconcilePendingPaymentsForOrder(params: {
   storeId: string
   zidEntityId: string
 }): Promise<boolean> {
-  const { client, saleOrderId, invoiceId, workspaceId, platform, storeId, zidEntityId } = params
+  const { client, invoiceId, workspaceId, platform, storeId, zidEntityId } = params
 
   try {
-    let paymentId = await resolveEntityLinkId({
+    const paymentId = await resolveEntityLinkId({
       workspaceId,
       platform: platform as EntityLinkPlatform,
       storeId: String(storeId),
@@ -495,42 +545,8 @@ export async function reconcilePendingPaymentsForOrder(params: {
       storeEntityId: String(zidEntityId),
     })
 
-    // If not found in entity_links, try searching account.payment by memo / ref
-    if (!paymentId) {
-      try {
-        const orders = await client.searchRead<any>('sale.order', [['id', '=', saleOrderId]], ['name'])
-        const orderName = orders?.[0]?.name
-        const searchTerms = [`Zid Order #${orderName || zidEntityId}`, `Zid Order #${zidEntityId}`]
-        const major = await client.getMajorVersion().catch(() => 17)
-        const refField = major >= 17 ? 'memo' : 'ref'
-        for (const term of searchTerms) {
-          let payments: any[] = []
-          try {
-            payments = await client.searchRead<any>(
-              'account.payment',
-              [[refField, '=', term]],
-              ['id', 'state'],
-              1
-            )
-          } catch {
-            const altField = refField === 'memo' ? 'ref' : 'memo'
-            payments = await client.searchRead<any>(
-              'account.payment',
-              [[altField, '=', term]],
-              ['id', 'state'],
-              1
-            ).catch(() => [])
-          }
-          if (payments?.[0]?.id) {
-            paymentId = payments[0].id
-            break
-          }
-        }
-      } catch {
-        // Non-fatal search
-      }
-    }
-
+    // A human-readable ref is not an identity: store order numbers can collide,
+    // including across connection generations. Only use the scoped durable link.
     if (!paymentId) {
       return false
     }

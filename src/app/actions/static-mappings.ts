@@ -1,8 +1,8 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
+import { getActiveUserId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -33,7 +33,7 @@ function isAllowedTable(table: string): table is MappingTable {
 
 export async function getStaticMappings(table: MappingTable, platform: string = 'zid') {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) throw new Error('Unauthorized')
     if (!isAllowedTable(table)) throw new Error('Invalid table')
 
@@ -58,7 +58,7 @@ export async function getStaticMappings(table: MappingTable, platform: string = 
 
 export async function saveStaticMapping(table: MappingTable, row: Record<string, any>, platform: string = 'zid') {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) throw new Error('Unauthorized')
     if (!isAllowedTable(table)) throw new Error('Invalid table')
 
@@ -75,6 +75,7 @@ export async function saveStaticMapping(table: MappingTable, row: Record<string,
         .select('id')
         .eq('id', id)
         .eq('workspace_id', user.active_workspace_id)
+        .eq('platform', platform)
         .maybeSingle()
       if (lookupError) throw lookupError
       if (!existing) throw new Error('Mapping not found in this workspace')
@@ -109,7 +110,7 @@ export async function saveStaticMapping(table: MappingTable, row: Record<string,
 
 export async function deleteStaticMapping(table: MappingTable, id: string) {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) throw new Error('Unauthorized')
     if (!isAllowedTable(table)) throw new Error('Invalid table')
 

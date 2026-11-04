@@ -3,6 +3,11 @@ import { buildOrderLineItems } from '@/lib/sync-engine'
 import type { FieldMappingRow } from '@/lib/sync-types'
 import { resolveOrderVatTax } from '@/lib/zid/order-helpers'
 
+jest.mock('../../src/lib/sync-runtime', () => ({
+  supabaseAdmin: jest.requireActual('../mocks/supabase').supabase,
+  logSync: jest.fn(),
+}))
+
 describe('resolveOrderVatTax helper', () => {
   it('returns null when enableVat is false', () => {
     const res = resolveOrderVatTax({ shipping_address: { country: 'SA' } }, {

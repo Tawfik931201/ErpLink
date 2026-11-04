@@ -11,6 +11,12 @@ import type { OdooClient } from '@/lib/odoo-client'
 import { buildOrderLineItems } from '@/lib/sync-engine'
 import type { FieldMappingRow } from '@/lib/sync-types'
 
+// The sync runtime owns a separate admin client outside the Supabase alias mock.
+jest.mock('../../src/lib/sync-runtime', () => ({
+  supabaseAdmin: jest.requireActual('../mocks/supabase').supabase,
+  logSync: jest.fn(),
+}))
+
 describe('Multi-Currency Order Sync & Conversion', () => {
   describe('extractOrderCurrency', () => {
     it('extracts currency_code from Zid payload', () => {

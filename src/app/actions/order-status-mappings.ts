@@ -1,9 +1,10 @@
 'use server'
 
-import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
+import { getActiveUserId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
+import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
 
 export async function saveOrderStatusMappings(
@@ -12,7 +13,7 @@ export async function saveOrderStatusMappings(
   storeId = ''
 ) {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) throw new Error('Unauthorized')
 
     const user = await getOrCreateDbUser(userId)
@@ -22,12 +23,14 @@ export async function saveOrderStatusMappings(
 
     // Get current mappings first (safe: no data loss if this fails) —
     // scoped to this store so sibling stores' rows are never touched.
-    const { data: existing } = await supabase
+    const { data: existing, error: existingError } = await supabase
       .from('order_status_mappings')
       .select('zid_status')
       .eq('workspace_id', workspaceId)
       .eq('platform', platform)
       .eq('store_id', storeId)
+
+    if (existingError) throw existingError
 
     // Upsert new/changed mappings (safe: old data preserved if this fails)
     // Accepts the object shape { state, enabled, invoice_action, picking_action }; legacy plain-string values
@@ -60,6 +63,7 @@ export async function saveOrderStatusMappings(
         invoice_action: invoiceActionOf(v),
       }))
 
+    let requiresJsonActions = false
     if (rows.length > 0) {
       let { error: upsertError } = await supabase
         .from('order_status_mappings')
@@ -74,6 +78,7 @@ export async function saveOrderStatusMappings(
           upsertError.message?.includes('invoice_action') ||
           (upsertError as any).code === '42703')
       ) {
+        requiresJsonActions = true
         console.warn('[OrderStatusMappings] Columns picking_action/invoice_action not found in DB, falling back to basic columns')
         const fallbackRows = rows.map(({ picking_action: _p, invoice_action: _i, ...rest }) => rest)
         const res = await supabase
@@ -113,15 +118,16 @@ export async function saveOrderStatusMappings(
 
     // Persist status_actions into standard_mapping_settings JSONB as dual storage (zero-migration guarantee)
     try {
-      const { data: stdRow } = await supabase
+      const { data: stdRows, error: readError } = await supabase
         .from('standard_mapping_settings')
-        .select('settings')
+        .select('settings, store_id')
         .eq('workspace_id', workspaceId)
         .eq('store_type', platform)
-        .eq('store_id', storeId)
+        .in('store_id', storeId ? [storeId, ''] : [''])
         .eq('entity_type', 'orders')
-        .maybeSingle()
 
+      if (readError) throw readError
+      const stdRow = stdRows?.find(row => row.store_id === storeId) ?? stdRows?.find(row => row.store_id === '')
       const currentSettings = stdRow?.settings && typeof stdRow.settings === 'object' ? stdRow.settings : {}
       const orderConfig = currentSettings.order && typeof currentSettings.order === 'object' ? currentSettings.order : {}
       const updatedSettings = {
@@ -131,7 +137,7 @@ export async function saveOrderStatusMappings(
           status_actions: mappings,
         },
       }
-      await supabase
+      const { error: jsonError } = await supabase
         .from('standard_mapping_settings')
         .upsert({
           workspace_id: workspaceId,
@@ -143,10 +149,16 @@ export async function saveOrderStatusMappings(
         }, {
           onConflict: 'workspace_id, store_type, store_id, entity_type',
         })
+      if (jsonError) throw jsonError
     } catch (stdErr) {
+      if (requiresJsonActions) throw stdErr
       console.warn('[OrderStatusMappings] Non-fatal: failed to dual-save status_actions to standard_mapping_settings:', stdErr)
     }
 
+    ttlCache.clear(`stdsets:${workspaceId}:`)
+    ttlCache.clear(`stdsets_all:${workspaceId}:`)
+    ttlCache.clear(`eng:stdsets:${workspaceId}:`)
+    ttlCache.clear(`webhook-gate:${workspaceId}:`)
     revalidatePath('/app/mapping-center')
     return { success: true }
   } catch (error: any) {
@@ -157,7 +169,7 @@ export async function saveOrderStatusMappings(
 
 export async function getOrderStatusMappings(platform: string, storeId = '') {
   try {
-    const { userId } = await auth()
+    const userId = await getActiveUserId()
     if (!userId) throw new Error('Unauthorized')
 
     const user = await getOrCreateDbUser(userId)
@@ -166,6 +178,7 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
     // Per-store rows overlay the platform defaults (''): a store inherits
     // everything it has not overridden.
     let data: any[] | null = null
+    let legacyActions = false
     const res = await supabase
       .from('order_status_mappings')
       .select('zid_status, odoo_state, enabled, store_id, invoice_action, picking_action')
@@ -174,6 +187,7 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
       .in('store_id', storeId ? [storeId, ''] : [''])
 
     if (res.error) {
+      legacyActions = true
       // Pre-migration DB fallback without invoice_action/picking_action columns
       const fallbackRes = await supabase
         .from('order_status_mappings')
@@ -229,7 +243,10 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
         .in('store_id', storeId ? [storeId, ''] : [''])
         .eq('entity_type', 'orders')
 
-      for (const row of stdRows || []) {
+      // A store's settings replace the default object; do not mix actions from
+      // a sibling/default row into an explicitly saved per-store configuration.
+      const effectiveRow = stdRows?.find(row => row.store_id === storeId) ?? stdRows?.find(row => row.store_id === '')
+      for (const row of effectiveRow ? [effectiveRow] : []) {
         const jsonActions = row?.settings?.order?.status_actions || row?.settings?.status_actions
         if (jsonActions && typeof jsonActions === 'object') {
           for (const [statusKey, cfg] of Object.entries(jsonActions)) {
@@ -243,10 +260,10 @@ export async function getOrderStatusMappings(platform: string, storeId = '') {
                   picking_action: String(c.picking_action || ''),
                 }
               } else {
-                if (!mappings[statusKey].invoice_action && c.invoice_action) {
+                if (legacyActions && !mappings[statusKey].invoice_action && c.invoice_action) {
                   mappings[statusKey].invoice_action = String(c.invoice_action)
                 }
-                if (!mappings[statusKey].picking_action && c.picking_action) {
+                if (legacyActions && !mappings[statusKey].picking_action && c.picking_action) {
                   mappings[statusKey].picking_action = String(c.picking_action)
                 }
                 if (!mappings[statusKey].state && c.state) {

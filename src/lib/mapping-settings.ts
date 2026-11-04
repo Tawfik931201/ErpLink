@@ -57,7 +57,8 @@ export function normalizeSettingsStoreKey(storeKey?: string | number | null): st
 export async function resolveSettingsStoreKey(
   client: SettingsClient,
   storeType: MappingStoreType,
-  storeKey?: string | number | null
+  storeKey?: string | number | null,
+  workspaceId?: string
 ): Promise<string> {
   const key = normalizeSettingsStoreKey(storeKey)
   if (!key) return ''
@@ -67,19 +68,21 @@ export async function resolveSettingsStoreKey(
   try {
     // store_id first, then merchant_id — a single `.or(...)` can match two
     // different rows and make `maybeSingle` fail or pick arbitrarily.
-    const byStore = await client
+    let byStoreQuery = client
       .from('merchant_tokens')
       .select('merchant_id')
       .eq('store_id', key)
-      .maybeSingle()
+    if (workspaceId) byStoreQuery = byStoreQuery.eq('workspace_id', workspaceId)
+    const byStore = await byStoreQuery.maybeSingle()
     const byStoreMerchant = (byStore?.data as { merchant_id?: unknown } | null)?.merchant_id
     if (!byStore?.error && byStoreMerchant) return String(byStoreMerchant)
 
-    const byMerchant = await client
+    let byMerchantQuery = client
       .from('merchant_tokens')
       .select('merchant_id')
       .eq('merchant_id', key)
-      .maybeSingle()
+    if (workspaceId) byMerchantQuery = byMerchantQuery.eq('workspace_id', workspaceId)
+    const byMerchant = await byMerchantQuery.maybeSingle()
     const merchant = (byMerchant?.data as { merchant_id?: unknown } | null)?.merchant_id
     return merchant ? String(merchant) : key
   } catch {
@@ -101,7 +104,7 @@ export async function getEffectiveStandardMappingSettings(
   if (!workspaceId) return null
   // Resolve first: a Zid delivery may carry the numeric store_id while the row
   // is keyed by merchant_id. Idempotent for a key that is already a merchant.
-  const key = await resolveSettingsStoreKey(client, storeType, storeKey)
+  const key = await resolveSettingsStoreKey(client, storeType, storeKey, workspaceId)
 
   const { data, error } = await client
     .from('standard_mapping_settings')

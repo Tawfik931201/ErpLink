@@ -18,10 +18,10 @@
  *   2. **ذاكرة تفاصيل الطلب**: الطلب نفسه يُسحب مرة واحدة ثم يُستخدم من
  *      الذاكرة لمدة قصيرة. ذروة 1000 إشعار لـ 200 طلب ⇒ 200 سحب لا 1000.
  *
- * الأمان: الذاكرة تُخزّن **استجابة القراءة** (بنود الطلب)، وحقول الجسم
- * الموقّع له الأولوية على الاستجابة في الدمج (`{...apiData, ...body}`) ⇒
- * الحالة الحديثة (الدفع/الشحن) تأتي من الجسم دائماً. الذاكرة لا تُدخل
- * بيانات قديمة على بيانات جديدة.
+ * Zid scopes this cache by both workspace and store, and reuses snapshots
+ * only for signed order-creation retries. Updates (including payment and
+ * shipping changes) and legacy deliveries read the API afresh; the current
+ * API snapshot takes precedence over older webhook fields.
  */
 
 /** السقوف الافتراضية لكل منصة — أقل من سقف المنصة بهامش أمان. */

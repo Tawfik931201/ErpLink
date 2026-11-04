@@ -1043,6 +1043,7 @@ export default function StandardMappingClient({
           const statusPlatform = standardStoreTab === 'salla' ? 'salla' : 'zid'
           const statusFieldDefault = defaultOrderStatusFieldName(statusPlatform)
           checkZidOrderStatusField(customFieldName || statusFieldDefault, statusPlatform).then(chk => {
+            if (cancelled) return
             if (chk.exists) {
               setStatusFieldExists(true)
               if (!customFieldName) setOrderStatusCustomField(chk.fieldName)
@@ -1059,6 +1060,7 @@ export default function StandardMappingClient({
         const jsonStatusActions: Record<string, any> =
           res?.settings?.order?.status_actions || (res?.settings as any)?.status_actions || {}
         getOrderStatusMappings(standardStoreTab, standardStoreId).then(mRes => {
+          if (cancelled) return
           const raw: Record<string, unknown> = (mRes.success ? (mRes.mappings || {}) : {}) as Record<string, unknown>
           const normalized: Record<
             string,
@@ -1090,7 +1092,7 @@ export default function StandardMappingClient({
               picking_action = String(o.picking_action || '')
             }
 
-            if (j && typeof j === 'object') {
+            if (!v && j && typeof j === 'object') {
               if (!state && j.state) state = String(j.state)
               if (j.enabled !== undefined && !v) enabled = j.enabled !== false
               if (!invoice_action && j.invoice_action) invoice_action = String(j.invoice_action)

@@ -1,5 +1,7 @@
 import { runErpCreateEffect, withErpCreateIdentity, withErpExecutionContext } from '../../src/lib/erp-effect-context'
+import { withErpTarget } from '../../src/lib/erp-execution-target'
 import type { OdooClient } from '../../src/lib/odoo-client'
+import { createPreparedOrderCustomer } from '../../src/lib/orders/customer-create'
 import { safeCreateOdooRecord } from '../../src/lib/sync-engine'
 
 jest.mock('../../src/lib/sync-runtime', () => ({ supabaseAdmin: {}, logSync: jest.fn() }))
@@ -38,6 +40,17 @@ const faults = () => (jest.requireMock('../../src/lib/supabase').supabase.faults
 
 describe('durable ERP create reservations', () => {
   beforeEach(() => { rows().clear(); faults().insert = false; faults().update = false })
+
+  it('reuses one related customer reservation across two different orders', async () => {
+    const remote = jest.fn(async () => 77)
+    const client = { create: (_model: string, values: Record<string, unknown>) => runErpCreateEffect('res.partner', values, remote, () => false, Number) }
+    const scope = { workspaceId: context.workspaceId, platform: 'zid' as const, storeId: context.storeId, erpConnectionId: context.erpConnectionId, connectionGeneration: 'v1', eventId: 'order.create' }
+    const pending = { sourceId: 'customer-77', values: { name: 'Buyer', ref: 'buyer@example.test' } }
+    const run = (order: string) => withErpTarget(scope, () => withErpExecutionContext({ ...context, storeEntityId: order }, () => createPreparedOrderCustomer(client, pending)))
+    expect(await run('order-1')).toBe(77)
+    expect(await run('order-2')).toBe(77)
+    expect(remote).toHaveBeenCalledTimes(1)
+  })
 
   it('does not contact ERP if the durable reservation cannot be stored', async () => {
     faults().insert = true

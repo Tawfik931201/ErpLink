@@ -60,8 +60,12 @@ describe('buildOrderLineItems analytic distribution', () => {
     expect(block).toContain('(orderStdSettings as any)?.order?.analytic')
   })
 
-  it('does not fail the order when distribution throws', () => {
+  it('fails Zid orders visibly when a configured distribution cannot be applied', () => {
     const block = injectionBlock()
+    expect(block).toContain("if (platform === 'zid') throw err")
+    expect(block).toContain("throw new Error('Matched analytic rules cannot be applied")
+    expect(block).toContain("fetchFieldMeta(client, 'sale.order', ['analytic_account_id'])")
+    // Salla keeps its established behavior; this strict setting contract is Zid's.
     expect(block).toMatch(/catch \(err: any\) \{[\s\S]*continuing without it/)
   })
 
