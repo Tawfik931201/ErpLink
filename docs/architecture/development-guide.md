@@ -28,6 +28,8 @@ Customer company fields now have the focused boundary `src/lib/customers/company
 
 Manual rows and map operations: `src/app/actions/category-mappings.ts` (`getCategoryMappings`, `saveCategoryMapping`, `batchImportCategoryMappings`, `deleteCategoryMapping`, `fetchStoreCategories`). Category-specific execution overrides: `src/lib/categories/mapping-overrides.ts`. Parent-category resolution still lives in `resolveSingleRelationId` in `src/lib/sync-engine.ts`; Salla source numeric IDs are not Odoo category IDs.
 
+The category audit adds `src/lib/categories/odoo-values.ts` for capability-based category value validation, typed matching, operation-local company context and non-destructive archive. Scoped Zid/Salla relations use `resolveStoreCategory` in the engine. Initial category imports share the category executor. See [category-standard-mapping-audit.md](../integrations/category-standard-mapping-audit.md) for behavior changes, version evidence and validation limits.
+
 Read the current per-store/default settings in `src/lib/mapping-settings.ts` and category settings use sites before changing precedence. Saving a manual map already performs a best-effort Odoo match-field write; do not accidentally remove it when reorganizing persistence. Salla publishes category create/update, not a category deletion subscription.
 
 ### Webhook handling and retries

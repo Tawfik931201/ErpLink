@@ -20,13 +20,13 @@ describe('product variant normalization characterization', () => {
       product_id: 20, attributes: { اللون: 'أحمر' } })
   })
 
-  it('keeps truthy price/id fallbacks but preserves explicit zero stock and weight', () => {
+  it('keeps legacy id fallbacks and preserves explicit zero price, cost, stock and weight', () => {
     const [variant] = extractGenericVariants({ id: 'parent', weight: 9, variants: [{
       id: 0, uuid: 'fallback-id', sale_price: 0, price: '8', quantity: 0,
       stock_quantity: 6, weight: 0, cost: 0, cost_price: '4', product_id: 0,
     }] }, 'zid')
-    expect(variant).toMatchObject({ id: 'fallback-id', price: 8, quantity: 0,
-      weight: 0, cost: 4, product_id: 'parent' })
+    expect(variant).toMatchObject({ id: 'fallback-id', price: 0, quantity: 0,
+      weight: 0, cost: 0, product_id: 'parent' })
   })
 
   it('uses Shopify option names and inventory quantities', () => {

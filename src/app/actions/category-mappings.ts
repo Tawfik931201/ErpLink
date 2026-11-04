@@ -5,7 +5,10 @@ import axios from 'axios'
 import { revalidatePath } from 'next/cache'
 
 import { getActiveWorkspaceErpConnection } from '@/app/actions/odoo'
+import { categoryFields, categoryMatchValue } from '@/lib/categories/odoo-values'
 import { decrypt } from '@/lib/crypto'
+import { upsertEntityLink } from '@/lib/entity-links'
+import { connectionGeneration } from '@/lib/erp-execution-target'
 import { OdooClient } from '@/lib/odoo-client'
 import { getSallaAccessToken } from '@/lib/salla-client'
 import { SHOPIFY_API_VERSION, getShopifyAccessToken } from '@/lib/shopify-client'
@@ -112,6 +115,10 @@ export async function saveCategoryMapping(data: {
       try {
         const conn = await getActiveWorkspaceErpConnection()
         if (conn.success && conn.connection) {
+          if (data.storeId && ['zid', 'salla', 'shopify'].includes(data.platform)) {
+            const saved = await upsertEntityLink({ workspaceId: user.active_workspace_id, platform: data.platform as 'zid' | 'salla' | 'shopify', storeId: data.storeId, odooModel: 'product.category', storeEntityId: String(data.source_category_id), erpConnectionId: conn.connection.id, connectionGeneration: connectionGeneration(conn.connection) }, data.odoo_category_id)
+            if (!saved) throw new Error('Failed to save durable category identity')
+          }
           const client = new OdooClient({
             url: conn.connection.url,
             db: conn.connection.db_name || '',
@@ -130,11 +137,14 @@ export async function saveCategoryMapping(data: {
           const settingsHit = ((settingsRows ?? []) as Array<{ store_id: string; settings: unknown }>)
             .find(r => r.store_id === (data.storeId || '')) ?? (settingsRows ?? []).find((r: any) => r.store_id === '')
           const settings = ((settingsHit as any)?.settings || {}) as Record<string, any>
-          const odooField = settings.category?.odoo_match_field || settings.match_odoo_field || 'x_zid_id_categ'
+          const odooField = settings.match_odoo_field || settings.category?.odoo_match_field
+          const sourceField = settings.match_zid_field || settings.category?.zid_match_field
 
-          if (odooField) {
-            const numVal = Number(data.source_category_id)
-            const val = (odooField === 'id' || Number.isInteger(numVal) && numVal > 0) ? numVal : String(data.source_category_id)
+          // Only the ID and name are available in this manual dialog. Never put an ID into a configured name field.
+          if (odooField && odooField !== 'id' && (sourceField === 'id' || sourceField === 'name')) {
+            const field = (await categoryFields(client))[odooField]
+            if (!field || field.readonly) throw new Error('Invalid category match field')
+            const val = categoryMatchValue(sourceField === 'id' ? data.source_category_id : data.source_category_name, field)
             await client.write('product.category', [data.odoo_category_id], {
               [odooField]: val
             })
@@ -143,6 +153,7 @@ export async function saveCategoryMapping(data: {
         }
       } catch (odooErr: any) {
         console.warn('[CategoryMappings] Failed to update Odoo category match field on manual map save:', odooErr.message || odooErr)
+        return { success: false, error: `Mapping saved, but Odoo linking failed: ${odooErr.message || odooErr}` }
       }
     }
 

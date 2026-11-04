@@ -168,8 +168,8 @@ export function CategorySettingsTab({
         title={lang === 'ar' ? 'الشركة الافتراضية (Odoo Company)' : 'Default Company'}
         description={
           lang === 'ar'
-            ? 'تحديد الشركة التابع لها التصنيف في نظام أودو متعدد الشركات'
-            : 'Specify the Odoo company associated with categories'
+            ? 'تحديد الشركة التي تُطبّق لها خصائص التكلفة والحسابات؛ التصنيفات مشتركة ما لم تدعم النسخة حقل الشركة'
+            : 'Company context for costing and accounts; categories are shared unless the model supports a company field'
         }
       >
         <div className="space-y-3">
@@ -202,8 +202,8 @@ export function CategorySettingsTab({
                 label={lang === 'ar' ? 'ربط وتحديد الشركة بالسجل في أودو' : 'Link and set company on the Odoo record'}
                 description={
                   lang === 'ar'
-                    ? 'يضمن تقييد التصنيف بالشركة المحددة فقط داخل أودو'
-                    : 'Restricts the category to the chosen company in Odoo'
+                    ? 'يكتب حقل الشركة فقط إذا كان موجودًا وقابلًا للكتابة في نسخة أودو'
+                    : 'Sets the company field only when supported by the connected Odoo model'
                 }
               />
             </div>

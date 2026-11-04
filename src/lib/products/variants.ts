@@ -2,6 +2,8 @@
 
 import { toNameString } from '@/lib/sync-helpers'
 
+import { finiteProductNumber } from './settings-values'
+
 export interface GenericVariant {
   id: string | number
   sku: string
@@ -14,6 +16,8 @@ export interface GenericVariant {
   weight?: number
   description?: string
   image?: string // URL or base64 of variant image
+  /** Original fields are needed for configured price/cost/language sources. */
+  source?: Record<string, unknown>
 }
 
 export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' | 'shopify'): GenericVariant[] {
@@ -38,17 +42,11 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
   return rawVariants.map((v: any) => {
     const variantId = v.id || v.uuid || v.variant_id || ''
     const sku = v.sku || v.default_code || v.sku_code || ''
-    const price = parseFloat(v.sale_price || v.price || v.regular_price || v.price_after_discount || '0') || 0
+    const price = finiteProductNumber(v.sale_price ?? v.price ?? v.regular_price ?? v.price_after_discount) ?? 0
     const barcode = v.barcode || v.gtin || v.upc || undefined
 
     // Quantity mapping across platforms
-    const quantity = v.quantity !== undefined
-      ? Number(v.quantity)
-      : (v.stock_quantity !== undefined
-        ? Number(v.stock_quantity)
-        : (v.inventory_quantity !== undefined
-          ? Number(v.inventory_quantity)
-          : undefined))
+    const quantity = finiteProductNumber(v.quantity ?? v.stock_quantity ?? v.inventory_quantity)
 
     const attributes: Record<string, string> = {}
 
@@ -78,14 +76,14 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
       }
     }
 
-    const cost = parseFloat(v.cost || v.cost_price || '0') || 0
+    const cost = finiteProductNumber(v.cost ?? v.cost_price)
 
     const rawWeight = v.weight ?? payload.weight
-    let weight = 0
+    let weight: number | undefined
     if (typeof rawWeight === 'object' && rawWeight !== null) {
-      weight = parseFloat((rawWeight as any).value ?? (rawWeight as any).weight ?? '0') || 0
+      weight = finiteProductNumber((rawWeight as any).value ?? (rawWeight as any).weight)
     } else {
-      weight = parseFloat(String(rawWeight ?? '0')) || 0
+      weight = finiteProductNumber(rawWeight)
     }
 
     const description = toNameString(v.description || payload.description || payload.short_description || payload.body_html || '')
@@ -109,7 +107,8 @@ export function extractGenericVariants(payload: any, platform: 'zid' | 'salla' |
       cost,
       weight,
       description,
-      image: variantImage || undefined
+      image: variantImage || undefined,
+      source: v,
     }
   })
 }

@@ -26,20 +26,22 @@ export async function applyCategoryMappingOverrides(
 
     // Per-store row first, platform default ('') as fallback — two stores
     // of one platform may map the same category name differently.
-    const { data: rows } = await supabaseAdmin
+    const { data: rows, error } = await supabaseAdmin
       .from('category_mappings')
       .select('*')
       .eq('workspace_id', workspaceId)
       .eq('platform', platform)
-      .ilike('source_category_name', catName)
+      .ilike('source_category_name', catName.replace(/[\\%_]/g, '\\$&'))
       .in('store_id', storeId ? [storeId, ''] : [''])
 
+    if (error) throw error
     const row = (rows ?? []).find((r: any) => (r.store_id || '') === storeId)
       ?? (rows ?? []).find((r: any) => !r.store_id)
-      ?? (rows ?? [])[0]
+
     if (!row) return {}
 
     const override: Record<string, any> = {}
+    if (row.parent_id !== undefined && row.parent_id !== null) override.parent_id = Number(row.parent_id) > 0 ? Number(row.parent_id) : false
     if (row.property_cost_method || row.property_valuation) {
       override.inventory_valuation = {}
       if (row.property_cost_method) override.inventory_valuation.property_cost_method = row.property_cost_method
@@ -72,6 +74,6 @@ export async function applyCategoryMappingOverrides(
     return override
   } catch (err) {
     console.warn('[SyncEngine] applyCategoryMappingOverrides error:', err)
-    return {}
+    throw err
   }
 }

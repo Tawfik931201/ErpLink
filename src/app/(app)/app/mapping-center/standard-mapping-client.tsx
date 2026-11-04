@@ -30,7 +30,7 @@ import {
 } from '@/app/actions/order-custom-status'
 import { getOrderStatusMappings, saveOrderStatusMappings } from '@/app/actions/order-status-mappings'
 import { getSallaLocations, getSallaPaymentMethods, type SallaLocation } from '@/app/actions/salla'
-import { getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
+import { getCategoryMatchFields, getStandardMappingSettings, saveStandardMappingSettings } from '@/app/actions/standard-mapping'
 import { deleteStaticMapping, getStaticMappings, saveStaticMapping } from '@/app/actions/static-mappings'
 import { getZidLocations, getZidPaymentMethods, type ZidLocation } from '@/app/actions/zid'
 import { useLanguage } from '@/components/language-provider'
@@ -95,7 +95,7 @@ function useOdooModelFields(
       setLoading(true)
       try {
         const { getOdooModelFields } = await import('@/app/actions/odoo')
-        const res = await getOdooModelFields(model, force)
+        const res = model === 'product.category' ? await getCategoryMatchFields() : await getOdooModelFields(model, force)
         if (res.success && res.fields) {
           setFields(res.fields.map(toOdooFieldOption))
         }
@@ -757,9 +757,21 @@ export default function StandardMappingClient({
     if (standardSubTab === 'orders') {
       setOrderStateMapping({})
     }
+    let cancelled = false
     getStandardMappingSettings(standardStoreTab, standardSubTab, standardStoreId).then(res => {
+      if (cancelled) return
       if (!res.success || !res.settings) {
-        if (standardSubTab === 'orders') {
+        if (standardSubTab === 'categories') {
+          setCostMethod('')
+          setInventoryValuation('')
+          setOnDeleteAction('nothing')
+          setMatchZidField('')
+          setMatchOdooField('')
+          setEnabledActions(['create', 'update', 'delete'])
+          setDisabled(false)
+          setCategoryCompanyId('')
+          setCategoryLinkCompany(false)
+        } else if (standardSubTab === 'orders') {
           setOrderDisabled(false)
           setOrderEnabledActions(['create', 'update', 'cancel', 'deliver'])
           setOrderMatchZidField('')
@@ -1091,6 +1103,7 @@ export default function StandardMappingClient({
         })
       }
     })
+    return () => { cancelled = true }
   }, [standardStoreTab, standardStoreId, standardSubTab])
 
   // Load store locations (Zid or Salla), Odoo internal locations & existing

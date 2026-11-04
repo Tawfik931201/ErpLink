@@ -1,9 +1,30 @@
 'use server'
 
 import { getActiveUserId } from '@/lib/auth'
+import { categoryFields, prepareCategoryValues } from '@/lib/categories/odoo-values'
+import { decrypt } from '@/lib/crypto'
+import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
+
+import { getActiveWorkspaceErpConnection } from './odoo'
+
+export async function getCategoryMatchFields() {
+  try {
+    const result = await getActiveWorkspaceErpConnection()
+    if (!result.success || !result.connection) throw new Error('Odoo connection is required')
+    const connection = result.connection
+    const client = new OdooClient({ url: connection.url, db: connection.db_name || '', username: connection.username, apiKey: decrypt(connection.password) })
+    const fields = await categoryFields(client)
+    return { success: true, fields: [
+      { value: 'id', label: 'ID' },
+      ...Object.entries(fields).filter(([name, field]) => name !== 'id' && !field.readonly && ['char', 'text', 'integer', 'float', 'selection'].includes(field.type)).map(([name, field]) => ({ value: name, label: field.string || name })),
+    ] }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Cannot read category match fields', fields: [] }
+  }
+}
 
 // Saved settings barely change while the page is open — memoize reads so tab
 // switches, background prefetch and post-save refetch are instant reads,
@@ -26,6 +47,20 @@ export async function saveStandardMappingSettings(
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
 
+    if (entityType === 'categories') {
+      if (!!settings.match_zid_field !== !!settings.match_odoo_field) throw new Error('Select both category match fields')
+      const result = await getActiveWorkspaceErpConnection()
+      if (!result.success || !result.connection) throw new Error('Odoo connection is required')
+      const connection = result.connection
+      const client = new OdooClient({ url: connection.url, db: connection.db_name || '', username: connection.username, apiKey: decrypt(connection.password) })
+      const fields = await categoryFields(client)
+      if (settings.match_odoo_field && settings.match_odoo_field !== 'id') {
+        const field = fields[settings.match_odoo_field]
+        if (!field || field.readonly || !['char', 'text', 'integer', 'float', 'selection'].includes(field.type)) throw new Error('Unsupported category match field')
+      }
+      prepareCategoryValues({ ...(settings.costing_method ? { property_cost_method: settings.costing_method } : {}), ...(settings.inventory_valuation ? { property_valuation: settings.inventory_valuation } : {}) }, fields)
+    }
+
     const { data, error } = await supabase
       .from('standard_mapping_settings')
       .upsert({
@@ -47,6 +82,7 @@ export async function saveStandardMappingSettings(
     // just-saved values on the refetch that follows a save.
     ttlCache.clear(`stdsets:${user.active_workspace_id}`)
     ttlCache.clear(`stdsets_all:${user.active_workspace_id}`)
+    ttlCache.clear(`eng:stdsets:${user.active_workspace_id}:`)
 
     return { success: true, data }
   } catch (error: any) {

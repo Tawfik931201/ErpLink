@@ -4,6 +4,12 @@ Actual source paths for the bounded refactor. Functions mentioned below can be l
 
 ## Domain responsibilities
 
+Product settings transforms now also live in `src/lib/products/settings-values.ts`;
+Odoo variant price representation and paginated variant reads live in
+`src/lib/products/variant-prices.ts`. The engine retains orchestration, inventory
+adjustments and BoM resolution. See [the Zid product audit](../integrations/zid-products-audit.md)
+for the functional corrections and compatibility limits from 2026-11-03.
+
 | Area | Focused modules | Remaining execution and data access | Main relationships |
 | --- | --- | --- | --- |
 | Products | `src/lib/products/variants.ts`, `src/lib/product-name.ts` | `src/lib/sync-engine.ts`: `syncAsSeparateProducts`, `syncChildAsSeparateProduct`, `syncAsVariants`, `syncChildVariantAsVariant`, `syncProductBom`, matching and writes. `src/app/actions/product-mappings.ts` handles manual mappings. | Store clients and payloads -> variant normalization -> orchestrator -> Odoo; stock remains a separate execution path. |

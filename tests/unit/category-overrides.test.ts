@@ -61,7 +61,7 @@ describe('category mapping overrides characterization', () => {
     await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })
     expect(query.in).toHaveBeenLastCalledWith('store_id', [''])
     query.in.mockResolvedValue({ data: [{ store_id: 'other', odoo_category_id: 7 }] })
-    expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' }, 'missing')).toEqual({ odoo_category_id: 7 })
+    expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' }, 'missing')).toEqual({})
   })
 
   it('keeps an empty accounting object when a truthy but nonpositive account is configured', async () => {
@@ -69,12 +69,12 @@ describe('category mapping overrides characterization', () => {
     expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).toEqual({ accounting: {} })
   })
 
-  it('returns empty for no row, returned database errors, and rejected queries', async () => {
+  it('returns empty for no row but surfaces database failures instead of silently dropping overrides', async () => {
     expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).toEqual({})
     query.in.mockResolvedValue({ data: null, error: { message: 'unavailable' } })
-    expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).toEqual({})
+    await expect(applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).rejects.toEqual({ message: 'unavailable' })
     query.in.mockRejectedValue(new Error('offline'))
-    expect(await applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).toEqual({})
+    await expect(applyCategoryMappingOverrides('w', 'zid', { name: 'Shoes' })).rejects.toThrow('offline')
     expect(console.warn).toHaveBeenCalled()
   })
 })

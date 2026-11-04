@@ -4,12 +4,16 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 import { decrypt } from '@/lib/crypto'
+import { withErpExecutionContext } from '@/lib/erp-effect-context'
+import { connectionGeneration, withErpTarget } from '@/lib/erp-execution-target'
+import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import { listSallaProducts, listSallaCustomers, listSallaCategories } from '@/lib/salla-client'
 import { listShopifyProducts, listShopifyCustomers, listShopifyCollections } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import {
   buildOdooValues,
+  executeOdooOperation,
   fetchFieldMeta,
   findExistingOdooRecord,
 } from '@/lib/sync-engine'
@@ -498,17 +502,52 @@ async function runTransferInBackground(
       })
     } else {
       // store_to_odoo: push fetched store entities into Odoo
+      const isZidProduct = data.platform === 'zid' && data.dataType === 'products' && odooModel === 'product.template'
+      const isStoreCategory = data.dataType === 'categories' && odooModel === 'product.category' && (data.platform === 'zid' || data.platform === 'salla')
+      const productSettings = isZidProduct ? await getEffectiveStandardMappingSettings(supabase, workspaceId, 'zid', 'products', data.storeIdentifier) : null
       await runWithConcurrencyLimit(5, entities, async (entity) => {
-        const zidId = String(entity.id || '')
+        const zidId = String(entity.id ?? (isStoreCategory ? entity.category_id ?? entity.category_uuid : undefined) ?? '')
         const nameForLog = entity.name?.ar || entity.name?.en || entity.name || entity.title || zidId
 
         try {
           // Build Odoo values using mapping rules
-          const odooValues = await buildOdooValues(odooClient, mappingItems, entity, fieldMeta, data.platform, workspaceId, data.storeIdentifier)
+          const categoryScope = { workspaceId, platform: data.platform, storeId: data.storeIdentifier, erpConnectionId: odooConn.id, connectionGeneration: connectionGeneration(odooConn), eventId: `transfer:${transferId}:${zidId}`, storeEntityId: zidId, rootModel: odooModel }
+          const buildValues = () => buildOdooValues(odooClient, mappingItems, entity, fieldMeta, data.platform, workspaceId, data.storeIdentifier, productSettings)
+          const odooValues = isStoreCategory
+            ? await withErpTarget(categoryScope, () => withErpExecutionContext(categoryScope, buildValues))
+            : await buildValues()
 
           if (Object.keys(odooValues).length === 0) {
             logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
             records_failed++
+            await updateDbProgress()
+            return
+          }
+
+          if (isZidProduct || isStoreCategory) {
+            const result = await withErpTarget({
+              workspaceId, platform: data.platform, storeId: data.storeIdentifier,
+              erpConnectionId: odooConn.id, connectionGeneration: connectionGeneration(odooConn),
+              eventId: `transfer:${transferId}:${zidId}`,
+            }, () => {
+              const operation = () => executeOdooOperation({
+              client: odooClient,
+              mapping: {
+                id: isStoreCategory ? 'transfer_categories' : 'transfer_products', workspace_id: workspaceId, erp_connection_id: odooConn.id,
+                merchant_id: data.storeIdentifier, store_id: data.storeIdentifier,
+                action: isStoreCategory ? 'category.create' : 'product.create', odoo_model: odooModel, name: data.name || 'Product import',
+                mappings: data.mappings || {},
+                odoo_match_field: odooConn.odoo_match_field,
+                zid_match_field: odooConn.zid_match_field,
+              },
+              event: isStoreCategory ? 'category.create' : 'product.create', storeId: data.storeIdentifier, zidEntityId: zidId,
+              zidData: entity, odooModel, odooOperation: 'create', odooValues,
+              presetKey: null, triggerType: 'manual' as const, platformHint: data.platform,
+            })
+              return isStoreCategory ? withErpExecutionContext(categoryScope, operation) : operation()
+            })
+            if (result.status !== 'success') throw new Error(result.message || 'Product import did not complete')
+            records_created++
             await updateDbProgress()
             return
           }
