@@ -47,6 +47,29 @@ describe('read-only order relation matching from customer/product settings', () 
     expect(client.search).not.toHaveBeenCalled()
   })
 
+  it('preserves a saved mobile match on Odoo 19 by using its confirmed phone replacement', async () => {
+    const client = { ...fixture().client, getMajorVersion: jest.fn().mockResolvedValue(19) }
+    client.execute.mockResolvedValueOnce([]).mockResolvedValueOnce([{ name: 'phone', ttype: 'char', readonly: false }])
+    const config = { match_zid_field: 'mobile', match_odoo_field: 'mobile' }
+    const result = await resolveOrderRelatedRecord(client, supabase, identity, 'customers', { mobile: '966555000000' }, config)
+    expect(client.search).toHaveBeenCalledWith('res.partner', [['phone', '=', '966555000000']], 2)
+    expect(result.matchValues).toEqual({ phone: '966555000000' })
+    expect(config.match_odoo_field).toBe('mobile')
+  })
+
+  it.each([14, 15, 16, 17])('does not replace mobile with a different key on Odoo %i', async major => {
+    const client = { ...fixture('mobile').client, getMajorVersion: jest.fn().mockResolvedValue(major) }
+    await resolveOrderRelatedRecord(client, supabase, identity, 'customers', { mobile: '966555000000' }, { match_zid_field: 'mobile', match_odoo_field: 'mobile' })
+    expect(client.search).toHaveBeenCalledWith('res.partner', [['mobile', '=', '966555000000']], 2)
+  })
+
+  it('does not silently replace another missing field even on Odoo 19', async () => {
+    const client = { ...fixture().client, getMajorVersion: jest.fn().mockResolvedValue(19) }
+    client.execute.mockResolvedValue([])
+    await expect(resolveOrderRelatedRecord(client, supabase, identity, 'customers', { email: 'a@example.test' }, { match_zid_field: 'email', match_odoo_field: 'x_missing' })).rejects.toThrow('does not exist')
+    expect(client.search).not.toHaveBeenCalled()
+  })
+
   it('rejects an incomplete configured pair instead of choosing a default field', async () => {
     await expect(resolveOrderRelatedRecord(fixture().cast, supabase, identity, 'customers', { id: 1001 },
       { match_zid_field: 'email' })).rejects.toThrow('Select both related match fields')

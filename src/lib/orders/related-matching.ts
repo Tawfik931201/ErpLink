@@ -13,7 +13,7 @@ export interface RelatedMatchResult {
   /** Safe creation values: record IDs and readonly fields are never written. */
   matchValues?: Record<string, unknown>
 }
-type MatchClient = Pick<OdooClient, 'search' | 'execute'>
+type MatchClient = Pick<OdooClient, 'search' | 'execute'> & Partial<Pick<OdooClient, 'getMajorVersion'>>
 type MatchField = { name: string; ttype: string; readonly?: boolean }
 const fieldReads = new WeakMap<MatchClient, Map<string, Promise<MatchField>>>()
 
@@ -25,10 +25,18 @@ async function matchingField(client: MatchClient, model: string, field: string):
   if (cached) return cached
   const read = client.execute<MatchField[]>('ir.model.fields', 'search_read',
     [[['model', '=', model], ['name', '=', field]]], { fields: ['name', 'ttype', 'readonly'], limit: 1 })
-    .then(rows => {
+    .then(async rows => {
       const hit = rows.find(row => row.name === field)
-      if (!hit) throw new Error(`Configured related match field ${model}.${field} does not exist`)
-      return hit
+      if (hit) return hit
+      // Odoo 19 removed mobile. Preserve the saved setting and the source
+      // phone value, translating only this known versioned field replacement.
+      if (model === 'res.partner' && field === 'mobile' && client.getMajorVersion && await client.getMajorVersion() >= 19) {
+        const replacement = await client.execute<MatchField[]>('ir.model.fields', 'search_read',
+          [[['model', '=', model], ['name', '=', 'phone']]], { fields: ['name', 'ttype', 'readonly'], limit: 1 })
+        const phone = replacement.find(row => row.name === 'phone' && row.ttype === 'char')
+        if (phone) return phone
+      }
+      throw new Error(`Configured related match field ${model}.${field} does not exist`)
     }).catch(error => { reads!.delete(key); throw error })
   reads.set(key, read)
   return read
@@ -121,10 +129,11 @@ export async function resolveOrderRelatedRecord(
     }
   }
   const value = typedMatchValue(raw, field, sourceField)
-  const ids = await client.search(model, [[targetField, '=', value]], 2)
-  if (ids.length > 1) throw new Error(`Ambiguous Odoo related ${entity} match for ${targetField}`)
+  const effectiveTarget = field.name
+  const ids = await client.search(model, [[effectiveTarget, '=', value]], 2)
+  if (ids.length > 1) throw new Error(`Ambiguous Odoo related ${entity} match for ${effectiveTarget}`)
   return {
     configured: true, recordId: ids[0] ?? null,
-    match: { sourceField, targetField, value }, matchValues: field.readonly ? {} : { [targetField]: value },
+    match: { sourceField, targetField: effectiveTarget, value }, matchValues: field.readonly ? {} : { [effectiveTarget]: value },
   }
 }
