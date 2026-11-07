@@ -3,7 +3,9 @@
 import { getActiveUserId } from '@/lib/auth'
 import { categoryFields, prepareCategoryValues } from '@/lib/categories/odoo-values'
 import { decrypt } from '@/lib/crypto'
+import { validateCustomerMatchSettings, type CustomerMatchField } from '@/lib/customers/matching-settings'
 import { OdooClient } from '@/lib/odoo-client'
+import { assertBomCapability } from '@/lib/products/bom-capability'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
@@ -46,6 +48,21 @@ export async function saveStandardMappingSettings(
 
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
+
+    if (settings.disabled !== true && (entityType === 'customers' || (entityType === 'products' && settings.bom?.enabled))) {
+      const result = await getActiveWorkspaceErpConnection()
+      if (!result.success || !result.connection) throw new Error('Odoo connection is required')
+      const connection = result.connection
+      if (connection.erp_type !== 'erpnext') {
+        const client = new OdooClient({ url: connection.url, db: connection.db_name || '', username: connection.username, apiKey: decrypt(connection.password) })
+        if (entityType === 'customers') {
+          const fields = await client.execute<Record<string, CustomerMatchField>>('res.partner', 'fields_get', [], { attributes: ['type', 'readonly'] })
+          validateCustomerMatchSettings(settings, fields)
+        } else {
+          await assertBomCapability(client, settings.bom.type || 'phantom')
+        }
+      }
+    }
 
     if (entityType === 'categories') {
       if (!!settings.match_zid_field !== !!settings.match_odoo_field) throw new Error('Select both category match fields')

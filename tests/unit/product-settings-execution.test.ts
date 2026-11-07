@@ -21,7 +21,9 @@ const makeClient = (major = 19) => ({
   getMajorVersion: jest.fn().mockResolvedValue(major),
   search: jest.fn().mockResolvedValue([]),
   searchRead: jest.fn().mockResolvedValue([]),
-  execute: jest.fn().mockResolvedValue([]),
+  execute: jest.fn().mockImplementation(async model => model === 'mrp.bom'
+    ? { product_tmpl_id: { type: 'many2one' }, bom_line_ids: { type: 'one2many' }, type: { type: 'selection', selection: [['normal', 'Normal'], ['phantom', 'Kit']] } }
+    : model === 'mrp.bom.line' ? { product_id: { type: 'many2one' }, product_qty: { type: 'float' } } : []),
   create: jest.fn().mockResolvedValue(500),
   write: jest.fn().mockResolvedValue(true),
 })
@@ -99,6 +101,30 @@ describe('product Standard Mapping execution', () => {
     expect(client.create).toHaveBeenCalledWith('product.template', expect.objectContaining({ default_code: '0012' }))
   })
 
+  it.each([false, true])('updates the owning template, never the matched variant ID (collision=%s)', async collision => {
+    const client = makeClient()
+    // In production template39 owns variant57. Another template57 may exist;
+    // even then its ID is unrelated to variant57 and must never be written.
+    client.execute.mockResolvedValue([{ name: 'default_code', ttype: 'char' }])
+    client.search.mockImplementation(async (model, domain) => {
+      if (domain.some((term: any[]) => term[0] === 'default_code' && term[2] === 'QA-SKU')) {
+        return model === 'product.product' ? [57] : model === 'product.template' ? [39] : []
+      }
+      if (model === 'product.template' && domain.some((term: any[]) => term[0] === 'id' && term[2] === 57)) return collision ? [57] : []
+      return []
+    })
+    client.write.mockImplementation(async (model, ids) => {
+      if (model === 'product.template' && ids.includes(57) && !collision) throw new Error('Missing template57')
+      return true
+    })
+    const settings = { inventory: { sync_enabled: true }, product: { odoo_match_field: 'default_code', zid_match_field: 'sku' } }
+    const result = await executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.publish', storeId: 'merchant-products', zidEntityId: 'source', zidData: { id: 'source', sku: 'QA-SKU' }, odooModel: 'product.template', odooOperation: 'update', odooValues: { name: 'Updated QA', default_code: 'QA-SKU' }, presetKey: null, platformHint: 'zid' })
+    expect(result).toMatchObject({ status: 'success', model: 'product.template', odooRecordId: 39 })
+    expect(client.write).toHaveBeenCalledWith('product.template', [39], expect.objectContaining({ name: 'Updated QA' }))
+    expect(client.write.mock.calls.some(([model, ids]) => model === 'product.template' && ids.includes(57))).toBe(false)
+    expect(client.search.mock.calls.some(([model]) => model === 'product.product')).toBe(false)
+  })
+
   it('disabled product synchronization performs no Odoo writes', async () => {
     const client = makeClient()
     const values = await buildOdooValues(asClient(client), [{ id: 'category', erpField: 'categ_id', zidField: 'category' }], { category: 'Must not create' }, new Map(), 'zid', 'ws-products', 'merchant-products', { disabled: true })
@@ -108,6 +134,72 @@ describe('product Standard Mapping execution', () => {
     expect(result.status).toBe('skipped')
     expect(client.create).not.toHaveBeenCalled()
     expect(client.write).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing Manufacturing module before creating even a partial grouped product', async () => {
+    const client = makeClient()
+    client.execute.mockRejectedValue(new Error("Object mrp.bom doesn't exist"))
+    const settings = { bom: { enabled: true, type: 'normal' } }
+    await expect(executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'bundle', zidData: { id: 'bundle', product_class: 'grouped_product', group_products: [{ item_id: 'component', item_quantity: 2 }] }, odooModel: 'product.template', odooOperation: 'create', odooValues: { name: 'Bundle' }, presetKey: null, platformHint: 'zid' })).rejects.toThrow('Manufacturing module')
+    expect(client.create).not.toHaveBeenCalled()
+    expect(client.write).not.toHaveBeenCalled()
+  })
+
+  it('fails an unavailable customer matching field before a partner write, without silently changing the setting', async () => {
+    const client = makeClient()
+    client.execute.mockResolvedValue({ phone: { type: 'char' } })
+    const settings = { customer: { odoo_match_field: 'mobile', zid_match_field: 'telephone' } }
+    await expect(executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'customer.create', storeId: 'merchant-products', zidEntityId: 'customer', zidData: { id: 'customer', telephone: '500000000' }, odooModel: 'res.partner', odooOperation: 'create', odooValues: { name: 'Customer' }, presetKey: null, platformHint: 'zid' })).rejects.toThrow('Customer match field "mobile" is unavailable')
+    expect(client.create).not.toHaveBeenCalled()
+    expect(client.write).not.toHaveBeenCalled()
+  })
+
+  it.each(['product.template', 'product.product'] as const)('runs All Images gallery synchronization during a real standalone %s execution', async model => {
+    const client = makeClient()
+    const relation = model === 'product.template' ? 'product_template_image_ids' : 'product_variant_image_ids'
+    const inverse = model === 'product.template' ? 'product_tmpl_id' : 'product_variant_id'
+    client.execute.mockImplementation(async target => target === model
+      ? { [relation]: { type: 'one2many', relation: 'product.image' } }
+      : target === 'product.image' ? { name: {}, image_1920: {}, sequence: {}, [inverse]: {} } : [])
+    const originalFetch = global.fetch
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from('image') })
+    global.fetch = fetchMock
+    try {
+      const settings = { image: { sync_mode: 'all' }, inventory: { sync_enabled: true } }
+      const result = await executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'gallery', zidData: { id: 'gallery', images: [{ url: 'https://images.test/main.png', is_main: true }, { url: 'https://images.test/second.png' }] }, odooModel: model, odooOperation: 'create', odooValues: { name: 'Gallery' }, presetKey: null, platformHint: 'zid' })
+      expect(result.status).toBe('success')
+      expect(client.write).toHaveBeenCalledWith(model, [500], { [relation]: [[0, 0, expect.objectContaining({ image_1920: Buffer.from('image').toString('base64') })]] })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it('fails missing All Images capability before creating a partial product', async () => {
+    const client = makeClient()
+    const settings = { image: { sync_mode: 'all' } }
+    await expect(executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'gallery', zidData: { id: 'gallery', images: [{ origin: 'https://images.test/main.png' }, { origin: 'https://images.test/extra.png' }] }, odooModel: 'product.template', odooOperation: 'create', odooValues: { name: 'Gallery' }, presetKey: null, platformHint: 'zid' })).rejects.toThrow('All Images requires')
+    expect(client.create).not.toHaveBeenCalled()
+    expect(client.write).not.toHaveBeenCalled()
+  })
+
+  it('chooses the flagged Zid variant primary image consistently with its extra-image gallery', async () => {
+    const client = makeClient()
+    const originalFetch = global.fetch
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from('primary') })
+    global.fetch = fetchMock
+    try {
+      const values = await buildVariantProductValues(asClient(client), { name: 'Parent' }, { id: 'parent' }, {
+        id: 'child', sku: 'CHILD', price: 100, image: 'https://images.test/first.png', attributes: { Size: '20' }, source: {
+          id: 'child', images: [{ origin: 'https://images.test/first.png' }, { origin: 'https://images.test/main.png', is_main: true }],
+        },
+      }, { image: { sync_mode: 'all' } }, 'zid')
+      expect(values.image_1920).toBe(Buffer.from('primary').toString('base64'))
+      expect(fetchMock).toHaveBeenCalledWith('https://images.test/main.png', expect.any(Object))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 
   it('simple product stock uses the generated variant ID and reports failures', async () => {

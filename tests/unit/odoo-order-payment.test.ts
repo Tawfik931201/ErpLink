@@ -298,6 +298,77 @@ describe('reconcilePaymentWithInvoice', () => {
 })
 
 describe('syncOrderPayment and reconcilePendingPaymentsForOrder', () => {
+  it.each(['posted', 'in_process', 'paid'])('recovers a committed %s payment after the XML-RPC None fault without repeating action_post', async committedState => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    let state = 'draft'
+    const client: any = {
+      searchRead: jest.fn(async (model: string) => model === 'sale.order'
+        ? [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [] }]
+        : [{ id: 101, state, company_id: [1, 'Company'] }]),
+      create: jest.fn(),
+      execute: jest.fn(async () => { state = committedState; throw new Error('cannot marshal None unless allow_none is enabled') }),
+    }
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result).toEqual({ paymentId: 101, reconciled: false })
+    expect(client.execute).toHaveBeenCalledTimes(1)
+    expect(client.execute).toHaveBeenCalledWith('account.payment', 'action_post', [[101]])
+    expect(client.searchRead.mock.calls.filter(([model]: [string]) => model === 'account.payment')).toHaveLength(2)
+    expect(client.create).not.toHaveBeenCalled()
+  })
+
+  it.each(['wrong_company', 'read_failure', 'draft'])('preserves the posting fault when readback is %s', async readback => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    let postingAttempted = false
+    const client: any = {
+      searchRead: jest.fn(async (model: string) => {
+        if (model === 'sale.order') return [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [] }]
+        if (postingAttempted && readback === 'read_failure') throw new Error('read failed')
+        return [{ id: 101, state: postingAttempted && readback === 'wrong_company' ? 'in_process' : 'draft', company_id: [postingAttempted && readback === 'wrong_company' ? 2 : 1, 'Company'] }]
+      }),
+      create: jest.fn(),
+      execute: jest.fn(async () => { postingAttempted = true; throw new Error('original posting fault') }),
+    }
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const result = await syncOrderPayment({
+        client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+        workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+      })
+      expect(result.errorReason).toBe('original posting fault')
+      expect(client.execute).toHaveBeenCalledTimes(1)
+      expect(client.create).not.toHaveBeenCalled()
+    } finally { errorSpy.mockRestore() }
+  })
+
+  it('rechecks company ownership after a normal successful posting response', async () => {
+    jest.mocked(getEffectiveStandardMappingSettings).mockResolvedValueOnce({
+      order: { payment_journal_mappings: [{ zid_payment_method: 'bank_transfer', odoo_journal_id: '14' }] },
+    } as any)
+    jest.mocked(resolveEntityLinkId).mockResolvedValueOnce(101)
+    let posted = false
+    const client: any = {
+      searchRead: jest.fn(async (model: string) => model === 'sale.order'
+        ? [{ id: 55, name: 'S0055', partner_id: [12, 'Customer'], company_id: [1, 'Company'], currency_id: [1, 'SAR'], invoice_ids: [] }]
+        : [{ id: 101, state: posted ? 'posted' : 'draft', company_id: [posted ? 2 : 1, 'Company'] }]),
+      create: jest.fn(), execute: jest.fn(async () => { posted = true; return true }),
+    }
+    const result = await syncOrderPayment({
+      client, saleOrderId: 55, zidData: { payment_status: 'paid', order_total: 250, payment_method: 'bank_transfer' },
+      workspaceId: 'ws-123', platform: 'zid', storeId: 'store-1', zidEntityId: 'ord-999',
+    })
+    expect(result.errorReason).toBe('linked_payment_company_mismatch')
+    expect(client.execute).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['unpaid', 250, true],
     ['partial', 50, true],

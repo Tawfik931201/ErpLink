@@ -486,12 +486,25 @@ export async function syncOrderPayment(params: {
       'account.payment', [['id', '=', paymentId]], ['id', 'state', 'company_id'], 1
     ))?.[0]
     let payment = await readPayment()
-    const paymentCompanyId = Number(Array.isArray(payment?.company_id) ? payment.company_id[0] : payment?.company_id)
-    if (paymentCompanyId !== companyId) return { paymentId, skippedReason: 'linked_payment_company_mismatch', errorReason: 'linked_payment_company_mismatch' }
+    const isOrderCompany = (record: { company_id?: unknown } | undefined): boolean =>
+      Number(Array.isArray(record?.company_id) ? record.company_id[0] : record?.company_id) === companyId
+    if (!isOrderCompany(payment)) return { paymentId, skippedReason: 'linked_payment_company_mismatch', errorReason: 'linked_payment_company_mismatch' }
     if (payment.state === 'draft') {
-      await client.execute('account.payment', 'action_post', [[paymentId]])
-      payment = await readPayment()
+      let verifiedAfterFault = false
+      try {
+        await client.execute('account.payment', 'action_post', [[paymentId]])
+      } catch (postError) {
+        // Odoo can commit action_post and then fail XML-RPC serialization of
+        // its None return. Never repeat the write: verify the committed state.
+        payment = await readPayment().catch(() => { throw postError })
+        if (!isOrderCompany(payment) || !['posted', 'in_process', 'paid'].includes(payment?.state)) throw postError
+        verifiedAfterFault = true
+      }
+      // Also verify a normal RPC response; a return value alone is not proof
+      // of the payment state or of its continued company ownership.
+      if (!verifiedAfterFault) payment = await readPayment()
     }
+    if (!isOrderCompany(payment)) return { paymentId, skippedReason: 'linked_payment_company_mismatch', errorReason: 'linked_payment_company_mismatch' }
     if (!['posted', 'in_process', 'paid'].includes(payment?.state)) {
       return { paymentId, skippedReason: 'payment_not_posted', errorReason: 'payment_not_posted' }
     }

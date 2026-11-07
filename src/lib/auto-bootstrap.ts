@@ -11,6 +11,7 @@
  */
 
 import { decrypt } from '@/lib/crypto'
+import { defaultCustomerMatchFields, type CustomerMatchField } from '@/lib/customers/matching-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import { supabase } from '@/lib/supabase'
 
@@ -108,6 +109,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
     let defaultPricelistId: number | null = null
     let defaultIncomeAccountId: number | null = null
     let defaultExpenseAccountId: number | null = null
+    let customerMatchFields: Record<string, CustomerMatchField> = {}
 
     if (erpConn && erpConn.status === 'connected' && erpConn.erp_type !== 'erpnext') {
       try {
@@ -118,6 +120,12 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
           username: erpConn.username,
           apiKey,
         })
+
+        try {
+          customerMatchFields = await client.execute<Record<string, CustomerMatchField>>('res.partner', 'fields_get', [], { attributes: ['type'] })
+        } catch {
+          // Phone is available across supported Odoo versions; do not guess mobile.
+        }
 
         let defaultCompanyId: number | null = null
         try {
@@ -264,8 +272,9 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
             settings: {
               customer_type: 'person',
               on_delete: 'nothing',
-              match_zid_field: 'mobile',
-              match_odoo_field: 'mobile',
+              ...(erpConn?.erp_type === 'erpnext'
+                ? { match_zid_field: 'mobile', match_odoo_field: 'mobile' }
+                : defaultCustomerMatchFields(storeType, customerMatchFields)),
               enabled_actions: ['create', 'update'],
             },
           },

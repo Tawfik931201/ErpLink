@@ -45,7 +45,7 @@ export const ZID_EVENT_MAP: Record<string, string> = {
 }
 
 /**
- * The 12 core events auto-registered on connect. They cover catalog (products
+ * The core events auto-registered on connect. They cover catalog (products
  * + categories, full create/update/delete), sales (all order events) and
  * customers. Everything else is opt-in from Advanced settings.
  */
@@ -59,6 +59,7 @@ export const ZID_CORE_EVENTS = [
   'product_publish',
   'customer_create',
   'customer_update',
+  'customer_merchant_update',
   'category_create',
   'category_update',
   'category_delete',

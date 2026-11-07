@@ -12,6 +12,13 @@ const AUTH_MODULE = '../../src/lib/zid/webhook-auth'
 
 const TEST_KEY = 'test-encryption-key-not-a-real-secret'
 
+it('registers manager customer edits as a core event', () => {
+  const source = fs.readFileSync(WEBHOOKS_PATH, 'utf8')
+  const core = source.match(/export const ZID_CORE_EVENTS = \[([\s\S]*?)\]/)?.[1] || ''
+  expect(core).toContain("'customer_merchant_update'")
+  expect(source).toContain("customer_merchant_update: 'customer.merchant.update'")
+})
+
 /**
  * Regression tests for src/lib/zid/webhook-auth.ts.
  *
