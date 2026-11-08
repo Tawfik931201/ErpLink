@@ -23,9 +23,11 @@ export interface MobileNavSection {
 export default function MobileNav({
   sections,
   dir,
+  children,
 }: {
   sections: MobileNavSection[]
   dir: 'rtl' | 'ltr'
+  children?: React.ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const pathname = usePathname()
@@ -43,10 +45,11 @@ export default function MobileNav({
         <Link href="/app/dashboard" className="flex items-center" aria-label="ErpLink Dashboard">
           <Logo variant="horizontal" size="sm" priority />
         </Link>
+        <div className="ms-auto min-w-0">{children}</div>
       </div>
 
       {open && (
-        <nav className="px-3 pb-3 space-y-2" dir={dir}>
+        <nav className="max-h-[70dvh] overflow-y-auto px-3 pb-3 space-y-2" dir={dir}>
           {sections.map((section, i) => (
             <div key={i} className="space-y-1">
               {section.items.map((item) => {

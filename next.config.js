@@ -50,7 +50,7 @@ const securityHeaders = [
       "connect-src 'self' https:",
       "frame-src 'self' https://challenges.cloudflare.com",
       "worker-src 'self' blob:",
-      "frame-ancestors 'self' https://*.zid.sa https://zid.sa https://*.zid.store https://zid.store https://*.salla.sa https://salla.sa https://*.salla.dev https://salla.dev https://*.myshopify.com https://admin.shopify.com https://*.bizsahla.com https://bizsahla.com",
+      "frame-ancestors 'self' https://*.zid.sa https://zid.sa https://*.zid.dev https://*.zid.store https://zid.store https://*.salla.sa https://salla.sa https://*.salla.dev https://salla.dev https://*.myshopify.com https://admin.shopify.com https://*.bizsahla.com https://bizsahla.com",
       "base-uri 'self'",
       "form-action 'self'",
     ].join('; '),
@@ -116,6 +116,13 @@ const nextConfig = {
       {
         source: '/:path*',
         headers: securityHeaders,
+      },
+      {
+        source: '/:locale(ar-sa|en-us)?/embedded',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
       },
     ]
 

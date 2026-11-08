@@ -6,6 +6,7 @@ import {
   SUPPORTED_URL_LOCALES,
   getUrlLocaleFromLanguage,
 } from '@/lib/locale'
+import { writePreferenceCookie } from '@/lib/preference-cookie'
 import type { Language } from '@/lib/translations'
 import { translations } from '@/lib/translations'
 
@@ -35,7 +36,7 @@ export function LanguageProvider({
     if (newLang === lang) return
 
     // Save to cookies before navigating (middleware will also set it)
-    document.cookie = `lang=${newLang}; path=/; max-age=${365 * 24 * 60 * 60}; SameSite=Lax`
+    writePreferenceCookie('lang', newLang)
     document.documentElement.lang = newLang
     document.documentElement.dir = newLang === 'ar' ? 'rtl' : 'ltr'
 

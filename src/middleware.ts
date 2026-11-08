@@ -117,6 +117,9 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   // --- HEADERS ---
+  // Server components must render the URL's language on this very request,
+  // including the first iframe navigation before a preference cookie exists.
+  if (langFromUrl) req.cookies.set(LOCALE_COOKIE, langFromUrl)
   const requestHeaders = new Headers(req.headers)
   requestHeaders.set('x-pathname', req.nextUrl.pathname)
 
@@ -125,10 +128,14 @@ export default clerkMiddleware(async (auth, req) => {
     const response = NextResponse.rewrite(req.nextUrl, {
       request: { headers: requestHeaders },
     })
+    const embedded = req.headers.get('sec-fetch-dest') === 'iframe' &&
+      (process.env.NODE_ENV === 'production' || req.nextUrl.protocol === 'https:')
     response.cookies.set(LOCALE_COOKIE, langFromUrl, {
       path: '/',
       maxAge: 365 * 24 * 60 * 60,
-      sameSite: 'lax',
+      sameSite: embedded ? 'none' : 'lax',
+      secure: embedded,
+      partitioned: embedded,
     })
     return response
   }

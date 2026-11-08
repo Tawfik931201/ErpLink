@@ -62,6 +62,10 @@ function verifyClerkSignature(
 
 /** Ensure the Clerk user exists in the local users table. */
 async function syncUserForUserCreated(data: any) {
+  // Embedded identities are provisioned with their existing store workspace by
+  // registerEmbeddedAccess. A default workspace here would escape that scope.
+  if (typeof data.external_id === 'string' && data.external_id.startsWith('zid-embedded:') &&
+      data.private_metadata?.zidEmbedded === true) return
   const userId = data.id as string | undefined
   if (!userId) return
 

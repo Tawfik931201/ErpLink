@@ -28,6 +28,16 @@ describe('next.config.js security headers for embedded apps', () => {
     expect(xFrameOptions).toBeUndefined()
   })
 
+  it('keeps launch credentials out of referrers and caches after global headers apply', async () => {
+    const rules = await nextConfig.headers()
+    const globalIndex = rules.findIndex((r: { source: string }) => r.source === '/:path*')
+    const embeddedIndex = rules.findIndex((r: { source: string }) => r.source.endsWith('/embedded'))
+    expect(embeddedIndex).toBeGreaterThan(globalIndex)
+    const headers = rules[embeddedIndex].headers
+    expect(headers).toContainEqual({ key: 'Referrer-Policy', value: 'no-referrer' })
+    expect(headers).toContainEqual({ key: 'Cache-Control', value: 'private, no-store' })
+  })
+
   it('configures CSP frame-ancestors to allow Zid, Salla, and Shopify merchant dashboards', async () => {
     const headerRules = await nextConfig.headers()
     const globalRule = headerRules.find((r: { source: string }) => r.source === '/:path*')
@@ -41,6 +51,7 @@ describe('next.config.js security headers for embedded apps', () => {
 
     // Must allow Zid dashboard
     expect(cspHeader.value).toContain('https://*.zid.sa')
+    expect(cspHeader.value).toContain('https://*.zid.dev')
     expect(cspHeader.value).toContain('https://zid.sa')
     expect(cspHeader.value).toContain('https://*.zid.store')
 

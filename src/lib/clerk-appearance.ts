@@ -11,6 +11,8 @@ export function getClerkAppearance(isDark: boolean) {
     baseTheme: isDark ? dark : undefined,
     variables: CLERK_VARIABLES,
     elements: {
+      rootBox: 'w-full max-w-full',
+      cardBox: 'w-full max-w-full',
       card: 'shadow-md border border-border',
     },
   }

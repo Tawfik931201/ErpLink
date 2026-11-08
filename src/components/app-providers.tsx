@@ -6,13 +6,14 @@ import { useEffect, useState } from 'react'
 
 import { LanguageProvider } from '@/components/language-provider'
 import { Toaster } from '@/components/ui/toaster'
+import { writePreferenceCookie } from '@/lib/preference-cookie'
 import type { Language } from '@/lib/translations'
 
 function ThemeCookieSync() {
   const { resolvedTheme } = useTheme()
   useEffect(() => {
     if (resolvedTheme) {
-      document.cookie = `theme=${resolvedTheme}; path=/; max-age=${365 * 24 * 60 * 60}; SameSite=Lax`
+      writePreferenceCookie('theme', resolvedTheme)
     }
   }, [resolvedTheme])
   return null

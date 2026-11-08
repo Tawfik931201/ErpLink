@@ -24,10 +24,12 @@ import { cn } from '@/lib/utils'
 
 export default function UserMenu({ 
   displayName, 
-  adminLabel 
+  adminLabel,
+  placement = 'sidebar',
 }: { 
   displayName: string
   adminLabel: string 
+  placement?: 'sidebar' | 'header'
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false)
@@ -124,8 +126,9 @@ export default function UserMenu({
       {/* Floating Menu Popover - Side Flyout layout */}
       {isOpen && (
         <div className={cn(
-          "absolute bottom-0 z-50 w-56 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 slide-in-from-bottom-2 duration-200",
-          dir === 'rtl' ? "right-full mr-6" : "left-full ml-6"
+          "absolute z-50 w-56 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-1 animate-in fade-in-50 duration-200",
+          placement === 'header' ? 'end-0 top-full mt-2 max-h-[70dvh] overflow-y-auto'
+            : cn('bottom-0', dir === 'rtl' ? "right-full mr-6" : "left-full ml-6")
         )}>
           {/* Option 1: Profile Details */}
           {user && (
@@ -193,8 +196,9 @@ export default function UserMenu({
 
             {isWorkspaceOpen && (
               <div className={cn(
-                "absolute top-0 z-50 w-52 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-0.5 max-h-60 overflow-y-auto animate-in fade-in-50 slide-in-from-left-2 duration-150",
-                dir === 'rtl' ? "right-full mr-2" : "left-full ml-2"
+                "z-50 bg-sidebar border border-border rounded-lg p-1.5 flex flex-col gap-0.5 max-h-60 overflow-y-auto animate-in fade-in-50 duration-150",
+                placement === 'header' ? 'relative mt-1 w-full'
+                  : cn('absolute top-0 w-52', dir === 'rtl' ? "right-full mr-2" : "left-full ml-2")
               )}>
                 <div className="px-2 py-1 border-b border-border/40 text-[9px] font-extrabold text-muted-foreground uppercase mb-1">
                   {lang === 'ar' ? 'اختر مساحة العمل' : 'Select Workspace'}

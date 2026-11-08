@@ -222,7 +222,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground font-sans" dir={dir}>
+    <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-background text-foreground font-sans" dir={dir}>
       {/* Fixed top alert strip — sits above the sidebar and the page content.
           The page (main) scrolls underneath it. Rendered for everyone,
           including admins, and not dismissible (product decision 2026-10-19). */}
@@ -241,9 +241,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} />
           </div>
         </aside>
-        <main className="flex-1 overflow-y-auto">
-          <MobileNav sections={navSections} dir={dir} />
-          <div className="p-6 md:p-8 max-w-7xl mx-auto">
+        <main className="min-w-0 flex-1 overflow-auto">
+          <MobileNav sections={navSections} dir={dir}>
+            <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} placement="header" />
+          </MobileNav>
+          <div className="mx-auto w-full max-w-7xl p-3 sm:p-6 md:p-8">
             {workspaceClosed ? (
               <div className="flex items-center justify-center h-full min-h-[60vh]">
                 <div className="text-center max-w-md">

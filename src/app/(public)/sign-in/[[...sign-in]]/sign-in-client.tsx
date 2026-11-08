@@ -4,6 +4,7 @@ import { SignIn } from '@clerk/nextjs'
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
 
+import EmbeddedStorageGate from '@/components/embedded-storage-gate'
 import { getClerkAppearance } from '@/lib/clerk-appearance'
 
 export function SignInClient({ signUpUrl }: { signUpUrl: string }) {
@@ -17,10 +18,10 @@ export function SignInClient({ signUpUrl }: { signUpUrl: string }) {
   const isDark = mounted ? resolvedTheme === 'dark' : false
 
   return (
-    <SignIn
+    <EmbeddedStorageGate><SignIn
       fallbackRedirectUrl="/app/dashboard"
       signUpUrl={signUpUrl}
       appearance={getClerkAppearance(isDark)}
-    />
+    /></EmbeddedStorageGate>
   )
 }

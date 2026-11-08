@@ -55,6 +55,22 @@ The queue payload for Odoo records is `{ field_mapping_id, model, odooRecordId: 
 
 ## Browser-facing data and downloads
 
+### Zid embedded launch (2026-11-08)
+
+`GET /embedded?token=<UUID-v4>&language=<ar|en>` is the iframe launch URL.
+It requests browser storage access when necessary, exchanges the UUID via the
+same-origin JSON `POST /api/zid/embedded/session`, activates a 60-second single-use
+Clerk ticket, and navigates within the iframe to the existing app dashboard.
+Invalid/revoked credentials return 401; unavailable identity/storage services
+return 503; the session endpoint is bounded by an IP rate limit and sends
+`private, no-store` and `no-referrer`.
+
+`POST /api/zid/embedded/register` accepts `{ merchantId: string }` only from an
+authenticated workspace owner on the app origin. It provisions an isolated
+Clerk member for the current store/workspace, hashes a UUID locally, and registers
+that UUID with Zid. It does not return provider credentials or impersonate the
+installer. Setup and browser limitations: [zid-embedded.md](../zid-embedded.md).
+
 `GET /api/mapping-center/settings?store=<zid|salla|shopify>&entity=<categories|products|customers|orders>&storeId=<optional>` is session/active-workspace scoped. Returns HTTP 200 `{ settings: object|null, orderStatusMappings: Record<string,{state,enabled}>|null }` and `Cache-Control: private, no-store`. Explicit store settings override platform defaults. Invalid request: 400 `{error}`; unauthenticated: 401; timeout/lookup failure: 503. No workspace returns both fields null. Each read is bounded by a 5-second timeout (`src/app/api/mapping-center/settings/route.ts:30`).
 
 `GET /api/tickets/attachments?id=<positive integer>` returns binary content, not JSON. Clerk user/email ticket ownership is checked (admin exempt). Existing headers include content type, encoded attachment filename, `private, max-age=3600`, and `nosniff`. Plain-text errors use 400/401/403/404/413/429/500. The body limit is 10 MiB. Uses the separate helpdesk JSON-RPC client `src/lib/odoo.ts`, not a workspace integration connection.
