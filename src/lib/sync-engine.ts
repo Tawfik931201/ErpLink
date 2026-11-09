@@ -56,6 +56,7 @@ import {
   platformLegacyIdField,
 } from '@/lib/platform-fields'
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
+import { extractBundleComponents, formatBundleInternalNotes, isDynamicBundle } from '@/lib/products/bundle'
 import { assertProductGalleryCapability, productImageUrl, syncProductGallery } from '@/lib/products/image-gallery'
 import { applyProductPriceSettings, assertProductWriteAllowed, finiteProductNumber, shouldSyncProductStock } from '@/lib/products/settings-values'
 import { readAllProductRows, syncVariantPrices } from '@/lib/products/variant-prices'
@@ -1640,6 +1641,13 @@ export async function buildOrderLineItems(
         } else {
           prodVals.type = rawType === 'service' ? 'service' : (wantsStorable ? 'product' : 'consu')
         }
+        // Dynamic bundles are never stocked, even when auto-created here.
+        if (isDynamicBundle(productData)) {
+          prodVals.type = 'service'
+          if (majorVer >= 18) prodVals.is_storable = false
+          const bundleNotes = formatBundleInternalNotes(productData)
+          if (bundleNotes) prodVals.description = bundleNotes
+        }
         if (sku) prodVals.default_code = sku
         if (barcode) prodVals.barcode = barcode
         if (price > 0) prodVals.list_price = price
@@ -1706,6 +1714,37 @@ export async function buildOrderLineItems(
       }
     }
     lines.push(line)
+
+    // Dynamic bundle: the bundle line above already carries the full price.
+    // Add the picked components as zero-price lines so Odoo picking/delivery
+    // moves the real items, without changing the order total. Grouped
+    // products keep their existing BoM behaviour and never reach this branch.
+    const bundleComponents = extractBundleComponents(productData)
+    const treatAsDynamicBundle =
+      bundleComponents.length > 0 &&
+      (isDynamicBundle(productData) || productData.product_class == null)
+    if (treatAsDynamicBundle) {
+      for (const comp of bundleComponents) {
+        let compProductId: number | null = null
+        if (comp.sku) compProductId = await lookupLineProduct(comp.sku)
+        if (!compProductId && comp.barcode) compProductId = await lookupLineProduct(comp.barcode)
+        if (!compProductId) {
+          console.warn(
+            `[SyncEngine] Dynamic bundle component skipped (not found in Odoo): ${comp.name || comp.sku || comp.barcode || ''} — bundle line still carries the full price`,
+          )
+          continue
+        }
+        lines.push({
+          product_id: compProductId,
+          product_uom_qty: qty * comp.quantity,
+          price_unit: 0,
+          name: comp.name || comp.sku || 'Bundle component',
+        })
+        console.info(
+          `[SyncEngine] Dynamic bundle zero-price line: product #${compProductId} qty=${qty * comp.quantity}`,
+        )
+      }
+    }
   }
 
   let effectiveOrderDiscount = orderLevelDiscount
@@ -2222,6 +2261,19 @@ export async function applyFixedSettingsToValues(
       wantsStorable = Boolean(inventoryCfg.track_inventory)
     } else {
       wantsStorable = defaultType === 'product' || values.type === 'product' || values.is_storable === true
+    }
+
+    // Dynamic bundles are never stocked: record them as service products,
+    // and keep the picked components as a formatted Internal Notes list.
+    // Components themselves sync as ordinary storable products.
+    if (isDynamicBundle(zidData)) {
+      values.type = 'service'
+      values.is_storable = false
+      const notes = formatBundleInternalNotes(zidData)
+      if (notes) {
+        const existing = typeof values.description === 'string' ? values.description.trim() : ''
+        values.description = existing ? `${existing}\n\n${notes}` : notes
+      }
     }
 
     if (!values.type) {
@@ -7025,8 +7077,11 @@ export async function executeOdooOperation(params: {
 
   if ((odooModel === 'product.template' || odooModel === 'product.product') &&
       (odooOperation === 'create' || odooOperation === 'update') && needsProductBom(mergedSettings, zidData)) {
-    if (zidData.product_class === 'dynamic_bundle') throw new Error('Dynamic bundles require customer selections and cannot be synchronized as a fixed BoM')
-    await assertBomCapability(client, mergedSettings.bom?.type || 'phantom')
+    // Dynamic bundles have no fixed BoM (the customer picks the components), so
+    // they are recorded as a service product instead — never a BoM assertion.
+    if (!isDynamicBundle(zidData)) {
+      await assertBomCapability(client, mergedSettings.bom?.type || 'phantom')
+    }
   }
 
   if ((odooModel === 'product.template' || odooModel === 'product.product') && (odooOperation === 'create' || odooOperation === 'update')) {
@@ -9036,7 +9091,9 @@ export async function syncProductBom(
   if (!bomEnabled) return
 
   const bomType = mergedSettings.bom?.type || 'phantom'
-  if (zidData.product_class === 'dynamic_bundle') throw new Error('Dynamic bundles require customer selections and cannot be synchronized as a fixed BoM')
+  // Dynamic bundles are service products with zero-price component lines on
+  // the order — there is no BoM to build and nothing to assert.
+  if (isDynamicBundle(zidData)) return
 
   const isGrouped = 
     zidData.product_class === 'grouped_product' || 

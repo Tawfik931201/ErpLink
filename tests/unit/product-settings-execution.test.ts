@@ -312,9 +312,12 @@ describe('product Standard Mapping execution', () => {
   })
 
   it('does not misrepresent customer-selected dynamic bundles as fixed kits', async () => {
+    // Dynamic bundles are service products with zero-price component lines on
+    // the order — syncProductBom must simply no-op (no BoM, no throw).
     const client = makeClient()
-    await expect(syncProductBom(asClient(client), 123, { product_class: 'dynamic_bundle' }, { bom: { enabled: true } }, 'zid', 'ws-products')).rejects.toThrow('customer selections')
+    await expect(syncProductBom(asClient(client), 123, { product_class: 'dynamic_bundle' }, { bom: { enabled: true } }, 'zid', 'ws-products')).resolves.toBeUndefined()
     expect(client.create).not.toHaveBeenCalled()
+    expect(client.write).not.toHaveBeenCalled()
   })
 })
 
