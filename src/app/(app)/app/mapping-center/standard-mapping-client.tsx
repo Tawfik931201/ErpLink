@@ -194,9 +194,7 @@ export default function StandardMappingClient({
   const [descLanguage, setDescLanguage] = useState('ar')
   const [descFallback, setDescFallback] = useState('none')
   const [descCustomText, setDescCustomText] = useState('')
-  const [imageSyncMode, setImageSyncMode] = useState('all')
   const [categorySyncMode, setCategorySyncMode] = useState('auto')
-  const [uomAutoCreate, setUomAutoCreate] = useState(true)
   const [taxSyncMode, setTaxSyncMode] = useState('auto_by_name')
   const [defaultTaxIds, setDefaultTaxIds] = useState<string[]>([])
   const [productMatchZidField, setProductMatchZidField] = useState('')
@@ -852,9 +850,7 @@ export default function StandardMappingClient({
         setDescLanguage(s.description?.language || 'ar')
         setDescFallback(s.description?.fallback || 'none')
         setDescCustomText(s.description?.custom_text || '')
-        setImageSyncMode(s.image?.sync_mode || 'all')
         setCategorySyncMode(s.category?.sync_mode || 'auto')
-        setUomAutoCreate(s.uom?.auto_create !== false)
         setTaxSyncMode(s.tax?.sync_mode || 'auto_by_name')
         setDefaultTaxIds(s.tax?.default_tax_ids?.map(String) || [])
         setProductMatchZidField(s.match_zid_field || '')
@@ -1224,9 +1220,12 @@ export default function StandardMappingClient({
         fallback: descFallback,
         custom_text: descCustomText,
       },
-      image: { sync_mode: imageSyncMode },
+      // Image sync and UoM auto-create are cancelled (2026-11-09). Values are
+      // still written so stored rows converge to skip/false even if an old
+      // row had 'all'/true — but the engine ignores them anyway.
+      image: { sync_mode: 'skip' },
       category: { sync_mode: categorySyncMode },
-      uom: { auto_create: uomAutoCreate },
+      uom: { auto_create: false },
       tax: {
         sync_mode: taxSyncMode,
         default_tax_ids: defaultTaxIds.filter(Boolean).map(Number),
@@ -1304,7 +1303,7 @@ export default function StandardMappingClient({
     invSyncEnabled, invSyncMode, odooStockWebhook,
     markupPercent, costSource, priceSource, rounding, decimalPlaces,
     nameLanguage, nameFallback, descLanguage, descFallback, descCustomText,
-    imageSyncMode, categorySyncMode, uomAutoCreate,
+    categorySyncMode,
     taxSyncMode, defaultTaxIds,
     productVariantSyncMode, bomEnabled, bomType,
     productOnDelete, productMatchZidField, productMatchOdooField,
@@ -2415,12 +2414,8 @@ export default function StandardMappingClient({
                   setBomEnabled={setBomEnabled}
                   bomType={bomType}
                   setBomType={setBomType}
-                  imageSyncMode={imageSyncMode}
-                  setImageSyncMode={setImageSyncMode}
                   categorySyncMode={categorySyncMode}
                   setCategorySyncMode={setCategorySyncMode}
-                  uomAutoCreate={uomAutoCreate}
-                  setUomAutoCreate={setUomAutoCreate}
                   taxSyncMode={taxSyncMode}
                   setTaxSyncMode={setTaxSyncMode}
                   defaultTaxIds={defaultTaxIds}

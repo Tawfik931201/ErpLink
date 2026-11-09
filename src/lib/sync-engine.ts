@@ -57,7 +57,6 @@ import {
 } from '@/lib/platform-fields'
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
 import { extractBundleComponents, formatBundleInternalNotes, isDynamicBundle } from '@/lib/products/bundle'
-import { assertProductGalleryCapability, productImageUrl, syncProductGallery } from '@/lib/products/image-gallery'
 import { applyProductPriceSettings, assertProductWriteAllowed, finiteProductNumber, shouldSyncProductStock } from '@/lib/products/settings-values'
 import { readAllProductRows, syncVariantPrices } from '@/lib/products/variant-prices'
 import { extractGenericVariants } from '@/lib/products/variants'
@@ -137,6 +136,18 @@ async function fetchAndBase64(url: string): Promise<string | null> {
     console.warn(`[SyncEngine] Error fetching/encoding binary from URL ${url}:`, err)
     return null
   }
+}
+
+// Product images are never synced (cancelled 2026-11-09): no `settings.image`
+// option, no gallery writes, no image_1920 writes. This helper only survives
+// because `resolveBinaryField` still recognizes store image URL shapes when a
+// non-product binary value arrives.
+function productImageUrl(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined
+  if (!value || typeof value !== 'object') return undefined
+  const image = value as Record<string, any>
+  const url = image.url ?? image.origin ?? image.thumbs?.fullSize ?? image.image_url ?? image.src ?? image.image?.url ?? image.path ?? image.full_path
+  return typeof url === 'string' ? url.trim() || undefined : undefined
 }
 
 async function resolveBinaryField(rawValue: unknown): Promise<string | null> {
@@ -2521,32 +2532,21 @@ export async function applyFixedSettingsToValues(
     }
   }
 
-  // ── Image sync_mode ─────────────────────────────────────────────────────────
-  const imgCfg = settings.image
-  if (imgCfg) {
-    if (imgCfg.sync_mode === 'skip') {
-      // Skip preserves existing images on updates.
-      delete values.image_1920
-      delete values.image_variant_1920
-      delete values.image_1024
-      delete values.image_512
-      delete values.image_256
-      delete values.image_128
-    } else if (imgCfg.sync_mode === 'main_only') {
-      delete values.image_1024
-      delete values.image_512
-      delete values.image_256
-      delete values.image_128
-    }
+  // ── Image sync: CANCELLED ───────────────────────────────────────────────
+  // Product photos are never synced (2026-11-09). Any stored
+  // `image.sync_mode` ('all'/'main_only' in old rows) is ignored on purpose,
+  // so a stale setting can no longer fail the sync with
+  // "Unrecognized product image URL". Deleting here preserves the existing
+  // Odoo gallery on updates, exactly like the old 'skip' mode.
+  for (const field of ['image_1920', 'image_variant_1920', 'image_1024', 'image_512', 'image_256', 'image_128']) {
+    delete values[field]
   }
 
-  // ── UOM auto_create ─────────────────────────────────────────────────────────
-  const uomCfg = settings.uom
-  if (uomCfg) {
-    if (!uomCfg.auto_create && values.uom_id === undefined) {
-      delete values.uom_id
-    }
-  }
+  // ── UOM auto-create: CANCELLED ──────────────────────────────────────────
+  // `settings.uom.auto_create` no longer exists as an option and is ignored.
+  // Missing `uom.uom` records are never created (see `allowCreate` in
+  // `buildOdooValues`); existing UoM records are still matched by name/ID.
+  // The old `values.uom_id === undefined` delete was a no-op — removed.
 
 
 
@@ -3983,7 +3983,9 @@ export async function buildOdooValues(
   for (const item of mappingItems) {
     if (!item.erpField) continue
     if (productSettings) {
-      if (item.erpField.startsWith('image') && productSettings.image?.sync_mode === 'skip') continue
+      // Product images are never synced (2026-11-09) — not even an explicit
+      // mapping to an `image*` field, regardless of any legacy sync_mode.
+      if (item.erpField.startsWith('image')) continue
       if (item.erpField === 'categ_id' && productSettings.category?.sync_mode === 'skip') continue
       if (item.erpField === 'taxes_id' && ['skip', 'static_ids'].includes(productSettings.tax?.sync_mode)) continue
       // Quantities must go through inventory adjustments and the stock-authority guard.
@@ -4052,7 +4054,10 @@ export async function buildOdooValues(
         continue
       }
 
-      const allowCreate = relation === 'uom.uom' ? productSettings?.uom?.auto_create !== false
+      // UoM auto-create is cancelled (2026-11-09): never create a `uom.uom`
+      // record, whatever any legacy `uom.auto_create` setting says. Matching
+      // an existing UoM by name/ID still works — only creation is off.
+      const allowCreate = relation === 'uom.uom' ? false
         : relation === 'product.category' ? productSettings?.category?.sync_mode !== 'map_existing' : true
       const resolvedId = await resolveSingleRelationId(client, relation, singleValue, platform, undefined, undefined, workspaceId, storeId, undefined, { allowCreate })
       if (resolvedId !== null) {
@@ -5926,11 +5931,8 @@ export async function buildVariantProductValues(
     const match = resolveZidMatchValue(data, fixedMatch.zid_field)
     if (match !== undefined && match !== null && match !== '') result[fixedMatch.odoo_field] = String(match)
   }
-  const variantImage = Array.isArray(variant.source?.images) && variant.source.images.length ? variant.source.images : variant.image
-  if (variantImage && settings.image?.sync_mode !== 'skip') {
-    const image = await resolveBinaryField(variantImage)
-    if (image) result.image_1920 = image
-  }
+  // Variant images are never synced (2026-11-09) — see the image note in
+  // `applyFixedSettingsToValues`.
   return result
 }
 
@@ -5976,7 +5978,6 @@ async function syncAsSeparateProducts(
   results.push(mainRecordId)
 
   if (mergedSettings && mainRecordId) {
-    await syncProductGallery(client, 'product.template', mainRecordId, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
     await syncProductBom(client, mainRecordId, zidData, mergedSettings, platform, mapping.workspace_id, storeId)
   }
 
@@ -6018,7 +6019,6 @@ async function syncAsSeparateProducts(
     }
 
     await syncProductTemplateStock(client, recordId, { ...variant.source, quantity: variant.quantity }, variantOdooValues, mergedSettings || {}, mapping.workspace_id, platform)
-    await syncProductGallery(client, 'product.template', recordId, variant.source || {}, mergedSettings || {}, resolveBinaryField, `${platform}:${storeId}`)
 
     if (variant.id) {
       await logSync({
@@ -6119,7 +6119,6 @@ async function syncChildAsSeparateProduct(
   await syncProductTemplateStock(client, recordId, zidData, childOdooValues, mergedSettings || {}, mapping.workspace_id, platform)
 
   if (mergedSettings && recordId) {
-    await syncProductGallery(client, 'product.template', recordId, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
     await syncProductBom(client, recordId, zidData, mergedSettings, platform, mapping.workspace_id, storeId)
   }
 
@@ -6198,7 +6197,6 @@ async function syncAsVariants(
   }
 
   if (mergedSettings) {
-    await syncProductGallery(client, 'product.template', templateId, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
     await syncProductBom(client, templateId, zidData, mergedSettings, platform, mapping.workspace_id, storeId)
   }
 
@@ -6364,7 +6362,7 @@ async function syncAsVariants(
       if (variantValues[field] !== undefined) detailValues[field] = variantValues[field]
     }
     // Description is a shared template field; it was applied once above.
-    if (variantValues.image_1920 && mergedSettings?.image?.sync_mode !== 'skip') detailValues.image_variant_1920 = variantValues.image_1920
+    // Variant images are never synced (2026-11-09).
     if (varOdooField && varOdooField !== 'id' && varZidField) {
       const value = resolveZidMatchValue({ ...variant.source, id: variant.id, sku: variant.sku, barcode: variant.barcode }, varZidField)
       if (value !== undefined && value !== null && value !== '') detailValues[varOdooField] = String(value)
@@ -6419,7 +6417,6 @@ async function syncAsVariants(
       await client.write('product.product', [matchingOdooVar.id], detailValues)
       if (finiteProductNumber(variantValues.list_price) !== undefined) variantPrices.set(matchingOdooVar.id, Number(variantValues.list_price))
       await syncProductStockQuantities(client, matchingOdooVar.id, { ...variant.source, quantity: variant.quantity }, mergedSettings || {}, mapping.workspace_id, platform)
-      await syncProductGallery(client, 'product.product', matchingOdooVar.id, variant.source || {}, mergedSettings || {}, resolveBinaryField, `${platform}:${storeId}`)
       updatedCount++
     } else {
       console.warn(`[SyncEngine] No matching Odoo variant found for attributes:`, JSON.stringify(variant.attributes))
@@ -6451,7 +6448,6 @@ async function syncAsVariants(
         if (variant.id) variantRecords.set(String(variant.id), createdVarId)
         if (finiteProductNumber(variantValues.list_price) !== undefined) variantPrices.set(createdVarId, Number(variantValues.list_price))
         await syncProductStockQuantities(client, createdVarId, { ...variant.source, quantity: variant.quantity }, mergedSettings || {}, mapping.workspace_id, platform)
-        await syncProductGallery(client, 'product.product', createdVarId, variant.source || {}, mergedSettings || {}, resolveBinaryField, `${platform}:${storeId}`)
         updatedCount++
       } catch (createErr: any) {
         throw createErr
@@ -6805,7 +6801,6 @@ async function syncChildVariantAsVariant(
     for (const field of ['default_code', 'barcode', 'standard_price', 'weight']) {
       if (odooValues[field] !== undefined) updatePayload[field] = odooValues[field]
     }
-    if (odooValues.image_1920 && mergedSettings.image?.sync_mode !== 'skip') updatePayload.image_variant_1920 = odooValues.image_1920
     if (varOdooField && varOdooField !== 'id' && varZidField) {
       const value = resolveZidMatchValue(zidData, varZidField)
       if (value !== undefined && value !== null && value !== '') updatePayload[varOdooField] = String(value)
@@ -6820,7 +6815,6 @@ async function syncChildVariantAsVariant(
       }
     }
     await syncProductStockQuantities(client, matchingOdooVar.id, zidData, mergedSettings, mapping.workspace_id, platform)
-    await syncProductGallery(client, 'product.product', matchingOdooVar.id, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
 
     const successMsg = `Successfully updated child variant product.product #${matchingOdooVar.id} under parent template #${templateId}.`
     console.info(`[SyncEngine] ✅ ${successMsg}`)
@@ -6862,7 +6856,6 @@ async function syncChildVariantAsVariant(
     for (const field of ['default_code', 'barcode', 'standard_price', 'weight']) {
       if (odooValues[field] !== undefined) createVariantPayload[field] = odooValues[field]
     }
-    if (odooValues.image_1920 && mergedSettings.image?.sync_mode !== 'skip') createVariantPayload.image_variant_1920 = odooValues.image_1920
     if (varOdooField && varOdooField !== 'id' && varZidField) {
       const value = resolveZidMatchValue(zidData, varZidField)
       if (value !== undefined && value !== null && value !== '') createVariantPayload[varOdooField] = String(value)
@@ -6877,7 +6870,6 @@ async function syncChildVariantAsVariant(
       }
     }
     await syncProductStockQuantities(client, createdVarId, zidData, mergedSettings, mapping.workspace_id, platform)
-    await syncProductGallery(client, 'product.product', createdVarId, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
 
     if (createdVarId !== null) {
       const successMsg = `Created missing child variant product.product #${createdVarId} under parent template #${templateId}.`
@@ -7084,14 +7076,8 @@ export async function executeOdooOperation(params: {
     }
   }
 
-  if ((odooModel === 'product.template' || odooModel === 'product.product') && (odooOperation === 'create' || odooOperation === 'update')) {
-    const separate = (mergedSettings.variant?.sync_mode || (mapping as any).variant_sync_mode || 'AS_VARIANTS') === 'AS_SEPARATE_PRODUCTS'
-    const nativeChild = execPlatform === 'zid' && (zidData.parent_id || zidData.parent) && !separate
-    await assertProductGalleryCapability(client, odooModel === 'product.product' || nativeChild ? 'product.product' : 'product.template', zidData, mergedSettings)
-    for (const variant of extractGenericVariants(zidData, execPlatform)) {
-      await assertProductGalleryCapability(client, separate ? 'product.template' : 'product.product', variant.source || {}, mergedSettings)
-    }
-  }
+  // Product photos are never synced (2026-11-09): no gallery capability
+  // assertion, so a weird image shape can never fail the whole product sync.
 
   // ── Returns: intercept an order update that is really a return ───────────
   // A return is NOT a new Odoo operation: `enabled_actions` in
@@ -8398,9 +8384,6 @@ export async function executeOdooOperation(params: {
       if (odooModel === 'product.template') {
         await syncProductTemplateStock(client, duplicateId, zidData, effectiveOdooValues, mergedSettings, mapping.workspace_id, execPlatform)
         await syncProductBom(client, duplicateId, zidData, mergedSettings, execPlatform, mapping.workspace_id, storeId)
-        await syncProductGallery(client, 'product.template', duplicateId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
-      } else if (odooModel === 'product.product') {
-        await syncProductGallery(client, 'product.product', duplicateId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
       }
       await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: duplicateId, status: 'success', payload: zidData, trigger_type: triggerType, platform: execPlatform })
       return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: duplicateId, message: `Updated existing ${odooModel} #${duplicateId}` }
@@ -8416,9 +8399,6 @@ export async function executeOdooOperation(params: {
     if (odooModel === 'product.template') {
       await syncProductTemplateStock(client, newId, zidData, effectiveOdooValues, mergedSettings, mapping.workspace_id, execPlatform)
       await syncProductBom(client, newId, zidData, mergedSettings, execPlatform, mapping.workspace_id, storeId)
-      await syncProductGallery(client, 'product.template', newId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
-    } else if (odooModel === 'product.product') {
-      await syncProductGallery(client, 'product.product', newId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
     }
 
     // Persist a stable platform ID (x_zid_id/x_salla_id/x_shopify_id) on the new record
@@ -8537,9 +8517,6 @@ export async function executeOdooOperation(params: {
     if (odooModel === 'product.template') {
       await syncProductTemplateStock(client, existingId, zidData, effectiveOdooValues, mergedSettings, mapping.workspace_id, execPlatform)
       await syncProductBom(client, existingId, zidData, mergedSettings, execPlatform, mapping.workspace_id, storeId)
-      await syncProductGallery(client, 'product.template', existingId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
-    } else if (odooModel === 'product.product') {
-      await syncProductGallery(client, 'product.product', existingId, zidData, mergedSettings, resolveBinaryField, `${execPlatform}:${storeId}`)
     }
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, odoo_record_id: existingId, status: 'success', payload: zidData, trigger_type: triggerType, platform: execPlatform })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'success', odooRecordId: existingId }

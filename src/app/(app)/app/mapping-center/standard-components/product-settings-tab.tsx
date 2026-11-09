@@ -9,7 +9,7 @@ import {
   GitCompare,
   GitFork,
   History,
-  Image as ImageIcon,
+  Layers,
   Loader2,
   Package,
   Percent,
@@ -88,13 +88,10 @@ interface ProductSettingsTabProps {
   setBomEnabled: (val: boolean) => void
   bomType: 'phantom' | 'normal'
   setBomType: (val: 'phantom' | 'normal') => void
-  // Media & Categories & UOM
-  imageSyncMode: string
-  setImageSyncMode: (val: string) => void
+  // Media & Categories & UOM — image sync and UoM auto-create were cancelled
+  // (2026-11-09): products never sync photos and never create `uom.uom` records.
   categorySyncMode: string
   setCategorySyncMode: (val: string) => void
-  uomAutoCreate: boolean
-  setUomAutoCreate: (val: boolean) => void
   // Tax
   taxSyncMode: string
   setTaxSyncMode: (val: string) => void
@@ -209,12 +206,8 @@ export function ProductSettingsTab({
   setBomEnabled,
   bomType,
   setBomType,
-  imageSyncMode,
-  setImageSyncMode,
   categorySyncMode,
   setCategorySyncMode,
-  uomAutoCreate,
-  setUomAutoCreate,
   taxSyncMode,
   setTaxSyncMode,
   defaultTaxIds,
@@ -735,32 +728,17 @@ export function ProductSettingsTab({
         </div>
       </SettingCard>
 
-      {/* 7. Media & Category Sync */}
+      {/* 7. Category Sync (image sync and UoM auto-create cancelled) */}
       <SettingCard
-        icon={<ImageIcon className="h-4 w-4 text-teal-600" />}
-        title={lang === 'ar' ? 'الوسائط والتصنيفات ووحدات القياس' : 'Media, Categories & UoM'}
+        icon={<Layers className="h-4 w-4 text-teal-600" />}
+        title={lang === 'ar' ? 'التصنيفات' : 'Categories'}
         description={
           lang === 'ar'
-            ? 'تحديد سياسات نقل الصور والتصنيفات وإنشاء وحدات القياس تلقائياً'
-            : 'Configure media sync, category linkage, and automatic unit of measure creation'
+            ? 'تحديد سياسة ربط التصنيفات'
+            : 'Configure category linkage'
         }
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="space-y-1.5">
-            <label className="block text-xs font-medium text-foreground/80">
-              {lang === 'ar' ? 'مزامنة الصور' : 'Image Sync Mode'}
-            </label>
-            <select
-              className="w-full h-9 px-3 rounded-none border border-input bg-background/80 text-xs text-foreground focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all"
-              value={imageSyncMode}
-              onChange={(e) => setImageSyncMode(e.target.value)}
-            >
-              <option value="all">{lang === 'ar' ? 'جميع الصور' : 'All Images'}</option>
-              <option value="main_only">{lang === 'ar' ? 'الصورة الرئيسية فقط' : 'Main Only'}</option>
-              <option value="skip">{lang === 'ar' ? 'تخطي الصور' : 'Skip Images'}</option>
-            </select>
-          </div>
-
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-foreground/80">
               {lang === 'ar' ? 'مزامنة التصنيفات' : 'Category Sync'}
@@ -774,20 +752,6 @@ export function ProductSettingsTab({
               <option value="skip">{lang === 'ar' ? 'تخطي' : 'Skip'}</option>
               <option value="map_existing">{lang === 'ar' ? 'ربط بالموجود' : 'Map Existing'}</option>
             </select>
-          </div>
-
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
-            <label className="block text-xs font-medium text-foreground/80">
-              {lang === 'ar' ? 'إنشاء وحدة القياس' : 'UoM Auto Create'}
-            </label>
-            <SettingToggle
-              checked={uomAutoCreate}
-              onChange={setUomAutoCreate}
-              label={lang === 'ar' ? 'إنشاء تلقائي لوحدة القياس' : 'Auto create UoM'}
-              description={
-                lang === 'ar' ? 'إنشاء الوحدة في أودو إذا لم تكن موجودة' : 'Create UoM in Odoo if not found'
-              }
-            />
           </div>
         </div>
       </SettingCard>

@@ -64,13 +64,21 @@ describe('product Standard Mapping execution', () => {
     expect(values.detailed_type).toBe(version >= 15 && version <= 17 ? 'consu' : undefined)
   })
 
-  it('skip images preserves all existing images and does not download mapped URLs', async () => {
-    const values = await applyFixedSettingsToValues({ image_1920: 'old', image_variant_1920: 'old' }, { image: { sync_mode: 'skip' } }, {}, 19, undefined, 'zid', 'product.template')
-    expect(values).not.toHaveProperty('image_1920')
-    expect(values).not.toHaveProperty('image_variant_1920')
-    const client = makeClient()
-    expect(await buildOdooValues(asClient(client), [{ id: 'image', erpField: 'image_1920', zidField: 'image' }], { image: 'https://must-not-fetch.test/image.png' }, new Map(), 'zid', undefined, '', { image: { sync_mode: 'skip' } })).toEqual({})
-    expect(client.create).not.toHaveBeenCalled()
+  it('product images are never synced, even with a legacy all-images setting', async () => {
+    const originalFetch = global.fetch
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+    try {
+      const values = await applyFixedSettingsToValues({ image_1920: 'old', image_variant_1920: 'old' }, { image: { sync_mode: 'all' } }, {}, 19, undefined, 'zid', 'product.template')
+      expect(values).not.toHaveProperty('image_1920')
+      expect(values).not.toHaveProperty('image_variant_1920')
+      const client = makeClient()
+      expect(await buildOdooValues(asClient(client), [{ id: 'image', erpField: 'image_1920', zidField: 'image' }], { image: 'https://must-not-fetch.test/image.png' }, new Map(), 'zid', undefined, '', { image: { sync_mode: 'all' } })).toEqual({})
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(client.create).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 
   it('separate variants get their own identity, configured name/price/cost, and zero values', async () => {
@@ -161,13 +169,8 @@ describe('product Standard Mapping execution', () => {
     expect(client.write).not.toHaveBeenCalled()
   })
 
-  it.each(['product.template', 'product.product'] as const)('runs All Images gallery synchronization during a real standalone %s execution', async model => {
+  it.each(['product.template', 'product.product'] as const)('runs no gallery synchronization during a real standalone %s execution, even with a legacy all-images setting', async model => {
     const client = makeClient()
-    const relation = model === 'product.template' ? 'product_template_image_ids' : 'product_variant_image_ids'
-    const inverse = model === 'product.template' ? 'product_tmpl_id' : 'product_variant_id'
-    client.execute.mockImplementation(async target => target === model
-      ? { [relation]: { type: 'one2many', relation: 'product.image' } }
-      : target === 'product.image' ? { name: {}, image_1920: {}, sequence: {}, [inverse]: {} } : [])
     const originalFetch = global.fetch
     const fetchMock = jest.fn().mockResolvedValue({ ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from('image') })
     global.fetch = fetchMock
@@ -175,22 +178,31 @@ describe('product Standard Mapping execution', () => {
       const settings = { image: { sync_mode: 'all' }, inventory: { sync_enabled: true } }
       const result = await executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'gallery', zidData: { id: 'gallery', images: [{ url: 'https://images.test/main.png', is_main: true }, { url: 'https://images.test/second.png' }] }, odooModel: model, odooOperation: 'create', odooValues: { name: 'Gallery' }, presetKey: null, platformHint: 'zid' })
       expect(result.status).toBe('success')
-      expect(client.write).toHaveBeenCalledWith(model, [500], { [relation]: [[0, 0, expect.objectContaining({ image_1920: Buffer.from('image').toString('base64') })]] })
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(client.write.mock.calls.some((call: any[]) => call[2] && Object.keys(call[2]).some(key => key.includes('image')))).toBe(false)
+      expect(client.execute).not.toHaveBeenCalledWith('product.image', expect.anything(), expect.anything())
     } finally {
       global.fetch = originalFetch
     }
   })
 
-  it('fails missing All Images capability before creating a partial product', async () => {
+  it('an unrecognized image shape never fails the product sync (no Unrecognized product image URL)', async () => {
     const client = makeClient()
     const settings = { image: { sync_mode: 'all' } }
-    await expect(executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'gallery', zidData: { id: 'gallery', images: [{ origin: 'https://images.test/main.png' }, { origin: 'https://images.test/extra.png' }] }, odooModel: 'product.template', odooOperation: 'create', odooValues: { name: 'Gallery' }, presetKey: null, platformHint: 'zid' })).rejects.toThrow('All Images requires')
-    expect(client.create).not.toHaveBeenCalled()
-    expect(client.write).not.toHaveBeenCalled()
+    const originalFetch = global.fetch
+    const fetchMock = jest.fn()
+    global.fetch = fetchMock
+    try {
+      const result = await executeOdooOperation({ client: asClient(client), mapping: { ...mapping, mappings: { __settings: settings } as any }, event: 'product.create', storeId: 'merchant-products', zidEntityId: 'gallery', zidData: { id: 'gallery', images: [{ unknown: 'image' }] }, odooModel: 'product.template', odooOperation: 'create', odooValues: { name: 'Gallery' }, presetKey: null, platformHint: 'zid' })
+      expect(result.status).toBe('success')
+      expect(client.create).toHaveBeenCalledWith('product.template', expect.objectContaining({ name: 'Gallery' }))
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      global.fetch = originalFetch
+    }
   })
 
-  it('chooses the flagged Zid variant primary image consistently with its extra-image gallery', async () => {
+  it('variant images are never fetched or written, even with a legacy all-images setting', async () => {
     const client = makeClient()
     const originalFetch = global.fetch
     const fetchMock = jest.fn().mockResolvedValue({ ok: true, headers: { get: () => 'image/png' }, arrayBuffer: async () => Buffer.from('primary') })
@@ -201,9 +213,8 @@ describe('product Standard Mapping execution', () => {
           id: 'child', images: [{ origin: 'https://images.test/first.png' }, { origin: 'https://images.test/main.png', is_main: true }],
         },
       }, { image: { sync_mode: 'all' } }, 'zid')
-      expect(values.image_1920).toBe(Buffer.from('primary').toString('base64'))
-      expect(fetchMock).toHaveBeenCalledWith('https://images.test/main.png', expect.any(Object))
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(values).not.toHaveProperty('image_1920')
+      expect(fetchMock).not.toHaveBeenCalled()
     } finally {
       global.fetch = originalFetch
     }
@@ -243,14 +254,14 @@ describe('product Standard Mapping execution', () => {
     expect(client.create).not.toHaveBeenCalled()
   })
 
-  it('map-existing categories and disabled UOM creation perform lookups without creating missing records', async () => {
+  it('UOM auto-create is cancelled: map-existing still looks up existing UoM/category records without creating missing ones, even with a legacy auto_create value', async () => {
     const client = makeClient()
     const rows = [{ id: 'category', erpField: 'categ_id', zidField: 'category' }, { id: 'uom', erpField: 'uom_id', zidField: 'unit' }]
     const meta = new Map([
       ['categ_id', { name: 'categ_id', ttype: 'many2one', relation: 'product.category' }],
       ['uom_id', { name: 'uom_id', ttype: 'many2one', relation: 'uom.uom' }],
     ])
-    await buildOdooValues(asClient(client), rows, { category: { id: 'new-category', name: 'Missing' }, unit: 'Box' }, meta, 'zid', 'ws-products', 'merchant-products', { category: { sync_mode: 'map_existing' }, uom: { auto_create: false } })
+    await buildOdooValues(asClient(client), rows, { category: { id: 'new-category', name: 'Missing' }, unit: 'Box' }, meta, 'zid', 'ws-products', 'merchant-products', { category: { sync_mode: 'map_existing' }, uom: { auto_create: true } })
     expect(client.search).toHaveBeenCalledWith('product.category', [['name', '=', 'Missing']])
     expect(client.search).toHaveBeenCalledWith('uom.uom', [['name', '=', 'Box']])
     expect(client.create).not.toHaveBeenCalled()
