@@ -1745,14 +1745,18 @@ export async function buildOrderLineItems(
           )
           continue
         }
+        // Zid already scales each component quantity by the ordered bundle
+        // quantity in the order payload (ordering 2 bundles of X ×1 sends
+        // quantity: 2 for X) — so the picked quantity is used as-is and must
+        // NOT be multiplied by the bundle quantity again.
         lines.push({
           product_id: compProductId,
-          product_uom_qty: qty * comp.quantity,
+          product_uom_qty: comp.quantity,
           price_unit: 0,
           name: comp.name || comp.sku || 'Bundle component',
         })
         console.info(
-          `[SyncEngine] Dynamic bundle zero-price line: product #${compProductId} qty=${qty * comp.quantity}`,
+          `[SyncEngine] Dynamic bundle zero-price line: product #${compProductId} qty=${comp.quantity}`,
         )
       }
     }
