@@ -2389,6 +2389,16 @@ export async function applyFixedSettingsToValues(
 
   applyProductPriceSettings(values, settings, zidData)
 
+  // ── Cost source "don't update" ───────────────────────────────────────────
+  // `applyProductPriceSettings` only *not writing* `standard_price` when
+  // `cost_source === 'none'`. It does not remove one some earlier step
+  // already placed there — and two do: the preset default mappings
+  // (`cost → standard_price`) and custom field mappings, via
+  // `buildOdooValues`. The buildOdooValues guard stops those at the source;
+  // this is the choke point that catches everything else (including values
+  // copied into variants). Odoo then owns the cost completely.
+  if (settings.price?.cost_source === 'none') delete values.standard_price
+
   // ── Name language selection ─────────────────────────────────────────────────
   const nameCfg = settings.name
   const rawName = zidData.name as Record<string, unknown> | string | undefined
@@ -3992,6 +4002,11 @@ export async function buildOdooValues(
       if (item.erpField.startsWith('image')) continue
       if (item.erpField === 'categ_id' && productSettings.category?.sync_mode === 'skip') continue
       if (item.erpField === 'taxes_id' && ['skip', 'static_ids'].includes(productSettings.tax?.sync_mode)) continue
+      // Cost source "don't update" ('none'): never write `standard_price` from
+      // ANY mapping — preset default (`cost → standard_price`) or custom —
+      // otherwise the setting is silently ignored and Odoo's cost is
+      // overwritten (the 2026-11-09 report).
+      if (item.erpField === 'standard_price' && productSettings.price?.cost_source === 'none') continue
       // Quantities must go through inventory adjustments and the stock-authority guard.
       if (['qty_available', 'virtual_available', 'free_qty'].includes(item.erpField)) continue
     }
@@ -5923,7 +5938,7 @@ export async function buildVariantProductValues(
   const rawPrice = finiteProductNumber(data.price)
   if (rawPrice !== undefined) values.list_price = rawPrice
   else delete values.list_price
-  const cost = finiteProductNumber(data.cost)
+  const cost = settings.price?.cost_source === 'none' ? undefined : finiteProductNumber(data.cost)
   if (cost !== undefined) values.standard_price = cost
   if (variant.weight !== undefined) values.weight = variant.weight
   if (variant.description) values.description_sale = variant.description

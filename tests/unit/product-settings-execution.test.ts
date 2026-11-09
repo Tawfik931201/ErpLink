@@ -47,6 +47,33 @@ describe('product Standard Mapping execution', () => {
     expect(values.standard_price).toBe(777)
   })
 
+  it("cost_source 'none' also blocks the field-mapping path from writing standard_price", async () => {
+    const client = makeClient()
+    const rows = [{ id: 'cost', erpField: 'standard_price', zidField: 'cost' }]
+    const meta = new Map([['standard_price', { name: 'standard_price', ttype: 'float', relation: '' }]])
+    const data = { cost: 42 }
+    // 'none' must win over a custom (or preset) mapping to standard_price.
+    expect(await buildOdooValues(asClient(client), rows, data, meta, 'zid', 'ws-products', 'merchant-products', { price: { cost_source: 'none' } })).toEqual({})
+    // Control: a real cost_source still writes the cost.
+    expect(await buildOdooValues(asClient(client), rows, data, meta, 'zid', 'ws-products', 'merchant-products', { price: { cost_source: 'cost' } })).toEqual({ standard_price: 42 })
+  })
+
+  it("cost_source 'none' strips a standard_price some earlier step already placed in values", async () => {
+    const values = await applyFixedSettingsToValues({ list_price: 100, standard_price: 777 }, { price: { source: 'price', cost_source: 'none', markup_percent: 0 } }, { price: 100, cost: 42 }, 19, undefined, 'zid', 'product.template')
+    expect(values.list_price).toBe(100)
+    expect(values).not.toHaveProperty('standard_price')
+  })
+
+  it("variants carry no cost when cost_source is 'none', even though the store sends one", async () => {
+    const client = makeClient()
+    const values = await buildVariantProductValues(asClient(client), { name: 'Parent', list_price: 330, standard_price: 777 },
+      { id: 'parent', name: { ar: 'عربي', en: 'Parent' }, price: 300 },
+      { id: 'child', sku: '0012', price: 50, cost: 42, attributes: { Size: 'M' }, source: { id: 'child', sku: '0012', price: 50, cost: 42 } },
+      { price: { source: 'price', cost_source: 'none', markup_percent: 0 } }, 'zid')
+    expect(values).not.toHaveProperty('standard_price')
+    expect(values.list_price).toBe(50)
+  })
+
   it('keeps zero prices/costs and uses regular price when sale price is absent', () => {
     const settings = { price: { source: 'sale_price', cost_source: 'cost', markup_percent: 10, rounding: '' } }
     const values = { list_price: 50, standard_price: 20 }
