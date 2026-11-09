@@ -142,3 +142,25 @@ Verified live the same day:
      (registers the UUID), then open the app from Zid's installed-apps
      list. Do not use Google/password sign-in inside the Zid iframe —
      that path is the one that returns `authorization_invalid`.
+
+   Follow-up 2026-11-09 (same day): the error persisted and a live re-check
+   still showed `partitioned_cookies: false` — i.e. the Dashboard toggle
+   above had not been applied yet. With the flag off, Clerk's
+   `__session`/`__client`/`__client_uat` cookies are `SameSite=Lax` and are
+   third-party inside the Zid iframe, so the Frontend API cannot identify
+   an authorized client and rejects sign-in with
+   `authorization_invalid`. No code change can flip this instance flag.
+   After enabling it, clear site data for `erplink.bizsahla.com` and
+   `clerk.bizsahla.com` (old unpartitioned `__session` conflicts with the
+   partitioned one) and re-check
+   `https://clerk.bizsahla.com/v1/environment` → `partitioned_cookies: true`
+   before retesting in Zid. If the embedded token was never registered
+   (button above never clicked, or the migration unapplied), Zid loads
+   the app without a token and the merchant lands on the manual sign-in
+   form — the exact path that fails — so both steps are required.
+
+   Sign-in card width (same day): `8d517d4` had set Clerk's
+   `rootBox`/`cardBox` to `w-full max-w-full`, stretching the sign-in
+   card to the full page width. Reverted to a constrained centered card
+   (`w-full max-w-md`, `mx-auto`) in `src/lib/clerk-appearance.ts`,
+   pinned by `tests/unit/clerk-appearance.test.ts`.
