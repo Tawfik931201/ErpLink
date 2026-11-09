@@ -48,13 +48,20 @@ export function solveVariantPriceExtras(base: number, rows: VariantPrice[], curr
   return result
 }
 
+export interface VariantPriceSyncResult {
+  /** False when combination prices are not representable as attribute extras on Odoo <=19 */
+  represented: boolean
+  /** Why the price write was skipped (set only when represented === false) */
+  reason?: string
+}
+
 export async function syncVariantPrices(
   client: OdooClient, templateId: number, prices: Map<number, number>, preserveOthers = false,
-): Promise<void> {
-  if (!prices.size) return
+): Promise<VariantPriceSyncResult> {
+  if (!prices.size) return { represented: true }
   if ((await client.getMajorVersion()) >= 20) {
     for (const [id, price] of prices) await client.write('product.product', [id], { lst_price: price })
-    return
+    return { represented: true }
   }
   const templates = await client.searchRead<any>('product.template', [['id', '=', templateId]], ['list_price'])
   if (!templates.length) throw new Error(`Missing template #${templateId} while syncing variant prices`)
@@ -67,7 +74,21 @@ export async function syncVariantPrices(
   }))
   if ([...prices.keys()].some(id => !rows.some(row => row.id === id))) throw new Error('Missing Odoo variant while syncing prices')
   if (!Number.isFinite(base) || rows.some(row => !Number.isFinite(row.price))) throw new Error('Invalid variant price')
-  const result = solveVariantPriceExtras(base, rows, current)
+  let result: Record<number, number>
+  try {
+    result = solveVariantPriceExtras(base, rows, current)
+  } catch (err: any) {
+    // Inconsistent combination prices (store discounts that don't decompose
+    // additively into attribute extras) must not fail the whole product sync:
+    // the template, variants and stock are already written. Surface the skip
+    // to the caller instead of throwing, so it can be logged visibly while
+    // the rest of the sync succeeds.
+    if (String(err?.message || '').includes('cannot be represented')) {
+      console.warn(`[VariantPrices] Prices for template #${templateId} cannot be represented as attribute extras; keeping current extras. ${String(err?.message || err)}`)
+      return { represented: false, reason: String(err?.message || err) }
+    }
+    throw err
+  }
   // One ORM call/transaction, with no intermediate partially updated extras.
   const lines = new Map<number, unknown[]>()
   for (const [id, price] of Object.entries(result)) {
@@ -81,4 +102,5 @@ export async function syncVariantPrices(
   }
   const commands = [...lines].map(([id, values]) => [1, id, { product_template_value_ids: values }])
   if (commands.length) await client.write('product.template', [templateId], { attribute_line_ids: commands })
+  return { represented: true }
 }

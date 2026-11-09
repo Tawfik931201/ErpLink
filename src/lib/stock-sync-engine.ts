@@ -710,20 +710,52 @@ async function readOdooProductMatchValues(
 
 // ─── Zid stock push ───────────────────────────────────────────────────────────
 
+/** A variant nested under a Zid parent (structure=child). Variant SKUs live
+ * inside `parent.variants[]`, never as top-level list rows. */
+function asVariantProduct(variant: any, parentId: string): Record<string, any> | null {
+  if (!variant?.id) return null
+  return {
+    ...variant,
+    parent_id: String(variant.parent_id || parentId),
+    structure: variant.structure || 'child',
+    is_infinite: variant.is_infinite ?? false,
+  }
+}
+
+function findVariantByMatch(product: Record<string, any>, field: 'sku' | 'barcode', value: string): Record<string, any> | null {
+  const variants = Array.isArray((product as any).variants) ? (product as any).variants : []
+  for (const v of variants) {
+    const candidate = field === 'sku' ? String((v as any)?.sku || '').trim() : String((v as any)?.barcode || '').trim()
+    if (candidate && candidate === value) {
+      const normalized = asVariantProduct(v, String(product.id))
+      if (normalized) return normalized
+    }
+  }
+  return null
+}
+
 async function findZidProductByMatch(
   creds: ZidCredentials,
   matchField: string,
   value: string
 ): Promise<Record<string, any> | null> {
   if (!value) return null
+  // `extended: true` makes Zid include parent.variants[] in list results;
+  // without it Odoo variant SKUs are invisible (they exist only nested).
   if (matchField === 'barcode') {
-    const res = await ZidAPI.products.list(creds, { page_size: 100, barcode: value })
+    const res = await ZidAPI.products.list(creds, { page_size: 100, barcode: value, extended: true })
     const items = Array.isArray(res.data?.results) ? res.data.results : []
-    return items.find((p: any) => String(p.barcode || '').trim() === value) || null
+    const direct = items.find((p: any) => String(p.barcode || '').trim() === value)
+    if (direct) return direct
+    for (const p of items) {
+      const nested = findVariantByMatch(p as Record<string, any>, 'barcode', value)
+      if (nested) return nested
+    }
+    return null
   }
   let page = 1
   for (let i = 0; i < 10; i++) {
-    const res = await ZidAPI.products.list(creds, { page_size: 100, page })
+    const res = await ZidAPI.products.list(creds, { page_size: 100, page, extended: true })
     const items = Array.isArray(res.data?.results) ? res.data.results : []
     const bySku = items.find((p: any) => String(p.sku || '').trim() === value)
     if (bySku) return bySku
@@ -734,6 +766,13 @@ async function findZidProductByMatch(
       return String(name || '').trim() === value
     })
     if (byName) return byName
+    // Variant SKU/barcode nested inside parent.variants[] — otherwise the
+    // Odoo variant would silently match nothing and its stock never pushes.
+    for (const p of items) {
+      const nested = findVariantByMatch(p as Record<string, any>, 'sku', value)
+        || findVariantByMatch(p as Record<string, any>, 'barcode', value)
+      if (nested) return nested
+    }
     const count = res.data?.count ?? items.length
     if (items.length === 0 || page * items.length >= count) break
     page++
@@ -836,10 +875,39 @@ async function pushStockToZid(params: {
   }
 
   const zidProductId = String(zidProduct.id)
+  const parentId = (zidProduct as any).parent_id ? String((zidProduct as any).parent_id) : null
+  const isChildVariant = (zidProduct as any).structure === 'child' || !!parentId
+  const roundedQty = Math.round(quantity)
+
+  if (isChildVariant && parentId) {
+    // Variants are documented to carry their own stocks[] per location and are
+    // written via the variants endpoint on the PARENT. The flat
+    // locations/stock-update payload targets the parent record, which Zid
+    // treats as stock-disabled while variants exist — so it never moves a
+    // variant's quantity. Use the documented variants path instead.
+    await ZidAPI.products.variants(creds, parentId, {
+      variants: [
+        {
+          id: zidProductId,
+          is_deleted: false,
+          stocks: [
+            {
+              available_quantity: roundedQty,
+              is_infinite: false,
+              location: zidLocationId,
+            },
+          ],
+        },
+      ],
+    })
+    console.info(`[StockSync] ✅ Updated Zid variant #${zidProductId} (parent ${parentId}) @ location ${zidLocationId} → ${quantity}`)
+    return 'pushed'
+  }
+
   await ZidAPI.locations.stockUpdate(creds, zidLocationId, [
     {
       product_id: zidProductId,
-      available_quantity: Math.round(quantity),
+      available_quantity: roundedQty,
       is_infinite: false,
     },
   ])

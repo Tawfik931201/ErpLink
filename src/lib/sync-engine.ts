@@ -6407,7 +6407,10 @@ async function syncAsVariants(
     }
   }
 
-  await syncVariantPrices(client, templateId, variantPrices)
+  const priceSync = await syncVariantPrices(client, templateId, variantPrices)
+  if (!priceSync.represented) {
+    await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: 'product.template', odoo_record_id: templateId, status: 'skipped', error_message: 'Variant prices cannot be represented as attribute extras (prices kept as-is)', payload: { ...zidData, reason: priceSync.reason }, trigger_type: triggerType, platform })
+  }
   for (const [sourceId, recordId] of variantRecords) {
     await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: sourceId, odoo_model: 'product.product', odoo_record_id: recordId, status: 'success', payload: zidData, trigger_type: triggerType, platform })
   }
@@ -6758,7 +6761,12 @@ async function syncChildVariantAsVariant(
     assertProductWriteAllowed(mergedSettings, true)
     await client.write('product.product', [matchingOdooVar.id], updatePayload)
     const price = finiteProductNumber(odooValues.list_price)
-    if (price !== undefined) await syncVariantPrices(client, templateId, new Map([[matchingOdooVar.id, price]]), true)
+    if (price !== undefined) {
+      const priceSync = await syncVariantPrices(client, templateId, new Map([[matchingOdooVar.id, price]]), true)
+      if (!priceSync.represented) {
+        await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: 'product.product', odoo_record_id: matchingOdooVar.id, status: 'skipped', error_message: 'Variant price cannot be represented as attribute extras (price kept as-is)', payload: { ...zidData, reason: priceSync.reason }, trigger_type: triggerType, platform })
+      }
+    }
     await syncProductStockQuantities(client, matchingOdooVar.id, zidData, mergedSettings, mapping.workspace_id, platform)
     await syncProductGallery(client, 'product.product', matchingOdooVar.id, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
 
@@ -6810,7 +6818,12 @@ async function syncChildVariantAsVariant(
     assertProductWriteAllowed(mergedSettings, false)
     const createdVarId = await client.create('product.product', createVariantPayload)
     const price = finiteProductNumber(odooValues.list_price)
-    if (price !== undefined) await syncVariantPrices(client, templateId, new Map([[createdVarId, price]]), true)
+    if (price !== undefined) {
+      const priceSync = await syncVariantPrices(client, templateId, new Map([[createdVarId, price]]), true)
+      if (!priceSync.represented) {
+        await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: 'product.product', odoo_record_id: createdVarId, status: 'skipped', error_message: 'Variant price cannot be represented as attribute extras (price kept as-is)', payload: { ...zidData, reason: priceSync.reason }, trigger_type: triggerType, platform })
+      }
+    }
     await syncProductStockQuantities(client, createdVarId, zidData, mergedSettings, mapping.workspace_id, platform)
     await syncProductGallery(client, 'product.product', createdVarId, zidData, mergedSettings, resolveBinaryField, `${platform}:${storeId}`)
 

@@ -147,6 +147,30 @@ describe('the Zid arm is preserved verbatim behind the dual dispatch', () => {
   })
 })
 
+describe('the Zid push handles variants (nested under a parent)', () => {
+  const source = readSource(ENGINE_PATH)
+
+  it('fetches extended product lists so nested variants are visible', () => {
+    expect(source).toMatch(/const res = await ZidAPI\.products\.list\(creds, \{ page_size: 100, barcode: value, extended: true \}\)/)
+    expect(source).toMatch(/const res = await ZidAPI\.products\.list\(creds, \{ page_size: 100, page, extended: true \}\)/)
+  })
+
+  it('matches a variant SKU/barcode inside parent.variants[]', () => {
+    expect(source).toMatch(/findVariantByMatch\(p as Record<string, any>, 'sku', value\)/)
+    expect(source).toMatch(/findVariantByMatch\(p as Record<string, any>, 'barcode', value\)/)
+  })
+
+  it('writes a child variant through the variants endpoint on its parent, not the flat locations payload', () => {
+    expect(source).toMatch(/const isChildVariant = \(zidProduct as any\)\.structure === 'child'/)
+    expect(source).toMatch(/ZidAPI\.products\.variants\(creds, parentId,/)
+    expect(source).toMatch(/stocks: \[[\s\S]*available_quantity: roundedQty/)
+  })
+
+  it('keeps the flat locations stock-update for standalone products', () => {
+    expect(source).toMatch(/await ZidAPI\.locations\.stockUpdate\(creds, zidLocationId, \[/)
+  })
+})
+
 describe('self-check: the pins actually detect a reverted rule', () => {
   const has = (src: string, re: RegExp) => re.test(src)
 

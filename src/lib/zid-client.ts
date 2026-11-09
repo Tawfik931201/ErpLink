@@ -406,6 +406,10 @@ export const ZidAPI = {
         }),
     },
 
+    /** POST /v1/products/{product_id}/variants/ — create/update variants (each may carry stocks[]) */
+    variants: (creds: ZidCredentials, productId: string, data: unknown) =>
+      zidClient.post(`/v1/products/${productId}/variants/`, data, { headers: buildZidHeaders(creds) }),
+
     // Stock management
     stocks: {
       list: (creds: ZidCredentials, productId: string) =>

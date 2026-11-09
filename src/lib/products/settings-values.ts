@@ -18,7 +18,9 @@ export function applyProductPriceSettings(
       ?? (cfg.source === 'sale_price' ? finiteProductNumber(data.price) : undefined)
     if (source !== undefined) values.list_price = source
   }
-  if (cfg.cost_source) {
+  // 'none' = "Don't update cost": never write values.standard_price, so the
+  // client's Odoo cost stays untouched even when Zid sends a cost value.
+  if (cfg.cost_source && cfg.cost_source !== 'none') {
     const cost = finiteProductNumber(resolvePath(data, cfg.cost_source))
     if (cost !== undefined) values.standard_price = cost
   }

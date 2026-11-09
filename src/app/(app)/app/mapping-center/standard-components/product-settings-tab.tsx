@@ -438,6 +438,7 @@ export function ProductSettingsTab({
               value={costSource}
               onChange={(e) => setCostSource(e.target.value)}
             >
+              <option value="none">{lang === 'ar' ? 'عدم تحديث التكلفة (أودوو يتحكم)' : "Don't update cost (Odoo owns it)"}</option>
               <option value="cost">{lang === 'ar' ? 'حقل التكلفة (cost)' : 'Cost field'}</option>
               <option value="price">{lang === 'ar' ? 'حقل السعر (price)' : 'Price field'}</option>
             </select>

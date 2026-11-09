@@ -40,6 +40,13 @@ describe('product Standard Mapping execution', () => {
     expect(values.standard_price).toBe(100)
   })
 
+  it("leaves Odoo cost untouched when cost_source is 'none'", () => {
+    const values: Record<string, unknown> = { list_price: 999, standard_price: 777 }
+    applyProductPriceSettings(values, { price: { source: 'price', cost_source: 'none', markup_percent: 0 } }, { price: 100, cost: 42 })
+    expect(values.list_price).toBe(100)
+    expect(values.standard_price).toBe(777)
+  })
+
   it('keeps zero prices/costs and uses regular price when sale price is absent', () => {
     const settings = { price: { source: 'sale_price', cost_source: 'cost', markup_percent: 10, rounding: '' } }
     const values = { list_price: 50, standard_price: 20 }
@@ -339,6 +346,29 @@ describe('Odoo variant price representation', () => {
     await syncVariantPrices(asClient(client), 123, new Map([[987, 125]]))
     expect(client.write).toHaveBeenCalledWith('product.template', [123], { attribute_line_ids: [[1, 50, { product_template_value_ids: [[1, 11, { price_extra: 25 }]] }]] })
     expect(client.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not throw on inconsistent combination prices; it reports represented=false so the product sync can continue', async () => {
+    const client = makeClient(19)
+    client.searchRead.mockImplementation(async model => {
+      if (model === 'product.template') return [{ id: 123, list_price: 100 }]
+      if (model === 'product.product') return [
+        { id: 1, product_template_attribute_value_ids: [11, 21], lst_price: 0 },
+        { id: 2, product_template_attribute_value_ids: [11, 22], lst_price: 5 },
+        { id: 3, product_template_attribute_value_ids: [12, 21], lst_price: 10 },
+        { id: 4, product_template_attribute_value_ids: [12, 22], lst_price: 99 },
+      ]
+      return [
+        { id: 11, price_extra: 0, attribute_line_id: [50, 'Size'] },
+        { id: 12, price_extra: 0, attribute_line_id: [50, 'Size'] },
+        { id: 21, price_extra: 0, attribute_line_id: [51, 'Color'] },
+        { id: 22, price_extra: 0, attribute_line_id: [51, 'Color'] },
+      ]
+    })
+    const result = await syncVariantPrices(asClient(client), 123, new Map([[1, 0], [2, 5], [3, 10], [4, 99]]))
+    expect(result.represented).toBe(false)
+    expect(result.reason).toContain('AS_SEPARATE_PRODUCTS')
+    expect(client.write).not.toHaveBeenCalled()
   })
 
   it('uses the independent variant price on Odoo 20', async () => {
