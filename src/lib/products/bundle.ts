@@ -45,6 +45,33 @@ export function isDynamicBundle(data: Record<string, unknown> | null | undefined
 }
 
 /**
+ * Zid carries bundle components in two shapes:
+ *  - an array of {item_id|id, sku, name, quantity} entries, or
+ *  - (dynamic bundles in order payloads) an object keyed by the option-group
+ *    name (e.g. "اختيار 1") whose values are arrays of the picked products.
+ * Collect entries from either shape.
+ */
+function collectEntries(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.filter((v): v is Record<string, unknown> => !!v && typeof v === 'object')
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const out: Record<string, unknown>[] = []
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      if (Array.isArray(nested)) {
+        for (const item of nested) {
+          if (item && typeof item === 'object') out.push(item as Record<string, unknown>)
+        }
+      } else if (nested && typeof nested === 'object') {
+        out.push(nested as Record<string, unknown>)
+      }
+    }
+    return out
+  }
+  return []
+}
+
+/**
  * Components carried by a bundle payload, from whichever of the known keys
  * Zid used. Returns [] when the payload carries no components (e.g. a minimal
  * webhook body) — the caller then keeps only the bundle line.
@@ -53,11 +80,11 @@ export function extractBundleComponents(
   data: Record<string, unknown> | null | undefined,
 ): BundleComponent[] {
   if (!data || typeof data !== 'object') return []
-  let raw: unknown[] = []
+  let raw: Record<string, unknown>[] = []
   for (const key of COMPONENT_KEYS) {
-    const value = (data as Record<string, unknown>)[key]
-    if (Array.isArray(value) && value.length > 0) {
-      raw = value
+    const entries = collectEntries((data as Record<string, unknown>)[key])
+    if (entries.length > 0) {
+      raw = entries
       break
     }
   }

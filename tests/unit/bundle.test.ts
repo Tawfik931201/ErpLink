@@ -30,6 +30,21 @@ describe('bundle helpers', () => {
     expect(extractBundleComponents(null)).toEqual([])
   })
 
+  it('extracts components from the option-group object shape (dynamic bundle order payload)', () => {
+    // Zid order payloads carry bundle_products as an object keyed by the
+    // option-group name, each value an array of picked products.
+    const data = {
+      bundle_products: {
+        'اختيار 1': [{ id: 'a1', sku: 'SKU-1', name: 'Perfume', quantity: 1 }],
+        'اختيار 2': [{ id: 'b2', sku: 'SKU-2', name: 'Chocolate', quantity: 2 }],
+      },
+    }
+    expect(extractBundleComponents(data)).toEqual([
+      { id: 'a1', sku: 'SKU-1', barcode: '', name: 'Perfume', quantity: 1 },
+      { id: 'b2', sku: 'SKU-2', barcode: '', name: 'Chocolate', quantity: 2 },
+    ])
+  })
+
   it('defaults component quantity to 1', () => {
     const [c] = extractBundleComponents({ components: [{ sku: 'A' }] })
     expect(c.quantity).toBe(1)
