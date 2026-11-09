@@ -4944,7 +4944,7 @@ async function processFixedMappingFallback(
   const scope = getErpExecutionScope()
   if (!scope || scope.workspaceId !== deliveryWorkspaceId || scope.platform !== platform || scope.storeId !== storeIdStr) throw new Error('Preset ERP execution scope mismatch')
   const rootModel = presetKey.includes('category') ? 'product.category' : presetKey.includes('product') ? 'product.template' : presetKey.includes('customer') ? 'res.partner' : 'sale.order'
-  return withErpExecutionContext({ ...scope, storeEntityId: String(zidData.id ?? zidData.category_id ?? zidData.category_uuid ?? zidData.customer_id ?? zidData.order_id ?? ''), rootModel },
+  return withErpExecutionContext({ ...scope, storeEntityId: storeEntityIdFromPayload(zidData), rootModel },
     () => processFixedMappingFallbackInternal(presetKey, event, storeIdStr, zidData, platform, existingMappings, deliveryWorkspaceId))
 }
 
@@ -5410,7 +5410,7 @@ async function processFixedMappingFallbackInternal(
       mapping: virtualMapping,
       event,
       storeId: storeIdStr,
-      zidEntityId: String(zidData.id ?? zidData.category_id ?? zidData.category_uuid ?? zidData.product_id ?? zidData.customer_id ?? zidData.order_id ?? ''),
+      zidEntityId: storeEntityIdFromPayload(zidData),
       zidData,
       odooModel,
       odooOperation,
@@ -5427,7 +5427,7 @@ async function processFixedMappingFallbackInternal(
       field_mapping_id: virtualMapping.id,
       event,
       store_id: storeIdStr,
-      zid_entity_id: String(zidData.id ?? zidData.category_id ?? zidData.category_uuid ?? zidData.product_id ?? zidData.customer_id ?? zidData.order_id ?? ''),
+      zid_entity_id: storeEntityIdFromPayload(zidData),
       odoo_model: odooModel,
       status: 'failed',
       error_message: errMsg,
@@ -5502,7 +5502,7 @@ export async function processSingleMapping(
   if (mapping.erp_connection_id && mapping.erp_connection_id !== target.erpConnectionId) throw new Error('Mapping ERP execution connection changed')
   await validateExecutionTarget(mapping.workspace_id, platform, storeId, target)
   const scope = { ...target, workspaceId: mapping.workspace_id, platform, storeId, eventId: inherited?.eventId || existingLogId || `manual:${event}` }
-  return await withErpTarget(scope, () => withErpExecutionContext({ ...scope, storeEntityId: String(zidData.id ?? zidData.category_id ?? zidData.category_uuid ?? zidData.customer_id ?? zidData.order_id ?? ''), rootModel: mapping.odoo_model },
+  return await withErpTarget(scope, () => withErpExecutionContext({ ...scope, storeEntityId: storeEntityIdFromPayload(zidData), rootModel: mapping.odoo_model },
     () => processSingleMappingInternal(mapping, event, storeId, zidData, triggerType, existingLogId, platformHint)))
   } catch (error) {
     return { mappingId: mapping.id, mappingName: mapping.name, model: mapping.odoo_model, status: 'failed', message: error instanceof Error ? error.message : 'ERP execution trust validation failed' }
@@ -5518,14 +5518,9 @@ async function processSingleMappingInternal(
   existingLogId?: string,
   platformHint?: 'zid' | 'salla' | 'shopify'
 ): Promise<SyncEngineResult['records'][number]> {
-  const zidEntityId = String(
-    zidData.id ??
-    zidData.category_id ??
-    zidData.category_uuid ??
-    zidData.customer_id ??
-    zidData.order_id ??
-    ''
-  )
+  // A Zid product delete carries `product_id`, not `id` — see
+  // storeEntityIdFromPayload.
+  const zidEntityId = storeEntityIdFromPayload(zidData)
   const odooModel = mapping.odoo_model
   const mappingPlatform = platformHint ?? getPlatformFromEvent(event)
   const odooOperation = normalizeOdooOperation(mapping.odoo_operation, event, mappingPlatform)
@@ -5912,6 +5907,23 @@ export async function syncProductTemplateStock(
   const ids = await client.search('product.product', [['product_tmpl_id', '=', templateId]], 2)
   if (ids.length !== 1) throw new Error(`Cannot resolve a single stock product for template #${templateId}`)
   await syncProductStockQuantities(client, ids[0], data, settings, workspaceId, platform)
+}
+
+// ─── Store entity identity in webhook payloads ────────────────────────────
+/** The store-side entity id carried by a webhook payload.
+ *
+ *  A Zid `product.delete` payload carries `product_id`, not `id` (the same
+ *  reason the fallback create-path chain at the fixed-mapping catch and the
+ *  sync_queue ENTITY_KEYS accept `product_id`/`sku`). Using `id`-only chains
+ *  made the execution context incomplete and failed the whole delete with
+ *  "ERP execution context is incomplete" (reported 2026-11-09 on a Zid
+ *  product delete). One helper, every site: the context builder, the
+ *  executeOdooOperation zidEntityId, the catch-log, and processSingleMapping. */
+export function storeEntityIdFromPayload(data: Record<string, unknown>): string {
+  return String(
+    data.id ?? data.category_id ?? data.category_uuid ?? data.product_id ??
+    data.customer_id ?? data.order_id ?? ''
+  )
 }
 
 /** Build a variant using the same Standard Mapping settings as its parent. */

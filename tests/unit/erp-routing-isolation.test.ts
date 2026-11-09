@@ -1,4 +1,4 @@
-import { processSingleMapping } from '../../src/lib/sync-engine'
+import { processSingleMapping, storeEntityIdFromPayload } from '../../src/lib/sync-engine'
 import type { FieldMappingRow } from '../../src/lib/sync-types'
 import { supabase } from '../mocks/supabase'
 
@@ -45,5 +45,27 @@ describe('ERP routing ownership boundary', () => {
     expect(result.status).toBe('skipped') // Empty field mapping, after successful routing.
     expect(supabase.calls.filter(c => c.table === 'erp_connections')[0].filters)
       .toContainEqual(['workspace_id', 'workspace-a'])
+  })
+
+  it('executes a Zid product delete carrying product_id, not id', async () => {
+    supabase.addMock('erp_connections', [{ id: 'connection-a', workspace_id: 'workspace-a', url: 'https://a.example', username: 'a', password: 'cipher-a', erp_type: 'odoo' }])
+    const result = await processSingleMapping({ ...mapping, erp_connection_id: null, odoo_model: 'product.template' }, 'product.deleted', 'store-a', { product_id: 42, sku: 'SKU-42' })
+    // Before the fix this failed with 'ERP execution context is incomplete'
+    // (storeEntityId '') — the id is now taken from product_id.
+    expect(result.message).not.toContain('execution context is incomplete')
+  })
+})
+
+describe('store entity identity', () => {
+  it('takes the id from product_id on a Zid product delete payload', () => {
+    expect(storeEntityIdFromPayload({ product_id: 42, sku: 'SKU-42' })).toBe('42')
+  })
+
+  it('prefers the plain id when present and keeps the other chains', () => {
+    expect(storeEntityIdFromPayload({ id: 7, product_id: 42 })).toBe('7')
+    expect(storeEntityIdFromPayload({ category_uuid: 'uuid-1' })).toBe('uuid-1')
+    expect(storeEntityIdFromPayload({ customer_id: 'c-1' })).toBe('c-1')
+    expect(storeEntityIdFromPayload({ order_id: 'o-1' })).toBe('o-1')
+    expect(storeEntityIdFromPayload({ sku: 'SKU-42' })).toBe('')
   })
 })
