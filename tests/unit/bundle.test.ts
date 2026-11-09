@@ -2,14 +2,25 @@ import {
   extractBundleComponents,
   formatBundleInternalNotes,
   isDynamicBundle,
+  isVoucher,
 } from '../../src/lib/products/bundle'
 
 describe('bundle helpers', () => {
   it('detects dynamic_bundle only', () => {
     expect(isDynamicBundle({ product_class: 'dynamic_bundle' })).toBe(true)
     expect(isDynamicBundle({ product_class: 'grouped_product' })).toBe(false)
+    expect(isDynamicBundle({ product_class: 'voucher' })).toBe(false)
     expect(isDynamicBundle({})).toBe(false)
     expect(isDynamicBundle(null)).toBe(false)
+  })
+
+  it('detects voucher only', () => {
+    expect(isVoucher({ product_class: 'voucher' })).toBe(true)
+    expect(isVoucher({ product_class: 'dynamic_bundle' })).toBe(false)
+    expect(isVoucher({ product_class: 'grouped_product' })).toBe(false)
+    expect(isVoucher({})).toBe(false)
+    expect(isVoucher(null)).toBe(false)
+    expect(isVoucher(undefined)).toBe(false)
   })
 
   it('extracts components from all known keys', () => {

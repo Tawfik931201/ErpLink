@@ -107,6 +107,22 @@ describe('order-line products use the configured Product match fields', () => {
     }))
   })
 
+  it('creates a missing voucher as a service product when Orders creates new products', async () => {
+    settings({ company_id: 7, category_id: 6, tax: { default_tax_ids: [5] } })
+    const client = mockClient()
+    const result = await lines(client, [{ id: 700, sku: 'VOUCHER-SKU', barcode: 'BAR-V', price: 99, product_class: 'voucher' }], { product_fallback_policy: 'create_new' })
+    expect(result[0].product_id).toBe(123)
+    expect(client.create).toHaveBeenCalledTimes(1)
+    expect(client.create).toHaveBeenCalledWith('product.product', expect.objectContaining({
+      name: expect.anything(), default_code: 'VOUCHER-SKU', barcode: 'BAR-V',
+      type: 'service', company_id: 7, categ_id: 6, taxes_id: [[6, 0, [5]]],
+    }))
+    // A voucher carries no bundle notes and no stock should be implied.
+    const created = (client.create.mock.calls as unknown[][])[0][1] as Record<string, unknown>
+    expect(created).not.toHaveProperty('description')
+    expect(created).not.toHaveProperty('group_products')
+  })
+
   it('keeps numeric match values numeric when creating a missing product', async () => {
     settings({ match_zid_field: 'product_id', match_odoo_field: 'x_number' })
     const client = mockClient()

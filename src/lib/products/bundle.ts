@@ -1,11 +1,15 @@
 /**
- * Zid bundle (dynamic_bundle) support — pure helpers, no I/O.
+ * Zid bundle (dynamic_bundle) + voucher support — pure helpers, no I/O.
  *
  * A dynamic bundle is NOT stocked: the bundle itself is recorded in Odoo as a
  * service product and its selling price lives on that single line. The items
  * the customer picked are recorded as normal products whose order lines carry
  * price 0 and the real quantities (for picking/delivery), plus a formatted
  * components list in the bundle's Internal Notes.
+ *
+ * A voucher is likewise never stocked: when one reaches Odoo it's recorded as
+ * a service product too — same policy, in both the product sync and the
+ * order-side auto-create fallback (see sync-engine's isDynamicBundle sites).
  *
  * These helpers only read the Zid payload shape; resolution against Odoo
  * (findUniqueOrderLineProduct) happens in sync-engine.
@@ -42,6 +46,12 @@ function finiteQty(value: unknown): number {
 export function isDynamicBundle(data: Record<string, unknown> | null | undefined): boolean {
   if (!data || typeof data !== 'object') return false
   return String(data.product_class ?? '').trim() === 'dynamic_bundle'
+}
+
+/** True when the payload belongs to a Zid voucher. */
+export function isVoucher(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data || typeof data !== 'object') return false
+  return String(data.product_class ?? '').trim() === 'voucher'
 }
 
 /**

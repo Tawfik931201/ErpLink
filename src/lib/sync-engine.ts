@@ -56,7 +56,7 @@ import {
   platformLegacyIdField,
 } from '@/lib/platform-fields'
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
-import { extractBundleComponents, formatBundleInternalNotes, isDynamicBundle } from '@/lib/products/bundle'
+import { extractBundleComponents, formatBundleInternalNotes, isDynamicBundle, isVoucher } from '@/lib/products/bundle'
 import { applyProductPriceSettings, assertProductWriteAllowed, finiteProductNumber, shouldSyncProductStock } from '@/lib/products/settings-values'
 import { readAllProductRows, syncVariantPrices } from '@/lib/products/variant-prices'
 import { extractGenericVariants } from '@/lib/products/variants'
@@ -1652,11 +1652,11 @@ export async function buildOrderLineItems(
         } else {
           prodVals.type = rawType === 'service' ? 'service' : (wantsStorable ? 'product' : 'consu')
         }
-        // Dynamic bundles are never stocked, even when auto-created here.
-        if (isDynamicBundle(productData)) {
+        // Dynamic bundles and vouchers are never stocked, even when auto-created here.
+        if (isDynamicBundle(productData) || isVoucher(productData)) {
           prodVals.type = 'service'
           if (majorVer >= 18) prodVals.is_storable = false
-          const bundleNotes = formatBundleInternalNotes(productData)
+          const bundleNotes = isDynamicBundle(productData) ? formatBundleInternalNotes(productData) : ''
           if (bundleNotes) prodVals.description = bundleNotes
         }
         if (sku) prodVals.default_code = sku
@@ -2278,16 +2278,19 @@ export async function applyFixedSettingsToValues(
       wantsStorable = defaultType === 'product' || values.type === 'product' || values.is_storable === true
     }
 
-    // Dynamic bundles are never stocked: record them as service products,
-    // and keep the picked components as a formatted Internal Notes list.
-    // Components themselves sync as ordinary storable products.
-    if (isDynamicBundle(zidData)) {
+    // Dynamic bundles and vouchers are never stocked: record them as service
+    // products; bundles additionally keep the picked components as a
+    // formatted Internal Notes list. Components themselves sync as ordinary
+    // storable products.
+    if (isDynamicBundle(zidData) || isVoucher(zidData)) {
       values.type = 'service'
       values.is_storable = false
-      const notes = formatBundleInternalNotes(zidData)
-      if (notes) {
-        const existing = typeof values.description === 'string' ? values.description.trim() : ''
-        values.description = existing ? `${existing}\n\n${notes}` : notes
+      if (isDynamicBundle(zidData)) {
+        const notes = formatBundleInternalNotes(zidData)
+        if (notes) {
+          const existing = typeof values.description === 'string' ? values.description.trim() : ''
+          values.description = existing ? `${existing}\n\n${notes}` : notes
+        }
       }
     }
 
@@ -4555,7 +4558,7 @@ async function processWebhookEventInternal(
             // Force API-fetched fields for grouped/bundle product detection.
             // Webhook payloads are often minimal; we must preserve bundle data from the API.
             const pClass = (productData as any).product_class
-            if (pClass === 'grouped_product' || pClass === 'dynamic_bundle' || pClass === 'bundle' || pClass === 'grouped') {
+            if (pClass === 'grouped_product' || pClass === 'dynamic_bundle' || pClass === 'bundle' || pClass === 'grouped' || pClass === 'voucher') {
               if ((productData as any).group_products) (data as any).group_products = (productData as any).group_products
               if ((productData as any).grouped_products) (data as any).grouped_products = (productData as any).grouped_products
               if ((productData as any).components) (data as any).components = (productData as any).components
