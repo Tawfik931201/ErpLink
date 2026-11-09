@@ -5,11 +5,11 @@ import { clerkClient } from '@clerk/nextjs/server'
 import { supabase } from '@/lib/supabase'
 import { DEFAULT_PERMISSIONS } from '@/lib/workspace-members-constants'
 import { getZidConfig } from '@/lib/zid/config'
+import { ZID_EMBEDDED_TOKEN_PATTERN } from '@/lib/zid/embedded-url'
 import { getAccessToken } from '@/lib/zid/token'
 
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 export function embeddedTokenHash(token: string): string | null {
-  return UUID_V4.test(token) ? createHash('sha256').update(token.toLowerCase()).digest('hex') : null
+  return ZID_EMBEDDED_TOKEN_PATTERN.test(token) ? createHash('sha256').update(token.toLowerCase()).digest('hex') : null
 }
 
 /** An isolated Clerk member prevents a store token from signing in as an admin

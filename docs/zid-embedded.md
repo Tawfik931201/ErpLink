@@ -87,3 +87,58 @@ storage approval, successful ticket activation, RTL/LTR layouts, and full
 authenticated screens inside the live Zid iframe require an integration pass
 after deployment. Local type/lint/test/build results alone do not establish
 end-to-end Embedded approval.
+
+## Diagnosis 2026-11-09 — `authorization_invalid` ("Unauthorized request") in Zid
+
+Reported: opening the installed app at
+`https://dashboard.zid.sa/en-sa/stores/3172448/apps/6958/embedded` shows the
+app, but signing in from inside Zid returns Clerk Frontend API JSON:
+
+```json
+{ "errors": [{ "message": "Unauthorized request",
+  "long_message": "You are not authorized to perform this request",
+  "code": "authorization_invalid" }],
+  "clerk_trace_id": "412349d1540bd5feb8748c809d2c2b4a" }
+```
+
+Verified live the same day:
+
+1. **`GET https://erplink.bizsahla.com/embedded` returned 404.** The
+   embedded-launch commit (`8d517d4`) was not deployed, so Zid's iframe
+   loaded the homepage / normal Clerk sign-in form instead of `/embedded`.
+   A normal sign-in inside a cross-site iframe is exactly what Clerk's
+   Frontend API rejects with `authorization_invalid` while the instance
+   has `partitioned_cookies: false` (confirmed via
+   `https://clerk.bizsahla.com/v1/environment`). The ticket flow on
+   `/embedded` exists precisely to bypass the normal sign-in.
+2. **Code fix (this change):** the middleware now routes any GET/HEAD
+   carrying a Zid embedded UUID token to `/embedded`, whatever the
+   configured Application URL is (`src/lib/zid/embedded-url.ts`, pure and
+   unit-tested in `tests/unit/zid-embedded-url.test.ts`). This makes the
+   launch tolerant of a Partner-Dashboard URL that still points at the
+   homepage — but the correct URL remains
+   `https://erplink.bizsahla.com/embedded`; set it in Zid anyway.
+3. **Still required outside this repo (no code can do these):**
+   - Deploy the embedded-launch commit (the 404 above proves it is live
+     only after a deploy + `GET /embedded` returns 200).
+   - Apply `supabase/migrations/20261108125125_zid_embedded_access.sql`.
+   - Clerk Dashboard → Sessions → **enable Partitioned cookies**
+     (instance flag `partitioned_cookies`). This is Clerk's supported way
+     for a session cookie to survive inside a cross-site iframe; without
+     it the app relies on the Storage Access API grant from
+     `EmbeddedStorageGate`, which Chrome grants per top-level site and
+     which Safari/Firefox may deny. Re-check
+     `https://clerk.bizsahla.com/v1/environment` → `partitioned_cookies: true`
+     after toggling.
+   - Clerk Dashboard → authorized origins/domains: ensure
+     `https://erplink.bizsahla.com` is the registered production domain
+     (it is the instance `home_url`); add `https://dashboard.zid.sa` if
+     the dashboard offers an authorized-origins list for embedded apps.
+   - Zid Partner Dashboard → app 6958: Application URL
+     `https://erplink.bizsahla.com/embedded`, scope
+     `embedded_apps_tokens_write` (add to `ZID_OAUTH_SCOPE` if set, then
+     reauthorize the store).
+   - As workspace owner, per store: **Enable sign-in inside Zid**
+     (registers the UUID), then open the app from Zid's installed-apps
+     list. Do not use Google/password sign-in inside the Zid iframe —
+     that path is the one that returns `authorization_invalid`.

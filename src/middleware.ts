@@ -8,6 +8,7 @@ import {
   stripLocaleFromPathname,
   DEFAULT_LANG,
 } from '@/lib/locale'
+import { getZidEmbeddedRedirectTarget } from '@/lib/zid/embedded-url'
 
 const LOCALE_COOKIE = 'lang'
 
@@ -62,6 +63,31 @@ export default clerkMiddleware(async (auth, req) => {
   const isServerAction =
     req.method === 'POST' &&
     (req.headers.has('next-action') || req.headers.has('x-action-forwarded') || req.headers.has('rsc'))
+
+  // --- ZID EMBEDDED LAUNCH ---
+  // Zid appends ?token=<uuid> to the configured Application URL. If that URL
+  // is not /embedded, the merchant lands on the public site / normal Clerk
+  // sign-in inside a cross-site iframe, and Clerk's Frontend API rejects the
+  // sign-in with authorization_invalid ("Unauthorized request"). Route any
+  // GET/HEAD carrying a Zid embedded token to /embedded, where the token is
+  // exchanged for a one-use ticket instead. GET/HEAD only: never redirect
+  // mutations (see isPostOrMutation below). The UUID check makes a false
+  // positive effectively impossible — only Zid sends such a token.
+  if (!isApiRoute(req) && !isPostOrMutation && search) {
+    const segments = pathname.split('/').filter(Boolean)
+    const first = segments[0]?.toLowerCase() ?? ''
+    const hasLocale = SUPPORTED_URL_LOCALES.includes(first)
+    const localePrefix = hasLocale
+      ? first
+      : getUrlLocaleFromLanguage(req.cookies.get(LOCALE_COOKIE)?.value || DEFAULT_LANG)
+    const target = getZidEmbeddedRedirectTarget({
+      pathname: hasLocale ? `/${segments.slice(1).join('/')}` : pathname,
+      token: req.nextUrl.searchParams.get('token'),
+      language: req.nextUrl.searchParams.get('language'),
+      localePrefix,
+    })
+    if (target) return NextResponse.redirect(new URL(target, req.url))
+  }
 
   // --- LEGACY /dashboard/* -> /app/* ---
   // Runs before locale handling so both /dashboard and /ar-sa/dashboard land on
