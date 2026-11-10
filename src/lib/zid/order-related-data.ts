@@ -25,7 +25,7 @@ export async function readOrderRelatedDetails(
     if (!token) throw new Error('No linked Zid store is available for related details')
     const scope = zidOrderCacheScope(identity.workspaceId, String(token.store_id || identity.storeId))
     if (!await acquirePullToken('zid', scope)) throw new Error('Zid related details pull budget exhausted; reschedule the order')
-    const credentials = await getAccessToken(token.merchant_id)
+    const credentials = await getAccessToken(token.merchant_id, identity.workspaceId)
     const creds = { authorization: credentials.authorization || '', managerToken: credentials.accessToken, storeId: token.store_id || token.merchant_id }
     const { ZidAPI } = await import('@/lib/zid-client')
     const response = entity === 'products'

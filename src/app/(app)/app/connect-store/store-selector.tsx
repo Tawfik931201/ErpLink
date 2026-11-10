@@ -234,6 +234,10 @@ export default function StoreSelector({
 
   const getErrorMessage = (err: string) => {
     switch (err) {
+      case 'webhook_registration_failed':
+        return ar
+          ? 'تم حفظ اتصال المتجر، لكن لم يكتمل تفعيل استقبال التحديثات. أعد حفظ إعدادات المزامنة لهذا المتجر، أو تواصل مع الدعم إذا استمرت المشكلة.'
+          : 'The store connection was saved, but receiving updates could not be enabled completely. Save this store’s sync settings again, or contact support if the problem continues.'
       case 'access_denied':
       case 'salla_denied':
         return ar

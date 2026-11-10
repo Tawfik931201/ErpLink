@@ -11,22 +11,25 @@ describe('OAuth unauthenticated ingress redirection', () => {
   const sallaCallback = read('src', 'app', 'api', 'salla', 'callback', 'route.ts')
 
   describe('Zid OAuth routes', () => {
-    it('redirects unauthenticated visitors to /sign-in in /api/zid/connect', () => {
-      expect(zidConnect).toContain('const { userId } = await auth()')
-      expect(zidConnect).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(req))")
-      expect(zidConnect).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
+    it('starts Zid OAuth without a partner login gate', () => {
+      expect(zidConnect).not.toContain('await auth()')
+      expect(zidConnect).not.toContain('/sign-in')
+      expect(zidConnect).toContain('await beginZidAuthorization()')
     })
 
-    it('redirects unauthenticated visitors to /sign-in preserving callback params in /api/zid/callback', () => {
-      expect(zidCallback).toContain('const { userId } = await auth()')
-      expect(zidCallback).toContain("const signInUrl = new URL('/sign-in', getAppBaseUrl(request))")
-      expect(zidCallback).toContain("signInUrl.searchParams.set('redirect_url', returnUrl)")
-      expect(zidCallback).not.toContain("return redirectToConnectZid(request, { error: 'unauthorized' })")
+    it('exchanges the code before post-OAuth account linking without forwarding it', () => {
+      expect(zidCallback).not.toContain('await auth()')
+      expect(zidCallback).not.toContain('redirect_url')
+      expect(zidCallback).not.toContain('request.nextUrl.pathname + request.nextUrl.search')
+      expect(zidCallback.indexOf('await exchangeAuthorizationCodeForResponse(code)'))
+        .toBeLessThan(zidCallback.indexOf('await savePendingZidConnection(tokenData)'))
+      expect(zidCallback).toContain('await consumeZidState(state)')
     })
 
-    it('provisions default workspace for new users if active_workspace_id is absent in /api/zid/callback', () => {
-      expect(zidCallback).toContain("import('@/lib/workspace-defaults')")
-      expect(zidCallback).toContain('await ensureDefaultWorkspace(userId)')
+    it('defers workspace provisioning until account linking', () => {
+      expect(zidCallback).not.toContain('ensureDefaultWorkspace')
+      expect(read('src', 'app', '(public)', 'connect', 'zid', 'page.tsx'))
+        .toContain('await ensureDefaultWorkspace(user.id)')
     })
 
     it('redirects to buildAuthorizationUrl(state) in /api/zid/connect', () => {

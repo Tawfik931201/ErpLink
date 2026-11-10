@@ -242,7 +242,7 @@ async function runTransferInBackground(
     // 3. Setup Store Credentials (platform-specific)
     let storeCreds: any = null
     if (data.platform === 'zid') {
-      const tokenData = await getAccessToken(storeToken.merchant_id)
+      const tokenData = await getAccessToken(storeToken.merchant_id, workspaceId)
       storeCreds = {
         authorization: tokenData.authorization || '',
         managerToken: tokenData.accessToken,

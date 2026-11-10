@@ -32,6 +32,7 @@ export async function getZidOrderStatuses(force = false, merchantId?: string): P
     if (!userId) throw new Error('Unauthorized')
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
+    const workspaceId = user.active_workspace_id
 
     const cacheKey = `zid:order-statuses:${user.active_workspace_id}:${merchantId || 'newest'}`
     if (force) ttlCache.delete(cacheKey)
@@ -56,7 +57,7 @@ export async function getZidOrderStatuses(force = false, merchantId?: string): P
         }
 
         try {
-          const tokenData = await getAccessToken(merchantTok.merchant_id)
+          const tokenData = await getAccessToken(merchantTok.merchant_id, workspaceId)
           const zidCreds = {
             authorization: tokenData.authorization || '',
             managerToken: tokenData.accessToken,

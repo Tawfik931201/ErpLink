@@ -599,18 +599,16 @@ export async function resolveSingleRelationId(
               console.warn(`[SyncEngine] No salla_token found for workspace "${workspaceId}" to resolve parent category`)
             }
           } else {
-            const { data: tokenRow } = await supabaseAdmin
-              .from('merchant_tokens')
-              .select('*')
-              .eq('workspace_id', workspaceId)
-              .limit(1)
-              .maybeSingle()
-
-            if (tokenRow?.access_token && tokenRow?.authorization_token) {
+            // A parent category must use this store's credentials, never the
+            // first store attached to the workspace.
+            const { resolveZidOrderTokenScope } = await import('@/lib/zid/order-enrichment')
+            const tokenRow = storeId ? await resolveZidOrderTokenScope(String(storeId), String(workspaceId)) : null
+            if (tokenRow?.merchant_id) {
+              const { getAccessToken } = await import('@/lib/zid/token')
               const { ZidAPI } = await import('@/lib/zid-client')
+              const tokens = await getAccessToken(tokenRow.merchant_id, String(workspaceId))
               const creds = {
-                authorization: tokenRow.authorization_token,
-                managerToken: tokenRow.access_token,
+                authorization: tokens.authorization || '', managerToken: tokens.accessToken,
                 storeId: tokenRow.store_id || tokenRow.merchant_id,
               }
               const catRes = await ZidAPI.categories.get(creds, platformId)
@@ -814,7 +812,7 @@ async function resolveStoreCategory(
       if (!token) throw new Error('Category store is not connected to this workspace')
       const { ZidAPI } = await import('@/lib/zid-client')
       const { getAccessToken } = await import('@/lib/zid/token')
-      const credentials = await getAccessToken(tokenKey)
+      const credentials = await getAccessToken(tokenKey, workspaceId)
       const response = await ZidAPI.categories.get({ authorization: credentials.authorization || '', managerToken: credentials.accessToken, storeId: token.store_id || tokenKey }, id)
       const body = response.data as any
       data = body?.category ?? body?.categories ?? body

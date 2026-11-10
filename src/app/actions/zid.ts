@@ -29,6 +29,7 @@ export async function getZidLocations(force = false, merchantId?: string): Promi
     if (!userId) throw new Error('Unauthorized')
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
+    const workspaceId = user.active_workspace_id
 
     const cacheKey = `zid:locations:${user.active_workspace_id}:${merchantId || 'newest'}`
     if (force) ttlCache.delete(cacheKey)
@@ -47,7 +48,7 @@ export async function getZidLocations(force = false, merchantId?: string): Promi
           : (merchantToks ?? [])[0] ?? null
         if (!merchantTok) throw new Error('Zid not connected')
 
-        const tokenData = await getAccessToken(merchantTok.merchant_id)
+        const tokenData = await getAccessToken(merchantTok.merchant_id, workspaceId)
         const zidCreds = {
           authorization: tokenData.authorization || '',
           managerToken: tokenData.accessToken,
@@ -102,6 +103,7 @@ export async function getZidPaymentMethods(force = false, merchantId?: string): 
     if (!userId) throw new Error('Unauthorized')
     const user = await getOrCreateDbUser(userId)
     if (!user.active_workspace_id) throw new Error('No active workspace')
+    const workspaceId = user.active_workspace_id
 
     const cacheKey = `zid:payment-methods:${user.active_workspace_id}:${merchantId || 'newest'}`
     if (force) ttlCache.delete(cacheKey)
@@ -119,7 +121,7 @@ export async function getZidPaymentMethods(force = false, merchantId?: string): 
           : (merchantToks ?? [])[0] ?? null
         if (!merchantTok) throw new Error('Zid not connected')
 
-        const tokenData = await getAccessToken(merchantTok.merchant_id)
+        const tokenData = await getAccessToken(merchantTok.merchant_id, workspaceId)
         const zidCreds = {
           authorization: tokenData.authorization || '',
           managerToken: tokenData.accessToken,

@@ -56,7 +56,7 @@ export async function registerEmbeddedAccess(merchantId: string, workspaceId: st
   }, { onConflict: 'merchant_id' })
   if (saveError) throw new Error('Could not save embedded credential')
 
-  const credentials = await getAccessToken(merchantId)
+  const credentials = await getAccessToken(merchantId, workspaceId)
   const authorization = credentials.authorization?.replace(/^Bearer\s+/i, '')
   if (!authorization) throw new Error('Zid authorization is missing')
   const config = getZidConfig()

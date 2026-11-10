@@ -45,11 +45,11 @@ The queue payload for Odoo records is `{ field_mapping_id, model, odooRecordId: 
 
 | Routes | Preservation contract |
 | --- | --- |
-| `GET /api/{zid,salla,shopify}/connect` | Stateless OAuth entry points. Do not add session enforcement merely to make them look consistent with callbacks. |
-| `GET /api/zid/callback` | Exact state/cookie equality (`zid_oauth_state`), code validation, Clerk session and active/default workspace before spending code. Supports JSON-mode branches as well as redirects. Writes tokens for real store identity without deleting other stores; clears state cookie on success. See `src/app/api/zid/callback/route.ts:116`. |
+| `GET /api/{zid,salla,shopify}/connect` | Public OAuth entry points. Zid now persists a hashed, single-use 10-minute state before redirecting; it never requires ERPlink login. |
+| `GET /api/zid/callback` | Validates exact cookie/state equality, atomically consumes state and promptly exchanges the code without a Clerk session. Verifies store identity via Zid, saves an encrypted one-hour pending grant, rotates to an opaque HttpOnly cookie, then redirects to `/connect/zid` without codes/tokens. No account binding or core webhook registration before confirmation. JSON debug responses are retired. |
 | `GET /api/salla/callback` | Exact `salla_oauth_state`, code, session and active/default workspace before token exchange; configured redirect URI must match connect. Redirect responses carry existing error/success query fields; success clears cookie. See `src/app/api/salla/callback/route.ts:73`. |
 | `GET /api/shopify/callback` | Shop validation, exact `shopify_oauth_state`, code, session and workspace, HMAC/token exchange; existing redirects retained. No automatic default workspace creation in this callback. See `src/app/api/shopify/callback/route.ts:29`. |
-| `GET /api/auth/zid/authorize`, `GET /api/auth/zid/callback` | Compatibility forwarding shims, retain query handling and target routes. |
+| `GET /api/auth/zid/authorize`, `GET /api/auth/zid/callback` | Re-export the canonical handlers in place; no login gate and no callback-code forwarding redirect. |
 | `GET /api/sign-up-intent/set` | Redirect shim to `/sign-up`. |
 | `GET` / `POST /api/auth/[...nextauth]` | Deliberate plain-text `Not Found` response with 404; presence of this shim does not mean NextAuth is active. |
 
@@ -98,3 +98,48 @@ Admin routes re-check Clerk and `isAdmin`; their existing choice of 401 versus 4
 | `GET` / `POST /api/admin/impersonate` | Admin/target validation, existing GET/query and POST form/JSON compatibility, cookie/redirect handling in `src/app/api/admin/impersonate/route.ts`. Keep routes and write-block behavior intact. |
 
 No request to any mutating admin endpoint above was made. A successful local build does not validate real webhook registrations, token refresh, merchant permissions, or Odoo method availability.
+
+### Zid OAuth-first account linking (2026-11-10)
+
+Apply `supabase/migrations/20261110171419_zid_oauth_first_onboarding.sql` **before deploying** these routes. It adds server-only `zid_oauth_pending` and the service-role-only, invoker `complete_zid_oauth_connection` RPC. A stable `ENCRYPTION_KEY` is required, including development. Expired grants are rejected immediately and purged on new OAuth attempts.
+
+`GET /connect/zid` is public, dynamic, private/no-store and no-referrer. It shows the verified store and Create account / Link existing account options; Clerk returns to this clean URL. Signed-in merchants explicitly select an owned workspace and confirm. No email-based account matching or silent binding occurs. A one-hour pending grant survives sign-in and process restarts. Expiry requires a fresh authorization. Denial without a callback leaves only an expiring state; starting again is safe.
+
+`POST /api/zid/link` requires the canonical Origin, a Clerk session and the pending HttpOnly cookie. One transaction locks the grant, rechecks workspace ownership, rejects a store already belonging to another workspace, saves the credentials and consumes the grant. Existing store keys and sync settings survive reauthorization; new rows use verified store IDs rather than manager IDs. Same-manager/multiple-store credentials cannot replace one another. Ambiguous legacy rows fail closed. Failed writes roll back without losing the grant. Successful confirmation updates active workspace, registers core webhooks and redirects to `/app/connect-odoo`; webhook setup failure instead redirects to the store page with an explicit warning. Saving Odoo settings retains the existing bootstrap path. Manual billing is unchanged.
+
+The external App Market activation URL should be `/api/zid/connect` (the existing callback URL without a code also enters that handler). Application URL remains the external ERPlink app URL, not `/embedded`. The listing must disclose the ERPlink account and Odoo configuration requirements. Production migration, deployment and a merchant end-to-end browser pass are separate from local verification.
+
+### Zid credential storage and isolation (2026-11-10)
+
+`src/lib/zid/credentials.ts` is the shared encryption/public-projection boundary.
+OAuth confirmation encrypts access, refresh and authorization credentials before
+passing them to the binding transaction. The pending payload remains separately
+encrypted. `src/lib/zid/token.ts` decrypts on the server only, transparently upgrades
+legacy plaintext rows on first use, and preserves their original expiry anchor.
+A stable `ENCRYPTION_KEY` is required for credential writes. Existing ciphertext
+continues to support the configured decrypt-only legacy keys; unreadable
+ciphertext raises an error and is never used as an API credential.
+
+Renewal only updates the exact row/store/workspace and refresh-credential version
+read before contacting Zid. A disconnected, moved or reauthorized connection
+cannot be resurrected or overwritten by that stale refresh. No renewal path
+inserts a new connection. Missing/ambiguous/orphan rows and database errors fail
+closed. When a workspace is supplied by an authenticated caller or job, the
+reader rechecks it before decrypting or migrating credentials. In-flight refresh
+sharing is process-local; compare-and-update protects writes across workers, but
+this is not a distributed provider-call lock.
+
+`getActiveWorkspaceZidTokens` reads an explicit display-field list and applies a
+second allowlist projection to its return value, including previously cached rows.
+Neither plaintext nor encrypted credentials reach browser props/server-action
+responses. Zid API failures drop authenticated Axios request/config objects and
+redact credential values from response diagnostics while preserving status and
+retry headers; OAuth exchange/refresh errors also omit raw provider bodies. Disconnect/settings actions verify the store belongs to the current
+workspace before any webhook API call. The Zid parent-category lookup uses its
+explicit store scope rather than the first store in a workspace.
+
+Deploy these readers and writers together. No additional schema migration is
+needed for encryption (the OAuth-first migration above is still required for
+onboarding). Already stored plaintext is upgraded when a connection is used,
+renewed or reauthorized; idle untouched rows are not claimed to have been
+migrated. No production rows were accessed or rewritten during local validation.

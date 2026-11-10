@@ -10,7 +10,7 @@ export default async function SignUpPage(props: {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background py-12 px-4 sm:px-6 lg:px-8">
-      <SignUpClient signInUrl={signInUrl} />
+      <SignUpClient signInUrl={signInUrl} redirectToZid={searchParams?.redirect_url === "/connect/zid"} />
     </div>
   )
 }

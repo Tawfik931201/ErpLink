@@ -13,6 +13,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { isWorkspaceClosed } from '@/lib/workspace-archive'
+import { publicZidStore, ZID_STORE_PUBLIC_COLUMNS } from '@/lib/zid/credentials'
 import { syncWebhooksWithSettings, unregisterAllZidWebhooks } from '@/lib/zid/webhooks'
 
 async function getOrCreateDbUser() {
@@ -276,7 +277,7 @@ const getCachedZidTokens = unstable_cache(
     // workspace filter: that throws once a second store connects).
     const { data: tokens, error } = await supabase
       .from('merchant_tokens')
-      .select('*')
+      .select(ZID_STORE_PUBLIC_COLUMNS)
       .eq('workspace_id', workspaceId)
       .order('updated_at', { ascending: false, nullsFirst: false })
     if (error) throw new Error('Failed to query merchant tokens: ' + error.message)
@@ -297,14 +298,14 @@ export async function getActiveWorkspaceZidTokens(): Promise<{ success: true; to
     if (!tokens || tokens.length === 0) {
       const { data: freshTokens } = await supabase
         .from('merchant_tokens')
-        .select('*')
+        .select(ZID_STORE_PUBLIC_COLUMNS)
         .eq('workspace_id', user.active_workspace_id)
         .order('updated_at', { ascending: false, nullsFirst: false })
       if (freshTokens && freshTokens.length > 0) {
         tokens = freshTokens
       }
     }
-    return { success: true, tokens }
+    return { success: true, tokens: tokens.map(publicZidStore) }
   } catch (error: any) {
     console.error('Failed to get Zid tokens:', error)
     return { success: false, error: error.message || 'Failed to fetch Zid tokens' }
@@ -317,6 +318,8 @@ export async function disconnectZidStore(merchantId: string) {
     if (!user.active_workspace_id) {
       throw new Error('No active workspace selected')
     }
+
+    await assertOwnsZidMerchant(merchantId)
 
     // Unregister this merchant's webhooks from Zid first (best-effort, non-blocking)
     unregisterAllZidWebhooks(merchantId).catch((err) =>
@@ -348,6 +351,8 @@ export async function updateZidSyncSettings(merchantId: string, settings: any) {
     if (!user.active_workspace_id) {
       throw new Error('No active workspace selected')
     }
+
+    await assertOwnsZidMerchant(merchantId)
 
     // Save new settings to DB
     const { error } = await supabase
@@ -667,7 +672,8 @@ async function getZidCredsForOwnedMerchant(merchantId: string) {
 
   await assertOwnsZidMerchant(merchantId)
 
-  const tokens = await getAccessToken(merchantId)
+  const user = await getOrCreateDbUser()
+  const tokens = await getAccessToken(merchantId, user.active_workspace_id || undefined)
   return {
     ZidAPI,
     creds: {

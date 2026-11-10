@@ -335,7 +335,7 @@ export async function fetchStoreCategories(platform: string = 'zid', storeKey?: 
       const merchantTok: any = pickByKey(merchantToks, r => String((r as any).merchant_id))
       if (!merchantTok) throw new Error('Zid store not connected')
 
-      const tokenData = await getAccessToken(merchantTok.merchant_id)
+      const tokenData = await getAccessToken(merchantTok.merchant_id, user.active_workspace_id)
       const creds = {
         authorization: tokenData.authorization || '',
         managerToken: tokenData.accessToken,

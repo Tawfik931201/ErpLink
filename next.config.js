@@ -124,6 +124,13 @@ const nextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
         ],
       },
+      {
+        source: '/:locale(ar-sa|en-us)?/connect/zid',
+        headers: [
+          { key: 'Cache-Control', value: 'private, no-store' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
     ]
 
     if (corsAllowedOrigin) {

@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import EmbeddedStorageGate from '@/components/embedded-storage-gate'
 import { getClerkAppearance } from '@/lib/clerk-appearance'
 
-export function SignUpClient({ signInUrl }: { signInUrl: string }) {
+export function SignUpClient({ signInUrl, redirectToZid = false }: { signInUrl: string; redirectToZid?: boolean }) {
   const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
@@ -20,6 +20,7 @@ export function SignUpClient({ signInUrl }: { signInUrl: string }) {
   return (
     <EmbeddedStorageGate><SignUp
       fallbackRedirectUrl="/app/dashboard"
+      forceRedirectUrl={redirectToZid ? "/connect/zid" : undefined}
       signInUrl={signInUrl}
       appearance={getClerkAppearance(isDark)}
     /></EmbeddedStorageGate>

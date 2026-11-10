@@ -72,7 +72,12 @@ describe('parent resolution is not Zid-only any more', () => {
     expect(branch).toMatch(/\.from\('salla_tokens'\)/)
     expect(branch).toMatch(/\.eq\('workspace_id', workspaceId\)/)
     // The Zid arm must survive untouched beside it.
-    expect(branch).toMatch(/\.from\('merchant_tokens'\)/)
+    // Zid now resolves the exact store/workspace through the shared resolver;
+    // selecting the first merchant row here would cross stores.
+    expect(branch).toContain('resolveZidOrderTokenScope(String(storeId), String(workspaceId))')
+    expect(branch).toContain('getAccessToken(tokenRow.merchant_id, String(workspaceId))')
+    const resolver = fs.readFileSync(path.join(process.cwd(), 'src/lib/zid/order-enrichment.ts'), 'utf8')
+    expect(resolver).toMatch(/\.from\('merchant_tokens'\)/)
     expect(branch).toMatch(/ZidAPI\.categories\.get/)
   })
 

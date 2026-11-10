@@ -223,7 +223,7 @@ async function runZidArm(args: {
 
   // 2. Zid token (stock is pushed to this Zid store)
   const zidTok = args.storeTok
-  const tokenData = await getAccessToken(zidTok.merchant_id)
+  const tokenData = await getAccessToken(zidTok.merchant_id, workspaceId)
   const zidCreds: ZidCredentials = {
     authorization: tokenData.authorization || '',
     managerToken: tokenData.accessToken,

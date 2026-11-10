@@ -1,44 +1,22 @@
-/**
- * GET /api/zid/connect — المسار Canonical لبدء ربط زد (OAuth).
- *
- * المسار القديم /api/auth/zid/authorize مجرد shim يعيد التوجيه إلى هنا
- * (لا منطق مكرر). صيغة state:
- *   - "<orgId>:<random>" عند تمرير ?organizationId= (تدفق سوق زد / متعدد)
- *   - "<random>" otherwise
- * تُحفظ القيمة الكاملة في كوكي zid_oauth_state ويتحقق منها /api/zid/callback
- * بالمساواة التامة — فيصلح state mismatch بين المسارين القديم والجديد.
- */
-import crypto from 'crypto'
-
-import { auth } from '@clerk/nextjs/server'
+/** Public App Market entry: OAuth precedes ERPlink account setup. */
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { getAppBaseUrl } from '@/lib/app-url'
+import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { buildAuthorizationUrl } from '@/lib/zid/auth'
+import { beginZidAuthorization, oauthCookieOptions } from '@/lib/zid/oauth-pending'
 import { ZidOAuthError } from '@/lib/zid/types'
 
 export async function GET(req: NextRequest) {
+  const limit = checkRateLimit(rateLimitKeyFromHeaders(n => req.headers.get(n), 'oauth-zid-connect'), 30, 60_000)
+  if (!limit.allowed) return NextResponse.json({ error: 'rate_limited' }, { status: 429 })
   try {
-    const { userId } = await auth()
-    if (!userId) {
-      const signInUrl = new URL('/sign-in', getAppBaseUrl(req))
-      const returnUrl = req.nextUrl.pathname + req.nextUrl.search
-      signInUrl.searchParams.set('redirect_url', returnUrl)
-      return NextResponse.redirect(signInUrl)
-    }
-
-    const organizationId = req.nextUrl.searchParams.get('organizationId')?.trim()
-    const random = crypto.randomBytes(16).toString('hex')
-    const state = organizationId ? `${organizationId}:${random}` : random
+    buildAuthorizationUrl()
+    const state = await beginZidAuthorization()
     const response = NextResponse.redirect(buildAuthorizationUrl(state))
 
-    response.cookies.set('zid_oauth_state', state, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 10 * 60,
-      path: '/',
-    })
+    response.cookies.set('zid_oauth_state', state, oauthCookieOptions(10 * 60))
+    response.headers.set('Cache-Control', 'private, no-store')
+    response.headers.set('Referrer-Policy', 'no-referrer')
 
     return response
   } catch (error) {

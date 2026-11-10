@@ -17,7 +17,7 @@
  *
  * Base URL: https://api.zid.sa/
  */
-import axios from 'axios'
+import axios, { AxiosError, AxiosHeaders } from 'axios'
 
 import { checkImpersonationWriteBlock } from './auth'
 
@@ -298,6 +298,32 @@ zidClient.interceptors.request.use(async (config) => {
     await checkImpersonationWriteBlock('Zid API')
   }
   return config
+})
+
+// Axios errors otherwise carry the full request headers (including OAuth
+// credentials) into callers' logs. Keep status/body for routing and retries,
+// but never propagate the authenticated request or its config.
+zidClient.interceptors.response.use(response => response, (error: unknown) => {
+  if (!axios.isAxiosError(error)) return Promise.reject(error)
+  const headers = AxiosHeaders.from(error.config?.headers)
+  const secrets = ['Authorization', 'X-Manager-Token', 'Access-Token']
+    .flatMap(name => {
+      const value = headers.get(name)
+      return typeof value === 'string' ? [value, value.replace(/^Bearer\s+/i, '')] : []
+    }).filter(value => value.length >= 8)
+  const redact = (text: string) => secrets.reduce((result, secret) => result.split(secret).join('[REDACTED]'), text)
+  const data = error.response?.data
+  let safeData: unknown = data
+  if (data !== undefined) {
+    try { safeData = JSON.parse(redact(JSON.stringify(data))) }
+    catch { safeData = undefined }
+  }
+  const safeResponse = error.response ? {
+    status: error.response.status, statusText: redact(error.response.statusText),
+    headers: AxiosHeaders.from(JSON.parse(redact(JSON.stringify(error.response.headers)))),
+    data: safeData, config: undefined as never,
+  } : undefined
+  return Promise.reject(new AxiosError(redact(error.message), error.code, undefined, undefined, safeResponse))
 })
 
 

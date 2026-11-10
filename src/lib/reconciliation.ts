@@ -160,7 +160,7 @@ export async function reconcileZidOrders(
       // Persist the fixed window before its first API call. A partial page may
       // be replayed, but must never disappear as wall time advances.
       await writeState(scope, { cursor, lastError: null })
-      const token = await getAccessToken(merchantKey)
+      const token = await getAccessToken(merchantKey, row.workspace_id)
       if (!token) {
         result.merchantsSkipped += 1
         continue
