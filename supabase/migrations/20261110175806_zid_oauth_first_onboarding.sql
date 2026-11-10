@@ -1,5 +1,12 @@
 BEGIN;
 
+-- Older installations keyed this table only by merchant_id and never applied
+-- the canonical UUID id column. Give each connection a stable row identity
+-- before OAuth completion and fenced token renewal start referencing it.
+ALTER TABLE public.merchant_tokens
+  ADD COLUMN IF NOT EXISTS id uuid NOT NULL DEFAULT gen_random_uuid();
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchant_tokens_row_id ON public.merchant_tokens(id);
+
 -- Server-only grants. Raw handles/codes are never persisted. Unlinked stores
 -- cannot enter normal synchronization through merchant_tokens.
 CREATE TABLE public.zid_oauth_pending (

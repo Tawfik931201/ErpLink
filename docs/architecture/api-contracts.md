@@ -101,7 +101,7 @@ No request to any mutating admin endpoint above was made. A successful local bui
 
 ### Zid OAuth-first account linking (2026-11-10)
 
-Apply `supabase/migrations/20261110171419_zid_oauth_first_onboarding.sql` **before deploying** these routes. It adds server-only `zid_oauth_pending` and the service-role-only, invoker `complete_zid_oauth_connection` RPC. A stable `ENCRYPTION_KEY` is required, including development. Expired grants are rejected immediately and purged on new OAuth attempts.
+Apply `supabase/migrations/20261110175806_zid_oauth_first_onboarding.sql` **before deploying** these routes. It adds server-only `zid_oauth_pending` and the service-role-only, invoker `complete_zid_oauth_connection` RPC. A stable `ENCRYPTION_KEY` is required, including development. Expired grants are rejected immediately and purged on new OAuth attempts.
 
 `GET /connect/zid` is public, dynamic, private/no-store and no-referrer. It shows the verified store and Create account / Link existing account options; Clerk returns to this clean URL. Signed-in merchants explicitly select an owned workspace and confirm. No email-based account matching or silent binding occurs. A one-hour pending grant survives sign-in and process restarts. Expiry requires a fresh authorization. Denial without a callback leaves only an expiring state; starting again is safe.
 
@@ -143,3 +143,13 @@ needed for encryption (the OAuth-first migration above is still required for
 onboarding). Already stored plaintext is upgraded when a connection is used,
 renewed or reauthorized; idle untouched rows are not claimed to have been
 migrated. No production rows were accessed or rewritten during local validation.
+
+Deployment note (2026-11-10): the OAuth-first migration was applied to the
+configured Supabase project and the local filename matches its recorded version
+20261110175806. The deployed legacy merchant_tokens table lacked the canonical
+UUID id column; the migration now adds it and a unique index without removing
+connections. Post-apply checks confirmed both existing connections retained,
+RLS enabled, public access denied, and service-role completion/ownership/replay
+checks passing in a fully rolled-back synthetic transaction. The RLS-without-
+policies advisory is intentional for this server-only table. Application
+end-to-end activation remains a separate merchant/browser check.
