@@ -161,3 +161,12 @@ both use same-origin. The endpoint still rejects null/missing/foreign origins;
 no CSRF bypass or proxy-host allowlist was added. Production probes without
 credentials returned 401 for the canonical Origin and 403 for Origin:null,
 confirming the configured base origin was already correct.
+
+Zid store list schema alignment (2026-11-10): the legacy merchant_tokens table
+also lacked created_at, which is part of the safe display projection. The
+applied migration 20261110182428_align_zid_store_display_schema adds a nullable
+created_at and a now() default for future rows; historical creation times remain
+unknown (NULL). Before applying it, the actual REST display query failed with
+42703; afterwards the exact query returned both connections without credentials.
+The list and Zid detail pages now distinguish a read failure from an empty list
+with a generic retry/support notice. No connections or credentials were deleted.

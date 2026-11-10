@@ -296,11 +296,12 @@ export async function getActiveWorkspaceZidTokens(): Promise<{ success: true; to
 
     let tokens = await getCachedZidTokens(user.active_workspace_id)
     if (!tokens || tokens.length === 0) {
-      const { data: freshTokens } = await supabase
+      const { data: freshTokens, error: freshError } = await supabase
         .from('merchant_tokens')
         .select(ZID_STORE_PUBLIC_COLUMNS)
         .eq('workspace_id', user.active_workspace_id)
         .order('updated_at', { ascending: false, nullsFirst: false })
+      if (freshError) throw new Error('Failed to query merchant tokens: ' + freshError.message)
       if (freshTokens && freshTokens.length > 0) {
         tokens = freshTokens
       }

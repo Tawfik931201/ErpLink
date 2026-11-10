@@ -46,6 +46,14 @@ export default async function ConnectZidPage() {
         </p>
       </div>
 
+      {!tokenRes.success && (
+        <p role="alert" className="rounded-md border border-destructive/25 bg-destructive/5 p-3 text-sm text-destructive">
+          {lang === 'ar'
+            ? 'تعذر تحميل متاجر زد المتصلة. أعد تحميل الصفحة، وإذا استمرت المشكلة تواصل مع الدعم.'
+            : 'Could not load connected Zid stores. Reload the page, or contact support if the problem continues.'}
+        </p>
+      )}
+
       <Suspense fallback={<div className="animate-pulse h-48 rounded-xl bg-muted/40" />}>
         <StoreSelector
           zidTokens={zidTokens}

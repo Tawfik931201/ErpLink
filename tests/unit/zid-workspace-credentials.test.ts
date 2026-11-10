@@ -42,3 +42,18 @@ it('still permits changes to the current workspace store', async () => {
   expect((await updateZidSyncSettings('42', { product_update: { zid2odoo: true, odoo2zid: false } })).success).toBe(true)
   expect(mockSync).toHaveBeenCalledWith('42', expect.any(Object))
 })
+it('reports a database read failure instead of claiming no stores are connected', async () => {
+  supabase.setMockResponder(() => ({ data: null, error: { code: '42703', message: 'display column missing' } }))
+  const result = await getActiveWorkspaceZidTokens()
+  expect(result.success).toBe(false)
+  expect(result).not.toHaveProperty('tokens')
+})
+it('also reports failure when the fresh fallback read fails after an empty cache', async () => {
+  let reads = 0
+  supabase.setMockResponder(() => ++reads === 1
+    ? { data: [], error: null }
+    : { data: null, error: { message: 'fresh read failed' } })
+  const result = await getActiveWorkspaceZidTokens()
+  expect(reads).toBe(2)
+  expect(result.success).toBe(false)
+})
