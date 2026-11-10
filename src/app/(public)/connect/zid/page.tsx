@@ -7,7 +7,9 @@ import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
 import { readPendingZidConnection, ZID_CONNECT_PATH, ZID_PENDING_COOKIE } from '@/lib/zid/oauth-pending'
 
 export const dynamic = 'force-dynamic'
-export const metadata = { title: 'ربط متجر زد | ERPlink', robots: { index: false, follow: false }, referrer: 'no-referrer' }
+// HTML form POSTs under no-referrer send Origin:null and fail the CSRF guard.
+// same-origin preserves Origin internally and still hides referrers externally.
+export const metadata = { title: 'ربط متجر زد | ERPlink', robots: { index: false, follow: false }, referrer: 'same-origin' }
 
 export default async function ZidAccountLinkPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams

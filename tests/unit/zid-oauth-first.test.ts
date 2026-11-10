@@ -123,6 +123,7 @@ it('does not expose provider failure details', async () => {
 })
 it('requires same-origin authenticated confirmation before binding', async () => {
   expect((await link(linkRequest('https://evil.example'))).status).toBe(403)
+  expect((await link(linkRequest('null'))).status).toBe(403)
   expect(mockAuth).not.toHaveBeenCalled()
   expect((await link(linkRequest())).status).toBe(401)
   expect(mockFinish).not.toHaveBeenCalled()

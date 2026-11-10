@@ -59,4 +59,17 @@ describe('next.config.js security headers for embedded apps', () => {
     expect(cspHeader.value).toContain('https://*.salla.sa')
     expect(cspHeader.value).toContain('https://*.myshopify.com')
   })
+
+  it('preserves Origin on the Zid confirmation form while hiding external referrers', async () => {
+    const rules = await nextConfig.headers()
+    const rule = rules.find((r: { source: string }) => r.source.endsWith('/connect/zid'))
+    expect(rule.headers).toContainEqual({ key: 'Referrer-Policy', value: 'same-origin' })
+    expect(rule.headers).toContainEqual({ key: 'Cache-Control', value: 'private, no-store' })
+    // HTML metadata can override the header, so both must agree.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('fs')
+    const page = fs.readFileSync('src/app/(public)/connect/zid/page.tsx', 'utf8')
+    expect(page).toContain("referrer: 'same-origin'")
+    expect(page).not.toContain("referrer: 'no-referrer'")
+  })
 })

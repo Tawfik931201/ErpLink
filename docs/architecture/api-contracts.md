@@ -103,7 +103,7 @@ No request to any mutating admin endpoint above was made. A successful local bui
 
 Apply `supabase/migrations/20261110175806_zid_oauth_first_onboarding.sql` **before deploying** these routes. It adds server-only `zid_oauth_pending` and the service-role-only, invoker `complete_zid_oauth_connection` RPC. A stable `ENCRYPTION_KEY` is required, including development. Expired grants are rejected immediately and purged on new OAuth attempts.
 
-`GET /connect/zid` is public, dynamic, private/no-store and no-referrer. It shows the verified store and Create account / Link existing account options; Clerk returns to this clean URL. Signed-in merchants explicitly select an owned workspace and confirm. No email-based account matching or silent binding occurs. A one-hour pending grant survives sign-in and process restarts. Expiry requires a fresh authorization. Denial without a callback leaves only an expiring state; starting again is safe.
+`GET /connect/zid` is public, dynamic, private/no-store and uses same-origin referrer policy in both HTTP headers and HTML metadata. This keeps same-site HTML form submissions from becoming Origin:null while suppressing external referrers. OAuth callbacks retain no-referrer. It shows the verified store and Create account / Link existing account options; Clerk returns to this clean URL. Signed-in merchants explicitly select an owned workspace and confirm. No email-based account matching or silent binding occurs. A one-hour pending grant survives sign-in and process restarts. Expiry requires a fresh authorization. Denial without a callback leaves only an expiring state; starting again is safe.
 
 `POST /api/zid/link` requires the canonical Origin, a Clerk session and the pending HttpOnly cookie. One transaction locks the grant, rechecks workspace ownership, rejects a store already belonging to another workspace, saves the credentials and consumes the grant. Existing store keys and sync settings survive reauthorization; new rows use verified store IDs rather than manager IDs. Same-manager/multiple-store credentials cannot replace one another. Ambiguous legacy rows fail closed. Failed writes roll back without losing the grant. Successful confirmation updates active workspace, registers core webhooks and redirects to `/app/connect-odoo`; webhook setup failure instead redirects to the store page with an explicit warning. Saving Odoo settings retains the existing bootstrap path. Manual billing is unchanged.
 
@@ -153,3 +153,11 @@ RLS enabled, public access denied, and service-role completion/ownership/replay
 checks passing in a fully rolled-back synthetic transaction. The RLS-without-
 policies advisory is intentional for this server-only table. Application
 end-to-end activation remains a separate merchant/browser check.
+
+Zid confirmation Origin fix (2026-11-10): no-referrer on the confirmation page
+caused browsers to send Origin:null for its native POST form, which correctly
+failed the endpoint's strict Origin check. The page header and HTML metadata now
+both use same-origin. The endpoint still rejects null/missing/foreign origins;
+no CSRF bypass or proxy-host allowlist was added. Production probes without
+credentials returned 401 for the canonical Origin and 403 for Origin:null,
+confirming the configured base origin was already correct.
