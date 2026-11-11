@@ -24,9 +24,8 @@
  * body), but the Portal secret was never set on the host — which made this route
  * return 500 before parsing anything and lost every delivery. Ingress is
  * therefore dual-path; see src/lib/salla/webhook-auth.ts for the full story.
- * Unauthenticated legacy deliveries are accepted but never trusted for the
- * destructive uninstall branch. Re-register every store via
- * POST /api/admin/salla-webhooks/refresh.
+ * Business deliveries require native authentication or the derived header.
+ * Re-register store subscriptions via POST /api/admin/salla-webhooks/refresh.
  */
 import { headers } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
@@ -264,6 +263,18 @@ async function handlePost(req: NextRequest) {
   const data = payload.data ?? {}
   const webhookId = extractSallaWebhookId(payload, getHeader)
 
+  // OAuth persists the link. This notification has no ERP operation.
+  if (event === 'app.installed') {
+    return NextResponse.json({ received: true, processed: false, reason: 'app_installed' })
+  }
+
+  if (isUnauthenticated && event !== 'app.uninstalled') {
+    return NextResponse.json(
+      { error: 'Salla webhook authentication required', message_ar: 'توقيع ويب هوك سلة مطلوب.' },
+      { status: 401 }
+    )
+  }
+
   // ── 1b. Upstream data guard: broken order lines never reach the queue ────
   if (event.startsWith('order.') && data && typeof data === 'object' && 'items' in (data as Record<string, unknown>)) {
     const { validateOrderLines } = await import('@/lib/platform-validation')
@@ -479,15 +490,9 @@ async function handlePost(req: NextRequest) {
   // والتحديث الحقيقي يحمل `updated_at` مختلفاً ⇒ بصمة مختلفة ⇒ يُعالَج.
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
 
-  // ختم تصنيف المصادقة على payload للتسليمات غير المصادقة فقط (legacy).
-  // محرك المزامنة يقرأه ليُجبر إعادة القراءة من API سالا (API يفوز) لهذه
-  // التسليمات بدل الدمج الحالي التي يفوز فيه جسم الحدث — فيصبح المتصل غير
-  // المصادق محفزاً فقط، لا مصدراً للقيم. التسليمات المصادقة سلوكها كما هو.
-  // يُحذف الختم قبل وصول البيانات لمحرك الكتابة حتى لا يدخل في أي تحويل.
   const sallaPayload: Record<string, unknown> = {
     ...(data as Record<string, unknown>),
     ...(webhookId ? { salla_webhook_id: webhookId } : {}),
-    ...(isUnauthenticated ? { salla_auth: authResult.status } : {}),
   }
 
   const enqueued = await enqueueWebhookEvent({

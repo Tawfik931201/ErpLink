@@ -67,6 +67,7 @@ const SALLA_EVENTS: Record<string, ResolvedOperation> = {
   'order.total.price.updated': { entityType: 'orders', operation: 'update' },
   'order.shipping.address.updated': { entityType: 'orders', operation: 'update' },
   'order.coupon.updated': { entityType: 'orders', operation: 'update' },
+  'order.customer.updated': { entityType: 'orders', operation: 'update' },
   'order.refunded': { entityType: 'orders', operation: 'update' },
   'order.deleted': { entityType: 'orders', operation: 'update' },
   'order.cancelled': { entityType: 'orders', operation: 'cancel' },

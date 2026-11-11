@@ -28,6 +28,14 @@ export const SMART_DEFAULT_ORDER_STATUSES: Record<string, Record<string, string>
     reverse_in_progress: 'cancel',
   },
   salla: {
+    payment_pending: 'draft',
+    in_progress: 'draft',
+    delivering: 'sale',
+    request_quote: 'draft',
+    deleted: '',
+    restored: '',
+    restoring: '',
+    closed: '',
     under_review: 'draft',
     confirmed: 'draft',
     preparing: 'draft',
@@ -64,7 +72,7 @@ export function getSmartDefaultOrderState(
   const normPlatform = (platform || 'zid').toLowerCase()
   const mapping = SMART_DEFAULT_ORDER_STATUSES[normPlatform] || SMART_DEFAULT_ORDER_STATUSES.zid
 
-  if (mapping[normStatus]) {
+  if (mapping[normStatus] || (normPlatform === 'salla' && Object.hasOwn(mapping, normStatus))) {
     return mapping[normStatus]
   }
 
@@ -216,7 +224,7 @@ export async function autoBootstrapWorkspace(workspaceId: string): Promise<{
         // (workspace_id, platform, store_id, zid_status).
         await supabase
           .from('order_status_mappings')
-          .upsert(toInsert, { onConflict: 'workspace_id, platform, store_id, zid_status' })
+          .upsert(toInsert, { onConflict: 'workspace_id, platform, store_id, zid_status', ignoreDuplicates: platform === 'salla' })
         bootstrapped.push(`order_status_mappings:${platform}`)
       }
     }

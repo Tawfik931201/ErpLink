@@ -506,21 +506,16 @@ export function extractSallaMerchantIdFromProfile(profilePayload: any): string {
   return String(m)
 }
 
-/**
- * Default Salla store events registered on connect.
- * Mirrors every toggle in `salla-sync-settings.tsx` (SALLA_SYNC_GROUPS) so no
- * UI switch points at an event that was never registered, plus
- * `category.deleted` (needed for delete sync though the UI only exposes
- * created/updated).
- *
- * `order.shipment.*` are included because `normalizeOdooOperation` maps any
- * event containing `deliver` to the `deliver` operation, and the `salla_order_deliver`
- * preset (20260802) maps that to Odoo's delivered state. Without these events
- * the preset could never fire: Salla does not expose order status changes under
- * `order.*` once the parcel moves, only under `order.shipment.*`. A missing
- * shipment event is therefore not a cosmetic gap — it means a shipped order is
- * never marked delivered in Odoo.
- */
+export async function getSallaShipmentOrderId(merchantId: string, shipmentId: string): Promise<string> {
+  const { data } = await callSallaApi(merchantId, 'GET', `/shipments/${encodeURIComponent(shipmentId)}`)
+  const orderId = String(data?.order_id ?? '')
+  if (String(data?.id ?? '') !== shipmentId || !/^\d+$/.test(orderId)) {
+    throw new Error('Salla shipment details did not identify its order')
+  }
+  return orderId
+}
+
+/** Store events received by Standard Mapping. Execution is gated per store. */
 export const SALLA_DEFAULT_WEBHOOK_EVENTS = [
   // Orders. The `order.shipment.*` family is deliberate: it maps to the `orders`
   // entity (the name contains "order"), so a shipment status change arrives as an
@@ -534,6 +529,8 @@ export const SALLA_DEFAULT_WEBHOOK_EVENTS = [
   'order.refunded',
   'order.deleted',
   'order.payment.updated',
+  'order.coupon.updated',
+  'order.customer.updated',
   'order.products.updated',
   'order.total.price.updated',
   'order.shipping.address.updated',
@@ -609,12 +606,20 @@ export interface SallaWebhookRegistrationResult {
  * every delivery. Pass `webhookSecret` to override it with an explicit value.
  */
 export async function registerSallaWebhooks(merchantId: string, webhookSecret?: string): Promise<SallaWebhookRegistrationResult> {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
-  const url = `${appUrl}/api/webhooks/salla`
+  const endpoint = new URL('/api/webhooks/salla', process.env.NEXT_PUBLIC_APP_URL)
+  if (process.env.NODE_ENV === 'production' && (
+    endpoint.protocol !== 'https:' || /(?:^|\.)ngrok(?:-free)?\.(?:app|dev|io)$/i.test(endpoint.hostname)
+  )) {
+    throw new Error('Salla webhooks require a permanent HTTPS application URL in production')
+  }
+  const url = endpoint.toString()
   let registered = 0
   let failed = 0
 
   const credential = getSallaWebhookCredential(webhookSecret)
+  if (!credential) {
+    return { registered: 0, failed: SALLA_DEFAULT_WEBHOOK_EVENTS.length, credentialAttached: false }
+  }
 
   const tasks = SALLA_DEFAULT_WEBHOOK_EVENTS.map((event) => async () => {
     try {
@@ -624,9 +629,7 @@ export async function registerSallaWebhooks(merchantId: string, webhookSecret?: 
         url,
         version: 2,
       }
-      if (credential) {
-        body.headers = [{ key: credential.headerKey, value: credential.headerValue }]
-      }
+      body.headers = [{ key: credential.headerKey, value: credential.headerValue }]
       await callSallaApi(merchantId, 'POST', '/webhooks/subscribe', body)
       registered++
     } catch (err: any) {
@@ -640,12 +643,6 @@ export async function registerSallaWebhooks(merchantId: string, webhookSecret?: 
   // time out; unbounded parallelism trips Salla rate limits.
   await runWithConcurrency(tasks, SALLA_WEBHOOK_CONCURRENCY)
 
-  if (!credential) {
-    console.error(
-      '[SallaClient] No ingress credential derivable (ENCRYPTION_KEY unset) — subscriptions registered without an auth header, so deliveries will be treated as legacy.'
-    )
-  }
-
   return { registered, failed, credentialAttached: Boolean(credential) }
 }
 
@@ -653,15 +650,19 @@ export async function registerSallaWebhooks(merchantId: string, webhookSecret?: 
  * Lists currently subscribed webhooks for a Salla merchant.
  */
 export async function listSallaWebhooks(merchantId: string): Promise<any[]> {
-  const res = await callSallaApi(merchantId, 'GET', '/webhooks')
-  return res.data || []
+  const webhooks: any[] = []
+  for (let page = 1; ; page++) {
+    const res = await callSallaApi(merchantId, 'GET', `/webhooks?page=${page}`)
+    webhooks.push(...(res.data || []))
+    if (!res.pagination?.next && page >= (res.pagination?.totalPages ?? 1)) return webhooks
+  }
 }
 
 /**
  * Deletes a specific Salla webhook subscription by id.
  */
 export async function deleteSallaWebhook(merchantId: string, webhookId: string | number): Promise<void> {
-  await callSallaApi(merchantId, 'DELETE', `/webhooks/${webhookId}`)
+  await callSallaApi(merchantId, 'DELETE', `/webhooks/unsubscribe?id=${encodeURIComponent(String(webhookId))}`)
 }
 
 /**

@@ -207,6 +207,36 @@ describe('product Standard Mapping execution', () => {
     expect(client.write).not.toHaveBeenCalled()
   })
 
+  it('archives a deleted Salla product when on_delete is set and delete is absent from enabled_actions', async () => {
+    const client = makeClient()
+    client.execute.mockResolvedValue({ default_code: { type: 'char' } })
+    client.search.mockImplementation(async model => model === 'product.template' ? [42] : [])
+    const settings = {
+      enabled_actions: ['create', 'update'],
+      on_delete: 'archive',
+      match_zid_field: 'sku',
+      match_odoo_field: 'default_code',
+    }
+    supabase.setMockResponder(table => table === 'standard_mapping_settings'
+      ? { data: [{ store_id: 'salla-product-archive', settings }], error: null }
+      : undefined)
+    const result = await executeOdooOperation({
+      client: asClient(client),
+      mapping,
+      event: 'product.deleted',
+      storeId: 'salla-product-archive',
+      zidEntityId: '42',
+      zidData: { id: 42, sku: 'SALLA-SKU' },
+      odooModel: 'product.template',
+      odooOperation: 'delete',
+      odooValues: {},
+      presetKey: 'salla_product_delete',
+      platformHint: 'salla',
+    })
+    expect(result.status).toBe('success')
+    expect(client.write).toHaveBeenCalledWith('product.template', [42], { active: false })
+  })
+
   it('fails an unavailable customer matching field before a partner write, without silently changing the setting', async () => {
     const client = makeClient()
     client.execute.mockResolvedValue({ phone: { type: 'char' } })

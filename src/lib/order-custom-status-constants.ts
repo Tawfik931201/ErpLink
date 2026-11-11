@@ -23,6 +23,14 @@ export const DEFAULT_ZID_ORDER_STATUSES: ZidStatusOption[] = [
  * match and silently break the custom-field selection).
  */
 export const DEFAULT_SALLA_ORDER_STATUSES: ZidStatusOption[] = [
+  { key: 'payment_pending', label: 'بانتظار الدفع (Payment Pending)' },
+  { key: 'in_progress', label: 'قيد التنفيذ (In Progress)' },
+  { key: 'delivering', label: 'جاري التوصيل (Delivering)' },
+  { key: 'request_quote', label: 'طلب عرض سعر (Request Quote)' },
+  { key: 'deleted', label: 'محذوف (Deleted)' },
+  { key: 'restored', label: 'تمت الاستعادة (Restored)' },
+  { key: 'restoring', label: 'جاري الاستعادة (Restoring)' },
+  { key: 'closed', label: 'مغلق (Closed)' },
   { key: 'under_review', label: 'بإنتظار المراجعة (Under Review)' },
   { key: 'pending_payment', label: 'بانتظار الدفع (Pending Payment)' },
   { key: 'confirmed', label: 'مؤكد (Confirmed)' },

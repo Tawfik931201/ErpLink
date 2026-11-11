@@ -26,7 +26,6 @@ import { translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
 import DisconnectButton from './disconnect-button'
-import SallaSyncSettingsTable from './salla-sync-settings'
 import ShopifySyncSettingsTable from './shopify-sync-settings'
 import SyncSettingsTable from './sync-settings'
 
@@ -233,6 +232,10 @@ export default function StoreSelector({
 
   const getErrorMessage = (err: string) => {
     switch (err) {
+      case 'salla_webhook_registration_failed':
+        return ar
+          ? 'تم حفظ اتصال سلة. تعذر تفعيل كل اشتراكات التحديثات. أعد الربط أو تواصل مع الدعم.'
+          : 'The Salla connection was saved. Some update subscriptions could not be activated. Reconnect or contact support.'
       case 'webhook_registration_failed':
         return ar
           ? 'تم حفظ اتصال المتجر، لكن لم يكتمل تفعيل استقبال التحديثات. أعد حفظ إعدادات المزامنة لهذا المتجر، أو تواصل مع الدعم إذا استمرت المشكلة.'
@@ -845,7 +848,9 @@ export default function StoreSelector({
               <InfoField label={ar ? 'حالة المزامنة' : 'Sync Status'}>
                 <span className="inline-flex items-center gap-1 font-bold text-primary text-xs">
                   <Check className="h-3.5 w-3.5" />
-                  {ar ? 'نشطة تلقائياً' : 'Active Automatically'}
+                  {detail.platform === 'salla'
+                    ? (ar ? 'تُسجَّل عند الربط' : 'Registered on connection')
+                    : (ar ? 'نشطة تلقائياً' : 'Active Automatically')}
                 </span>
               </InfoField>
             </div>
@@ -858,7 +863,9 @@ export default function StoreSelector({
                 {ar ? 'إعدادات المزامنة المتقدمة' : 'Advanced Sync Settings'}
               </h2>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                {t('sync.coreOn')}
+                {detail.platform === 'salla'
+                  ? (ar ? 'تُدار مزامنة سلة من التعيين القياسي.' : 'Manage Salla synchronization in Standard Mapping.')
+                  : t('sync.coreOn')}
               </p>
             </div>
             <div className="pt-2 border-t border-border/50">
@@ -869,10 +876,9 @@ export default function StoreSelector({
                 />
               )}
               {detail.platform === 'salla' && (
-                <SallaSyncSettingsTable
-                  merchantId={detailToken.merchant_id}
-                  initialSettings={detailToken.sync_settings}
-                />
+                <Link href="/app/mapping-center" className="text-sm text-primary hover:underline">
+                  {ar ? 'فتح مركز التعيين' : 'Open Mapping Center'}
+                </Link>
               )}
               {detail.platform === 'shopify' && (
                 <ShopifySyncSettingsTable

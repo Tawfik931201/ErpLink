@@ -24,7 +24,7 @@ import {
   executeErpNextOperation,
   fetchErpNextFieldMeta,
 } from '@/lib/erpnext-engine'
-import { resolveOperationForEvent } from '@/lib/event-operation'
+import { resolveEventOperation, resolveOperationForEvent } from '@/lib/event-operation'
 import { isInventorySyncErpToStoreEnabled } from '@/lib/inventory-sync-settings'
 import { getEffectiveStandardMappingSettings, resolveSettingsStoreKey } from '@/lib/mapping-settings'
 import {
@@ -2097,7 +2097,14 @@ const HARDCODED_FIELD_META: Record<string, { ttype: string; relation?: string }>
 // Known preset_key format: {platform}_{model}_{action}
 // e.g. "zid_product_create", "salla_order_update", "shopify_product_create"
 //                          "zid_category", "shopify_category_create"
-function derivePresetKey(event: string, platform: string): string | null {
+export function derivePresetKey(event: string, platform: string): string | null {
+  if (platform === 'salla') {
+    const resolved = resolveEventOperation(event, platform)
+    if (!resolved) return null
+    if (resolved.entityType === 'categories') return 'salla_category'
+    return `salla_${resolved.entityType.slice(0, -1)}_${resolved.operation}`
+  }
+
   const ev = event.toLowerCase()
   let model = ''
   let action = ''
@@ -4414,7 +4421,8 @@ async function processWebhookEventInternal(
   // تحويل أو كتابة لاحقة. للتسليمات غير المصادقة تُعاد القراءة القيمية من
   // API المنصة (API يفوز في الدمج) — المتصل غير المصادق يبقى محفزاً فقط،
   // لا مصدراً للقيم. التسليمات المصادقة: سلوك الدمج كما هو تماماً.
-  const deliveryAuth = String((data as any)?.zid_auth ?? (data as any)?.salla_auth ?? '').toLowerCase()
+  const sallaDeliveryAuth = String((data as any)?.salla_auth ?? '').toLowerCase()
+  const deliveryAuth = String((data as any)?.zid_auth ?? sallaDeliveryAuth).toLowerCase()
   if ((data as any)?.zid_auth !== undefined) delete (data as any).zid_auth
   if ((data as any)?.salla_auth !== undefined) delete (data as any).salla_auth
   const isLegacyDelivery = deliveryAuth === 'legacy' || deliveryAuth === 'unconfigured'
@@ -4424,6 +4432,25 @@ async function processWebhookEventInternal(
     failed: 0,
     skipped: 0,
     records: [],
+  }
+
+  if (platformHint === 'salla' && (sallaDeliveryAuth === 'legacy' || sallaDeliveryAuth === 'unconfigured')) {
+    if (workspaceIdParam) {
+      await logSync({
+        workspace_id: workspaceIdParam,
+        field_mapping_id: '',
+        event,
+        store_id: storeIdStr,
+        zid_entity_id: undefined,
+        odoo_model: 'webhook-ingress',
+        status: 'skipped',
+        error_message: 'Salla webhook authentication required',
+        payload: {},
+        trigger_type: 'automatic',
+        platform: 'salla',
+      })
+    }
+    return { ...result, processed: 1, skipped: 1 }
   }
 
   let resolvedWorkspaceId = workspaceIdParam
@@ -4692,6 +4719,16 @@ async function processWebhookEventInternal(
   // (The Salla webhook route enqueues raw payloads only and returns 200
   // immediately — Salla retries on timeout. Enrichment used to block the
   // webhook response; it now happens here inside the queue worker.)
+  const isSallaShipment = syncPlatform === 'salla' && normalizedEvent.startsWith('order.shipment.')
+  let sallaShipmentOrderId = isSallaShipment
+    ? (data as any)?.order?.id ?? (data as any)?.order_id
+    : undefined
+  const sallaShipmentId = isSallaShipment ? (data as any)?.id : undefined
+  if (isSallaShipment && sallaShipmentOrderId == null && sallaShipmentId != null &&
+      ((data as any)?.shipping_number != null || (data as any)?.reference_id != null)) {
+    const { getSallaShipmentOrderId } = await import('./salla-client')
+    sallaShipmentOrderId = await getSallaShipmentOrderId(storeIdStr, String(sallaShipmentId))
+  }
   if (syncPlatform === 'salla') {
     const keys = data && typeof data === 'object' ? Object.keys(data) : []
 
@@ -4720,7 +4757,7 @@ async function processWebhookEventInternal(
     const isShipmentEvent = normalizedEvent.includes('shipment')
     const shipmentHasOrder = (data as any)?.order && typeof (data as any).order === 'object'
     const shipmentEntityId = isShipmentEvent && !shipmentHasOrder
-      ? (data as any)?.order_id ?? (data as any)?.order?.id
+      ? sallaShipmentOrderId
       : undefined
     // Payload size alone is the wrong test for orders. An `order.updated` payload
     // can carry a dozen fields and still omit `items`, and it would pass the
@@ -4741,7 +4778,7 @@ async function processWebhookEventInternal(
     // كثيفاً — للمتصل غير المصادق صحة الحدث ليست مضمونة، فالجسم محفز فقط
     // و API هي مصدر القيم (نفس قاعدة ثقة مسار أودو → المتجر).
     const legacyNeedsFetch = isLegacyDelivery && hasEntity
-    if (legacyNeedsFetch || missingOrderItems || missingParentId || isThin) {
+    if (legacyNeedsFetch || missingOrderItems || missingParentId || isThin || shipmentEntityId != null) {
       try {
         const { getSallaOrder, getSallaCustomer, getSallaCategory, getSallaProduct } = await import('./salla-client')
         if (normalizedEvent.startsWith('order.')) {
@@ -4788,13 +4825,15 @@ async function processWebhookEventInternal(
     const shipmentOrder = (data as any)?.order
     const hasShipmentOrder =
       shipmentOrder && typeof shipmentOrder === 'object' && !Array.isArray(shipmentOrder)
-    const targetOrderId = hasShipmentOrder ? (shipmentOrder as any).id : (data as any)?.order_id
+    const targetOrderId = (hasShipmentOrder ? (shipmentOrder as any).id : undefined) ?? sallaShipmentOrderId
     if (targetOrderId !== undefined && targetOrderId !== null && String(targetOrderId) !== '') {
       data = {
         ...(hasShipmentOrder ? (shipmentOrder as Record<string, unknown>) : data),
         id: targetOrderId,
-        __shipment_id: (data as any)?.__shipment_id ?? (data as any)?.id,
+        __shipment_id: (data as any)?.__shipment_id ?? sallaShipmentId,
       }
+    } else {
+      throw new Error('Salla shipment has no verified order ID')
     }
   }
 
@@ -7084,7 +7123,8 @@ export async function executeOdooOperation(params: {
   // Resolve platform once for reuse across order/cancel/deliver operations
   const execPlatform: 'zid' | 'salla' | 'shopify' = platformHint ?? getPlatformFromEvent(event)
   if ((odooModel === 'product.template' || odooModel === 'product.product' || odooModel === 'product.category') &&
-      (mergedSettings.disabled || (Array.isArray(mergedSettings.enabled_actions) && !mergedSettings.enabled_actions.includes(odooOperation)))) {
+      (mergedSettings.disabled || (Array.isArray(mergedSettings.enabled_actions) && !mergedSettings.enabled_actions.includes(odooOperation) &&
+        !(execPlatform === 'salla' && odooOperation === 'delete' && mergedSettings.on_delete && mergedSettings.on_delete !== 'nothing')))) {
     const message = `Product ${odooOperation} is disabled in Standard Mapping settings`
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: 'skipped', error_message: message, payload: zidData, trigger_type: triggerType, platform: execPlatform })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message }
@@ -8348,6 +8388,16 @@ export async function executeOdooOperation(params: {
 
   // ── Deliver operation (sale.order only) ────────────────────────────────────
   if (odooOperation === 'deliver') {
+    if (execPlatform === 'salla' && mergedSettings.order?.partial_fulfillment) {
+      const message = 'Review partial Salla delivery in Odoo. Shipment quantities could not be verified for automatic validation.'
+      await logSync({
+        id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id,
+        event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel,
+        status: 'skipped', error_message: message, payload: zidData, trigger_type: triggerType, platform: execPlatform,
+      })
+      return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: 'skipped', message }
+    }
+
     const existingId = (odooModel === 'sale.order' ? existingSaleOrderId : await findExistingOdooRecord(client, odooModel, zidData, odooValues, mapping, matchStrategy, fixedMatch, mapping.workspace_id, execPlatform))
     if (existingId === null) {
       const msg = `No matching ${odooModel} record found in Odoo for deliver`

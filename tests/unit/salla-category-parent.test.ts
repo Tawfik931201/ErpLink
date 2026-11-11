@@ -94,7 +94,7 @@ describe('a parentless category payload is completed before mapping', () => {
     // legacyNeedsFetch prepends the legacy re-fresh (API wins for
     // unauthenticated deliveries); the completeness gates stay.
     expect(source).toMatch(
-      /if \(legacyNeedsFetch \|\| missingOrderItems \|\| missingParentId \|\| isThin\) \{/
+      /if \(legacyNeedsFetch \|\| missingOrderItems \|\| missingParentId \|\| isThin \|\| shipmentEntityId != null\) \{/
     )
   })
 })

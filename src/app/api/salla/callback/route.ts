@@ -42,13 +42,8 @@ function mapSallaError(error: string): string {
 }
 
 /**
- * Core preset saved for NEW Salla connections (store → ERP, all order events
- * + products + customers + categories). Must mirror CORE_SALLA_EVENTS in
- * `src/app/(app)/app/connect-store/salla-sync-settings.tsx` — the UI falls
- * back to that list only when the DB row has no settings, so saving it here
- * is what makes a fresh store sync out of the box with zero manual toggles.
- * (`category.deleted` does not exist in Salla's catalogue — created/updated
- * only — so it is deliberately absent.)
+ * Legacy connection settings retained for existing readers. Standard Mapping
+ * controls inbound Salla operations.
  */
 const SALLA_CONNECT_SYNC_DEFAULTS: Record<string, { odoo2salla: boolean; salla2odoo: boolean }> =
   Object.fromEntries(
@@ -269,9 +264,11 @@ export async function GET(request: NextRequest) {
     // empty string used to mean "no auth header at all", which is precisely why
     // every delivery arrived unauthenticated. An explicit value is still honoured
     // for operators who want the header to mirror the env secret.
+    let webhookRegistrationComplete = false
     try {
       const { registerSallaWebhooks } = await import('@/lib/salla-client')
       const result = await registerSallaWebhooks(merchantId, undefined)
+      webhookRegistrationComplete = result.failed === 0 && result.credentialAttached
       if (result.failed > 0) {
         console.error(
           `[SallaCallback] ${result.failed}/${result.registered + result.failed} Salla webhook subscriptions failed for merchant ${merchantId} — repair with POST /api/admin/salla-webhooks/refresh`
@@ -279,12 +276,11 @@ export async function GET(request: NextRequest) {
       }
       if (!result.credentialAttached) {
         console.error(
-          `[SallaCallback] Subscriptions registered without an ingress credential for merchant ${merchantId} (no ENCRYPTION_KEY) — deliveries will be treated as legacy.`
+          `[SallaCallback] Subscriptions could not be registered with an ingress credential for merchant ${merchantId}.`
         )
       }
     } catch {
-      // Webhook registration is best-effort — the store is connected even if
-      // some events failed to register; they can be repaired later.
+      console.error('[SallaCallback] Webhook registration could not be completed')
     }
 
     // Auto-bootstrap workspace defaults in background (zero-configuration)
@@ -297,7 +293,9 @@ export async function GET(request: NextRequest) {
     // NOTE: pass the raw store name — URLSearchParams encodes it once.
     // (Pre-encoding here double-encoded Arabic names.)
     const response = redirectToConnectStore(request, {
-      success: 'salla_connected',
+      ...(webhookRegistrationComplete
+        ? { success: 'salla_connected' }
+        : { error: 'salla_webhook_registration_failed' }),
       store: storeName || merchantId,
     })
 

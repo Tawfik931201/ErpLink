@@ -6,7 +6,7 @@ import {
   resolveEventOperation,
   resolveOperationForEvent,
 } from '@/lib/event-operation'
-import { normalizeOdooOperation } from '@/lib/sync-engine'
+import { derivePresetKey, normalizeOdooOperation } from '@/lib/sync-engine'
 
 /**
  * Event → operation is the highest-consequence routing decision in the app.
@@ -77,6 +77,16 @@ describe('Salla event catalogue ↔ classifier agreement', () => {
 })
 
 describe('the gate and the writer can no longer disagree', () => {
+  it('selects the matching Standard Mapping preset for every Salla subscription', () => {
+    for (const event of SUBSCRIBED) {
+      const { entityType, operation } = resolveEventOperation(event, 'salla')!
+      const expected = entityType === 'categories'
+        ? 'salla_category'
+        : `salla_${entityType.slice(0, -1)}_${operation}`
+      expect({ event, preset: derivePresetKey(event, 'salla') }).toEqual({ event, preset: expected })
+    }
+  })
+
   it('routes every subscribed event to the same operation on both paths', () => {
     for (const event of SUBSCRIBED) {
       const gated = resolveEventOperation(event, 'salla')!
