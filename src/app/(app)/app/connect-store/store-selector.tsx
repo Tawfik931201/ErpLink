@@ -20,7 +20,6 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 import { getZidWebhookHealth, recoverZidBrokenWebhooks } from '@/app/actions/workspaces'
 import { Button, buttonVariants } from '@/components/ui/button'
-import ZidEmbeddedButton from '@/components/zid-embedded-button'
 import { useToast } from '@/hooks/use-toast'
 import type { Language } from '@/lib/translations'
 import { translations } from '@/lib/translations'
@@ -752,9 +751,6 @@ export default function StoreSelector({
                 </a>
               )}
 
-              {detail.platform === 'zid' && (
-                <ZidEmbeddedButton merchantId={String(detailToken.merchant_id)} lang={lang} />
-              )}
               {detail.platform === 'zid' && (
                 <DisconnectButton
                   merchantId={String(detailToken.merchant_id)}
