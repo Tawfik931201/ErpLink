@@ -24,6 +24,8 @@ Order references use `orders/related-matching.ts` to honor saved Customers/Produ
 
 When an explicitly selected matching key is absent from the order, `zid/order-related-data.ts` reads the customer's/product's details within the store pull budget and deduplicates identical reads per execution client and store. Only matching uses the hydrated source: catalog prices and quantities never replace order line amounts.
 
+Salla order creation hydrates thin deliveries with Order Details and the separate Order Items endpoint. It reads native net unit prices, discounts and COD fees, including an explicit zero fee. The saved default pricelist takes precedence over automatic currency selection. The create saves a scoped order link before confirmation, invoicing and payment so a retry can resume on the same order. Enabled status mappings control workflow actions and the saved automatic flags supply defaults. Odoo rejections surface in the sync result. See `tests/unit/salla-order-create-audit.test.ts` for the mocked creation path.
+
 ### Importing Salla customers
 
 `src/app/actions/transfers.ts`: `startInitialTransfer` validates workspace/ERP/store selection; `runTransferInBackground` paginates `listSallaCustomers` for customer imports. The actual merchant API reader is `listSallaCustomers` in `src/lib/salla-client.ts`, through its token/transport functions. Mapping, metadata and duplicate matching use `buildOdooValues`, `fetchFieldMeta` and `findExistingOdooRecord` from `src/lib/sync-engine.ts`.

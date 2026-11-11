@@ -10,6 +10,7 @@ const idOf = (value: unknown): number => Number(Array.isArray(value) ? value[0] 
 export async function resolveOrderCurrencySettings(params: {
   client: OdooClient; payload: Record<string, unknown>; values: Record<string, unknown>
   settings: Record<string, any>; create: boolean; existingOrderId?: number | null; mappedCurrencyId?: number; mappedConversionRate?: number
+  platform?: 'zid' | 'salla'
 }): Promise<{ companyId: number; currencyId: number; pricelistId: number; rate: number }> {
   const { client, payload, values, settings } = params
   if (params.existingOrderId) {
@@ -40,7 +41,8 @@ export async function resolveOrderCurrencySettings(params: {
     if (!list || !list.active || (idOf(list.company_id) && idOf(list.company_id) !== companyId)) throw new Error(`Configured order pricelist ${id} is unavailable for company ${companyId}`)
     return list
   }
-  const sourceCode = extractOrderCurrency(payload, 'zid')
+  const sourceCode = extractOrderCurrency(payload, params.platform ?? 'zid', params.platform === 'salla' ? '' : 'SAR')
+  if (params.platform === 'salla' && !/^[A-Z]{3}$/.test(sourceCode)) throw new Error('Salla order currency is missing or invalid')
   const [source] = await read<Currency>('res.currency', [['name', '=', sourceCode]], ['id', 'name', 'active'])
   const explicitCurrencyId = idOf(values.currency_id)
   const explicitPricelistId = idOf(values.pricelist_id)
@@ -77,7 +79,8 @@ export async function resolveOrderCurrencySettings(params: {
         anchorCurrency = storeCurrencies[0]
       }
       if (!anchorCurrency) throw new Error(`Cannot convert unknown order currency ${sourceCode} to ${target.name}`)
-      const rawDate = String(payload.created_at || payload.date || new Date().toISOString())
+      const sourceDate = payload.created_at || payload.date
+      const rawDate = String((sourceDate && typeof sourceDate === 'object' ? (sourceDate as { date?: string }).date : sourceDate) || new Date().toISOString())
       const date = new Date(rawDate)
       if (!Number.isFinite(date.getTime())) throw new Error('Invalid order date for currency conversion')
       const day = date.toISOString().slice(0, 10)

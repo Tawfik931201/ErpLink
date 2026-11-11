@@ -444,6 +444,21 @@ export async function getSallaOrder(merchantId: string, orderId: string | number
   }
 }
 
+/** Order Details defaults to the light response. Read all items separately. */
+export async function getSallaOrderItems(merchantId: string, orderId: string | number): Promise<unknown[]> {
+  const items: unknown[] = []
+  for (let page = 1; page <= 100; page++) {
+    const query = new URLSearchParams({ order_id: String(orderId), page: String(page) })
+    const res = await callSallaApi(merchantId, 'GET', `/orders/items?${query}`)
+    if (!Array.isArray(res.data)) throw new Error('Invalid Salla order items response')
+    items.push(...res.data)
+    const hasNext = res.pagination?.next || res.pagination?.next_page || page < (res.pagination?.totalPages ?? 1)
+    if (!hasNext) return items
+    if (!res.data.length) throw new Error('Incomplete paginated Salla order items response')
+  }
+  throw new Error('Salla order items pagination did not complete')
+}
+
 /**
  * Fetch a single customer with full details (used to enrich thin webhooks).
  */

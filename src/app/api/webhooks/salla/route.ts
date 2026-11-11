@@ -278,7 +278,7 @@ async function handlePost(req: NextRequest) {
   // ── 1b. Upstream data guard: broken order lines never reach the queue ────
   if (event.startsWith('order.') && data && typeof data === 'object' && 'items' in (data as Record<string, unknown>)) {
     const { validateOrderLines } = await import('@/lib/platform-validation')
-    const check = validateOrderLines((data as Record<string, unknown>).items)
+    const check = validateOrderLines((data as Record<string, unknown>).items, 'salla')
     if (!check.ok) {
       // الحدث يُحفظ كيتيم (بلا workspace) بدل أن يضيع — استثناء صلاحية
       // القائمة يعود للإدارة بطابعه، والرد يبقى 400 حتى لا تعيد سالا الإرسال.

@@ -50,13 +50,15 @@ export function validateStatus(value: unknown): PlatformValidation {
  * items is NOT rejected here (thin payloads are enriched in the worker) —
  * but an order WITH broken lines is.
  */
-export function validateOrderLines(items: unknown): PlatformValidation {
+export function validateOrderLines(items: unknown, platform?: 'salla'): PlatformValidation {
   if (items === undefined || items === null) return { ok: true }
   if (!Array.isArray(items)) return { ok: false, error: 'invalid_items_shape' }
   for (const line of items.slice(0, 500)) {
     const l = line as Record<string, unknown>
     if (!l || typeof l !== 'object') return { ok: false, error: 'invalid_line_shape' }
-    const price = l.price ?? l.total ?? l.unit_price
+    const amounts = l.amounts as { price_without_tax?: unknown } | undefined
+    let price = (platform === 'salla' ? amounts?.price_without_tax : undefined) ?? l.price ?? l.total ?? l.unit_price
+    if (platform === 'salla' && price && typeof price === 'object' && 'amount' in price) price = price.amount
     const qty = l.quantity ?? l.qty ?? l.count
     if (price !== undefined) {
       const r = validatePrice(price)

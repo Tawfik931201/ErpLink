@@ -12,8 +12,10 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink, type EntityLinkPlatform } from '@/lib/entity-links'
+import { withErpCreateIdentity } from '@/lib/erp-effect-context'
 import { getEffectiveStandardMappingSettings, type MappingStoreType } from '@/lib/mapping-settings'
 import type { OdooClient } from '@/lib/odoo-client'
+import { readSallaAmount } from '@/lib/salla/order-amounts'
 import { supabase } from '@/lib/supabase'
 
 import { normalizePaymentKey, paymentKeysFromOrder } from './analytic-distribution'
@@ -27,9 +29,17 @@ export interface PaymentJournalMapping {
 /**
  * Determine if an order is marked as paid across various platform payload shapes.
  */
-export function isOrderPaid(zidData: Record<string, unknown> | null | undefined): boolean {
+export function isOrderPaid(zidData: Record<string, unknown> | null | undefined, platform?: string): boolean {
   if (!zidData || typeof zidData !== 'object') return false
   const d = zidData as any
+  if (platform === 'salla') {
+    if (d.is_pending_payment === true) return false
+    const paid = readSallaAmount(d.payment_actions?.refund_action?.paid_amount)
+    const total = readSallaAmount(d.amounts?.total ?? d.total)
+    // Payment identity is per order. Wait for full payment so an initial
+    // partial amount cannot consume the identity for the settled order.
+    if (paid !== undefined && total !== undefined) return paid > 0 && Math.round(paid * 100) >= Math.round(total * 100)
+  }
   const candidates = [
     d.payment_status,
     d.payment?.status,
@@ -64,9 +74,13 @@ export function isOrderPaid(zidData: Record<string, unknown> | null | undefined)
 /**
  * Extract total payment amount from order payload.
  */
-export function extractPaymentAmount(zidData: Record<string, unknown> | null | undefined): number {
+export function extractPaymentAmount(zidData: Record<string, unknown> | null | undefined, platform?: string): number {
   if (!zidData || typeof zidData !== 'object') return 0
   const d = zidData as any
+  if (platform === 'salla') {
+    const total = readSallaAmount(d.amounts?.total ?? d.total)
+    if (total !== undefined) return total
+  }
   const candidates = [
     d.order_total,
     d.total_price,
@@ -376,7 +390,7 @@ export async function syncOrderPayment(params: {
       return { skippedReason: 'payment_sync_disabled' }
     }
 
-    if (!isOrderPaid(zidData)) {
+    if (!isOrderPaid(zidData, platform)) {
       return { skippedReason: 'order_not_paid' }
     }
 
@@ -424,7 +438,7 @@ export async function syncOrderPayment(params: {
     }
 
     const currencyId = Array.isArray(order.currency_id) ? order.currency_id[0] : order.currency_id
-    let amount = extractPaymentAmount(zidData)
+    let amount = extractPaymentAmount(zidData, platform)
     // Lines may have been converted into the configured fallback currency.
     // A fully paid source total cannot be reused with a different currency id.
     // Use Odoo's resulting total, preserving the exact conversion and rounding
@@ -445,7 +459,7 @@ export async function syncOrderPayment(params: {
     }
 
     const paymentDate = extractPaymentDate(zidData)
-    const paymentRef = `Zid Order #${order.name || zidEntityId}`
+    const paymentRef = `${platform === 'salla' ? 'Salla' : 'Zid'} Order #${order.name || zidEntityId}`
 
     let paymentId: number
     if (existingPaymentId) {
@@ -456,7 +470,7 @@ export async function syncOrderPayment(params: {
         'account.journal', [['id', '=', journalId], ['company_id', '=', companyId], ['type', 'in', ['bank', 'cash']]], ['id'], 1
       )
       if (!journals?.[0]?.id) return { skippedReason: 'invalid_payment_journal_for_order_company', errorReason: 'invalid_payment_journal_for_order_company' }
-      paymentId = await createOdooPayment(client, {
+      const createPayment = () => createOdooPayment(client, {
         partnerId,
         amount,
         journalId,
@@ -466,6 +480,7 @@ export async function syncOrderPayment(params: {
         companyId,
         post: false,
       })
+      paymentId = platform === 'salla' ? await withErpCreateIdentity('salla-order-payment', createPayment) : await createPayment()
 
       const linked = await upsertEntityLink(
         {

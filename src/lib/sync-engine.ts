@@ -16,7 +16,7 @@ import { decrypt } from '@/lib/crypto'
 import { injectCustomerCompanyFields } from '@/lib/customers/company-fields'
 import { validateCustomerMatchSettings } from '@/lib/customers/matching-settings'
 import { resolveEntityLinkId, STORED_ODOO_ID_FIELD, upsertEntityLink } from '@/lib/entity-links'
-import { withErpExecutionContext } from '@/lib/erp-effect-context'
+import { withErpCreateIdentity, withErpExecutionContext } from '@/lib/erp-effect-context'
 import { getErpExecutionScope, resolveExecutionTarget, validateExecutionTarget, withErpTarget, type ExecutionTarget } from '@/lib/erp-execution-target'
 import {
   buildErpNextValues,
@@ -65,6 +65,7 @@ import { extractSallaRefundedLines, isReturnSignal, type StoreReturnLine } from 
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
 import { fetchZidReturnState } from '@/lib/returns/zid'
+import { hasPricedSallaItems, hasSallaItemPrice, orderItemBasePriceKeys, readSallaAmount, readSallaOrderDiscount } from '@/lib/salla/order-amounts'
 import { resolvePath, resolveShopifyCustomerFullName, resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
 import type {
@@ -1242,8 +1243,8 @@ export async function buildOrderLineItems(
     fallbackTaxRatePercent: fallbackTaxRate,
   })
 
-  const defaultLineTaxCmd: [number, number, number[]] | null = isCreation && enableVat && resolvedVatTaxId
-    ? [6, 0, [resolvedVatTaxId]]
+  const defaultLineTaxCmd: [number, number, number[]] | null = isCreation && enableVat && (resolvedVatTaxId || platform === 'salla')
+    ? [6, 0, resolvedVatTaxId ? [resolvedVatTaxId] : []]
     : (isCreation && pricesIncludeTax && taxRatePercent === 0 ? [6, 0, []] : null)
 
   if (pricesIncludeTax) {
@@ -1301,13 +1302,16 @@ export async function buildOrderLineItems(
     ? orderStdSettings._currency_conversion_rate
     : (typeof orderStdSettings?.currency_conversion_rate === 'number' ? orderStdSettings.currency_conversion_rate : 1.0)
 
-  const rawCodFee = resolveZidCodAmount(zidData) || codAmount
+  const sallaCodFee = platform === 'salla' ? readSallaAmount(resolvePath(zidData, 'amounts.cash_on_delivery')) : undefined
+  const rawCodFee = sallaCodFee ?? (resolveZidCodAmount(zidData) || codAmount)
   const codFeeAmount = convertCurrencyAmount(rawCodFee, currencyConversionRate)
 
   const rawShippingCost = resolveZidShippingCost(zidData)
   const shippingCost = convertCurrencyAmount(rawShippingCost, currencyConversionRate)
 
-  const orderLevelDiscount = resolveOrderDiscountAmount(zidData)
+  const sallaOrderDiscount = platform === 'salla' ? readSallaOrderDiscount(zidData) : undefined
+  let orderLevelDiscount = resolveOrderDiscountAmount(zidData)
+  if (sallaOrderDiscount !== undefined) orderLevelDiscount = sallaOrderDiscount
   const convertedOrderDiscount = convertCurrencyAmount(orderLevelDiscount, currencyConversionRate)
   console.info(`[SyncEngine] Order line settings: addShipping=${addShippingAsLine} addDiscount=${addDiscountAsLine} discountMode=${discountMode} shippingCost=${shippingCost} addCod=${addCodAsLine} codFee=${codFeeAmount} orderDiscount=${convertedOrderDiscount} rate=${currencyConversionRate}`)
 
@@ -1377,6 +1381,7 @@ export async function buildOrderLineItems(
   const hasLineDiscountMapping = effectiveLineMappings.some(m => m.erpField === 'discount')
   // Track whether any product will actually carry discount to satisfy Option C rule
   let anyProductHasDiscount = false
+  let appliedSallaLineDiscount = 0
 
   for (const product of products) {
     const productData = (product && typeof product === 'object') ? product as Record<string, unknown> : {}
@@ -1437,11 +1442,17 @@ export async function buildOrderLineItems(
 
       // Numeric
       let val: any = rawValue
+      const isSallaNetPrice = platform === 'salla' &&
+        (fm.zidField === 'amounts.price_without_tax' || fm.zidField === 'amounts.price_without_tax.amount')
+      if (platform === 'salla' && fm.erpField === 'price_unit') {
+        val = readSallaAmount(val)
+        if (val === undefined) throw new Error('Mapped Salla order item price is invalid')
+      }
       if (typeof val === 'string' && ['integer', 'float', 'monetary'].includes(ttype)) {
         const parsed = parseFloat(val)
         if (!isNaN(parsed)) val = parsed
       }
-      if (fm.erpField === 'price_unit' && typeof val === 'number' && val > 0 && pricesIncludeTax && taxRatePercent > 0) {
+      if (fm.erpField === 'price_unit' && typeof val === 'number' && val > 0 && pricesIncludeTax && taxRatePercent > 0 && !isSallaNetPrice) {
         val = Math.round((val / (1 + (taxRatePercent / 100))) * 100) / 100
       }
       line[fm.erpField] = val
@@ -1452,14 +1463,19 @@ export async function buildOrderLineItems(
     // gross_sale_price / price_before / net_price / total ...). Prefer explicit
     // unit keys, then derive the unit from line totals / quantity.
     const qty = parseFloat(String(productData.quantity ?? productData.qty ?? 1)) || 1
-    let zidPrice = numFromKeys(productData, ['price_before', 'net_price', 'gross_price', 'price', 'unit_price', 'amount'])
+    const sallaNetPrice = platform === 'salla' ? readSallaAmount(resolvePath(productData, 'amounts.price_without_tax')) : undefined
+    const sallaItemDiscount = platform === 'salla' ? readSallaAmount(resolvePath(productData, 'amounts.total_discount')) : undefined
+    let zidPrice = numFromKeys(productData, orderItemBasePriceKeys)
       || numFromKeys(productData, ['total_before', 'total']) / qty
     let zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
       || numFromKeys(productData, ['discounted_total', 'total']) / qty
       || zidPrice
     const zidDiscountDirect = numFromKeys(productData, ['discount', 'discount_percentage'])
 
-    if (pricesIncludeTax && taxRatePercent > 0) {
+    if (sallaNetPrice !== undefined) {
+      zidPrice = sallaNetPrice
+      zidSalePrice = sallaItemDiscount === undefined ? zidPrice : Math.max(0, zidPrice - sallaItemDiscount / qty)
+    } else if (pricesIncludeTax && taxRatePercent > 0) {
       const taxDivisor = 1 + (taxRatePercent / 100)
       if (zidPrice > 0) {
         zidPrice = Math.round((zidPrice / taxDivisor) * 100) / 100
@@ -1471,7 +1487,11 @@ export async function buildOrderLineItems(
     }
     console.info(`[SyncEngine] Order line sku=${String(productData.sku ?? '')} qty=${qty} price=${zidPrice} salePrice=${zidSalePrice} discountDirect=${zidDiscountDirect}`)
 
-    if (zidDiscountDirect > 0 || (zidSalePrice > 0 && zidSalePrice < zidPrice)) {
+    if (platform === 'salla' && typeof line.price_unit !== 'number' && !hasSallaItemPrice(productData)) {
+      throw new Error('Salla order item has no usable price')
+    }
+
+    if (zidDiscountDirect > 0 || (zidSalePrice < zidPrice && (zidSalePrice > 0 || sallaItemDiscount !== undefined))) {
       anyProductHasDiscount = true
     }
 
@@ -1482,7 +1502,7 @@ export async function buildOrderLineItems(
       if (zidDiscountDirect > 0) {
         // Use Zid's explicit discount value
         discountPercent = zidDiscountDirect
-      } else if (zidPrice > 0 && zidSalePrice > 0 && zidSalePrice < zidPrice) {
+      } else if (zidPrice > 0 && zidSalePrice < zidPrice && (zidSalePrice > 0 || sallaItemDiscount !== undefined)) {
         // Calculate from price difference (Option C fallback)
         discountPercent = Math.round(((zidPrice - zidSalePrice) / zidPrice) * 100 * 100) / 100
       }
@@ -1495,7 +1515,7 @@ export async function buildOrderLineItems(
     }
 
     // If price_unit wasn't set from mapping, derive it
-    if (!line['price_unit']) {
+    if (!line['price_unit'] && !(platform === 'salla' && line.price_unit === 0)) {
       line['price_unit'] = (zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
     }
 
@@ -1506,6 +1526,7 @@ export async function buildOrderLineItems(
     const baseUnit = typeof line['price_unit'] === 'number' ? line['price_unit'] : ((zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0))
     subtotalBeforeDiscount += baseUnit * qty
     totalDiscountAmount += convertCurrencyAmount(Math.max(0, zidPrice - zidSalePrice), currencyConversionRate) * qty
+    if (platform === 'salla') appliedSallaLineDiscount += baseUnit * qty * (Number(line.discount) || 0) / 100
 
     // Auto-set product_uom_qty if user didn't map it explicitly
     if (!('product_uom_qty' in line)) {
@@ -1530,12 +1551,13 @@ export async function buildOrderLineItems(
       const zidTaxName = String(productData.tax_name ?? productData.tax ?? productData.tax_rate ?? '')
       if (mapping.workspace_id && zidTaxName && !enableVat) {
         try {
-          const { data: taxRow } = await supabaseAdmin
+          let query = supabaseAdmin
             .from('tax_mappings')
             .select('odoo_tax_id')
             .eq('workspace_id', mapping.workspace_id)
             .eq('source_tax_name', zidTaxName)
-            .maybeSingle()
+          if (platform === 'salla') query = query.eq('platform', platform)
+          const { data: taxRow } = await query.maybeSingle()
           if (taxRow?.odoo_tax_id) {
             resolvedMappingTaxId = taxRow.odoo_tax_id
           }
@@ -1615,8 +1637,8 @@ export async function buildOrderLineItems(
           newName = `Product [${sku}]`
         }
         const barcode = String(productData.barcode ?? '').trim()
-        let price = numFromKeys(productData, ['price', 'sale_price', 'unit_price', 'amount']) || 0
-        if (pricesIncludeTax && taxRatePercent > 0 && price > 0) {
+        let price = sallaNetPrice ?? numFromKeys(productData, ['price', 'sale_price', 'unit_price', 'amount'])
+        if (sallaNetPrice === undefined && pricesIncludeTax && taxRatePercent > 0 && price > 0) {
           price = Math.round((price / (1 + (taxRatePercent / 100))) * 100) / 100
         }
 
@@ -1761,10 +1783,11 @@ export async function buildOrderLineItems(
   }
 
   let effectiveOrderDiscount = orderLevelDiscount
-  if (pricesIncludeTax && taxRatePercent > 0 && effectiveOrderDiscount > 0) {
+  if (sallaOrderDiscount === undefined && pricesIncludeTax && taxRatePercent > 0 && effectiveOrderDiscount > 0) {
     const taxDivisor = 1 + (taxRatePercent / 100)
     effectiveOrderDiscount = Math.round((effectiveOrderDiscount / taxDivisor) * 100) / 100
   }
+  if (platform === 'salla') effectiveOrderDiscount = convertCurrencyAmount(effectiveOrderDiscount, currencyConversionRate)
   if (effectiveOrderDiscount > 0) {
     totalDiscountAmount = Math.max(totalDiscountAmount, effectiveOrderDiscount)
     anyProductHasDiscount = true
@@ -1774,7 +1797,17 @@ export async function buildOrderLineItems(
   // If individual lines did not have explicit discounts, distribute the overall order discount % across lines.
   // Note: Only distribute if there is an explicit order-level discount (effectiveOrderDiscount > 0).
   // Line-level discounts belong strictly to their own items and must never be applied to other non-discounted products!
-  if (addDiscountAsLine && discountMode === 'percent' && totalDiscountAmount > 0 && subtotalBeforeDiscount > 0) {
+  if (platform === 'salla' && addDiscountAsLine) {
+    totalDiscountAmount = Math.max(0, totalDiscountAmount - appliedSallaLineDiscount)
+    const remainingSubtotal = subtotalBeforeDiscount - appliedSallaLineDiscount
+    if (discountMode === 'percent' && totalDiscountAmount > 0 && remainingSubtotal > 0) {
+      const rate = Math.min(1, totalDiscountAmount / remainingSubtotal)
+      for (const line of lines) {
+        const existing = Number(line.discount) || 0
+        line.discount = Math.round((existing + (100 - existing) * rate) * 100) / 100
+      }
+    }
+  } else if (addDiscountAsLine && discountMode === 'percent' && totalDiscountAmount > 0 && subtotalBeforeDiscount > 0) {
     if (effectiveOrderDiscount > 0) {
       const overallDiscountPercent = Math.round((totalDiscountAmount / subtotalBeforeDiscount) * 100 * 100) / 100
       if (overallDiscountPercent > 0) {
@@ -3498,6 +3531,7 @@ export async function ensureSaleOrderTaxes(
   workspaceId: string,
   platform?: 'zid' | 'salla' | 'shopify',
   storeId = '',
+  strict = false,
 ): Promise<void> {
   if (!workspaceId || !odooOrderId) return
   try {
@@ -3524,7 +3558,7 @@ export async function ensureSaleOrderTaxes(
     const expectedTaxIds = expectedTaxId ? [expectedTaxId] : []
 
     const majorVersion = await client.getMajorVersion().catch(() => 19)
-    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+    let taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
 
     let lines: any[] = []
     try {
@@ -3534,12 +3568,12 @@ export async function ensureSaleOrderTaxes(
         ['id', 'name', taxField]
       )
     } catch {
-      const altField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
+      taxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
       lines = await client.searchRead<any>(
         'sale.order.line',
         [['order_id', '=', odooOrderId], ['display_type', '=', false]],
-        ['id', 'name', altField]
-      ).catch(() => [])
+        ['id', 'name', taxField]
+      )
     }
 
     if (!lines || lines.length === 0) return
@@ -3563,15 +3597,17 @@ export async function ensureSaleOrderTaxes(
 
     if (linesNeedingUpdate.length > 0) {
       const taxCmd = expectedTaxIds.length > 0 ? [[6, 0, expectedTaxIds]] : [[6, 0, []]]
-      await client.write('sale.order.line', linesNeedingUpdate, {
+      const written = await client.write('sale.order.line', linesNeedingUpdate, {
         [taxField]: taxCmd,
       })
+      if (strict && !written) throw new Error('Odoo rejected the configured order taxes')
       console.info(
         `[SyncEngine] ✅ Enforced destination tax (${expectedTaxIds.length > 0 ? expectedTaxIds.join(',') : '0%'} ` +
         `for country "${destinationCountryCode || 'Unknown'}" matched "${appliedCountryCode}") on ${linesNeedingUpdate.length} line(s) of sale.order #${odooOrderId}`
       )
     }
   } catch (err: any) {
+    if (strict) throw err
     console.warn(`[SyncEngine] Failed to enforce order lines taxes on sale.order #${odooOrderId} (non-fatal):`, err?.message || err)
   }
 }
@@ -3583,10 +3619,11 @@ async function maybeApplyOrderStatusAction(
   workspaceId: string,
   platform?: 'zid' | 'salla' | 'shopify',
   storeId = '',
+  sallaCreateSettings?: { auto_confirm?: boolean; auto_invoice?: boolean },
 ): Promise<void> {
   try {
     const zidStatus = resolveZidStatus(zidData)
-    if (!zidStatus) return
+    if (!zidStatus && !sallaCreateSettings) return
 
     const resolvedPlatform = platform || 'zid'
     const syncConfiguredPayment = async () => {
@@ -3594,7 +3631,9 @@ async function maybeApplyOrderStatusAction(
         workspaceId, platform: resolvedPlatform, storeId,
         zidEntityId: String(zidData.id || (zidData as any).order_id || ''),
       })
-      if (resolvedPlatform === 'zid' && result.errorReason) throw new Error(`Configured order payment failed: ${result.errorReason}`)
+      if ((resolvedPlatform === 'zid' || sallaCreateSettings) && result.errorReason) {
+        throw new Error(`Configured order payment failed: ${result.errorReason}`)
+      }
     }
 
     // ── 1. Always update the custom status selection field in Odoo if configured ──
@@ -3602,7 +3641,7 @@ async function maybeApplyOrderStatusAction(
       const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
       const customField = orderStdSettings?.order_status_custom_field || (orderStdSettings as any)?.order?.order_status_custom_field
       const isEnabled = orderStdSettings?.update_custom_status_field !== false && (orderStdSettings as any)?.order?.update_custom_status_field !== false
-      if (customField && isEnabled) {
+      if (zidStatus && customField && isEnabled) {
         // Monotonic guard: do not downgrade an already completed / delivered / confirmed order to 'new' or 'draft'
         let shouldWriteCustom = true
         if (zidStatus === 'new' || zidStatus === 'draft') {
@@ -3623,7 +3662,8 @@ async function maybeApplyOrderStatusAction(
         if (shouldWriteCustom) {
           const knownKeys = await getSaleOrderSelectionKeys(client, workspaceId, customField)
           if (!knownKeys || knownKeys.has(zidStatus)) {
-            await client.write('sale.order', [odooRecordId], { [customField]: zidStatus })
+            const written = await client.write('sale.order', [odooRecordId], { [customField]: zidStatus })
+            if (!written && sallaCreateSettings) throw new Error('Odoo rejected the configured order status field')
             console.info(`[SyncEngine] Synced ${resolvedPlatform} status "${zidStatus}" to custom field "${customField}" on sale.order #${odooRecordId}`)
           } else {
             console.warn(`[SyncEngine] Skipping custom status "${zidStatus}" on sale.order #${odooRecordId} — not an option of "${customField}"`)
@@ -3631,13 +3671,18 @@ async function maybeApplyOrderStatusAction(
         }
       }
     } catch (fieldErr: any) {
-      if (resolvedPlatform === 'zid') throw fieldErr
+      if (resolvedPlatform === 'zid' || sallaCreateSettings) throw fieldErr
       console.warn(`[SyncEngine] Failed to write custom status field on sale.order #${odooRecordId} (non-fatal):`, fieldErr?.message || fieldErr)
     }
 
     // ── 2. Apply mapped native workflow transition ──
-    const configuredRow = await getOrderStatusRow(workspaceId, zidStatus, resolvedPlatform, storeId)
-    const row = configuredRow || (resolvedPlatform === 'zid' ? {
+    const configuredRow = zidStatus ? await getOrderStatusRow(workspaceId, zidStatus, resolvedPlatform, storeId) : null
+    const row = sallaCreateSettings ? {
+      enabled: configuredRow?.enabled ?? true,
+      odoo_state: configuredRow?.odoo_state || (sallaCreateSettings.auto_confirm ? 'sale' : ''),
+      picking_action: configuredRow?.picking_action || '',
+      invoice_action: configuredRow?.invoice_action || (sallaCreateSettings.auto_invoice && configuredRow?.odoo_state !== 'cancel' ? 'create' : ''),
+    } : configuredRow || (resolvedPlatform === 'zid' ? {
       odoo_state: getSmartDefaultOrderState(zidStatus, resolvedPlatform) || '', enabled: true,
       picking_action: '', invoice_action: '',
     } : null)
@@ -3688,27 +3733,35 @@ async function maybeApplyOrderStatusAction(
     }
 
     // Keep invoice taxes consistent with the prepared SO before invoicing.
-    await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId)
+    await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId, !!sallaCreateSettings)
 
     // 2c. Invoice action (create, post, create_and_post, cancel)
-    if (row.invoice_action) {
+    const invoiceAction = row.invoice_action
+    if (invoiceAction) {
       const zidEntityId = String(zidData.id || (zidData as any).order_id || '')
-      await applyOrderInvoiceAction(
+      const applyInvoice = () => applyOrderInvoiceAction(
         client,
         odooRecordId,
-        row.invoice_action,
+        invoiceAction,
         zidStatus,
         workspaceId,
         resolvedPlatform,
         storeId,
         zidEntityId
       )
+      if (sallaCreateSettings) await withErpCreateIdentity('salla-order-invoice', applyInvoice)
+      else await applyInvoice()
     }
 
+    if (sallaCreateSettings) {
+      await assertOrderActionResults(client, odooRecordId, {
+        ...row, invoice_action: row.invoice_action === 'post' ? 'create_and_post' : row.invoice_action,
+      })
+    }
     await syncConfiguredPayment()
     if (resolvedPlatform === 'zid') await assertOrderActionResults(client, odooRecordId, row)
   } catch (err: any) {
-    if ((platform || 'zid') === 'zid') throw err
+    if ((platform || 'zid') === 'zid' || sallaCreateSettings) throw err
     console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
   }
 }
@@ -4765,22 +4818,23 @@ async function processWebhookEventInternal(
     // the sync looks like it succeeded. Completeness of an order is decided by
     // `items`, so that is what gates the fetch; the size heuristic stays for the
     // other entities, where a small payload genuinely means "identifier only".
-    const missingOrderItems =
-      hasEntity && normalizedEvent.startsWith('order.') && orderSource?.items === undefined
+    const isOrderCreate = isOrderCreationEvent(normalizedEvent)
+    const missingOrderItems = hasEntity && normalizedEvent.startsWith('order.') &&
+      (orderSource?.items === undefined || (isOrderCreate && !hasPricedSallaItems(orderSource.items)))
     // A category payload can be fat (>4 keys) and still omit `parent_id`. Size
     // alone then passes it through with no parent, which looks exactly like
     // "synced fine but Parent Category is empty". Fetch the full category when
     // the parent key is absent so the mapping always has a value to resolve.
     const missingParentId =
       hasEntity && normalizedEvent.startsWith('category.') && (data as any)?.parent_id === undefined
-    const isThin = hasEntity && keys.length <= 4
+    const isThin = hasEntity && (isOrderCreate ? !orderSource.amounts : keys.length <= 4)
     // legacy delivery: تُعاد القراءة من API سالا **دائماً** حتى لو كان payload
     // كثيفاً — للمتصل غير المصادق صحة الحدث ليست مضمونة، فالجسم محفز فقط
     // و API هي مصدر القيم (نفس قاعدة ثقة مسار أودو → المتجر).
     const legacyNeedsFetch = isLegacyDelivery && hasEntity
     if (legacyNeedsFetch || missingOrderItems || missingParentId || isThin || shipmentEntityId != null) {
       try {
-        const { getSallaOrder, getSallaCustomer, getSallaCategory, getSallaProduct } = await import('./salla-client')
+        const { getSallaOrder, getSallaOrderItems, getSallaCustomer, getSallaCategory, getSallaProduct } = await import('./salla-client')
         if (normalizedEvent.startsWith('order.')) {
           const orderFetchId = isShipmentEvent && !shipmentHasOrder ? shipmentEntityId : entityId
           if (orderFetchId === undefined || orderFetchId === null) {
@@ -4788,11 +4842,19 @@ async function processWebhookEventInternal(
             // is nothing valid to fetch, and `entityId` is a shipment id.
           } else {
             const full = await getSallaOrder(storeIdStr, String(orderFetchId))
-          // `full` first, then the event's own order object: when both describe
-          // the same order the event wins (it is fresher than our GET), and the
-          // thin envelope can no longer overwrite the correct id with a wrong one.
-          // legacy delivery: يُعكس الاتجاه — API يفوز وتُتجاهل قيم الجسم المتعارضة.
-          if (full) data = isLegacyDelivery ? { ...orderSource, ...full } : { ...full, ...orderSource }
+            if (isOrderCreate && (!full || String(full.id) !== String(orderFetchId))) {
+              throw new Error('Could not verify Salla order details')
+            }
+            if (full) {
+              data = isLegacyDelivery
+                ? (isOrderCreate ? { ...full } : { ...orderSource, ...full })
+                : { ...full, ...orderSource }
+              const sourceItems = isLegacyDelivery ? full.items : data.items
+              if (isOrderCreate && !hasPricedSallaItems(sourceItems)) {
+                data.items = hasPricedSallaItems(full.items) ? full.items : await getSallaOrderItems(storeIdStr, String(orderFetchId))
+                if (!hasPricedSallaItems(data.items)) throw new Error('Salla order items could not be retrieved with valid prices')
+              }
+            }
           }
         } else if (normalizedEvent.startsWith('customer.')) {
           const full = await getSallaCustomer(storeIdStr, String(entityId))
@@ -4807,7 +4869,8 @@ async function processWebhookEventInternal(
           const full = await getSallaProduct(storeIdStr, String(entityId))
           if (full) data = { ...data, ...full }
         }
-      } catch {
+      } catch (err) {
+        if (isOrderCreate) throw err
         // Enrichment is best-effort — fall back to the raw payload.
       }
     }
@@ -7122,6 +7185,19 @@ export async function executeOdooOperation(params: {
 
   // Resolve platform once for reuse across order/cancel/deliver operations
   const execPlatform: 'zid' | 'salla' | 'shopify' = platformHint ?? getPlatformFromEvent(event)
+  const isSallaOrderCreate = odooModel === 'sale.order' && execPlatform === 'salla' && odooOperation === 'create'
+  const finishSallaOrderCreate = async (recordId: number) => {
+    const scope = getErpExecutionScope()
+    if (scope) {
+      const saved = await upsertEntityLink({
+        workspaceId: mapping.workspace_id, platform: 'salla', storeId: scope.storeId,
+        odooModel: 'sale.order', storeEntityId: zidEntityId,
+      }, recordId)
+      if (!saved) throw new Error('Salla order was written but its durable identity could not be saved')
+    }
+    await ensureSaleOrderTaxes(client, recordId, zidData, mapping.workspace_id, 'salla', storeId, true)
+    await maybeApplyOrderStatusAction(client, recordId, zidData, mapping.workspace_id, 'salla', storeId, mergedSettings.order ?? {})
+  }
   if ((odooModel === 'product.template' || odooModel === 'product.product' || odooModel === 'product.category') &&
       (mergedSettings.disabled || (Array.isArray(mergedSettings.enabled_actions) && !mergedSettings.enabled_actions.includes(odooOperation) &&
         !(execPlatform === 'salla' && odooOperation === 'delete' && mergedSettings.on_delete && mergedSettings.on_delete !== 'nothing')))) {
@@ -7563,7 +7639,7 @@ export async function executeOdooOperation(params: {
     delete (effectiveOdooValues as any).location_id
     delete (odooValues as any).location_id
 
-    const orderSettings = (mergedSettings)?.order
+    const orderSettings = mergedSettings.order || (isSallaOrderCreate ? mergedSettings : undefined)
     if (platform === 'zid') {
       const customerPolicy = mergedSettings.customer_fallback_policy ?? orderSettings?.customer_fallback_policy ?? 'create_new'
       if (!['create_new', 'skip_order', 'default_customer'].includes(customerPolicy)) throw new Error('Invalid configured order customer fallback policy')
@@ -7973,7 +8049,8 @@ export async function executeOdooOperation(params: {
     // maybeApplyOrderStatusAction perform the real transition after the record
     // write. Disabled rows leave Odoo fully untouched for this status;
     // unmapped statuses keep the legacy smart-default passive write.
-    if (zidStatus && !effectiveOdooValues.state) {
+    if (isSallaOrderCreate) delete effectiveOdooValues.state
+    if (zidStatus && !effectiveOdooValues.state && !isSallaOrderCreate) {
       const statusRow = await getOrderStatusRow(mapping.workspace_id, zidStatus, platform, storeId)
       if (!statusRow) {
         const resolvedState = await resolveOrderState(
@@ -8007,6 +8084,7 @@ export async function executeOdooOperation(params: {
         effectiveOdooValues[customStatusField] = zidStatus
         console.info(`[SyncEngine] Injected ${execPlatform} status "${zidStatus}" into custom field "${customStatusField}" on sale.order`)
       } else {
+        if (isSallaOrderCreate) throw new Error(`Salla status "${zidStatus}" is not available in configured field "${customStatusField}"`)
         console.warn(`[SyncEngine] Skipping custom status "${zidStatus}" — not an option of "${customStatusField}" on sale.order (Odoo would reject the whole order write)`)
       }
     }
@@ -8041,7 +8119,10 @@ export async function executeOdooOperation(params: {
       const isMultiCurrencyEnabled = !!(orderSettings?.multi_currency_enabled ?? orderSettings?.order?.multi_currency_enabled)
       const baseCurrencyId = Number(orderSettings?.base_currency_id ?? orderSettings?.order?.base_currency_id) || null
 
-      if (execPlatform === 'zid') {
+      if (execPlatform === 'zid' || isSallaOrderCreate) {
+        if (isSallaOrderCreate && !existingSaleOrderId && orderSettings.default_pricelist_id && !effectiveOdooValues.pricelist_id) {
+          effectiveOdooValues.pricelist_id = orderSettings.default_pricelist_id
+        }
         let mappedCurrencyId: number | undefined
         let mappedConversionRate: number | undefined
         if (!existingSaleOrderId && !isMultiCurrencyEnabled && !effectiveOdooValues.currency_id && !effectiveOdooValues.pricelist_id && !baseCurrencyId && !orderSettings.default_pricelist_id) {
@@ -8057,8 +8138,9 @@ export async function executeOdooOperation(params: {
         const resolvedCurrency = await resolveOrderCurrencySettings({
           client, payload: zidData, values: effectiveOdooValues, settings: orderSettings,
           create: odooOperation === 'create', existingOrderId: existingSaleOrderId, mappedCurrencyId, mappedConversionRate,
+          platform: isSallaOrderCreate ? 'salla' : 'zid',
         })
-        effectiveOdooValues.company_id = resolvedCurrency.companyId
+        if (!isSallaOrderCreate || mergedSettings.link_company !== false) effectiveOdooValues.company_id = resolvedCurrency.companyId
         effectiveOdooValues.currency_id = resolvedCurrency.currencyId
         effectiveOdooValues.pricelist_id = resolvedCurrency.pricelistId
         resolvedConversionRate = resolvedCurrency.rate
@@ -8256,7 +8338,8 @@ export async function executeOdooOperation(params: {
             ? `${existingNote}\n${couponPrefix}${couponCode}`
             : `${couponPrefix}${couponCode}`
         }
-        if (!effectiveOdooValues.x_coupon_code) {
+        if (!effectiveOdooValues.x_coupon_code &&
+            (!isSallaOrderCreate || (await fetchFieldMeta(client, 'sale.order', ['x_coupon_code'])).has('x_coupon_code'))) {
           effectiveOdooValues.x_coupon_code = couponCode
         }
       }
@@ -8271,7 +8354,8 @@ export async function executeOdooOperation(params: {
     // rebuild or replace lines, protecting existing line items, taxes, pricelists, and discounts.
     // Order lines and taxes are established strictly at initial order creation.
     const isStatusUpdateEvent = event === 'order.status.update' || event.endsWith('.status.update') || event === 'order.status_update' || event === 'order.updated' || event.endsWith('.updated') || event === 'order.update' || odooOperation === 'update'
-    if ((odooOperation === 'create' && !isStatusUpdateEvent) && !('order_line' in effectiveOdooValues)) {
+    if ((odooOperation === 'create' && !isStatusUpdateEvent) && !('order_line' in effectiveOdooValues) &&
+        !(isSallaOrderCreate && existingSaleOrderId)) {
       let orderStdSettings: Record<string, any> | null = null
       if (mapping.workspace_id && platform) {
         try {
@@ -8351,13 +8435,13 @@ export async function executeOdooOperation(params: {
   }
   const createPreparedRecord = async () => {
     await prepareOrderWrite(true)
-    return odooModel === 'sale.order' && execPlatform === 'zid'
+    return (odooModel === 'sale.order' && execPlatform === 'zid') || isSallaOrderCreate
       ? client.create(odooModel, effectiveOdooValues)
       : safeCreateOdooRecord(client, odooModel, effectiveOdooValues, odooValues)
   }
   const writePreparedRecord = async (recordId: number) => {
     await prepareOrderWrite(false)
-    return odooModel === 'sale.order' && execPlatform === 'zid'
+    return (odooModel === 'sale.order' && execPlatform === 'zid') || isSallaOrderCreate
       ? client.write(odooModel, [recordId], effectiveOdooValues)
       : safeWriteOdooRecord(client, odooModel, recordId, effectiveOdooValues, odooValues)
   }
@@ -8460,7 +8544,8 @@ export async function executeOdooOperation(params: {
       if (!ok) throw new Error(`Odoo write returned false for ${odooModel} #${duplicateId}`)
       await persistCategoryIdentity(duplicateId)
       if (odooModel === 'sale.order') {
-        await maybeApplyOrderStatusAction(client, duplicateId, zidData, mapping.workspace_id, execPlatform, storeId)
+        if (isSallaOrderCreate) await finishSallaOrderCreate(duplicateId)
+        else await maybeApplyOrderStatusAction(client, duplicateId, zidData, mapping.workspace_id, execPlatform, storeId)
       }
       console.info(`[SyncEngine] ✅ Updated existing ${odooModel} #${duplicateId} in Odoo (zid_id="${zidEntityId}")`)
       if (odooModel === 'product.template') {
@@ -8475,8 +8560,11 @@ export async function executeOdooOperation(params: {
     await persistCategoryIdentity(newId)
     console.info(`[SyncEngine] ✅ Created ${odooModel} #${newId} in Odoo (zid_id="${zidEntityId}")`)
     if (odooModel === 'sale.order') {
-      await ensureSaleOrderTaxes(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
-      await maybeApplyOrderStatusAction(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
+      if (isSallaOrderCreate) await finishSallaOrderCreate(newId)
+      else {
+        await ensureSaleOrderTaxes(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
+        await maybeApplyOrderStatusAction(client, newId, zidData, mapping.workspace_id, execPlatform, storeId)
+      }
     }
     if (odooModel === 'product.template') {
       await syncProductTemplateStock(client, newId, zidData, effectiveOdooValues, mergedSettings, mapping.workspace_id, execPlatform)

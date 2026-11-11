@@ -43,8 +43,8 @@ export const COMMON_RATES_TO_SAR: Record<string, number> = {
 /**
  * Extract the currency ISO code from an order payload across Zid, Salla, or Shopify.
  */
-export function extractOrderCurrency(zidData: Record<string, unknown>, platform?: string): string {
-  if (!zidData || typeof zidData !== 'object') return 'SAR'
+export function extractOrderCurrency(zidData: Record<string, unknown>, platform?: string, fallback = 'SAR'): string {
+  if (!zidData || typeof zidData !== 'object') return fallback
 
   // 1. Explicit currency keys (string or nested object)
   const candidates = [
@@ -104,13 +104,14 @@ export function extractOrderCurrency(zidData: Record<string, unknown>, platform?
       return shopifyCurr.trim().toUpperCase()
     }
   } else if (platform === 'salla') {
-    const sallaCurr = resolvePath(zidData, 'currency') || resolvePath(zidData, 'price.currency')
+    const sallaCurr = resolvePath(zidData, 'amounts.total.currency') || resolvePath(zidData, 'total.currency')
+      || resolvePath(zidData, 'items.0.currency') || resolvePath(zidData, 'items.0.amounts.price_without_tax.currency')
     if (typeof sallaCurr === 'string' && sallaCurr.trim()) {
       return sallaCurr.trim().toUpperCase()
     }
   }
 
-  return 'SAR'
+  return fallback
 }
 
 /** Zid's order/settlement totals prove FX direction only for the declared store currency. */
