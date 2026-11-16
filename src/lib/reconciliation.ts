@@ -129,7 +129,7 @@ export async function reconcileZidOrders(
   }
 
   type Merchant = { merchant_id?: string | number; store_id?: string | number; workspace_id: string }
-  const candidates: Array<{ row: Merchant; merchantKey: string; storeId: string; scope: string; state: ReconcileState }> = []
+  const candidates: Array<{ row: Merchant; merchantKey: string; storeId: string; scope: string; target: Awaited<ReturnType<typeof resolveExecutionTarget>>; state: ReconcileState }> = []
   for (const row of (merchants ?? []) as Merchant[]) {
     const merchantKey = String(row.merchant_id || row.store_id || '')
     const storeId = String(row.store_id || row.merchant_id || '')
@@ -137,14 +137,14 @@ export async function reconcileZidOrders(
     try {
       const target = await resolveExecutionTarget(row.workspace_id, 'zid', storeId)
       const scope = JSON.stringify(['zid', 'orders', row.workspace_id, storeId, target.erpConnectionId, target.connectionGeneration])
-      candidates.push({ row, merchantKey, storeId, scope, state: await readState(scope) })
+      candidates.push({ row, merchantKey, storeId, scope, target, state: await readState(scope) })
     } catch (error) {
       result.errors.push(`${storeId}: ${error instanceof Error ? error.message.slice(0, 150) : 'target unavailable'}`)
     }
   }
   candidates.sort((a, b) => (Date.parse(a.state.lastAttempt || '') || 0) - (Date.parse(b.state.lastAttempt || '') || 0))
 
-  for (const { row, merchantKey, storeId, scope, state } of candidates) {
+  for (const { row, merchantKey, storeId, scope, target, state } of candidates) {
     if (result.apiCalls >= MAX_API_CALLS_PER_RUN || result.enqueued + result.duplicates >= MAX_ENQUEUED_PER_RUN) {
       result.stopped = 'rate_ceiling'
       break
@@ -213,6 +213,7 @@ export async function reconcileZidOrders(
           event: 'order.updated',
           platform: 'zid',
           payload: orderData,
+          executionTarget: target,
           dedupKey: `reconcile:zid:${scope}:${orderId}:${updatedAt}`,
         })
         if (queued.error || queued.skipped || (!queued.id && !queued.duplicate && !queued.coalesced)) throw new Error(`${orderId}: ${queued.error || 'dispatch not confirmed'}`)

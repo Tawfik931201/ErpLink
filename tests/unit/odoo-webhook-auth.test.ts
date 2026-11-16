@@ -325,10 +325,15 @@ describe('the caller secret is read from the places Odoo can put it', () => {
 describe('the registration and the receivers stay in sync', () => {
   const read = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8')
 
-  it('registration appends a secret to the stock URL and scopes it by workspace', () => {
+  it('scopes a new stock registration by both workspace and ERP resource', () => {
     const source = read('src/lib/odoo-webhook.ts')
     expect(source).toContain('withOdooWebhookSecret')
-    expect(source).toContain('secretScope: odooStockSecretScope(workspaceId)')
+    expect(source).toContain('secretScope: odooStockSecretScope(workspaceId, resource)')
+    expect(source).toContain('&resource=${resource}')
+    const receiver = read('src/app/api/webhooks/odoo/stock/route.ts')
+    expect(receiver).toContain('scope: odooStockSecretScope(workspaceId, resource)')
+    expect(receiver).toContain("resource !== odooStockWebhookResource(erpConn.url, erpConn.db_name ?? '')")
+    expect(receiver).toContain('binding?.switched_at')
     // The record receiver is the default scope, derived from the mapping id the
     // URL already carries.
     expect(source).toContain('odooRecordSecretScope(fieldMappingId)')

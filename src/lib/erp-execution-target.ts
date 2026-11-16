@@ -4,6 +4,9 @@ import { createHash } from 'crypto'
 import { supabase } from '@/lib/supabase'
 
 export type CommercePlatform = 'zid' | 'salla' | 'shopify' | 'odoo'
+export function isCommercePlatform(platform: string): platform is Exclude<CommercePlatform, 'odoo'> {
+  return platform === 'zid' || platform === 'salla' || platform === 'shopify'
+}
 export interface ExecutionTarget { erpConnectionId: string; connectionGeneration: string }
 export interface TrustedErpConnection {
   id: string; workspace_id: string; url: string; username: string; password: string
@@ -40,9 +43,8 @@ export function connectionGeneration(connection: TrustedErpConnection): string {
   ])).digest('hex')
 }
 
-/** Manual numeric-ID mappings are valid only for the originally bound ERP
- * resource. Credential rotation is separate and remains generation checked. */
-async function requireWorkspaceBinding(connection: TrustedErpConnection): Promise<void> {
+/** A destination change retires database-specific mappings before using the new ERP. */
+export async function requireWorkspaceBinding(connection: TrustedErpConnection, followSettings = false): Promise<void> {
   const binding = {
     workspace_id: connection.workspace_id, erp_connection_id: connection.id,
     erp_type: connection.erp_type || 'odoo', url: connection.url, db_name: connection.db_name || '',
@@ -60,9 +62,18 @@ async function requireWorkspaceBinding(connection: TrustedErpConnection): Promis
     data = reread.data
     error = reread.error
   }
-  if (error || !data || Object.entries(binding).some(([key, value]) => String(data[key] ?? '') !== value)) {
-    throw new Error('ERP workspace resource changed; controlled mapping reconciliation required')
+  if (!error && data && Object.entries(binding).every(([key, value]) => String(data[key] ?? '') === value)) return
+  if (!error && data && followSettings) {
+    const refreshed = await supabase.rpc('switch_erp_mapping_destination', {
+      p_workspace_id: connection.workspace_id,
+      p_connection_id: connection.id,
+      p_erp_type: binding.erp_type,
+      p_url: binding.url,
+      p_db_name: binding.db_name,
+    })
+    if (!refreshed.error && refreshed.data === true) return
   }
+  throw new Error('ERP workspace resource changed; controlled mapping reconciliation required')
 }
 
 async function requireStore(workspaceId: string, platform: string, storeId: string) {
@@ -86,7 +97,7 @@ export async function resolveExecutionTarget(workspaceId: string, platform: stri
   await requireStore(workspaceId, platform, storeId)
   const { data, error } = await supabase.from('erp_connections').select('*').eq('workspace_id', workspaceId).maybeSingle()
   if (error || !data || (data.status && data.status !== 'connected')) throw new Error('No unique active ERP execution connection')
-  await requireWorkspaceBinding(data as TrustedErpConnection)
+  await requireWorkspaceBinding(data as TrustedErpConnection, isCommercePlatform(platform))
   return { erpConnectionId: data.id, connectionGeneration: connectionGeneration(data as TrustedErpConnection) }
 }
 

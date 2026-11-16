@@ -1,6 +1,7 @@
 import {
   odooRecordSecretScope,
   odooStockSecretScope,
+  odooStockWebhookResource,
   withOdooWebhookSecret,
 } from './odoo/webhook-secret'
 import { OdooClient, type OdooConfig } from './odoo-client'
@@ -271,15 +272,16 @@ export async function registerOdooStockWebhook(
   odooModel = 'stock.quant'
 ): Promise<{ baseAutomationId: number; serverActionId?: number }> {
   const fieldNames = ['product_id', 'location_id', 'quantity', 'inventory_quantity']
+  const resource = odooStockWebhookResource(config.url, config.db)
   return registerOdooWebhook(
     config,
     odooModel,
     workspaceId,
     fieldNames,
     {
-      webhookPath: `/api/webhooks/odoo/stock?workspace_id=${workspaceId}`,
+      webhookPath: `/api/webhooks/odoo/stock?workspace_id=${workspaceId}&resource=${resource}`,
       labelSuffix: 'Stock',
-      secretScope: odooStockSecretScope(workspaceId),
+      secretScope: odooStockSecretScope(workspaceId, resource),
     }
   )
 }

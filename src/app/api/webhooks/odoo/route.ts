@@ -143,6 +143,7 @@ async function handlePost(req: NextRequest) {
     .from('field_mappings')
     .select('*')
     .eq('id', field_mapping_id)
+    .is('erp_destination_retired_at', null)
     .maybeSingle()
 
   if (mappingErr || !mapping) {
@@ -229,6 +230,7 @@ export async function runBackgroundSync(field_mapping_id: string, model: string,
     .from('field_mappings')
     .select('*')
     .eq('id', field_mapping_id)
+    .is('erp_destination_retired_at', null)
     .maybeSingle()
 
   if (mappingErr || !mapping) {

@@ -496,6 +496,7 @@ async function handlePost(req: NextRequest) {
   }
 
   const enqueued = await enqueueWebhookEvent({
+    acceptBeforeErp: true,
     workspaceId: sallaToken.workspace_id,
     storeId: merchantId,
     event,
@@ -551,7 +552,7 @@ async function handlePost(req: NextRequest) {
 
   return NextResponse.json({
     received: true,
-    queued: !enqueued.duplicate,
+    queued: !enqueued.duplicate && !enqueued.deferred,
     coalesced: enqueued.coalesced,
   })
 }

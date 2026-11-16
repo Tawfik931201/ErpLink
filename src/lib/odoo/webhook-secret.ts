@@ -1,3 +1,5 @@
+import { createHash } from 'crypto'
+
 import { hkdfHex } from '@/lib/crypto'
 import { secretMatches } from '@/lib/webhook-secret'
 
@@ -65,8 +67,13 @@ export const ODOO_STOCK_SCOPE_PREFIX = 'stock'
 export const ODOO_RECORD_SCOPE_PREFIX = 'record'
 
 /** Scope for `/api/webhooks/odoo/stock?workspace_id=…`. */
-export function odooStockSecretScope(workspaceId: string): string {
-  return `${ODOO_STOCK_SCOPE_PREFIX}:${workspaceId}`
+export function odooStockSecretScope(workspaceId: string, resource?: string | null): string {
+  const scope = `${ODOO_STOCK_SCOPE_PREFIX}:${workspaceId}`
+  return resource ? `${scope}:${resource}` : scope
+}
+
+export function odooStockWebhookResource(url: string, database: string): string {
+  return createHash('sha256').update(JSON.stringify([url, database])).digest('hex')
 }
 
 /** Scope for `/api/webhooks/odoo?field_mapping_id=…`. */

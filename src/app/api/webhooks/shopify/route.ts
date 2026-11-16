@@ -301,6 +301,7 @@ async function handlePost(req: NextRequest) {
             .select('id')
             .or(`store_id.eq.${shopDomain},merchant_id.eq.${shopDomain}`)
             .eq('action', topic)
+            .is('erp_destination_retired_at', null)
             .limit(1)
           return ((data as Array<{ id: string }> | null)?.length ?? 0) > 0
         }
@@ -412,6 +413,7 @@ async function handlePost(req: NextRequest) {
   // ── بث SSE (in-memory سريع) ثم enqueue فقط — بلا إثراء ثقيل ──────────
   try {
     const queued = await enqueueWebhookEvent({
+      acceptBeforeErp: true,
       workspaceId: shopifyToken.workspace_id as string,
       storeId: shopDomain,
       event: topic,
@@ -442,6 +444,7 @@ async function handlePost(req: NextRequest) {
         )
         .catch(() => {})
     }
+    return NextResponse.json({ received: true, queued: !queued.deferred })
   } catch {
     // استثناء قبل الحفظ الدائم → 503 ليعيد Shopify الإرسال (8 مرات / 4 ساعات).
     return NextResponse.json(
@@ -450,8 +453,6 @@ async function handlePost(req: NextRequest) {
     )
   }
 
-  // رد 200 فوري — الإثراء والمعالجة الثقيلة في الطابور المركزي بعد الحفظ الدائم.
-  return NextResponse.json({ received: true, queued: true })
 }
 
 export async function GET() {

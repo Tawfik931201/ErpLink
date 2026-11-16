@@ -26,6 +26,7 @@ const MAX_BATCH = 50
 const FLUSH_DELAY_MS = 150
 
 export interface ReceiptRow {
+  awaitingErp?: boolean
   erpConnectionId?: string
   connectionGeneration?: string
   dedupKey: string
@@ -74,6 +75,7 @@ async function insertReceiptsViaSupabase(rows: ReceiptRow[]): Promise<ReceiptOut
     dedup_key: row.dedupKey,
     payload: row.payload,
     status: 'pending',
+    awaiting_erp: row.awaitingErp ?? false,
     erp_connection_id: row.erpConnectionId ?? null,
     connection_generation: row.connectionGeneration ?? null,
   }))

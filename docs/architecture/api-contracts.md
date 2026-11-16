@@ -25,7 +25,7 @@ Webhook GET methods are readiness JSON endpoints: Zid/Salla/Shopify report `ok`,
 - Invalid credentials: 401; unconfigured production verifier: 500. Anonymous-only ingress buckets may return 429. Credential presence bypasses that bucket, then actual verification decides authenticity. Do not replace this with a blanket rate limit.
 - Size limits: 413. Malformed JSON and missing required identifiers can return 400. Some malformed/sentinel events are durably recorded before their existing 400 response; do not convert all malformed requests into ordinary queued jobs.
 - Odoo record mapping not found: 404; missing mapping/model/id/workspace: 400. Odoo stock invalid workspace UUID: 400, unknown workspace: 404, workspace lookup failure: 503.
-- Durable enqueue failure: Odoo returns 503 `{ error: 'Failed to persist webhook', detail }`; Salla returns 503 `{ received: false, processed: false, error: 'durable_storage_failed' }`; other routes retain their own error body.
+- Durable receipt failure: Odoo returns 503 `{ error: 'Failed to persist webhook', detail }`; Salla returns 503 `{ received: false, processed: false, error: 'durable_storage_failed' }`; other routes retain their own error body.
 - Salla stale events older than 15 minutes are saved with null workspace and acknowledged as stale without enqueue; Shopify has its own stale-event branch. Do not let the regular inbox drain process these orphan rows automatically.
 
 ### Internal queue contract
@@ -34,7 +34,7 @@ Webhook GET methods are readiness JSON endpoints: Zid/Salla/Shopify report `ok`,
 
 1. Missing workspace/store/event returns `{ skipped: true }`.
 2. Admission overload returns `{ error: 'ingress_overloaded' }`; authenticated traffic over its workspace share is otherwise deferred, not rejected.
-3. Durable receipt precedes queue insert. Odoo writes immediately; store deliveries may use the 50-row/150ms write batcher. Awaiting the batch result is required before acknowledging durability.
+3. Store routes save a receipt for the verified workspace and store before resolving ERP. If the connection is unavailable, the route acknowledges the saved receipt with `queued: false`. The inbox retries until an owned destination is available. Odoo-origin events and explicit execution retries keep their existing destination pin.
 4. Explicit delivery id wins; otherwise canonical payload fingerprint forms the dedup identity. Mapping identity participates in Odoo coalescing. Do not substitute an entity id for delivery identity.
 5. Queue execution dispatches Odoo record events to `runBackgroundSync`, Odoo stock to `processOdooStockEvent`, and store events to `processWebhookEvent(..., true, workspace_id, queue_id)`.
 6. Record worker result `{ ok: false, message }` retries; `{ ok: true, skipped?: true, message? }` settles. Store result with `failed === 0` settles. Missing result retries, not silent success.

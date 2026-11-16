@@ -1,3 +1,4 @@
+import { getErpExecutionScope } from '@/lib/erp-execution-target'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { supabaseAdmin } from '@/lib/sync-runtime'
 import { ttlCache } from '@/lib/ttl-cache'
@@ -10,8 +11,9 @@ export async function getCachedStandardMappingSettings(
   storeId = ''
 ): Promise<Record<string, any> | null> {
   const key = String(storeId ?? '').trim()
+  const generation = getErpExecutionScope()?.connectionGeneration ?? ''
   return ttlCache.get(
-    `eng:stdsets:${workspaceId}:${storeType}:${key}:${entityType}`,
+    `eng:stdsets:${workspaceId}:${storeType}:${key}:${entityType}:${generation}`,
     30_000,
     // Delegated to the shared reader: per-store row first, platform default
     // ('') as fallback, with store_id compared as TEXT on both sides. The

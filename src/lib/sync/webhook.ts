@@ -162,6 +162,7 @@ async function processWebhookEventInternal(
   let mappingQuery = supabaseAdmin
     .from('field_mappings')
     .select('*')
+    .is('erp_destination_retired_at', null)
     .or('store_id.eq.' + storeIdStr + ',merchant_id.eq.' + storeIdStr)
   // حصر الصفوف بمساحة التسليم نفسها. بدون هذا السطر تكفي صفوفة field_mappings
   // قديمة في مساحة أخرى تحمل نفس merchant id أن تخطف المزامنة كاملة: المسار

@@ -1,10 +1,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
+import { connectionGeneration } from '@/lib/erp-execution-target'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import {
   authorizeOdooWebhook,
   odooStockSecretScope,
+  odooStockWebhookResource,
 } from '@/lib/odoo/webhook-secret'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
@@ -89,8 +91,12 @@ async function handlePost(req: NextRequest) {
   // an existence oracle out of the `erp_connections` lookup below. The secret is
   // scoped to the workspace the URL already names — see
   // src/lib/odoo/webhook-secret.ts for the migration window on `legacy`.
+  const resource = req.nextUrl.searchParams.get('resource')
+  if (resource !== null && !/^[0-9a-f]{64}$/.test(resource)) {
+    return NextResponse.json({ error: 'Invalid ERP resource' }, { status: 400 })
+  }
   const auth = authorizeOdooWebhook({
-    scope: odooStockSecretScope(workspaceId),
+    scope: odooStockSecretScope(workspaceId, resource),
     authorization: req.headers.get('authorization'),
     headerSecret: req.headers.get('x-odoo-secret'),
     querySecret: req.nextUrl.searchParams.get('secret'),
@@ -100,10 +106,13 @@ async function handlePost(req: NextRequest) {
     console.warn(`[Odoo Stock Webhook] Rejected delivery: ${auth.error}`)
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
+  if (resource && auth.status !== 'ok') {
+    return NextResponse.json({ error: 'Missing ERP resource credential' }, { status: 401 })
+  }
 
   const { data: erpConn, error: connErr } = await supabase
     .from('erp_connections')
-    .select('id')
+    .select('id, workspace_id, erp_type, url, db_name, username, password, status')
     .eq('workspace_id', workspaceId)
     .maybeSingle()
 
@@ -113,6 +122,18 @@ async function handlePost(req: NextRequest) {
   }
   if (!erpConn) {
     return NextResponse.json({ error: 'Unknown workspace' }, { status: 404 })
+  }
+  if (resource) {
+    if (resource !== odooStockWebhookResource(erpConn.url, erpConn.db_name ?? '')) {
+      return NextResponse.json({ error: 'Odoo stock webhook belongs to a previous destination' }, { status: 409 })
+    }
+  } else {
+    const { data: binding, error } = await supabase.from('erp_workspace_bindings')
+      .select('switched_at').eq('workspace_id', workspaceId).maybeSingle()
+    if (error) return NextResponse.json({ error: 'Failed to validate ERP destination' }, { status: 503 })
+    if (binding?.switched_at) {
+      return NextResponse.json({ error: 'Register the stock webhook for the current Odoo destination' }, { status: 409 })
+    }
   }
 
   const quantId = toId(actual._id || actual.id || payload.id)
@@ -167,6 +188,7 @@ async function handlePost(req: NextRequest) {
       platform: 'odoo',
       payload: enqueuePayload,
       dedupKey,
+      executionTarget: { erpConnectionId: erpConn.id, connectionGeneration: connectionGeneration(erpConn) },
     })
   } catch (err) {
     console.error('[Odoo Stock Webhook] Enqueue threw:', err)

@@ -43,9 +43,25 @@ it('rejects unpinned jobs and disabled connections', async () => {
   await expect(resolveExecutionTarget('ws-a', 'zid', 'a')).rejects.toThrow('active')
 })
 
-it.each(['url', 'db_name', 'id'])('rejects a replacement %s even for a new event while manual maps reference the original ERP', async field => {
-  supabase.addMock('erp_connections', [{ ...connections[0], [field]: `replacement-${field}` }])
-  await expect(resolveExecutionTarget('ws-a', 'zid', 'a')).rejects.toThrow('resource changed')
+it.each(['url', 'db_name', 'id'])('uses a replacement %s for new store events after the mapping switch', async field => {
+  const oldTarget = await resolveExecutionTarget('ws-a', 'zid', 'a')
+  const replacement = { ...connections[0], [field]: `replacement-${field}` }
+  supabase.addMock('erp_connections', [replacement])
+  const switchDestination = jest.spyOn(supabase, 'rpc')
+    .mockResolvedValue({ data: true, error: null } as never)
+  try {
+    await expect(validateExecutionTarget('ws-a', 'zid', 'a', oldTarget)).rejects.toThrow()
+    expect(switchDestination).not.toHaveBeenCalled()
+    await expect(resolveExecutionTarget('ws-a', 'zid', 'a')).resolves.toEqual({
+      erpConnectionId: replacement.id, connectionGeneration: connectionGeneration(replacement),
+    })
+    expect(switchDestination).toHaveBeenCalledWith('switch_erp_mapping_destination', {
+      p_workspace_id: 'ws-a', p_connection_id: replacement.id,
+      p_erp_type: 'odoo', p_url: replacement.url, p_db_name: replacement.db_name,
+    })
+  } finally {
+    switchDestination.mockRestore()
+  }
 })
 
 it('binds a new workspace once and rereads the winner without updating an existing resource', async () => {

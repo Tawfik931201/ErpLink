@@ -1,3 +1,5 @@
+import { connectionGeneration } from '../../src/lib/erp-execution-target'
+import { enqueueWebhookEvent } from '../../src/lib/sync-queue'
 import { dispatchWebhookReceipt, drainWebhookInbox, pruneProcessedInbox } from '../../src/lib/webhook-inbox'
 import { supabase } from '../mocks/supabase'
 
@@ -5,6 +7,54 @@ describe('durable dispatch RPC boundary (offline)', () => {
   const originalRpc = supabase.rpc
   beforeEach(() => supabase.reset())
   afterEach(() => { supabase.rpc = originalRpc })
+
+  it('accepts a Zid category without Odoo and dispatches once the workspace has a current connection', async () => {
+    const event = {
+      workspaceId: 'ws-a', platform: 'zid', storeId: 'store-a', event: 'category.update',
+      payload: { id: 'category-a' }, acceptBeforeErp: true,
+    }
+    supabase.addMock('webhook_inbox', [])
+    supabase.addMock('merchant_tokens', [{ workspace_id: event.workspaceId }])
+    supabase.setMockResponder((table, op) => {
+      if (table === 'webhook_inbox' && op === 'select') {
+        return { data: { id: 'receipt-a' }, error: null }
+      }
+      return undefined
+    })
+
+    expect(await enqueueWebhookEvent(event)).toEqual({ deferred: true })
+    const save = supabase.calls.findIndex(call => call.table === 'webhook_inbox' && call.op === 'insert')
+    const lookup = supabase.calls.findIndex(call => call.table === 'erp_connections')
+    expect(save).toBeGreaterThanOrEqual(0)
+    expect(lookup).toBeGreaterThan(save)
+    expect(supabase.calls[save].args[0]).toMatchObject({
+      awaiting_erp: true, erp_connection_id: null, workspace_id: event.workspaceId, store_id: event.storeId,
+    })
+
+    supabase.setMockResponder(null)
+    supabase.addMock('webhook_inbox', [{
+      id: 'receipt-a', status: 'pending', workspace_id: event.workspaceId, platform: 'zid',
+      store_id: event.storeId, attempts: 0, awaiting_erp: true,
+    }])
+    const dbDispatch = jest.fn(async () => ({ data: 'job-a', error: null }))
+    supabase.rpc = dbDispatch as unknown as typeof supabase.rpc
+    expect(await drainWebhookInbox()).toMatchObject({ enqueued: 0, failed: 0 })
+    expect(dbDispatch).not.toHaveBeenCalled()
+
+    const connection = {
+      id: 'erp-new', workspace_id: event.workspaceId, erp_type: 'odoo', status: 'connected',
+      url: 'https://new.example', db_name: 'new', username: 'user', password: 'cipher',
+    }
+    supabase.addMock('erp_connections', [connection])
+    supabase.addMock('erp_workspace_bindings', [{ ...connection, erp_connection_id: connection.id }])
+    expect(await drainWebhookInbox()).toMatchObject({ enqueued: 1, failed: 0 })
+    expect(dbDispatch).toHaveBeenCalledWith('dispatch_webhook_receipt', {
+      p_receipt_id: 'receipt-a',
+      p_queue_row: expect.objectContaining({
+        erp_connection_id: connection.id, connection_generation: connectionGeneration(connection),
+      }),
+    })
+  })
 
   it('uses the same authoritative receipt identity on intake and repeated recovery', async () => {
     const accepted = new Map<string, string>()

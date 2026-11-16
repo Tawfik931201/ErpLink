@@ -1,10 +1,11 @@
 /**
  * Durable receipt storage and atomic receipt-to-job dispatch.
  * A permanent queue_id marker survives queue completion so dispatcher recovery
- * cannot recreate an already-dispatched event. Unpinned and orphan receipts
- * remain stored for controlled recovery; permanent new identities are retained.
+ * cannot recreate an already-dispatched event. Store receipts waiting for an
+ * ERP are dispatched once an owned destination is available.
  */
 
+import { isCommercePlatform, resolveExecutionTarget, type ExecutionTarget } from './erp-execution-target'
 import { supabase } from './supabase'
 
 /**
@@ -15,6 +16,7 @@ import { supabase } from './supabase'
  * تطابق القيمتين مضمون باختبار (`tests/unit/ingress-durability.test.ts`).
  */
 const SYNC_QUEUE_MAX_RETRIES = 5
+const DISPATCH_RETRY_DELAY_MS = 60_000
 
 export interface WebhookReceipt {
   platform: string
@@ -124,9 +126,11 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
 
   const { data, error } = await supabase
     .from('webhook_inbox')
-    .select('id,platform,store_id,workspace_id,event,dedup_key,payload,attempts')
+    .select('id,platform,store_id,workspace_id,attempts,awaiting_erp')
     .eq('status', 'pending')
     .not('workspace_id', 'is', null)
+    .lte('next_dispatch_at', new Date().toISOString())
+    .order('next_dispatch_at', { ascending: true })
     .order('received_at', { ascending: true })
     .limit(Math.max(1, Math.min(limit, 100)))
 
@@ -140,10 +144,8 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
     platform: string
     store_id: string
     workspace_id: string | null
-    event: string
-    dedup_key: string | null
-    payload: Record<string, unknown>
     attempts: number
+    awaiting_erp: boolean
   }>
 
   result.scanned = rows.length
@@ -157,13 +159,23 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
       continue
     }
 
+    let target
+    if (row.awaiting_erp && isCommercePlatform(row.platform)) {
+      try {
+        target = await resolveExecutionTarget(row.workspace_id, row.platform, row.store_id)
+      } catch {
+        await postponeInboxDispatch(row.id, 'erp_execution_target_unavailable')
+        continue
+      }
+    }
     const dispatched = await dispatchWebhookReceipt(row.id, {
       max_retries: SYNC_QUEUE_MAX_RETRIES,
       next_retry_at: new Date().toISOString(),
-    })
+    }, target)
     if (dispatched.error) {
       result.failed += 1
-      await markInboxFailed(row.id, dispatched.error, row.attempts)
+      if (row.awaiting_erp) await postponeInboxDispatch(row.id, dispatched.error)
+      else await markInboxFailed(row.id, dispatched.error, row.attempts)
     } else result.enqueued += 1
   }
 
@@ -173,15 +185,27 @@ export async function drainWebhookInbox(limit = 25): Promise<InboxDrainResult> {
 /** Atomically insert one receipt-owned job and persist the dispatch marker. */
 export async function dispatchWebhookReceipt(
   receiptId: string,
-  queueOptions: { max_retries: number; next_retry_at: string }
+  queueOptions: { max_retries: number; next_retry_at: string },
+  target?: ExecutionTarget
 ): Promise<{ id?: string; error?: string }> {
   try {
     const { data, error } = await supabase.rpc('dispatch_webhook_receipt', {
-      p_receipt_id: receiptId, p_queue_row: queueOptions,
+      p_receipt_id: receiptId,
+      p_queue_row: target ? {
+        ...queueOptions,
+        erp_connection_id: target.erpConnectionId,
+        connection_generation: target.connectionGeneration,
+      } : queueOptions,
     })
     if (error || typeof data !== 'string') return { error: 'receipt_dispatch_unavailable' }
     return { id: data }
   } catch { return { error: 'receipt_dispatch_transport_failed' } }
+}
+
+async function postponeInboxDispatch(id: string, error: string): Promise<void> {
+  await supabase.from('webhook_inbox')
+    .update({ last_error: error, next_dispatch_at: new Date(Date.now() + DISPATCH_RETRY_DELAY_MS).toISOString() })
+    .eq('id', id).eq('status', 'pending').eq('awaiting_erp', true)
 }
 
 /**
@@ -202,7 +226,7 @@ async function markInboxFailed(id: string, message: string, attempts: number): P
       attempts: nextAttempts,
       ...(status === 'failed' ? { status: 'failed' as const } : {}),
     })
-    .eq('id', id)
+    .eq('id', id).eq('status', 'pending')
   if (status === 'failed') {
     console.error(`[Webhook Inbox] receipt ${id} marked failed after ${nextAttempts} drain attempts: ${message}`)
   }

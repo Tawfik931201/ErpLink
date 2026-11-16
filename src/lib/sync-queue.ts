@@ -1,7 +1,7 @@
 /**
  * Durable webhook processing backed by Supabase inbox receipts and queue jobs.
- * New receipts pin the ERP connection generation. Atomic dispatch links each
- * receipt to one job permanently; distinct accepted deliveries are retained.
+ * Store receipts can wait for the current ERP. Atomic dispatch pins that
+ * connection generation and permanently links the receipt to one job.
  * RPC claims separate retry scheduling from fenced, renewable worker leases.
  * Unknown remote outcomes are quarantined for reconciliation, never replayed
  * automatically. This is not an exactly-once guarantee across ERP systems.
@@ -9,6 +9,7 @@
 
 import { createHash } from 'crypto'
 
+import { isCommercePlatform } from './erp-execution-target'
 import { admitWorkspaceEvent, getActiveWorkspaceIds } from './ingress-admission'
 import { processOdooStockEvent } from './stock-sync-engine'
 import { supabase } from './supabase'
@@ -348,6 +349,7 @@ interface EnqueueParams {
   dedupKey?: string | null
   nextRetryAt?: string
   executionTarget?: { erpConnectionId: string; connectionGeneration: string }
+  acceptBeforeErp?: boolean
 }
 
 /**
@@ -372,6 +374,7 @@ export async function enqueueFailedSync(params: EnqueueParams & { errorMessage: 
 
 export interface EnqueueResult {
   id?: string
+  deferred?: boolean
   duplicate?: boolean
   coalesced?: boolean
   skipped?: boolean
@@ -382,9 +385,8 @@ export interface EnqueueResult {
 /**
  * Enqueue a webhook event for background processing — idempotent.
  *
- *  - نفس delivery id المعلّق → يُتجاهل (duplicate).
- *  - نفس الكيان المعلّق (platform+event+store+entity) → يُدمج بأحدث payload
- *    (coalescing) بدل إدراج صف جديد — يمتص الدفعات الكبيرة والتكرار خلال ~5s.
+ * Duplicate deliveries retain their existing receipt. Store ingress may save
+ * the receipt for dispatch later, once the workspace has a usable ERP.
  */
 export async function enqueueWebhookEvent(params: EnqueueParams): Promise<EnqueueResult> {
   if (!params.workspaceId || !params.storeId || !params.event) {
@@ -407,14 +409,17 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     ? `delivery:${params.platform}:${params.storeId}:${params.event}:${deliveryId}`
     : `fingerprint:${params.platform}:${params.storeId}:${params.event}:${fingerprintPayload(params.payload)}`)
   const { resolveExecutionTarget, validateExecutionTarget } = await import('./erp-execution-target')
+  const acceptBeforeErp = params.acceptBeforeErp && isCommercePlatform(params.platform) && !params.executionTarget
   let target
-  try {
-    if (params.executionTarget) {
-      await validateExecutionTarget(params.workspaceId, params.platform, params.storeId, params.executionTarget)
-      target = params.executionTarget
-    } else target = await resolveExecutionTarget(params.workspaceId, params.platform, params.storeId)
-  } catch {
-    return { error: 'erp_execution_target_unavailable' }
+  if (!acceptBeforeErp) {
+    try {
+      if (params.executionTarget) {
+        await validateExecutionTarget(params.workspaceId, params.platform, params.storeId, params.executionTarget)
+        target = params.executionTarget
+      } else target = await resolveExecutionTarget(params.workspaceId, params.platform, params.storeId)
+    } catch {
+      return { error: 'erp_execution_target_unavailable' }
+    }
   }
   const { recordWebhookReceipt, dispatchWebhookReceipt } = await import('./webhook-inbox')
   // Odoo remains unbatched. Every admitted delivery is preserved individually;
@@ -426,13 +431,14 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     ;[receipt] = await insertReceipts([{
       dedupKey, platform: params.platform, storeId: params.storeId,
       workspaceId: params.workspaceId, event: params.event, payload: params.payload,
-      erpConnectionId: target.erpConnectionId, connectionGeneration: target.connectionGeneration,
+      erpConnectionId: target?.erpConnectionId, connectionGeneration: target?.connectionGeneration,
+      awaitingErp: acceptBeforeErp,
     }])
   } else {
     receipt = await recordWebhookReceipt({
       dedupKey, platform: params.platform, storeId: params.storeId,
       workspaceId: params.workspaceId, event: params.event, payload: params.payload,
-      erpConnectionId: target.erpConnectionId, connectionGeneration: target.connectionGeneration,
+      erpConnectionId: target?.erpConnectionId, connectionGeneration: target?.connectionGeneration,
     })
   }
   if (!receipt?.ok) return { error: receipt?.error ?? 'inbox_write_failed' }
@@ -441,11 +447,18 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
     return { duplicate: true }
   }
   if (!receipt.id) return { error: 'inbox_receipt_id_missing' }
+  if (acceptBeforeErp) {
+    try {
+      target = await resolveExecutionTarget(params.workspaceId, params.platform, params.storeId)
+    } catch {
+      return { deferred: true }
+    }
+  }
   const dispatched = await dispatchWebhookReceipt(receipt.id, {
     max_retries: SYNC_QUEUE_MAX_RETRIES,
     next_retry_at: params.nextRetryAt ?? new Date(Date.now() + coalesceWindowMs()).toISOString(),
-  })
-  if (dispatched.error) return { error: dispatched.error }
+  }, acceptBeforeErp ? target : undefined)
+  if (dispatched.error) return acceptBeforeErp ? { deferred: true } : { error: dispatched.error }
   metrics.enqueued += 1
   return { id: dispatched.id }
 }

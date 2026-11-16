@@ -199,6 +199,7 @@ export async function POST() {
       .from('field_mappings')
       .select('id, odoo_model, odoo_match_field, odoo_webhook_id, odoo_server_action_id, mappings, sync_direction')
       .eq('workspace_id', workspaceId)
+      .is('erp_destination_retired_at', null)
       .not('odoo_webhook_id', 'is', null)
 
     if (mapErr) {

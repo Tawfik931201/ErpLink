@@ -722,7 +722,10 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     message: 'Zid webhook endpoint is ready.',
-    events: ['order.create', 'order.status.update', 'product.create', 'product.update', 'customer.create'],
+    events: [
+      'order.create', 'order.status.update', 'product.create', 'product.update', 'customer.create',
+      'category.create', 'category.update', 'category.delete',
+    ],
   })
 }
 
@@ -733,7 +736,7 @@ export async function GET() {
  * `error` تعني «لم يُحفظ بشكل دائم» → يرد المسار بـ 503 فتعيد زد الإرسال.
  * `skipped` تعني قراراً مقصوداً (معطّل من الإعدادات) → رد 200 طبيعي.
  */
-type HandlerResult = 'enqueued' | 'skipped' | 'no_workspace' | 'error'
+type HandlerResult = 'enqueued' | 'deferred' | 'skipped' | 'no_workspace' | 'error'
 
 async function findMerchantWorkspaceId(storeId: number): Promise<string | null> {
   const storeStr = String(storeId)
@@ -804,6 +807,7 @@ async function handleOrderEvent(
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
   const queued = await enqueueWebhookEvent({
+    acceptBeforeErp: true,
     workspaceId,
     storeId: String(storeId),
     event,
@@ -830,7 +834,7 @@ async function handleOrderEvent(
       )
       .catch(() => {})
   }
-  return 'enqueued'
+  return queued.deferred ? 'deferred' : 'enqueued'
 }
 
 async function handleProductEvent(
@@ -862,6 +866,7 @@ async function handleProductEvent(
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
   const queued = await enqueueWebhookEvent({
+    acceptBeforeErp: true,
     workspaceId,
     storeId: String(storeId),
     event,
@@ -888,7 +893,7 @@ async function handleProductEvent(
       )
       .catch(() => {})
   }
-  return 'enqueued'
+  return queued.deferred ? 'deferred' : 'enqueued'
 }
 
 async function handleCustomerEvent(
@@ -920,6 +925,7 @@ async function handleCustomerEvent(
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
   const queued = await enqueueWebhookEvent({
+    acceptBeforeErp: true,
     workspaceId,
     storeId: String(storeId),
     event,
@@ -946,7 +952,7 @@ async function handleCustomerEvent(
       )
       .catch(() => {})
   }
-  return 'enqueued'
+  return queued.deferred ? 'deferred' : 'enqueued'
 }
 
 async function handleCategoryEvent(
@@ -979,6 +985,7 @@ async function handleCategoryEvent(
   try {
     const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
     const queued = await enqueueWebhookEvent({
+      acceptBeforeErp: true,
       workspaceId,
       storeId: String(storeId),
       event,
@@ -1005,7 +1012,7 @@ async function handleCategoryEvent(
       )
       .catch(() => {})
   }
-  return 'enqueued'
+  return queued.deferred ? 'deferred' : 'enqueued'
   } catch (err) {
     console.error('[Zid Webhook] Failed to enqueue category event', err)
     return 'error'
@@ -1046,6 +1053,7 @@ async function handleAbandonedCartEvent(
 
   const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
   const queued = await enqueueWebhookEvent({
+    acceptBeforeErp: true,
     workspaceId,
     storeId: String(storeId),
     event,
@@ -1072,7 +1080,7 @@ async function handleAbandonedCartEvent(
       )
       .catch(() => {})
   }
-  return 'enqueued'
+  return queued.deferred ? 'deferred' : 'enqueued'
 }
 
 export async function POST(req: NextRequest) {

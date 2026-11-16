@@ -11,6 +11,7 @@
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface FieldMappingRow {
+  erp_destination_retired_at?: string | null
   id: string
   workspace_id: string
   erp_connection_id: string | null

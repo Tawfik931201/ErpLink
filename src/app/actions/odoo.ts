@@ -408,6 +408,9 @@ export async function saveErpConnection(data: {
       result = inserted
     }
 
+    const { requireWorkspaceBinding } = await import('@/lib/erp-execution-target')
+    await requireWorkspaceBinding(result, true)
+
     // Store the detected Odoo version in a second, best-effort write: a
     // database that has not applied migration 20261021 has no `odoo_version`
     // column, and naming it in the insert above would fail the whole connect.

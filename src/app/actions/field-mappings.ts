@@ -28,6 +28,7 @@ export async function getFieldMappings() {
     const { data: mappings, error } = await supabase
       .from('field_mappings')
       .select('*')
+      .is('erp_destination_retired_at', null)
       .eq('workspace_id', user.active_workspace_id)
       .order('created_at', { ascending: false })
 
@@ -58,6 +59,7 @@ export async function getFieldMappingById(id: string) {
     const { data: mapping, error } = await supabase
       .from('field_mappings')
       .select('*')
+      .is('erp_destination_retired_at', null)
       .eq('id', id)
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
@@ -101,7 +103,7 @@ export async function saveFieldMapping(data: {
     }
     if (data.id) {
       const { data: ownedMapping, error } = await supabase.from('field_mappings')
-        .select('id').eq('id', data.id).eq('workspace_id', user.active_workspace_id).maybeSingle()
+        .select('id').is('erp_destination_retired_at', null).eq('id', data.id).eq('workspace_id', user.active_workspace_id).maybeSingle()
       if (error || !ownedMapping) throw new Error('Field mapping not found in active workspace')
     }
 
@@ -324,6 +326,7 @@ export async function deleteFieldMapping(id: string) {
     const { data: mapping } = await supabase
       .from('field_mappings')
       .select('odoo_webhook_id, odoo_server_action_id, erp_connection_id')
+      .is('erp_destination_retired_at', null)
       .eq('id', id)
       .eq('workspace_id', user.active_workspace_id)
       .maybeSingle()
@@ -359,6 +362,7 @@ export async function deleteFieldMapping(id: string) {
       .from('field_mappings')
       .delete()
       .eq('id', id)
+      .is('erp_destination_retired_at', null)
       .eq('workspace_id', user.active_workspace_id)
 
     if (error) throw new Error('Failed to delete field mapping: ' + error.message)

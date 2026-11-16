@@ -538,6 +538,7 @@ export async function processSingleMapping(
   const inherited = getErpExecutionScope()
   const target = inherited ?? await resolveExecutionTarget(mapping.workspace_id, platform, storeId)
   if (inherited && (inherited.workspaceId !== mapping.workspace_id || inherited.storeId !== storeId || inherited.platform !== platform)) throw new Error('Mapping ERP execution scope mismatch')
+  if (mapping.erp_destination_retired_at) throw new Error('Mapping belongs to a retired ERP destination')
   if (mapping.erp_connection_id && mapping.erp_connection_id !== target.erpConnectionId) throw new Error('Mapping ERP execution connection changed')
   await validateExecutionTarget(mapping.workspace_id, platform, storeId, target)
   const scope = { ...target, workspaceId: mapping.workspace_id, platform, storeId, eventId: inherited?.eventId || existingLogId || `manual:${event}` }
@@ -829,6 +830,7 @@ async function syncMissingOdooProduct(
   const { data: compMappingRows } = await supabaseAdmin
     .from('field_mappings')
     .select('*')
+    .is('erp_destination_retired_at', null)
     .eq('workspace_id', workspaceId)
     .eq('erp_connection_id', getErpExecutionScope()?.erpConnectionId || '')
 
