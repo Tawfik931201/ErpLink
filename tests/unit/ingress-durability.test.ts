@@ -83,7 +83,7 @@ describe('the Odoo → store skips leave a trace', () => {
 })
 
 describe('the standard-mapping preset skip leaves a trace', () => {
-  const engine = read('lib', 'sync-engine.ts')
+  const engine = read('lib', 'sync', 'mappings.ts')
 
   it('logs the blocked preset instead of returning null in silence', () => {
     const idx = engine.indexOf('if (!presetCheck.allowed) {')
@@ -95,12 +95,20 @@ describe('the standard-mapping preset skip leaves a trace', () => {
 })
 
 describe('a Zid order is never synced without its line items', () => {
-  const engine = read('lib', 'sync-engine.ts')
+  const zidOrders = read('lib', 'zid', 'orders.ts')
+  const webhook = read('lib', 'sync', 'webhook.ts')
 
   it('fails the task instead of writing a partial order', () => {
-    const idx = engine.indexOf('Failed to fetch full Zid order details')
+    const idx = zidOrders.indexOf('Failed to fetch full Zid order details')
     expect(idx).toBeGreaterThan(-1)
-    const window = engine.slice(idx, idx + 1200)
+    expect(zidOrders.slice(idx, idx + 600)).toContain('return { errorMessage:')
+    const enrich = webhook.indexOf('const prepared = await enrichZidOrder(')
+    const guard = webhook.indexOf("if ('errorMessage' in prepared)")
+    const mapping = webhook.indexOf('// 1. Find all field_mappings')
+    expect(enrich).toBeGreaterThan(-1)
+    expect(guard).toBeGreaterThan(enrich)
+    expect(mapping).toBeGreaterThan(guard)
+    const window = webhook.slice(guard, mapping)
     // The task must FAIL so the queue retries it — not "continue with the
     // minimal payload", which wrote an order with no products at all.
     expect(window).toContain("status: 'failed'")

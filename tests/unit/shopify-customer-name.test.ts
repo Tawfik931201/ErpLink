@@ -71,7 +71,7 @@ describe('shopify customer catalogue', () => {
 
 describe('full-name wiring source pins', () => {
   const ROOT = process.cwd()
-  const engine = fs.readFileSync(path.join(ROOT, 'src/lib/sync-engine.ts'), 'utf8')
+  const engine = fs.readFileSync(path.join(ROOT, 'src/lib/odoo/customers.ts'), 'utf8')
 
   it('applies the composed name in the res.partner block', () => {
     expect(engine).toContain('resolveShopifyCustomerFullName')

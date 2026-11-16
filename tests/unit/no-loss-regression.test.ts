@@ -84,7 +84,7 @@ describe('the Standard Mapping settings are unchanged', () => {
     // البوابة عند الاستقبال وبوابة المحرك: سطران متطابقان. لو اختلفا
     // لأحدهما لأصبح السلوك غير متوقع.
     const gate = read('lib', 'webhook-gate.ts')
-    const engine = read('lib', 'sync-engine.ts')
+    const engine = read('lib', 'sync', 'settings.ts')
     const gateRule = "settings.enabled_actions.includes(operation)"
     expect(gate).toContain(gateRule)
     expect(engine).toContain(gateRule)

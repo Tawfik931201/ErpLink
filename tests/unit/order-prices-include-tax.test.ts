@@ -10,7 +10,7 @@ import path from 'path'
  * 4. When disabled (default), prices reach Odoo as-is.
  */
 
-const enginePath = path.join(process.cwd(), 'src', 'lib', 'sync-engine.ts')
+const enginePath = path.join(process.cwd(), 'src', 'lib', 'odoo', 'order-lines.ts')
 const engineSource = fs.readFileSync(enginePath, 'utf8')
 
 const tabPath = path.join(

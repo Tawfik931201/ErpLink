@@ -26,7 +26,8 @@ function readSrc(...parts: string[]): string {
   return fs.readFileSync(path.join(SRC, ...parts), 'utf8')
 }
 
-const engine = readSrc('lib', 'sync-engine.ts')
+const webhook = readSrc('lib', 'sync', 'webhook.ts')
+const mappings = readSrc('lib', 'sync', 'mappings.ts')
 
 function queryBlock(source: string): string {
   const from = source.indexOf('Find all field_mappings matching')
@@ -57,7 +58,7 @@ function prefersDeliveryWorkspace(body: string): boolean {
 }
 
 describe('field_mappings query is scoped to the delivery workspace', () => {
-  const block = queryBlock(engine)
+  const block = queryBlock(webhook)
 
   it('gates a workspace_id filter on resolvedWorkspaceId', () => {
     expect(isQueryScoped(block)).toBe(true)
@@ -68,7 +69,7 @@ describe('field_mappings query is scoped to the delivery workspace', () => {
   })
 
   it('keeps the component-sync field_mappings query scoped too', () => {
-    const scoped = engine.match(/from\('field_mappings'\)[\s\S]{0,240}?eq\('workspace_id', workspaceId\)/g) || []
+    const scoped = mappings.match(/from\('field_mappings'\)[\s\S]{0,240}?eq\('workspace_id', workspaceId\)/g) || []
     expect(scoped.length).toBeGreaterThanOrEqual(1)
   })
 
@@ -86,7 +87,7 @@ describe('field_mappings query is scoped to the delivery workspace', () => {
 })
 
 describe('preset path prefers the delivery workspace', () => {
-  const body = presetFnBody(engine)
+  const body = presetFnBody(mappings)
 
   it('accepts a deliveryWorkspaceId parameter', () => {
     expect(body).toContain('deliveryWorkspaceId?: string | null')
@@ -115,7 +116,7 @@ describe('preset path prefers the delivery workspace', () => {
 
 describe('call sites pass the delivery workspace', () => {
   it('both invocations end with a workspace argument', () => {
-    const calls = [...engine.matchAll(/(?<!function )processFixedMappingFallback\(\s*([\s\S]*?)\)/g)]
+    const calls = [...(webhook + mappings).matchAll(/(?<!function )processFixedMappingFallback\(\s*([\s\S]*?)\)/g)]
     expect(calls.length).toBe(2)
     for (const call of calls) {
       const args = call[1].trim()

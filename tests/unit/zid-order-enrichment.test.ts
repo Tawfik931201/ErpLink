@@ -126,8 +126,7 @@ describe('Zid order enrichment isolation and freshness', () => {
   })
 
   it('wires the policies before caching/merging and rereads unsigned full payloads', () => {
-    const engine = readFileSync(join(__dirname, '../../src/lib/sync-engine.ts'), 'utf8')
-    const part = engine.slice(engine.indexOf('// ── If Zid order event'), engine.indexOf('// ── If Salla event'))
+    const part = readFileSync(join(__dirname, '../../src/lib/zid/orders.ts'), 'utf8')
     expect(part).toContain('if (!orderId || isLegacyDelivery || !hasOrderItems || !isOrderCreationEvent(normalizedEvent))')
     expect(part).toContain("if (!orderId) throw new Error('Zid order event is missing its order id')")
     expect(part).toContain('resolveZidOrderTokenScope(storeIdStr, resolvedWorkspaceId')

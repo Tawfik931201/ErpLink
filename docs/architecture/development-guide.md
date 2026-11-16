@@ -6,15 +6,17 @@ Use this map before changing integration behavior. This refactor freezes UI and 
 
 ### Product synchronization
 
-Start with `src/lib/sync-engine.ts`: `processWebhookEvent` resolves/enriches inbound events; `processSingleMapping` and `executeOdooOperation` execute mappings. Product mode logic remains in `syncAsSeparateProducts`, `syncChildAsSeparateProduct`, `syncAsVariants`, and `syncChildVariantAsVariant`. Payload variant extraction lives in `src/lib/products/variants.ts`; product naming in `src/lib/product-name.ts`. Product BoM creation remains `syncProductBom` in the engine.
+For a platform product change start in `src/lib/zid/products.ts`, `src/lib/salla/products.ts` or `src/lib/shopify/products.ts`. The shared variant fields live in `src/lib/products/variants.ts`. For an Odoo product change start in `src/lib/odoo/products.ts`, then follow the native/separate variant, stock or BoM modules. Use `src/lib/erpnext/products.ts` for ERPNext Item defaults.
 
 For merchant transport inspect `src/lib/zid-client.ts` or `src/lib/salla-client.ts`; for manual mapping CRUD use `src/app/actions/product-mappings.ts`. Stock propagation has its own `src/lib/stock-sync-engine.ts` and `src/app/actions/inventory-sync.ts`. An Odoo-to-store product change currently belongs to `runBackgroundSync` in `src/app/api/webhooks/odoo/route.ts`, not the inbound product helper. Preserve variant-mode distinctions and external-ID fallback ordering.
 
+Salla product settings read money objects and `cost_price`, and use `skus` joined to the option values for real variants. Automatic sales tax checks a Salla-scoped mapping, a name or a defensible percentage; a standalone monetary tax amount does not supply a percentage. Salla product writes surface Odoo field rejections without retrying after dropping fields. Native variants reject combinations that would generate extra Odoo variants; separate products support those SKU sets. The mocked `salla-product-create-audit.test.ts` covers both creation modes and the values sent to Odoo.
+
 ### Creating a Sales Order or changing order lines in Odoo
 
-The actual Sales Order write path remains in `src/lib/sync-engine.ts`, in `executeOdooOperation`, through `safeCreateOdooRecord`/`safeWriteOdooRecord`. Locate calls using the model and operation branch rather than looking for a hypothetical `OrderRepository`.
+`src/lib/odoo/execute-operation.ts` runs the Sales Order write through the record helpers. `src/lib/odoo/order-values.ts` handles related customer selection, fiscal settings and header/line preparation.
 
-`buildOrderLineItems` builds Odoo line commands and resolves products, prices, discount/tax fields and existing mappings. `buildOdooValues` builds mapped fields. `prepareSaleOrderForUpdate` and `normalizeOrderLinesForUpdate` preserve current restrictions on existing/confirmed orders; changing those restrictions is a behavior change. `ensureSaleOrderTaxes`, status/picking/invoice actions and rules also remain in the engine. Fulfilled-item extraction alone moved to `src/lib/orders/fulfillment-items.ts`.
+`src/lib/odoo/order-lines.ts` assembles Odoo lines and preserves the restrictions on updates to confirmed orders. `src/lib/odoo/order-workflow.ts` owns order taxes, status, picking and invoice actions. Fulfilled-item extraction lives in `src/lib/orders/fulfillment-items.ts`.
 
 Use `src/lib/zid/order-helpers.ts` for Zid status/shipping/COD normalization; `src/lib/odoo/order-currency.ts`, `order-payment.ts` and `analytic-distribution.ts` for their existing dedicated responsibilities. Returns enter through `src/lib/returns/engine.ts` before ordinary writes. Do not combine order-create and order-update behavior or normalize configured analytic percentages during cleanup.
 
@@ -28,15 +30,15 @@ Salla order creation hydrates thin deliveries with Order Details and the separat
 
 ### Importing Salla customers
 
-`src/app/actions/transfers.ts`: `startInitialTransfer` validates workspace/ERP/store selection; `runTransferInBackground` paginates `listSallaCustomers` for customer imports. The actual merchant API reader is `listSallaCustomers` in `src/lib/salla-client.ts`, through its token/transport functions. Mapping, metadata and duplicate matching use `buildOdooValues`, `fetchFieldMeta` and `findExistingOdooRecord` from `src/lib/sync-engine.ts`.
+`src/app/actions/transfers.ts`: `startInitialTransfer` validates workspace/ERP/store selection; `runTransferInBackground` paginates `listSallaCustomers` for customer imports. The actual merchant API reader is `listSallaCustomers` in `src/lib/salla-client.ts`, through its token/transport functions. Manual transfer uses the existing public sync imports for Odoo value mapping, metadata and duplicate matching.
 
-Customer company fields now have the focused boundary `src/lib/customers/company-fields.ts`; generic Salla enrichment and `res.partner` relation creation still remain in the engine. Customer webhook processing and bulk import are separate entry paths; test both before assuming a helper affects both. Keep store selection, pagination and workspace predicates intact.
+Salla webhook enrichment lives in `src/lib/salla/customers.ts`. Odoo partner preparation uses `src/lib/customers/company-fields.ts` from `src/lib/odoo/customers.ts`. Customer webhook processing and bulk import are separate entry paths; test both before assuming a helper affects both. Keep store selection, pagination and workspace predicates intact.
 
 ### Category linking
 
-Manual rows and map operations: `src/app/actions/category-mappings.ts` (`getCategoryMappings`, `saveCategoryMapping`, `batchImportCategoryMappings`, `deleteCategoryMapping`, `fetchStoreCategories`). Category-specific execution overrides: `src/lib/categories/mapping-overrides.ts`. Parent-category resolution still lives in `resolveSingleRelationId` in `src/lib/sync-engine.ts`; Salla source numeric IDs are not Odoo category IDs.
+Manual rows and map operations: `src/app/actions/category-mappings.ts` (`getCategoryMappings`, `saveCategoryMapping`, `batchImportCategoryMappings`, `deleteCategoryMapping`, `fetchStoreCategories`). Category-specific execution overrides: `src/lib/categories/mapping-overrides.ts`. `src/lib/odoo/relations.ts` resolves source category IDs, and `src/lib/odoo/categories.ts` prepares the destination values.
 
-The category audit adds `src/lib/categories/odoo-values.ts` for capability-based category value validation, typed matching, operation-local company context and non-destructive archive. Scoped Zid/Salla relations use `resolveStoreCategory` in the engine. Initial category imports share the category executor. See [category-standard-mapping-audit.md](../integrations/category-standard-mapping-audit.md) for behavior changes, version evidence and validation limits.
+The category audit adds `src/lib/categories/odoo-values.ts` for capability-based category value validation, typed matching, operation-local company context and non-destructive archive. Scoped Zid/Salla relations use `resolveStoreCategory` in `src/lib/odoo/relations.ts`. Initial category imports share the category executor. See [category-standard-mapping-audit.md](../integrations/category-standard-mapping-audit.md) for behavior changes, version evidence and validation limits.
 
 Read the current per-store/default settings in `src/lib/mapping-settings.ts` and category settings use sites before changing precedence. Saving a manual map already performs a best-effort Odoo match-field write; do not accidentally remove it when reorganizing persistence. Salla publishes category create/update, not a category deletion subscription.
 
@@ -44,13 +46,17 @@ Read the current per-store/default settings in `src/lib/mapping-settings.ts` and
 
 Transport/authentication/HTTP output starts in `src/app/api/webhooks/<platform>/route.ts`; stock uses `src/app/api/webhooks/odoo/stock/route.ts`. Platform verification lives in `src/lib/zid/webhook-auth.ts`, `src/lib/salla/webhook-auth.ts`, `src/lib/odoo/webhook-secret.ts`, or Shopify's existing route/client logic. `src/lib/event-operation.ts` classifies operations; `webhook-gate.ts` checks current mapping settings.
 
-Durability/retry changes belong in `src/lib/sync-queue.ts` and `webhook-inbox.ts`; admission and batched persistence already have `ingress-admission.ts`/`ingress-batch.ts`. Enrichment and writes belong downstream in `processWebhookEvent` or the existing Odoo workers. Preserve authentication-before-lookup, durable receipt-before-acknowledgement, delivery-based dedup, mapping-aware coalescing, tenant scoping, retry budgets and exact error/status distinctions. See [api-contracts.md](api-contracts.md).
+Durability/retry changes belong in `src/lib/sync-queue.ts` and `webhook-inbox.ts`; admission and batched persistence already have `ingress-admission.ts`/`ingress-batch.ts`. `src/lib/sync/webhook.ts` dispatches store data preparation and hands matching events to `src/lib/sync/mappings.ts`. Preserve authentication-before-lookup, durable receipt-before-acknowledgement, delivery-based dedup, mapping-aware coalescing, tenant scoping, retry budgets and exact error/status distinctions. See [api-contracts.md](api-contracts.md).
 
 ### Adding a future commerce platform
 
 This is a new feature, outside the current refactor. Follow the actual existing boundaries: a dedicated transport/token client; OAuth entry/callback routes; authenticated ingress route; platform verifier; field/event catalogues under `src/lib/platforms/`; external-ID rules in `platform-fields.ts`; event classification in `event-operation.ts`; supported settings and queue/platform unions. Then integrate normalization and domain execution at their real engine call sites with explicit tests.
 
 Adding one table row in `platform-fields.ts` alone does not add a working integration. Zid/Salla/Shopify have deliberately different identity, authentication, topics and payloads; do not generate a universal adapter that silently erases those differences. Avoid importing `sync-engine.ts` from newly extracted domain modules.
+
+### ERPNext expansion
+
+Use `src/lib/erpnext/mappings.ts` for custom mapping execution, `values.ts` for DocType fields and relationships, and `records.ts` for matching and writes. Add a specific operation and fixtures for each new DocType workflow. `tests/unit/erpnext-product-routing.test.ts` exercises Zid enrichment, pinned ERP selection and the REST create/update contract for Item.
 
 ## Verification by change area
 

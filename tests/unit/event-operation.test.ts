@@ -237,7 +237,9 @@ describe('source pins', () => {
     // a leftover mapEventToEntityAndOp, reintroduces the drift.
     expect(read('src/lib/event-operation.ts')).toContain('const SALLA_EVENTS')
     expect(read('src/lib/webhook-gate.ts')).not.toContain('mapEventToEntityAndOp')
-    expect(read('src/lib/sync-engine.ts')).not.toContain('mapEventToEntityAndOp')
+    for (const file of ['sync/events.ts', 'sync/mappings.ts', 'sync/webhook.ts']) {
+      expect(read('src/lib/' + file)).not.toContain('mapEventToEntityAndOp')
+    }
   })
 
   it('has no inline event classifier left in sync-engine', () => {
@@ -249,11 +251,11 @@ describe('source pins', () => {
     // order.shipment.cancelled writing {state:'cancel'}.
     //
     // Anchored on `normalizedEvent` so it matches the event ladder only. The
-    // `verb.includes('cancel')` ternaries around sync-engine.ts:1738 are a
+    // `verb.includes('cancel')` ternaries in order workflow are a
     // different concern — they translate a merchant's configured action name
     // ("cancel", "fulfill") in Mapping Center, not an inbound event slug — and
     // must not be "cleaned up" to satisfy this pin.
-    const engine = read('src/lib/sync-engine.ts')
+    const engine = read('src/lib/sync/mappings.ts')
     expect(engine).not.toMatch(/normalizedEvent\.includes\('cancel'\) \? 'cancel'/)
     expect(engine).not.toMatch(/normalizedEvent\.includes\('deliver'\) \? 'deliver'/)
     // Every operation decision must go through the shared function.
@@ -264,13 +266,13 @@ describe('source pins', () => {
 
   it('routes both consumers through the shared resolver', () => {
     expect(read('src/lib/webhook-gate.ts')).toContain('resolveEventOperation(event, storeType)')
-    expect(read('src/lib/sync-engine.ts')).toContain('resolveOperationForEvent(event, platform)')
+    expect(read('src/lib/sync/events.ts')).toContain('resolveOperationForEvent(event, platform)')
   })
 
   it('passes the resolved platform into the operation router', () => {
     // Without the platform the router cannot consult the Salla table at all,
     // silently restoring the substring behaviour.
-    const engine = read('src/lib/sync-engine.ts')
+    const engine = read('src/lib/sync/mappings.ts')
     expect(engine).toContain(
       'normalizeOdooOperation(mapping.odoo_operation, event, mappingPlatform)'
     )
@@ -278,24 +280,27 @@ describe('source pins', () => {
   })
 
   it('reads the nested data.order and prefers it for both id and merge', () => {
-    const engine = read('src/lib/sync-engine.ts')
-    expect(engine).toContain('(data as any)?.order')
+    const source = read('src/lib/salla/webhook-data.ts')
+    const orders = read('src/lib/salla/orders.ts')
+    const data = ['orders', 'customers', 'categories', 'products'].map(entity => read('src/lib/salla/' + entity + '.ts')).join('\n')
+    expect(source).toContain('(data as any)?.order')
+    expect(source).toContain('enrichSallaOrder(data, storeIdStr, orderSource, orderFetchId')
+    expect(orders).toContain('{ ...full, ...orderSource }')
     // The order branch merges the nested order LAST so the event's fresher
     // values win over our GET — and the thin envelope can no longer overwrite
     // the correct id with the status-record id.
-    expect(engine).toContain('{ ...full, ...orderSource }')
     // Customer and category have no nested form, so they keep `...data` — which
     // is exactly why a third `...data` merge (the old order branch) must not be
     // there. Counted rather than matched on formatting.
     // Both directions exist now: the legacy delivery inverts the merge
     // (API wins over the untrusted body), the authenticated one keeps the
     // event-wins order. Each entity must keep both forms.
-    expect(engine.match(/\{ \.\.\.full, \.\.\.orderSource \}/g) ?? []).toHaveLength(1)
-    expect(engine.match(/\{ \.\.\.orderSource, \.\.\.full \}/g) ?? []).toHaveLength(1)
-    expect(engine.match(/\{ \.\.\.full, \.\.\.data \}/g) ?? []).toHaveLength(2)
+    expect(data.match(/\{ \.\.\.full, \.\.\.orderSource \}/g) ?? []).toHaveLength(1)
+    expect(data.match(/\{ \.\.\.orderSource, \.\.\.full \}/g) ?? []).toHaveLength(1)
+    expect(data.match(/\{ \.\.\.full, \.\.\.data \}/g) ?? []).toHaveLength(2)
     // Three legacy-inverted merges: customer, category — and the legacy-only
     // product re-fetch branch (`product.*` payloads are otherwise full, no
     // fetch, no merge for authenticated deliveries).
-    expect(engine.match(/\{ \.\.\.data, \.\.\.full \}/g) ?? []).toHaveLength(3)
+    expect(data.match(/\{ \.\.\.data, \.\.\.full \}/g) ?? []).toHaveLength(3)
   })
 })

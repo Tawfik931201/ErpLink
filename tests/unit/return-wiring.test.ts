@@ -16,7 +16,10 @@ import path from 'path'
 const root = path.resolve(__dirname, '../..')
 const read = (...parts: string[]) => readFileSync(path.join(root, ...parts), 'utf8')
 
-const engine = read('src', 'lib', 'sync-engine.ts')
+const engine = read('src', 'lib', 'odoo', 'execute-operation.ts')
+const orderPreparation = read('src', 'lib', 'odoo', 'order-values.ts')
+const webhook = read('src', 'lib', 'sync', 'webhook.ts')
+const shipment = read('src', 'lib', 'salla', 'webhook-data.ts')
 const zidClient = read('src', 'lib', 'zid-client.ts')
 const eventOperation = read('src', 'lib', 'event-operation.ts')
 
@@ -25,7 +28,7 @@ describe('returns are intercepted before any order write', () => {
   const execPlatform = engine.indexOf('const execPlatform', fnStart)
   const signal = engine.indexOf('isReturnSignal(', execPlatform)
   const process = engine.indexOf('processReturnEvent(', signal)
-  const firstWrite = engine.indexOf('await client.create(', execPlatform)
+  const firstWrite = engine.indexOf('const order = await prepareOdooOrder(', execPlatform)
 
   it('finds the function and the interception', () => {
     expect(fnStart).toBeGreaterThan(-1)
@@ -34,8 +37,9 @@ describe('returns are intercepted before any order write', () => {
     expect(process).toBeGreaterThan(signal)
   })
 
-  it('runs the interception before the first Odoo create in the function', () => {
-    expect(firstWrite).toBeGreaterThan(signal)
+  it('runs the interception before order preparation can create a related Odoo record', () => {
+    expect(orderPreparation).toContain('await client.create(')
+    expect(firstWrite).toBeGreaterThan(process)
   })
 
   it('only intercepts sale.order updates on zid/salla', () => {
@@ -59,17 +63,22 @@ describe('returns are intercepted before any order write', () => {
 })
 
 describe('Salla shipment events target the order, not the shipment', () => {
-  const normalizeAt = engine.indexOf("normalizedEvent.includes('shipment')")
-  const mappingQueryAt = engine.indexOf('// 1. Find all field_mappings')
+  const normalizeAt = shipment.indexOf('const targetOrderId =')
+  const enrichAt = webhook.indexOf('data = await prepareSallaWebhookData(')
+  const mappingQueryAt = webhook.indexOf('// 1. Find all field_mappings')
 
   it('normalises the id after enrichment and before the mapping lookup', () => {
-    expect(normalizeAt).toBeGreaterThan(-1)
-    expect(mappingQueryAt).toBeGreaterThan(normalizeAt)
+    const orderFetchAt = shipment.indexOf("await enrichSallaOrder(")
+    expect(orderFetchAt).toBeGreaterThan(-1)
+    expect(normalizeAt).toBeGreaterThan(orderFetchAt)
+    expect(shipment.slice(normalizeAt)).toContain("id: targetOrderId")
+    expect(enrichAt).toBeGreaterThan(-1)
+    expect(mappingQueryAt).toBeGreaterThan(enrichAt)
   })
 
   it('does not ask Salla for an order using the shipment id', () => {
-    expect(engine).toContain('shipmentEntityId')
-    expect(engine).toContain('orderFetchId')
+    expect(shipment).toContain('shipmentEntityId')
+    expect(shipment).toContain('const orderFetchId = isShipmentEvent && !shipmentHasOrder ? shipmentEntityId : entityId')
   })
 })
 

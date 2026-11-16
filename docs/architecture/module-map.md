@@ -1,23 +1,20 @@
 # Module map
 
-Actual source paths for the bounded refactor. Functions mentioned below can be located by name; line positions will change as modules are extracted. The four domain helpers are small boundaries, not complete domain services.
+The paths below are relative to `src/lib/` unless otherwise stated. `sync-engine.ts` and `erpnext-engine.ts` preserve existing imports.
 
-## Domain responsibilities
+## Inbound sync responsibilities
 
-Product settings transforms now also live in `src/lib/products/settings-values.ts`;
-Odoo variant price representation and paginated variant reads live in
-`src/lib/products/variant-prices.ts`. The engine retains orchestration, inventory
-adjustments and BoM resolution. See [the Zid product audit](../integrations/zid-products-audit.md)
-for the functional corrections and compatibility limits from 2026-11-03.
+| Area | Store data | Destination execution |
+| --- | --- | --- |
+| Dispatch | `sync/webhook.ts` applies the store's enrichment before mapping. | `sync/mappings.ts` selects the existing mapping and dispatches with the validated ERP connection. |
+| Products | `zid/products.ts`, `salla/products.ts`, `shopify/products.ts` and the shared variant shape in `products/variants.ts`. | `odoo/products.ts` prepares values. `odoo/product-native-variants.ts`, `odoo/product-separate-variants.ts`, `odoo/product-stock.ts` and `odoo/product-bom.ts` handle the corresponding writes. ERPNext `erpnext/products.ts` supplies Item creation defaults. |
+| Customers | `zid/customers.ts` and `salla/customers.ts` fetch details. `shopify/customers.ts` composes the customer name. | `odoo/customers.ts` prepares the partner values and `odoo/relations.ts` resolves linked records. ERPNext uses its custom DocType mapping. |
+| Categories | `zid/categories.ts` and `salla/categories.ts` read category details. | `odoo/relations.ts` resolves parents, `odoo/categories.ts` prepares values and `categories/odoo-values.ts` checks Odoo capabilities. ERPNext uses its custom DocType mapping. |
+| Orders | `zid/orders.ts` and `salla/orders.ts` hydrate store orders. `zid/order-helpers.ts` and `salla/order-amounts.ts` handle store-specific values. | `odoo/order-values.ts` prepares the order, `odoo/order-lines.ts` builds lines and `odoo/order-workflow.ts` handles status, invoice and picking. The executor intercepts returns before ordinary order preparation. |
+| Record writes | Original payload fields remain available to custom mappings. | `odoo/execute-operation.ts` and `odoo/records.ts` run Odoo writes. `erpnext/mappings.ts`, `erpnext/values.ts` and `erpnext/records.ts` process the existing ERPNext custom mappings. |
+| Outbound inventory | `stock-sync-engine.ts` sends the authoritative Odoo balance to the store. | The app's Odoo webhook route owns the outbound record worker. |
 
-| Area | Focused modules | Remaining execution and data access | Main relationships |
-| --- | --- | --- | --- |
-| Products | `src/lib/products/variants.ts`, `src/lib/product-name.ts` | `src/lib/sync-engine.ts`: `syncAsSeparateProducts`, `syncChildAsSeparateProduct`, `syncAsVariants`, `syncChildVariantAsVariant`, `syncProductBom`, matching and writes. `src/app/actions/product-mappings.ts` handles manual mappings. | Store clients and payloads -> variant normalization -> orchestrator -> Odoo; stock remains a separate execution path. |
-| Customers | `src/lib/customers/company-fields.ts`, `src/lib/sync-helpers.ts` customer name helper | `src/lib/sync-engine.ts`: partner relation creation, `buildOdooValues`, `executeOdooOperation`, matching. `src/app/actions/transfers.ts`: bulk customer import. | Platform customer payload -> mapping/company fields -> `res.partner`; identity remains scoped through existing matching/entity-link rules. |
-| Categories | `src/lib/categories/mapping-overrides.ts` | `src/app/actions/category-mappings.ts`: fetch/save/delete/import mapping rows and existing best-effort ERP match-field update; `sync-engine.ts`: parent category resolution and category execution. | Saved mapping overrides -> existing fixed/rule values -> `product.category`; per-store precedence retained. |
-| Orders | `src/lib/orders/fulfillment-items.ts`, `src/lib/zid/order-helpers.ts`, `src/lib/odoo/order-currency.ts`, `src/lib/odoo/order-payment.ts`, `src/lib/odoo/analytic-distribution.ts` | `src/lib/sync-engine.ts`: `buildOrderLineItems`, `normalizeOrderLinesForUpdate`, `prepareSaleOrderForUpdate`, `ensureSaleOrderTaxes`, `executeOdooOperation`, invoice/picking/status actions. | Enriched order -> line/header mapping -> Sales Order create/update -> status/invoice/delivery actions. No new business rules. |
-| Returns | `src/lib/returns/detect.ts`, `settings.ts`, `engine.ts`, `odoo.ts`, `zid.ts` | Existing orchestrator interception before ordinary Odoo writes. | `mode: nothing` remains inert; existing negative-SO and stock/credit-note behavior retained. |
-| Inventory | `src/lib/stock-sync-engine.ts`, `src/lib/inventory-sync-settings.ts`, `src/app/actions/inventory-sync.ts` | Odoo stock route and `sync-engine.ts` stock helpers remain. | Read tenant Odoo balance -> resolve mapped product/location -> platform stock update. |
+Manual imports and mapping CRUD remain in `src/app/actions/`. The workspace ERP transport lives in `odoo-client.ts` or `erpnext/client.ts`.
 
 ## Platform integrations
 
@@ -25,10 +22,10 @@ for the functional corrections and compatibility limits from 2026-11-03.
 | --- | --- | --- |
 | Zid | `src/lib/zid-client.ts`; `src/lib/zid/{config,auth,token,types,webhooks,webhook-auth,store-identity,subscription-webhook,order-helpers}.ts` | Merchant API requests, OAuth/token store and refresh lock, registration, ingress classification, distinct store/merchant identity, subscription lifecycle, order normalization helpers. |
 | Salla | `src/lib/salla-client.ts`, `src/lib/salla/webhook-auth.ts` | API calls, merchant token refresh lock, catalog/customer/category/order reads, webhook event catalogue and registration, native/derived ingress authentication. |
-| Odoo workspace integration | `src/lib/odoo-client.ts`, `src/lib/odoo/{version,webhook-secret,order-currency,order-payment,analytic-distribution}.ts`, `src/lib/odoo-webhook.ts` | XML-RPC transport/authentication/version compatibility, scoped ingress credentials, Odoo-specific order/accounting helpers and action registration. Domain writes still primarily in orchestrators. |
+| Odoo workspace integration | `src/lib/odoo-client.ts`, `src/lib/odoo/{version,webhook-secret,order-currency,order-payment,analytic-distribution}.ts`, `src/lib/odoo-webhook.ts` | XML-RPC transport/authentication/version compatibility, scoped ingress credentials, Odoo-specific order/accounting helpers and action registration. Domain execution lives in the Odoo modules listed above. |
 | Helpdesk Odoo | `src/lib/odoo.ts`, `src/app/actions/contact.ts`, `src/app/actions/tickets.ts`, `src/app/api/tickets/attachments/route.ts` | Separate env-configured JSON-RPC integration for public contact/support; do not merge blindly into workspace client. |
 | Shopify | `src/lib/shopify-client.ts`, `src/lib/shopify-topics.ts`, Shopify HTTP routes | Existing third-platform behavior. Field catalogues, subscribed topics and configuration are deliberately distinct. |
-| ERPNext | `src/lib/erpnext-engine.ts`, `src/app/actions/custom-fields-erpnext.ts` | Existing alternative ERP path; not expanded or replaced during Odoo organization. |
+| ERPNext | `src/lib/erpnext-engine.ts`, `src/app/actions/custom-fields-erpnext.ts` | REST transport and custom DocType mapping under `src/lib/erpnext/`. |
 | Field catalogues | `src/lib/platforms/{zid,salla,odoo,shopify}/fields.ts`, `src/lib/platform-fields.ts` | Existing field/event metadata and platform external-ID field rules. `mapping-constants.ts` is a compatibility barrel. |
 
 ## Shared infrastructure and application boundaries
@@ -52,4 +49,4 @@ for the functional corrections and compatibility limits from 2026-11-03.
 
 The source dependency inventory covered 304 files before extraction and found two existing strongly connected groups: `auth.ts`/`supabase.ts`, and the Odoo route/stock engine/sync engine/queue/Telegram notifier/skip-log group. This is an inventory of source imports, not a proof of every possible dynamic runtime path. See [ingress-audit.md](ingress-audit.md) for concrete cycle edges and risk.
 
-New focused domain modules must not import `sync-engine.ts` back. Type-only imports belong in `sync-types.ts`; existing shared runtime stays in `sync-runtime.ts`. Do not move application auth into pure payload helpers or import route handlers into new domain code. Existing cycles are documented and deferred, not claimed resolved.
+Store modules and destination modules depend on focused helpers and shared types. The Odoo relation and bill-of-materials code receive their orchestration callbacks from the composition root in `sync/mappings.ts`. `sync-runtime.ts` owns shared logging and database access.

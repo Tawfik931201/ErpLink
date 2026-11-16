@@ -1576,15 +1576,10 @@ live alongside them. The inventory is explicit about review and scan limitations
 - UI freeze: do not change JSX, styling, labels, navigation, component APIs, routes,
   backend response shapes, schema, environment names or dependency versions during
   internal reorganization. Import changes must preserve existing consumers.
-- Bounded domain helpers: `src/lib/products/variants.ts` normalizes variants;
-  `customers/company-fields.ts` fills unmapped partner company fields;
-  `categories/mapping-overrides.ts` reads per-store/default category overrides;
-  `orders/fulfillment-items.ts` parses delivered items. These paths are under
-  `src/lib/`. They must never import `sync-engine.ts` back.
-- `src/lib/sync-engine.ts` remains the integration orchestrator. Sales Order
-  creation is in `executeOdooOperation`'s `safeCreateOdooRecord` path; order lines
-  are built by `buildOrderLineItems`. A full order-service split is deferred until
-  mocked orchestration tests prove financial, matching, state and retry behavior.
+- `src/lib/sync-engine.ts` preserves the public imports. Follow `src/lib/sync/webhook.ts` for store data preparation and `src/lib/sync/mappings.ts` for Standard Mapping and ERP selection.
+- Start platform-specific changes in `src/lib/{zid,salla,shopify}/`. Product settings and variants have shared helpers in `src/lib/products/`. Odoo product preparation starts at `src/lib/odoo/products.ts`. Native and separate variants, stock and BoM have their own Odoo modules.
+- Odoo Sales Order writes enter `src/lib/odoo/execute-operation.ts`. Order values, lines, status/invoice/picking live in `order-values.ts`, `order-lines.ts` and `order-workflow.ts` in the same directory. Focused modules depend on shared helpers. The Odoo relations and BoM code get orchestration callbacks from `sync/mappings.ts`.
+- `src/lib/erpnext/` owns ERPNext REST execution for custom mappings. Standard Mapping and manual imports use Odoo. Keep the validated execution target attached to the queued event. See `docs/architecture/module-map.md` for the complete navigation map.
 - Manual imports follow `src/app/actions/transfers.ts`; importing Salla customers
   uses `listSallaCustomers` in `src/lib/salla-client.ts`, not actions/salla.ts.
 - Keep platform clients/auth/token refresh separate. Keep existing Shopify and

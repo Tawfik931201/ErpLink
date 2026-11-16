@@ -174,24 +174,25 @@ describe('resolveEntityLinkId never guesses across scopes', () => {
 })
 
 describe('engine wiring pins (fail if the plumbing is removed)', () => {
-  const engine = readStripped('src/lib/sync-engine.ts')
+  const execution = readStripped('src/lib/odoo/execute-operation.ts')
+  const records = readStripped('src/lib/odoo/records.ts')
   const runtime = readStripped('src/lib/sync-runtime.ts')
 
   it('success paths hand the platform to logSync so the link is written', () => {
-    expect(engine).toContain('platform: execPlatform')
+    expect(execution).toContain('platform: execPlatform')
   })
 
   it('findExistingOdooRecord consults the durable link store-scoped', () => {
-    expect(engine).toContain('resolveEntityLinkId')
-    expect(engine).toContain('odoo_entity_links')
+    expect(records).toContain('resolveEntityLinkId')
+    expect(records).toContain('odoo_entity_links')
   })
 
   it('the reserved match field resolves from the link, never the payload', () => {
-    expect(engine).toContain('STORED_ODOO_ID_FIELD')
+    expect(records).toContain('STORED_ODOO_ID_FIELD')
   })
 
   it('the legacy sync_logs fallback is store-scoped when the mapping has a store', () => {
-    expect(engine).toContain(".eq('store_id', mapping.merchant_id)")
+    expect(records).toContain(".eq('store_id', mapping.merchant_id)")
   })
 
   it('logSync refreshes the durable link on success', () => {

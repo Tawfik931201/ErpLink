@@ -191,34 +191,37 @@ describe('Odoo Product Registration Across Versions 14 to 20', () => {
   })
 
   describe('Source pins for resilience and Odoo ORM error recovery', () => {
-    const syncEngineSrc = fs.readFileSync(path.resolve(__dirname, '../../src/lib/sync-engine.ts'), 'utf8')
+    const records = fs.readFileSync(path.resolve(__dirname, '../../src/lib/odoo/records.ts'), 'utf8')
+    const separateVariants = fs.readFileSync(path.resolve(__dirname, '../../src/lib/odoo/product-separate-variants.ts'), 'utf8')
+    const nativeVariants = fs.readFileSync(path.resolve(__dirname, '../../src/lib/odoo/product-native-variants.ts'), 'utf8')
+    const orderLines = fs.readFileSync(path.resolve(__dirname, '../../src/lib/odoo/order-lines.ts'), 'utf8')
 
     it('pins that safeCreateOdooRecord prunes fields on "Wrong value for" ORM validation errors', () => {
-      expect(syncEngineSrc).toContain('Wrong value for (?:[a-zA-Z0-9_]+\\.)*([a-zA-Z0-9_]+):')
-      expect(syncEngineSrc).toContain('Pruning invalid selection value for field "${badField}" from ${model} create')
+      expect(records).toContain('Wrong value for (?:[a-zA-Z0-9_]+\\.)*([a-zA-Z0-9_]+):')
+      expect(records).toContain('Pruning invalid selection value for field "${badField}" from ${model} create')
     })
 
     it('pins that safeWriteOdooRecord prunes fields on "Wrong value for" ORM validation errors', () => {
-      expect(syncEngineSrc).toContain('Pruning invalid selection value for field "${badField}" from ${model} write')
+      expect(records).toContain('Pruning invalid selection value for field "${badField}" from ${model} write')
     })
 
     it('pins that syncAsSeparateProducts and syncTemplateWithVariants use safeWriteOdooRecord and safeCreateOdooRecord', () => {
-      expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', mainDuplicateId, odooValues, odooValues)")
-      expect(syncEngineSrc).toContain("safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)")
-      expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, variantOdooValues, variantOdooValues)")
-      const variantCreate = /safeCreateOdooRecord\(client, 'product.template', variantOdooValues, variantOdooValues,\s*`variant:\$\{String\(variant\.id \|\| variant\.sku \|\| JSON\.stringify\(variant\.attributes\)\)\}`\)/
-      expect(syncEngineSrc).toMatch(variantCreate)
+      expect(separateVariants).toContain("safeWriteOdooRecord(client, 'product.template', mainDuplicateId, odooValues, odooValues, platform)")
+      expect(separateVariants).toContain("mainRecordId = await safeCreateOdooRecord(client, 'product.template', odooValues, odooValues, undefined, platform)")
+      expect(separateVariants).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, variantOdooValues, variantOdooValues, platform)")
+      const variantCreate = /safeCreateOdooRecord\(client, 'product.template', variantOdooValues, variantOdooValues,\s*`variant:\$\{String\(variant\.id \|\| variant\.sku \|\| JSON\.stringify\(variant\.attributes\)\)\}`, platform\)/
+      expect(separateVariants).toMatch(variantCreate)
       // Removing the source identity must fail this pin: otherwise distinct
       // same-model variants would share the parent's durable create effect.
-      expect(syncEngineSrc.replace(variantCreate, "safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)"))
+      expect(separateVariants.replace(variantCreate, "safeCreateOdooRecord(client, 'product.template', variantOdooValues, variantOdooValues)"))
         .not.toMatch(variantCreate)
-      expect(syncEngineSrc).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, odooValues, odooValues)")
-      expect(syncEngineSrc).toContain("safeCreateOdooRecord(client, 'product.template', odooValues, odooValues)")
+      expect(nativeVariants).toContain("safeWriteOdooRecord(client, 'product.template', duplicateId, odooValues, odooValues, platform)")
+      expect(nativeVariants).toContain("templateId = await safeCreateOdooRecord(client, 'product.template', odooValues, odooValues, undefined, platform)")
     })
 
     it('pins that order line auto-creation handles Odoo 18+ is_storable and Odoo 20+ tracking', () => {
-      expect(syncEngineSrc).toContain('prodVals.is_storable = wantsStorable')
-      expect(syncEngineSrc).toContain('prodVals.tracking = false')
+      expect(orderLines).toContain('prodVals.is_storable = wantsStorable')
+      expect(orderLines).toContain('prodVals.tracking = false')
     })
   })
 

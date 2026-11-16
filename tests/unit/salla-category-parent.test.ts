@@ -2,7 +2,7 @@
  * Pins why a Salla category synced to Odoo without its Parent Category
  * (reported 2026-10-06), and the three pieces that fix it.
  *
- * Two causes, both in src/lib/sync-engine.ts:
+ * Two causes across the preset mapping and Odoo relation resolution:
  *
  *   1. The hardcoded `salla_category` preset mapped `name` only — unlike
  *      `zid_category`, which has carried `parent_id` since it was written. The
@@ -26,16 +26,18 @@
 import fs from 'fs'
 import path from 'path'
 
-const ENGINE_PATH = path.join(process.cwd(), 'src/lib/sync-engine.ts')
-const source = fs.readFileSync(ENGINE_PATH, 'utf8')
+const read = (file: string) => fs.readFileSync(path.join(process.cwd(), 'src/lib', file), 'utf8')
+const presets = read('sync/mappings.ts')
+const source = read('odoo/relations.ts')
+const sallaWebhook = read('salla/webhook-data.ts')
 
 /** Slice of source containing the salla_category preset row. */
 function sallaPresetBlock(): string {
-  const start = source.indexOf("'salla_category'")
+  const start = presets.indexOf("'salla_category'")
   expect(start).toBeGreaterThan(-1)
-  const end = source.indexOf("'shopify_category'", start)
+  const end = presets.indexOf("'shopify_category'", start)
   expect(end).toBeGreaterThan(-1)
-  return source.slice(start, end)
+  return presets.slice(start, end)
 }
 
 describe('the salla_category preset maps the parent', () => {
@@ -90,10 +92,10 @@ describe('parent resolution is not Zid-only any more', () => {
 
 describe('a parentless category payload is completed before mapping', () => {
   it('forces enrichment when parent_id is absent, regardless of size', () => {
-    expect(source).toMatch(/const missingParentId =/)
+    expect(sallaWebhook).toMatch(/const missingParentId =/)
     // legacyNeedsFetch prepends the legacy re-fresh (API wins for
     // unauthenticated deliveries); the completeness gates stay.
-    expect(source).toMatch(
+    expect(sallaWebhook).toMatch(
       /if \(legacyNeedsFetch \|\| missingOrderItems \|\| missingParentId \|\| isThin \|\| shipmentEntityId != null\) \{/
     )
   })

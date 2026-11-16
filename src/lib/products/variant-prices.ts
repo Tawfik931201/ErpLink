@@ -56,11 +56,14 @@ export interface VariantPriceSyncResult {
 }
 
 export async function syncVariantPrices(
-  client: OdooClient, templateId: number, prices: Map<number, number>, preserveOthers = false,
+  client: OdooClient, templateId: number, prices: Map<number, number>, preserveOthers = false, strict = false,
 ): Promise<VariantPriceSyncResult> {
   if (!prices.size) return { represented: true }
   if ((await client.getMajorVersion()) >= 20) {
-    for (const [id, price] of prices) await client.write('product.product', [id], { lst_price: price })
+    for (const [id, price] of prices) {
+      const written = await client.write('product.product', [id], { lst_price: price })
+      if (!written && strict) throw new Error(`Odoo rejected price for variant #${id}`)
+    }
     return { represented: true }
   }
   const templates = await client.searchRead<any>('product.template', [['id', '=', templateId]], ['list_price'])
@@ -101,6 +104,9 @@ export async function syncVariantPrices(
     lines.set(lineId, commands)
   }
   const commands = [...lines].map(([id, values]) => [1, id, { product_template_value_ids: values }])
-  if (commands.length) await client.write('product.template', [templateId], { attribute_line_ids: commands })
+  if (commands.length) {
+    const written = await client.write('product.template', [templateId], { attribute_line_ids: commands })
+    if (!written && strict) throw new Error(`Odoo rejected variant prices for product #${templateId}`)
+  }
   return { represented: true }
 }

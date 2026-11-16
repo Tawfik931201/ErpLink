@@ -7,22 +7,41 @@ export function finiteProductNumber(value: unknown): number | undefined {
   return Number.isFinite(number) ? number : undefined
 }
 
+export function sallaMoneyAmount(value: unknown): number | undefined {
+  return finiteProductNumber(value && typeof value === 'object'
+    ? (value as Record<string, unknown>).amount
+    : value)
+}
+
+export function readSallaProductPrice(data: Record<string, unknown>, source: string): number | undefined {
+  if (source === 'cost') return sallaMoneyAmount(data.cost_price) ?? sallaMoneyAmount(data.cost)
+  return sallaMoneyAmount(resolvePath(data, source))
+}
+
 export function applyProductPriceSettings(
   values: Record<string, unknown>, settings: Record<string, any>, data: Record<string, unknown>,
+  platform?: 'zid' | 'salla' | 'shopify',
 ): void {
   const cfg = settings.price
   if (!cfg) return
+  const read = (source: string) => platform === 'salla'
+    ? readSallaProductPrice(data, source)
+    : finiteProductNumber(resolvePath(data, source))
   // Select the source BEFORE applying markup; do not turn sale_price=null into 0.
   if (cfg.source) {
-    const source = finiteProductNumber(resolvePath(data, cfg.source))
-      ?? (cfg.source === 'sale_price' ? finiteProductNumber(data.price) : undefined)
+    const selected = read(cfg.source)
+    // Honor Salla's explicit no-promotion flag without discarding a real zero.
+    const source = (platform === 'salla' && cfg.source === 'sale_price' && data.has_special_price === false
+      ? undefined : selected) ?? (cfg.source === 'sale_price' ? read('price') : undefined)
     if (source !== undefined) values.list_price = source
+    else if (platform === 'salla') delete values.list_price
   }
   // 'none' = "Don't update cost": never write values.standard_price, so the
   // client's Odoo cost stays untouched even when Zid sends a cost value.
   if (cfg.cost_source && cfg.cost_source !== 'none') {
-    const cost = finiteProductNumber(resolvePath(data, cfg.cost_source))
+    const cost = read(cfg.cost_source)
     if (cost !== undefined) values.standard_price = cost
+    else if (platform === 'salla') delete values.standard_price
   }
   const price = finiteProductNumber(values.list_price)
   if (price !== undefined) values.list_price = price * (1 + (finiteProductNumber(cfg.markup_percent) ?? 0) / 100)
@@ -42,10 +61,13 @@ export function applyProductPriceSettings(
 }
 
 /** Never apply stock to a service, an untracked item or an ERP-owned balance. */
-export function shouldSyncProductStock(settings: Record<string, any>, data: Record<string, unknown>): boolean {
+export function shouldSyncProductStock(
+  settings: Record<string, any>, data: Record<string, unknown>, platform?: 'zid' | 'salla' | 'shopify',
+): boolean {
   const type = typeof settings.product_type === 'string' ? settings.product_type : settings.product_type?.default_type
   const allowed = type !== 'service' && settings.inventory?.track_inventory !== false
     && settings.inventory?.sync_enabled !== true && data.is_infinite !== true
+    && !(platform === 'salla' && data.unlimited_quantity === true)
   return allowed
 }
 

@@ -316,7 +316,7 @@ describe('Multi-Currency Order Sync & Conversion', () => {
       // In Odoo standard sale.order, currency_id is a computed/related field from pricelist_id.currency_id.
       // Recording a sale order in AED requires a pricelist whose currency is AED.
       const syncEngineSrc = fs.readFileSync(
-        path.resolve(__dirname, '../../src/lib/sync-engine.ts'),
+        path.resolve(__dirname, '../../src/lib/odoo/order-values.ts'),
         'utf8'
       )
       expect(syncEngineSrc).toContain("['currency_id', '=', matchedCurr.id], ['active', '=', true]")

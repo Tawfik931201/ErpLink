@@ -10,14 +10,16 @@ const root = path.resolve(__dirname, '../..')
 const read = (...parts: string[]) => readFileSync(path.join(root, ...parts), 'utf8')
 
 describe('Zid out-of-order order webhooks', () => {
-  const engine = read('src', 'lib', 'sync-engine.ts')
+  const engine = read('src', 'lib', 'odoo', 'execute-operation.ts')
+  const zidOrders = read('src', 'lib', 'zid', 'orders.ts')
+  const workflow = read('src', 'lib', 'odoo', 'order-workflow.ts')
   const queue = read('src', 'lib', 'sync-queue.ts')
 
   describe('Sync Engine live status priority and upsert', () => {
     it('prioritizes live API order status over stale webhook payload on order.create enrichment', () => {
       // Must preserve orderData.order_status if liveStatus is present
-      expect(engine).toContain('const liveStatus = orderData.order_status || orderData.status || orderData.display_status')
-      expect(engine).toContain('order_status: orderData.order_status')
+      expect(zidOrders).toContain('const liveStatus = orderData.order_status || orderData.status || orderData.display_status')
+      expect(zidOrders).toContain('order_status: orderData.order_status')
     })
 
     it('handles missing sale.order updates without stealing another queued create', () => {
@@ -34,8 +36,8 @@ describe('Zid out-of-order order webhooks', () => {
     })
 
     it('guards against custom status downgrade when a late draft/new event arrives', () => {
-      expect(engine).toContain("Skipping custom status downgrade to")
-      expect(engine).toContain("zidStatus === 'new' || zidStatus === 'draft'")
+      expect(workflow).toContain("Skipping custom status downgrade to")
+      expect(workflow).toContain("zidStatus === 'new' || zidStatus === 'draft'")
     })
   })
 

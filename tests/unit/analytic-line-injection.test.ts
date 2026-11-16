@@ -7,10 +7,10 @@ import path from 'path'
  * unsupported-key allowlist, or an unprobed field is never written, and both
  * look like "the rule was saved but Odoo shows nothing".
  *
- * Source under test: src/lib/sync-engine.ts
+ * Source under test: src/lib/odoo/order-lines.ts
  */
 
-const sourcePath = path.join(process.cwd(), 'src', 'lib', 'sync-engine.ts')
+const sourcePath = path.join(process.cwd(), 'src', 'lib', 'odoo', 'order-lines.ts')
 const source = fs.readFileSync(sourcePath, 'utf8')
 
 function injectionBlock(): string {

@@ -21,18 +21,18 @@ ERPlink uses Next.js App Router, TypeScript, Clerk user IDs and Supabase REST. `
 
 ## Locate the responsibility
 
-The four extracted domain helpers are bounded functions. Most domain writes still live in `src/lib/sync-engine.ts`; do not assume complete domain services or repositories exist.
+`src/lib/sync-engine.ts` preserves public imports. Platform reads live in the store folders. Destination execution lives under `odoo/` or `erpnext/`. Follow `sync/webhook.ts` into `sync/mappings.ts` to trace the selected mapping and ERP.
 
 | Task | Start here; then trace callers |
 | --- | --- |
 | Product payload variants | `src/lib/products/variants.ts`: `extractGenericVariants`; original export remains available from `src/lib/sync-engine.ts`. |
-| Odoo product creation/update, variants, BoM | `src/lib/sync-engine.ts`: `executeOdooOperation`, `syncAsSeparateProducts`, `syncChildAsSeparateProduct`, `syncAsVariants`, `syncChildVariantAsVariant`, `syncProductBom`. Manual mapping CRUD: `src/app/actions/product-mappings.ts`. |
-| Customer company/tax fields | `src/lib/customers/company-fields.ts`: `injectCustomerCompanyFields`. Partner mapping, relation creation and matching remain in the engine: `buildOdooValues`, `resolveSingleRelationId`, `findExistingOdooRecord`, `executeOdooOperation`. |
+| Odoo product creation/update, variants, BoM | `src/lib/odoo/products.ts`, `product-native-variants.ts`, `product-separate-variants.ts`, `product-stock.ts` and `product-bom.ts`. Manual mapping CRUD lives in `src/app/actions/product-mappings.ts`. |
+| Customer company/tax fields | `src/lib/customers/company-fields.ts` and `src/lib/odoo/customers.ts`. Partner matching and relations live in `src/lib/odoo/records.ts` and `relations.ts`. |
 | Bulk customer/product/category import | `src/app/actions/transfers.ts`: `startInitialTransfer` → `runTransferInBackground`. Salla customer pagination calls `listSallaCustomers` in `src/lib/salla-client.ts`; `src/app/actions/salla.ts` handles locations/payment methods instead. Bulk import and webhook processing are separate paths. |
-| Category mappings and parents | `src/app/actions/category-mappings.ts` handles mapping CRUD/import; `src/lib/categories/mapping-overrides.ts`: `applyCategoryMappingOverrides` reads overrides. Parent resolution stays in engine `resolveSingleRelationId`. |
-| Sales Order creation/update | Engine `executeOdooOperation` → `safeCreateOdooRecord` / `safeWriteOdooRecord`. Lines: `buildOrderLineItems`; existing-order guards: `prepareSaleOrderForUpdate`, `normalizeOrderLinesForUpdate`; taxes: `ensureSaleOrderTaxes`. |
-| Order fulfillment/payment/currency/returns | `src/lib/orders/fulfillment-items.ts`: `extractFulfilledItems`; `src/lib/zid/order-helpers.ts`; `src/lib/odoo/order-payment.ts`, `order-currency.ts`, `analytic-distribution.ts`; `src/lib/returns/engine.ts`. Status/invoice/picking orchestration remains in the engine. |
-| Inbound store sync | Platform webhook route → `src/lib/sync-queue.ts` → engine `processWebhookEvent` → preset or `processSingleMapping` → Odoo execution. Inspect enrichment and custom/preset callers before changing shared helpers. |
+| Category mappings and parents | `src/app/actions/category-mappings.ts` for CRUD/import, `src/lib/categories/mapping-overrides.ts` for overrides, and `src/lib/odoo/relations.ts` for parents. Store data reads live in `zid/categories.ts` and `salla/categories.ts` under `src/lib/`. |
+| Sales Order creation/update | `src/lib/odoo/execute-operation.ts` runs the write, `order-values.ts` prepares the header and related records, and `order-lines.ts` handles lines and update guards. |
+| Order fulfillment/payment/currency/returns | `src/lib/odoo/order-workflow.ts` owns status/invoice/picking. See also `src/lib/orders/fulfillment-items.ts`, `src/lib/zid/order-helpers.ts`, `src/lib/odoo/order-payment.ts`, `order-currency.ts`, `analytic-distribution.ts` and `src/lib/returns/engine.ts`. |
+| Inbound store sync | Webhook route → `src/lib/sync-queue.ts` → `src/lib/sync/webhook.ts` → `src/lib/sync/mappings.ts` → Odoo executor or ERPNext custom mapping in `src/lib/erpnext/mappings.ts`. |
 | Odoo → store products/stock | `runBackgroundSync` in `src/app/api/webhooks/odoo/route.ts`; stock execution in `src/lib/stock-sync-engine.ts`, stock ingress in `src/app/api/webhooks/odoo/stock/route.ts`. |
 
 ## Platform and infrastructure boundaries
@@ -55,7 +55,7 @@ Before moving sensitive logic, run relevant baseline tests and add fixture/mock 
 
 Preserve Odoo version/field probes, exception-driven legacy fallbacks, explicit mappings, platform IDs, tax/currency/discount calculations, stock authority, tenant filters, dedup and retry ordering. Odoo webhook bodies are triggers; retain the authoritative ERP readback and authenticated removal rules. Keep durable receipt-before-acknowledgement and existing platform-specific registration strategies.
 
-Full Sales Order and outbound Odoo worker extraction remains a separate high-risk migration requiring mocked RPC call-sequence and failure coverage. If a portion cannot be verified, stop that portion, document the gap, and continue independent safe work. Do not correct historical matching, fulfillment, billing-date or auth quirks incidentally. Obtain approval before an unapproved high-risk or irreversible step; this skill adds no approval requirement for ordinary reversible work already authorized by the user.
+Moving the outbound Odoo worker or changing Sales Order write ordering requires mocked RPC call-sequence and failure coverage. If a portion cannot be verified, stop that portion, document the gap, and continue independent safe work. Do not correct historical matching, fulfillment, billing-date or auth quirks incidentally. Obtain approval before an unapproved high-risk or irreversible step; this skill adds no approval requirement for ordinary reversible work already authorized by the user.
 
 ## Select and run checks
 

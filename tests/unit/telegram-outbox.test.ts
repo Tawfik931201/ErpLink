@@ -145,7 +145,7 @@ describe('one message per request', () => {
   })
 
   it('carries the queue row id into the sync result', () => {
-    const engine = read('lib', 'sync-engine.ts')
+    const engine = read('lib', 'sync', 'webhook.ts')
     expect(engine).toContain('queueItemId ? `queue:${queueItemId}` : null')
 
     const queue = read('lib', 'sync-queue.ts')

@@ -19,8 +19,9 @@ Zid / Salla / Shopify
     -> atomic receipt-to-job dispatch: pinned ERP target and permanent receipt marker
     -> sync_queue: distinct deliveries, fenced leases, retries / unknown-outcome quarantine
     -> background worker
-    -> sync-engine.ts: enrich payload, resolve mapping, map values, execute Odoo operation
-    -> OdooClient XML-RPC
+    -> sync/webhook.ts: validate target, prepare store payload, find mappings
+    -> sync/mappings.ts: dispatch by the pinned ERP connection
+    -> odoo/ (XML-RPC) or erpnext/ (REST custom mapping)
     -> sync_logs + durable entity links; Telegram notifications via outbox
 
 Odoo automated actions
@@ -41,22 +42,15 @@ Browser manual import
 
 Unlinked store deliveries are stored as orphan receipts rather than guessed into another workspace. The normal inbox drain excludes null-workspace rows; admin recovery is explicit. Verified bodies are not interchangeable with authoritative ERP reads: Odoo record/stock pushes reread Odoo values, and deletion requires the existing authentication conditions.
 
-## Domain organization after bounded extraction
+## Store and ERP execution
 
-This is an incremental organization step, not completion of a full domain architecture. Four focused responsibilities now have direct destination files:
+Store modules prepare data in `src/lib/zid/`, `src/lib/salla/` and `src/lib/shopify/`. The queue and `sync/webhook.ts` keep the existing workspace and store context. `sync/mappings.ts` applies Standard Mapping and then the matching custom mappings. It calls the executor for the validated connection type. The old `src/lib/sync-engine.ts` import path exports the same entry points.
 
-| Domain | Focused file | Boundary |
-| --- | --- | --- |
-| Products | `src/lib/products/variants.ts` | Existing cross-platform variant payload normalization. |
-| Customers | `src/lib/customers/company-fields.ts` | Existing customer company-field derivation/injection. |
-| Categories | `src/lib/categories/mapping-overrides.ts` | Existing category-specific mapping override lookup and merge behavior. |
-| Orders | `src/lib/orders/fulfillment-items.ts` | Existing fulfilled-item extraction from payload shapes. |
+Odoo owns destination field mapping, record matching and writes. Entity-specific preparation lives in `odoo/{products,categories,customers,order-values}.ts`. Order lines and post-write workflow have dedicated modules. ERPNext owns its REST client, DocType metadata, value mapping and record execution under `erpnext/`. Both destinations receive the prepared source payload with its original fields available to custom mappings.
 
-These helpers do not import `sync-engine.ts`. Existing public exports/import paths are preserved where required. They do not introduce generic repositories, a new integration protocol, or a plugin system.
+ERPNext currently executes custom mappings. Its product path is exercised with mocked creation and update requests. Standard Mapping and manual import still use Odoo. The target resolver currently requires a unique active ERP connection per workspace. Workspaces with simultaneous ERP destinations would need explicit configuration and a pinned target per delivery.
 
-`src/lib/sync-engine.ts` remains the large orchestrator and still owns important product, partner, category and Sales Order operations. In particular, `buildOrderLineItems`, `buildOdooValues`, `processWebhookEvent`, `processSingleMapping` and `executeOdooOperation` remain there. The generic Odoo route still owns the outbound `runBackgroundSync` worker. Moving these coupled writes requires executable characterization of their error, fallback and side-effect ordering before a later stage.
-
-Existing cohesive modules stay in place: `returns/`, `odoo/order-currency.ts`, `odoo/order-payment.ts`, `odoo/analytic-distribution.ts`, per-platform webhook verifiers, field catalogues, mapping settings, entity links and queue infrastructure. More folders alone would not improve their separation.
+The outbound Odoo route still owns `runBackgroundSync`. Odoo-to-store stock uses the existing stock engine. See the [module map](module-map.md) for the location of each inbound operation.
 
 ## Limits of this review
 

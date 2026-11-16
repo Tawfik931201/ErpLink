@@ -28,7 +28,7 @@ describe('sync_logs retention policy', () => {
   })
 
   it('purges by status-specific cutoffs (success ≠ others)', () => {
-    const src = fs.readFileSync(path.join(SRC, 'lib', 'sync-engine.ts'), 'utf8')
+    const src = fs.readFileSync(path.join(SRC, 'lib', 'sync', 'log-retention.ts'), 'utf8')
     const fn = src.slice(src.indexOf('export async function cleanupExpiredLogs'))
     // rule 1 targets success only, rule 2 excludes success
     expect(fn).toContain(".eq('status', 'success')")

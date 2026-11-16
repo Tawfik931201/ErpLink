@@ -10,10 +10,10 @@ import path from 'path'
  * 3. Shipping line is enabled when shipping_product_id is configured.
  * 4. SKU fallbacks are removed from UI in favor of direct Odoo product selection.
  *
- * Source under test: src/lib/sync-engine.ts & order-settings-tab.tsx
+ * Source under test: src/lib/odoo/order-lines.ts & order-settings-tab.tsx
  */
 
-const enginePath = path.join(process.cwd(), 'src', 'lib', 'sync-engine.ts')
+const enginePath = path.join(process.cwd(), 'src', 'lib', 'odoo', 'order-lines.ts')
 const engineSource = fs.readFileSync(enginePath, 'utf8')
 
 const tabPath = path.join(

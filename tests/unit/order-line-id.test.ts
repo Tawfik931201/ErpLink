@@ -85,7 +85,7 @@ describe('engine reads mapped line paths generically (source pin)', () => {
     // changes: any zidField path (incl. `id`) is read off the line item.
     // If this ever becomes a hardcoded field list, the catalogue `id`
     // silently stops resolving.
-    const engine = read('src/lib/sync-engine.ts')
+    const engine = read('src/lib/odoo/order-lines.ts')
     expect(engine).toContain('resolvePath(productData, fm.zidField)')
   })
 })
