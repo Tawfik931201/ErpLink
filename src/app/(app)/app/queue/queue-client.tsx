@@ -293,7 +293,9 @@ export default function QueueClient() {
         ? null
         : (overview?.dead ?? 0) + (overview?.archived ?? 0),
   }
-  const frozenCount = overview?.frozen ?? 0
+  // Unknown outcomes are displayed in Frozen for investigation, but must never
+  // be included in the Retry Frozen action's advertised replayable count.
+  const frozenCount = Math.max(0, (overview?.frozen ?? 0) - (overview?.uncertain ?? 0))
   const orphanCount = overview?.orphans ?? 0
 
   const openItem = (id: string) => {
