@@ -16,6 +16,72 @@ import type { FieldMappingRow, SyncEngineResult } from '@/lib/sync-types'
 import { syncProductStockQuantities } from './product-stock'
 import { buildVariantProductValues } from './product-variant-values'
 
+async function ensureSingleAttributeLine(
+  client: OdooClient,
+  templateId: number,
+  attributeId: number,
+  desiredValueIds: number[],
+  strict = false,
+): Promise<number> {
+  // Re-read immediately before mutation. Parent and child webhooks can arrive
+  // nearly together; using an earlier snapshot lets both workers see "no line"
+  // and create duplicates for the same attribute.
+  const lines = await client.searchRead<any>('product.template.attribute.line', [
+    ['product_tmpl_id', '=', templateId],
+    ['attribute_id', '=', attributeId],
+  ], ['id', 'value_ids'], 100)
+
+  if (lines.length === 0) {
+    try {
+      return await client.create('product.template.attribute.line', {
+        product_tmpl_id: templateId,
+        attribute_id: attributeId,
+        value_ids: [[6, 0, desiredValueIds]],
+      })
+    } catch (err) {
+      // A concurrent worker may have created the line between the read and the
+      // create. Re-read once and continue through the merge path.
+      const raced = await client.searchRead<any>('product.template.attribute.line', [
+        ['product_tmpl_id', '=', templateId],
+        ['attribute_id', '=', attributeId],
+      ], ['id', 'value_ids'], 100)
+      if (raced.length === 0) throw err
+      lines.push(...raced)
+    }
+  }
+
+  const keeper = lines[0]
+  const mergedValueIds = Array.from(new Set([
+    ...(keeper.value_ids || []).map(Number),
+    ...desiredValueIds.map(Number),
+    ...lines.slice(1).flatMap((line: any) => (line.value_ids || []).map(Number)),
+  ])).filter(id => Number.isInteger(id) && id > 0)
+
+  const written = await client.write('product.template.attribute.line', [keeper.id], {
+    value_ids: [[6, 0, mergedValueIds]],
+  })
+  if (!written && strict) throw new Error(`Odoo rejected attribute line #${keeper.id}`)
+
+  // Defensive cleanup for old/raced duplicate rows. Do this only after the
+  // keeper contains the full union, so removing duplicates cannot lose values.
+  const duplicateIds = lines.slice(1).map((line: any) => Number(line.id)).filter((id: number) => Number.isInteger(id) && id > 0)
+  if (duplicateIds.length > 0) {
+    try {
+      await client.unlink('product.template.attribute.line', duplicateIds)
+      console.warn(
+        `[SyncEngine] Removed duplicate attribute line(s) #${duplicateIds.join(', #')} for template #${templateId}, attribute #${attributeId}.`
+      )
+    } catch (err: any) {
+      if (strict) throw err
+      console.warn(
+        `[SyncEngine] Could not remove duplicate attribute lines for template #${templateId}: ${err?.message ?? err}`
+      )
+    }
+  }
+
+  return Number(keeper.id)
+}
+
 export async function syncAsVariants(
   syncProductBom: SyncProductBom,
   client: OdooClient,
@@ -113,33 +179,18 @@ export async function syncAsVariants(
   }
 
   // Step 3: Attribute Lines configuration
-  const existingLines = await client.searchRead<any>('product.template.attribute.line', [
-    ['product_tmpl_id', '=', templateId]
-  ], ['attribute_id', 'value_ids'])
-
   for (const [attrName, attrId] of Object.entries(attributeIdMap)) {
     const desiredValueIds = Object.values(valueIdMap[attrName])
-    const existingLine = existingLines.find((line: any) => {
-      const lineAttrId = Array.isArray(line.attribute_id) ? line.attribute_id[0] : line.attribute_id
-      return lineAttrId === attrId
-    })
-
-    if (existingLine) {
-      const existingValIds = existingLine.value_ids || []
-      const unionValIds = Array.from(new Set([...existingValIds, ...desiredValueIds]))
-      const written = await client.write('product.template.attribute.line', [existingLine.id], {
-        value_ids: [[6, 0, unionValIds]]
-      })
-      if (!written && platform === 'salla') throw new Error(`Odoo rejected attribute line #${existingLine.id}`)
-      console.info(`[SyncEngine] Updated product.template.attribute.line #${existingLine.id} with values: [${unionValIds.join(', ')}]`)
-    } else {
-      const lineId = await client.create('product.template.attribute.line', {
-        product_tmpl_id: templateId,
-        attribute_id: attrId,
-        value_ids: [[6, 0, desiredValueIds]]
-      })
-      console.info(`[SyncEngine] Created new product.template.attribute.line #${lineId} for attribute "${attrName}"`)
-    }
+    const lineId = await ensureSingleAttributeLine(
+      client,
+      templateId,
+      attrId,
+      desiredValueIds,
+      platform === 'salla',
+    )
+    console.info(
+      `[SyncEngine] Ensured single product.template.attribute.line #${lineId} for attribute "${attrName}" with values: [${desiredValueIds.join(', ')}]`
+    )
   }
 
   // Step 4: Force Odoo to generate product.product variants by writing
@@ -579,32 +630,9 @@ export async function syncChildVariantAsVariant(
     valueIdMap[attrName] = valId
   }
 
-  const existingLines = await client.searchRead<any>('product.template.attribute.line', [
-    ['product_tmpl_id', '=', templateId]
-  ], ['attribute_id', 'value_ids'])
-
   for (const [attrName, attrId] of Object.entries(attributeIdMap)) {
     const desiredValId = valueIdMap[attrName]
-    const existingLine = existingLines.find((line: any) => {
-      const lineAttrId = Array.isArray(line.attribute_id) ? line.attribute_id[0] : line.attribute_id
-      return lineAttrId === attrId
-    })
-
-    if (existingLine) {
-      const existingValIds = existingLine.value_ids || []
-      if (!existingValIds.includes(desiredValId)) {
-        const unionValIds = Array.from(new Set([...existingValIds, desiredValId]))
-        await client.write('product.template.attribute.line', [existingLine.id], {
-          value_ids: [[6, 0, unionValIds]]
-        })
-      }
-    } else {
-      await client.create('product.template.attribute.line', {
-        product_tmpl_id: templateId,
-        attribute_id: attrId,
-        value_ids: [[6, 0, [desiredValId]]]
-      })
-    }
+    await ensureSingleAttributeLine(client, templateId, attrId, [desiredValId])
   }
 
   const allLineIds = await client.search('product.template.attribute.line', [
