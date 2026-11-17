@@ -573,10 +573,34 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
     else perWorkspace.set(ws, [item])
   }
 
-  // ── Dependency ordering within each workspace: order.create precedes order.update ──
-  // When an order's create and update events are both in the queue, ensure create runs first.
+  // ── Dependency ordering within each workspace ─────────────────────────────
+  // Orders: create must precede update.
+  // Products: parent + child variants are one mutation family in Odoo. Running
+  // them concurrently can create duplicate product.template.attribute.line
+  // rows and duplicate variant combinations. Keep the parent before its
+  // children and preserve source arrival order otherwise.
   const isOrderCreateEvent = (ev: string) =>
     ev === 'order.create' || ev === 'order.created' || ev === 'order_create' || ev === 'order_created'
+
+  const productFamilyId = (item: QueueItem): string | null => {
+    if (!/^(product[._]|product$)/i.test(item.event || '')) return null
+    const payload: any = item.payload ?? {}
+    const parentId = payload.parent_id
+      ?? payload.parent?.id
+      ?? payload.product?.parent_id
+      ?? payload.product?.parent?.id
+    const ownId = extractEntityId(payload)
+    const family = parentId ?? ownId
+    return family === undefined || family === null || family === '' ? null : String(family)
+  }
+
+  const productDependencyRank = (item: QueueItem): number => {
+    const payload: any = item.payload ?? {}
+    const isChild = Boolean(payload.parent_id ?? payload.parent?.id ?? payload.product?.parent_id ?? payload.product?.parent?.id)
+    if (!isChild) return 0
+    if (/delete|unpublish/i.test(item.event || '')) return 2
+    return 1
+  }
 
   for (const [, list] of perWorkspace) {
     if (list.length > 1) {
@@ -588,6 +612,14 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
           const bIsCreate = isOrderCreateEvent(b.event)
           if (aIsCreate && !bIsCreate) return -1
           if (!aIsCreate && bIsCreate) return 1
+        }
+
+        const familyA = productFamilyId(a)
+        const familyB = productFamilyId(b)
+        if (familyA && familyB && familyA === familyB) {
+          const rank = productDependencyRank(a) - productDependencyRank(b)
+          if (rank !== 0) return rank
+          return Date.parse(a.created_at || '') - Date.parse(b.created_at || '')
         }
         return 0
       })
@@ -731,7 +763,21 @@ export async function processWorkspaceQueue(
 async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
   const pending = [...claimed]
   const runningPerWorkspace = new Map<string, number>()
+  const runningProductFamilies = new Set<string>()
   let activeWorkers = 0
+
+  const serialProductKey = (item: QueueItem): string | null => {
+    if (!/^(product[._]|product$)/i.test(item.event || '')) return null
+    const payload: any = item.payload ?? {}
+    const parentId = payload.parent_id
+      ?? payload.parent?.id
+      ?? payload.product?.parent_id
+      ?? payload.product?.parent?.id
+    const ownId = extractEntityId(payload)
+    const family = parentId ?? ownId
+    if (family === undefined || family === null || family === '') return null
+    return `${item.workspace_id || 'unknown'}|${item.platform || 'unknown'}|${item.store_id || 'unknown'}|${String(family)}`
+  }
 
   return new Promise<void>((resolve) => {
     function scheduleNext() {
@@ -744,24 +790,29 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
         const itemIdx = pending.findIndex((item) => {
           const ws = item.workspace_id || 'unknown'
           const currentRunning = runningPerWorkspace.get(ws) || 0
+          const productKey = serialProductKey(item)
           return currentRunning < MAX_CONCURRENT_PER_WORKSPACE
+            && (!productKey || !runningProductFamilies.has(productKey))
         })
 
         if (itemIdx === -1) {
-          // جميع العناصر المعلقة المتبقية في هذه الدفعة تخص مساحات عمل وصلت لحدها الأقصى المتزامن حالياً.
-          // ننتظر حتى ينتهي أحد العمال النشطين ثم نتابع.
+          // Remaining work is blocked by workspace concurrency or a currently
+          // running product-family dependency. Resume when a worker settles.
           break
         }
 
         const [item] = pending.splice(itemIdx, 1)
         const ws = item.workspace_id || 'unknown'
+        const productKey = serialProductKey(item)
         runningPerWorkspace.set(ws, (runningPerWorkspace.get(ws) || 0) + 1)
+        if (productKey) runningProductFamilies.add(productKey)
         activeWorkers++
 
         processOneItem(item)
           .catch(() => {})
           .finally(() => {
             activeWorkers--
+            if (productKey) runningProductFamilies.delete(productKey)
             const current = runningPerWorkspace.get(ws) || 1
             if (current <= 1) {
               runningPerWorkspace.delete(ws)
