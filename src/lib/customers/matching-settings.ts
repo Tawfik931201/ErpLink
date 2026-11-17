@@ -27,3 +27,13 @@ export function defaultCustomerMatchFields(storeType: string, fields: Record<str
     match_odoo_field: fields.mobile ? 'mobile' : 'phone',
   }
 }
+
+/**
+ * An explicit Standard Mapping customer field is authoritative for lookup.
+ * A different field (especially an old shared email) must not silently take
+ * priority when the selected telephone/phone match does not resolve.
+ * Durable entity links are checked before these candidate searches.
+ */
+export function customerMatchCandidateAllowed(candidateField: string, configuredOdooField?: string | null): boolean {
+  return !configuredOdooField || candidateField === configuredOdooField
+}
