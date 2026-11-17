@@ -99,6 +99,22 @@ export async function resolveOrderRelatedRecord(
   if (!sourceField || !targetField) throw new Error('Select both related match fields')
   const model = entity === 'products' ? 'product.product' : 'res.partner'
 
+  // Zid customer webhooks/profile payloads use `mobile` as the canonical phone,
+  // while the legacy Customer Mapping catalog also exposes `telephone`. Orders
+  // often contain only mobile/phone, so preserve the configured key while filling
+  // the equivalent Zid phone aliases before resolving it.
+  if (identity.platform === 'zid' && entity === 'customers') {
+    const phone = source.telephone ?? source.phone ?? source.mobile
+    if (phone !== undefined && phone !== null && phone !== '') {
+      source = {
+        ...source,
+        telephone: source.telephone ?? phone,
+        phone: source.phone ?? phone,
+        mobile: source.mobile ?? phone,
+      }
+    }
+  }
+
   if (sourceField === STORED_ODOO_ID_FIELD) {
     if (targetField !== 'id' || !scope) throw new Error('Saved related record matching requires the scoped Odoo ID')
     const entityId = resolveZidMatchValue(source, 'id')
