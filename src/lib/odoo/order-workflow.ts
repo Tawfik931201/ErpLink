@@ -686,8 +686,13 @@ export async function ensureSaleOrderTaxes(
     const resolvedPlatform = platform || 'zid'
     const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
     const enableVat = orderStdSettings?.enable_vat ?? (orderStdSettings as any)?.order?.enable_vat ?? false
-    if (!enableVat) return
-
+    // Preserve Salla/Shopify's legacy non-VAT behaviour; this zero-tax fix
+    // applies only to the Zid Standard Mapping orders contract.
+    if (!enableVat && resolvedPlatform !== 'zid') return
+    // Odoo recalculates default product and shipping taxes during sale.order writes.
+    // When Standard Mapping disables VAT, a no-op here silently restores those
+    // inherited taxes on status updates even if create had correctly cleared them.
+    // Read each line below and clear only mismatching taxes, also in zero-VAT mode.
     const vatCountryRules: VatCountryRule[] = (
       orderStdSettings?.vat_country_rules
       ?? (orderStdSettings as any)?.order?.vat_country_rules
@@ -696,12 +701,14 @@ export async function ensureSaleOrderTaxes(
     const vatSaudiTaxId = orderStdSettings?.vat_saudi_tax_id ?? (orderStdSettings as any)?.order?.vat_saudi_tax_id
     const vatNonSaudiTaxId = orderStdSettings?.vat_non_saudi_tax_id ?? (orderStdSettings as any)?.order?.vat_non_saudi_tax_id
 
-    const { taxId: expectedTaxId, destinationCountryCode, appliedCountryCode } = resolveOrderVatTax(zidData, {
-      enableVat: true,
-      vatCountryRules,
-      vatSaudiTaxId,
-      vatNonSaudiTaxId,
-    })
+    const { taxId: expectedTaxId, destinationCountryCode, appliedCountryCode } = enableVat
+      ? resolveOrderVatTax(zidData, {
+          enableVat: true,
+          vatCountryRules,
+          vatSaudiTaxId,
+          vatNonSaudiTaxId,
+        })
+      : { taxId: null, destinationCountryCode: '', appliedCountryCode: 'VAT disabled by Orders Standard Mapping' }
 
     const expectedTaxIds = expectedTaxId ? [expectedTaxId] : []
 
@@ -881,7 +888,10 @@ export async function maybeApplyOrderStatusAction(
     }
 
     // Keep invoice taxes consistent with the prepared SO before invoicing.
-    await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId, !!sallaCreateSettings)
+    // For Zid orders, a successful status event must not conceal a rejected
+    // tax correction; otherwise the queue deletes the only retryable receipt.
+    await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId,
+      resolvedPlatform === 'zid' || !!sallaCreateSettings)
 
     // 2c. Invoice action (create, post, create_and_post, cancel)
     const invoiceAction = row.invoice_action
