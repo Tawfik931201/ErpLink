@@ -82,6 +82,19 @@ beforeEach(() => {
   paymentState = 'draft'
   mockOdoo.create.mockReset().mockImplementation(async model => model === 'account.payment' ? 701 : 501)
   mockOdoo.searchRead.mockReset().mockImplementation(async model => {
+    if (model === 'sale.order.line') {
+      // Model durable Odoo sale lines created via one2many commands.
+      // A strict VAT readback must not see an empty fake ERP order.
+      const command = mockOdoo.create.mock.calls.find(([name]) => name === 'sale.order')?.[1]?.order_line || []
+      return command.map((entry: [number, number, Record<string, any>], index: number) => {
+        const data = entry[2] || {}
+        const taxCommand = data.tax_ids || data.tax_id || [[6, 0, []]]
+        const taxes = Array.isArray(taxCommand?.[0]?.[2]) ? taxCommand[0][2] : []
+        return { id: 900 + index, name: data.name || 'Item', product_id: data.product_id,
+          product_uom_qty: data.product_uom_qty, price_unit: data.price_unit,
+          tax_ids: taxes, tax_id: taxes, discount: data.discount || 0 }
+      })
+    }
     if (model === 'res.company') return [{ currency_id: [40, 'SAR'] }]
     if (model === 'sale.order') return [{ id: 501, name: 'S00501', state: orderState, invoice_ids: invoiceIds,
       company_id: [10, 'Company'], partner_id: [11, 'Customer'], currency_id: [40, 'SAR'], pricelist_id: [18, 'Saved'], amount_total: 230 }]
