@@ -1,4 +1,5 @@
 import { categoryFields, categoryMatchValue } from '@/lib/categories/odoo-values'
+import { customerMatchCandidateAllowed } from '@/lib/customers/matching-settings'
 import { resolveEntityLinkId, STORED_ODOO_ID_FIELD } from '@/lib/entity-links'
 import { withErpCreateIdentity } from '@/lib/erp-effect-context'
 import { getErpExecutionScope } from '@/lib/erp-execution-target'
@@ -9,6 +10,11 @@ import { allPlatformIdFieldNames, pickExistingIdField, platformIdFieldNames } fr
 import { resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { supabaseAdmin } from '@/lib/sync-runtime'
 import type { OdooFieldMeta } from '@/lib/sync-types'
+
+/** Fail closed when two distinct store customers resolve to one Odoo partner. */
+export class CustomerMatchSafetyError extends Error {
+  constructor(message: string) { super(message); this.name = 'CustomerMatchSafetyError' }
+}
 
 function invalidOdooFieldFromError(err: unknown): string | null {
   const message = String((err as any)?.message || '')
@@ -257,6 +263,31 @@ export async function findExistingOdooRecord(
   const explicitCategoryMatch = model === 'product.category' && !!(fixedMatch || matchStrategy || (mapping?.odoo_match_field && mapping?.zid_match_field))
   const explicitProductMatch = isProduct && !!(fixedMatch || matchStrategy || (mapping?.odoo_match_field && mapping?.zid_match_field))
   const assertOrderOwnership = async (recordId: number) => {
+    // A saved partner link is stronger than email/phone heuristics. Before
+    // reusing ANY partner (including links and historical success logs), verify
+    // that another customer in this store does not already own it. This check
+    // applies only when a merchant has configured an explicit customer match.
+    if (model === 'res.partner' && fixedMatch && zidId && workspaceId && platform && mapping?.merchant_id) {
+      const scope = getErpExecutionScope()
+      if (!scope || scope.workspaceId !== workspaceId || scope.platform !== platform || scope.storeId !== mapping.merchant_id) {
+        throw new CustomerMatchSafetyError('Cannot verify customer ownership without the active ERP connection scope')
+      }
+      const { data, error } = await supabaseAdmin.from('odoo_entity_links')
+        .select('store_entity_id')
+        .eq('workspace_id', workspaceId)
+        .eq('erp_connection_id', scope.erpConnectionId)
+        .eq('connection_generation', scope.connectionGeneration)
+        .eq('platform', platform)
+        .eq('store_id', mapping.merchant_id)
+        .eq('odoo_model', 'res.partner')
+        .eq('odoo_record_id', recordId)
+        .neq('store_entity_id', zidId)
+        .limit(1)
+      if (error) throw new CustomerMatchSafetyError('Cannot verify customer ownership: entity links query failed')
+      if (data?.length) {
+        throw new CustomerMatchSafetyError(`Customer link conflict: Odoo partner #${recordId} is already linked to a different ${platform} customer (${data[0].store_entity_id}); refusing to overwrite it from ${zidId}`)
+      }
+    }
     if (model !== 'sale.order') return
     try {
       await assertSaleOrderLinkOwnership(supabaseAdmin, recordId, {
@@ -380,7 +411,7 @@ export async function findExistingOdooRecord(
                   }
                 }
               } catch (e) {
-                if (e instanceof OrderMatchSafetyError) throw e
+                if ((e instanceof OrderMatchSafetyError || e instanceof CustomerMatchSafetyError)) throw e
                 console.warn(`[SyncEngine] Failed to verify ${model} #${idNum} during sync_logs lookup:`, e)
                 // Record might have been deleted or field error, continue with other candidates
               }
@@ -388,7 +419,7 @@ export async function findExistingOdooRecord(
         }
       }
     } catch (err) {
-      if (err instanceof OrderMatchSafetyError) throw err
+      if ((err instanceof OrderMatchSafetyError || err instanceof CustomerMatchSafetyError)) throw err
       console.warn('[SyncEngine] Early sync_logs lookup failed:', err)
     }
   }
@@ -424,12 +455,12 @@ export async function findExistingOdooRecord(
             }
           }
         } catch (err) {
-          if (err instanceof OrderMatchSafetyError) throw err
+          if ((err instanceof OrderMatchSafetyError || err instanceof CustomerMatchSafetyError)) throw err
           // Record was deleted in Odoo — fall through to other candidates.
         }
       }
     } catch (err) {
-      if (err instanceof OrderMatchSafetyError) throw err
+      if ((err instanceof OrderMatchSafetyError || err instanceof CustomerMatchSafetyError)) throw err
       console.warn('[SyncEngine] entity-link lookup failed:', err)
     }
   }
@@ -584,6 +615,10 @@ export async function findExistingOdooRecord(
   const validCandidates = candidates.filter(domain => {
     const fieldName = domain[0] as string
     if (explicitCategoryMatch && fixedMatch && fieldName !== fixedMatch.odoo_field) return false
+    // Explicit customer Standard Mapping (e.g. telephone -> phone) must not
+    // silently fall back to email or another field and merge two customers.
+    // Previously saved links were resolved above, before this candidate list.
+    if (model === 'res.partner' && !customerMatchCandidateAllowed(fieldName, fixedMatch?.odoo_field)) return false
     if (fieldName === 'id') return true
     if (checkedFieldMeta.size > 0 && !checkedFieldMeta.has(fieldName)) {
       console.info(`[SyncEngine] Skipping candidate search for missing field "${fieldName}" on ${model}`)
