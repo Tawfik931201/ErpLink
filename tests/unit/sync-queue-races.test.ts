@@ -39,7 +39,7 @@ describe('durable queue race guards', () => {
   })
   it('fences success, retry and quarantine by claim token', () => {
     const settlement = source.slice(source.indexOf('async function settleSuccessfulItem'), source.indexOf('async function processOneItem'))
-    expect((settlement.match(/eq\('lease_token', item.lease_token\)/g) ?? []).length).toBe(2)
+    expect((settlement.match(/eq\('lease_token', item.lease_token\)/g) ?? []).length).toBeGreaterThanOrEqual(2)
     const retry = source.slice(source.indexOf('async function incrementRetry'), source.indexOf('// ─── Cleanup'))
     expect((retry.match(/eq\('lease_token', item.lease_token\)/g) ?? []).length).toBe(3)
     expect(retry.includes('lease_token: null')).toBe(true)

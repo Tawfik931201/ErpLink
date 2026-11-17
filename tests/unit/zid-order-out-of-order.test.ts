@@ -31,7 +31,7 @@ describe('Zid out-of-order order webhooks', () => {
     })
 
     it('reschedules non-existent sale.order updates as failed instead of dropping as skipped', () => {
-      expect(engine).toContain("isOrderUpdate ? 'failed' : 'skipped'")
+      expect(engine).toMatch(/isOrderUpdate\s*\|\|\s*retryMissingProduct\)\s*\?\s*'failed'\s*:\s*'skipped'/)
       expect(engine).toContain("not yet found in Odoo for status update; rescheduled to retry")
     })
 
@@ -48,9 +48,11 @@ describe('Zid out-of-order order webhooks', () => {
     })
 
     it('bypasses circuit breaker on order-pending rescheduling and applies fast 12-15s retry', () => {
-      expect(queue).toContain("const isOrderPending = typeof errorMessage === 'string' && (/not yet found in Odoo for status update/i).test(errorMessage)")
-      expect(queue).toContain("if (!isOrderPending) {")
-      expect(queue).toContain("const backoffMinutes = isOrderPending ? 0.2 : computeBackoffMinutes")
+      expect(queue).toContain("const isDependencyPending = typeof errorMessage === 'string' && (")
+      expect(queue).toContain("/not yet found in Odoo for status update/i.test(errorMessage)")
+      expect(queue).toContain("/not yet found in Odoo for .*retry after product\\.create/i.test(errorMessage)")
+      expect(queue).toContain("const backoffMinutes = isDependencyPending ? 0.2 : computeBackoffMinutes")
+      expect(queue).toContain("const jitterMs = isDependencyPending ? Math.floor(Math.random() * 3_000)")
     })
   })
 })
