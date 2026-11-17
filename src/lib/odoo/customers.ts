@@ -1,4 +1,4 @@
-import { injectCustomerCompanyFields } from '@/lib/customers/company-fields'
+import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo } from '@/lib/customers/company-fields'
 import { applyFixedSettingsToValues, applyRulesToValues } from '@/lib/odoo/value-settings'
 import { resolveShopifyCustomerFullName } from '@/lib/shopify/customers'
 
@@ -27,6 +27,7 @@ export async function prepareOdooCustomer({
 
   // Company fields always persist, even without explicit mapping rows
   effectiveOdooValues = injectCustomerCompanyFields(effectiveOdooValues, zidData)
+  effectiveOdooValues = normalizeCustomerCompanyTypeForOdoo(effectiveOdooValues, majorVersion)
 
   // Shopify and Salla send first_name / last_name separately while the
   // standard presets map name <- a single source, which drops the family

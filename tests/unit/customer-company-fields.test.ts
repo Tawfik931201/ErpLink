@@ -1,4 +1,4 @@
-import { injectCustomerCompanyFields } from '../../src/lib/customers/company-fields'
+import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo } from '../../src/lib/customers/company-fields'
 
 describe('customer company fields characterization', () => {
   it('fills undefined fields from platform aliases and classifies companies', () => {
@@ -31,5 +31,24 @@ describe('customer company fields characterization', () => {
     expect(result).toEqual(values)
     expect(result).not.toBe(values)
     expect(data).toEqual({ tax_number: null })
+  })
+
+  it('translates company_type to is_company on Odoo 20', () => {
+    expect(normalizeCustomerCompanyTypeForOdoo({ name: 'Acme', company_type: 'company' }, 20))
+      .toEqual({ name: 'Acme', is_company: true })
+    expect(normalizeCustomerCompanyTypeForOdoo({ name: 'Person', company_type: 'person' }, 20))
+      .toEqual({ name: 'Person', is_company: false })
+  })
+
+  it('keeps company_type unchanged on Odoo 14-19', () => {
+    expect(normalizeCustomerCompanyTypeForOdoo({ company_type: 'company' }, 14))
+      .toEqual({ company_type: 'company' })
+    expect(normalizeCustomerCompanyTypeForOdoo({ company_type: 'person' }, 19))
+      .toEqual({ company_type: 'person' })
+  })
+
+  it('preserves an explicit is_company value on Odoo 20', () => {
+    expect(normalizeCustomerCompanyTypeForOdoo({ company_type: 'company', is_company: false }, 20))
+      .toEqual({ is_company: false })
   })
 })

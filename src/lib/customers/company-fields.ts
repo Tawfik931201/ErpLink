@@ -39,3 +39,21 @@ export function injectCustomerCompanyFields(
   }
   return values
 }
+
+/**
+ * Odoo 20 removed the computed `company_type` field from res.partner while
+ * retaining the stable boolean `is_company`. Keep 14-19 behavior unchanged,
+ * but translate every company_type value before an Odoo 20 write so both
+ * settings-driven and payload-driven classification remain compatible.
+ */
+export function normalizeCustomerCompanyTypeForOdoo(
+  odooValues: Record<string, unknown>,
+  odooMajorVersion: number,
+): Record<string, unknown> {
+  const values = { ...odooValues }
+  if (odooMajorVersion >= 20 && values.company_type !== undefined) {
+    if (values.is_company === undefined) values.is_company = values.company_type === 'company'
+    delete values.company_type
+  }
+  return values
+}
