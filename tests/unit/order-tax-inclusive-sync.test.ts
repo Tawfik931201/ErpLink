@@ -102,6 +102,46 @@ describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across 
     expect(lines[0].tax_ids).toEqual([[6, 0, [5]]])
   })
 
+  it('preserves the actual Zid charged price and explicit 0% tax when VAT mapping is disabled', async () => {
+    const client = createMockClient()
+    const liveZidShape = {
+      id: 502210210,
+      products: [{
+        id: 'p-live',
+        sku: 'SKU-115',
+        name: 'Live Zid sale-price shape',
+        quantity: 1,
+        price: 81.23,
+        total: 81.23,
+        net_price: 100,
+        gross_price: 100,
+        price_before: 100,
+        net_sale_price: '81.23000000000000',
+        gross_sale_price: '81.23000000000000',
+        discounted_total: 81.23,
+        tax_amount: '0.00000000000000',
+        tax_percentage: 0,
+        is_discounted: false,
+      }],
+      shipping: { address: { country: { code: 'SA' } } },
+    }
+
+    const lines = await buildOrderLineItems(
+      client,
+      baseMapping,
+      liveZidShape,
+      new Map(),
+      {},
+      'zid',
+      { enable_vat: false, prices_include_tax: false },
+      'store-1'
+    )
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].price_unit).toBe(81.23)
+    expect(lines[0].tax_ids).toEqual([[6, 0, []]])
+  })
+
   it('Case 2: With setting enabled (prices_include_tax = true, tax_rate_percent = 15) — calculates 100 SAR before tax for Odoo', async () => {
     const client = createMockClient()
     const stdSettings = {
