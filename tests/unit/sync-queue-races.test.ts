@@ -114,4 +114,18 @@ describe('durable queue race guards', () => {
     expect(source).toMatch(/retry after product\\\.create/)
     expect(source).toMatch(/const isDependencyPending/)
   })
+  it('archives deterministic invalid Zid variants but never uncertain ERP effects', () => {
+    const helper = source.slice(
+      source.indexOf('function isInvalidProductVariantInput'),
+      source.indexOf('async function incrementRetry')
+    )
+    expect(helper).toContain("item.platform === 'zid'")
+    expect(helper).toContain('Invalid product variant configuration:')
+    expect(helper).toContain('outcome_unknown')
+    expect(helper).toContain("from('sync_queue_dead').insert")
+    expect(helper).toContain("eq('lease_token', item.lease_token)")
+    const retry = source.slice(source.indexOf('async function incrementRetry'))
+    expect(retry.indexOf('await parkUnknownOutcome(item)')).toBeLessThan(retry.indexOf('archiveInvalidProductVariant(item'))
+  })
+
 })
