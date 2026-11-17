@@ -8,7 +8,7 @@ import { platformIdField, platformLegacyIdField } from '@/lib/platform-fields'
 import { assertProductWriteAllowed, finiteProductNumber } from '@/lib/products/settings-values'
 import { readAllProductRows, syncVariantPrices } from '@/lib/products/variant-prices'
 import { pickStaleZidVariants } from '@/lib/products/variant-reconciliation'
-import type { GenericVariant } from '@/lib/products/variants'
+import { assertCompleteVariantCombinations, type GenericVariant } from '@/lib/products/variants'
 import { resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
 import type { FieldMappingRow, SyncEngineResult } from '@/lib/sync-types'
@@ -102,6 +102,9 @@ export async function syncAsVariants(
   _priceSettings?: { markup_percent: number; rounding: string; decimal_places: number },
   mergedSettings?: Record<string, any>
 ): Promise<SyncEngineResult['records'][number]> {
+  // Validate before creating/updating a template or its attribute lines.
+  assertCompleteVariantCombinations(variants)
+
   console.info(`[SyncEngine] 📦 مزامنة ${variants.length} متغيرات تحت منتج رئيسي واحد في أودو.`)
 
   // Step 1: Create or update the main product.template
