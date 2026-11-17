@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ERPlink — دليل النظام التفاعلي</title>
+<style>
+  :root {
+    /* هوية الموقع (مأخوذة من globals.css / tailwind) */
+    --background: 216 26% 97%;
+    --foreground: 218 32% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 218 32% 16%;
+    --primary: 217 85% 50%;        /* #1366EC */
+    --primary-fg: 0 0% 100%;
+    --brand: 216 92% 63%;          /* #4A90F8 */
+    --brand-strong: 219 80% 44%;
+    --secondary: 216 24% 94%;
+    --secondary-fg: 218 30% 30%;
+    --muted: 216 24% 94%;
+    --muted-fg: 218 13% 42%;
+    --accent: 216 45% 94%;
+    --accent-fg: 218 45% 25%;
+    --border: 216 18% 88%;
+    --ring: 217 72% 52%;
+    --success: 158 62% 36%;
+    --warning: 37 91% 50%;
+    --danger: 0 72% 51%;
+    --zid: 217 85% 50%;
+    --odoo: 258 72% 56%;
+    --salla: 164 72% 38%;
+    --shopify: 142 50% 40%;
+    --radius: 14px;
+    --shadow: 0 8px 30px rgba(19, 42, 82, .08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", "Noto Kufi Arabic", Arial, sans-serif;
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    line-height: 1.75;
+  }
+  a { color: hsl(var(--primary)); }
+  .app { display: grid; grid-template-columns: 290px 1fr; min-height: 100vh; }
+  .sidebar {
+    position: sticky; top: 0; height: 100vh; overflow: auto;
+    background: hsl(216 30% 98%); border-left: 1px solid hsl(var(--border));
+    padding: 18px 14px 24px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px; padding: 6px 8px 14px; margin-bottom: 8px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .logo {
+    width: 38px; height: 38px; border-radius: 10px;
+    background: linear-gradient(135deg, hsl(var(--brand)), hsl(var(--brand-strong)));
+    display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px;
+    box-shadow: 0 6px 16px rgba(74,144,248,.35);
+  }
+  .brand h1 { font-size: 1rem; margin: 0; }
+  .brand p { margin: 0; color: hsl(var(--muted-fg)); font-size: .78rem; }
+  .search { width: 100%; margin: 10px 0 12px; padding: 9px 11px; border: 1px solid hsl(var(--border)); border-radius: 10px; background: #fff; color: inherit; }
+  .nav-group { margin: 10px 0 6px; font-size: .78rem; color: hsl(var(--muted-fg)); font-weight: 700; padding: 0 8px; }
+  .nav button {
+    width: 100%; text-align: right; border: 0; background: transparent; color: hsl(var(--foreground));
+    padding: 8px 10px; border-radius: 10px; cursor: pointer; font: inherit; font-size: .92rem;
+  }
+  .nav button:hover { background: hsl(var(--accent)); }
+  .nav button.active { background: hsl(216 60% 95%); color: hsl(var(--brand-strong)); font-weight: 600; }
+
+  .main { padding: 22px 22px 40px; max-width: 1200px; }
+  .hero {
+    background: linear-gradient(135deg, hsl(216 92% 63% / .12), hsl(217 85% 50% / .04)), #fff;
+    border: 1px solid hsl(var(--border)); border-radius: 18px; padding: 22px 22px 18px; box-shadow: var(--shadow);
+  }
+  .hero h2 { margin: 0 0 6px; font-size: 1.5rem; }
+  .hero p { margin: 0; color: hsl(var(--muted-fg)); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { font-size: .8rem; padding: 4px 10px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: #fff; color: hsl(var(--secondary-fg)); }
+  .chip.brand { background: hsl(216 92% 63% / .12); color: hsl(var(--brand-strong)); border-color: hsl(216 92% 63% / .25); }
+
+  .section { margin-top: 22px; scroll-margin-top: 16px; }
+  .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .section-head h3 { margin: 0; font-size: 1.15rem; }
+  .section-head .hint { color: hsl(var(--muted-fg)); font-size: .86rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .card {
+    background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+    padding: 14px 14px 12px; cursor: pointer; transition: .15s ease; position: relative;
+  }
+  .card:hover { transform: translateY(-2px); border-color: hsl(var(--brand)); box-shadow: var(--shadow); }
+  .card.selected { border-color: hsl(var(--primary)); box-shadow: 0 0 0 2px hsl(var(--primary) / .15), var(--shadow); }
+  .card h4 { margin: 0 0 4px; font-size: .98rem; }
+  .card p { margin: 0; color: hsl(var(--muted-fg)); font-size: .86rem; line-height: 1.65; }
+  .badge { display: inline-flex; align-items: center; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-bottom: 6px; }
+  .b-brand { background: hsl(216 92% 63% / .14); color: hsl(var(--brand-strong)); }
+  .b-zid { background: hsl(217 91% 95%); color: #1d4ed8; }
+  .b-salla { background: hsl(158 60% 93%); color: #047857; }
+  .b-shopify { background: hsl(142 60% 93%); color: #166534; }
+  .b-odoo { background: hsl(262 83% 96%); color: #6d28d9; }
+  .b-warn { background: hsl(38 92% 95%); color: #92400e; }
+  .b-ok { background: hsl(158 60% 93%); color: #047857; }
+  .b-danger { background: hsl(0 85% 96%); color: #b91c1c; }
+  .b-muted { background: hsl(var(--secondary)); color: hsl(var(--secondary-fg)); }
+
+  .layout { display: grid; grid-template-columns: 1fr 360px; gap: 16px; align-items: start; margin-top: 14px; }
+  .detail {
+    position: sticky; top: 14px; background: #fff; border: 1px solid hsl(var(--border)); border-radius: 16px;
+    padding: 16px 16px 14px; box-shadow: var(--shadow); min-height: 180px;
+  }
+  .detail.empty { color: hsl(var(--muted-fg)); display: grid; place-items: center; text-align: center; padding: 28px 18px; }
+  .detail h4 { margin: 0 0 4px; font-size: 1.05rem; }
+  .detail .path { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .78rem; color: hsl(var(--brand-strong)); background: hsl(216 92% 63% / .1); padding: 2px 7px; border-radius: 6px; display: inline-block; margin: 4px 0 8px; direction: ltr; }
+  .detail .desc { margin: 0 0 10px; font-size: .92rem; }
+  .detail h5 { margin: 12px 0 4px; font-size: .88rem; color: hsl(var(--secondary-fg)); }
+  .detail ul { margin: 0; padding: 0 18px 0 0; }
+  .detail li { margin: 3px 0; font-size: .88rem; }
+  .kv { display: grid; gap: 6px; margin-top: 6px; }
+  .kv div { background: hsl(var(--secondary)); border: 1px solid hsl(var(--border)); border-radius: 10px; padding: 7px 9px; font-size: .84rem; }
+  .kv code { font-family: ui-monospace, Consolas, monospace; color: hsl(var(--brand-strong)); direction: ltr; unicode-bidi: embed; }
+  .note { margin-top: 10px; padding: 9px 10px; border-radius: 10px; font-size: .84rem; border: 1px solid; }
+  .note.info { background: hsl(216 92% 63% / .08); border-color: hsl(216 92% 63% / .25); color: #1e3a8a; }
+  .note.warn { background: hsl(38 92% 95%); border-color: hsl(38 92% 60% / .35); color: #92400e; }
+  .note.ok { background: hsl(158 60% 93%); border-color: hsl(158 50% 55% / .35); color: #065f46; }
+
+  .table-wrap { overflow: auto; border: 1px solid hsl(var(--border)); border-radius: 14px; background: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid hsl(var(--border)); text-align: right; vertical-align: top; }
+  th { background: hsl(216 30% 98%); color: hsl(var(--secondary-fg)); font-weight: 700; position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover td { background: hsl(216 60% 97%); }
+  tr.clickable.selected td { background: hsl(216 60% 95%); }
+  td code { direction: ltr; unicode-bidi: embed; color: hsl(var(--brand-strong)); font-family: ui-monospace, Consolas, monospace; font-size: .82rem; }
+
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .step { background: #fff; border: 1px solid hsl(var(--border)); border-radius: 12px; padding: 8px 10px; font-size: .86rem; cursor: pointer; }
+  .step:hover, .step.selected { border-color: hsl(var(--primary)); background: hsl(216 60% 97%); }
+  .arrow { color: hsl(var(--muted-fg)); font-weight: 700; }
+
+  .footer-note { margin-top: 26px; color: hsl(var(--muted-fg)); font-size: .86rem; border-top: 1px solid hsl(var(--border)); padding-top: 14px; }
+  .pill-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .pill { font-size:.76rem; padding:2px 8px; border-radius:999px; background:hsl(var(--secondary)); border:1px solid hsl(var(--border)); }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; border-left: 0; border-bottom: 1px solid hsl(var(--border)); }
+    .layout { grid-template-columns: 1fr; }
+    .detail { position: static; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">E</div>
+      <div><h1>ERPlink Docs</h1><p>دليل النظام التفاعلي</p></div>
+    </div>
+    <input id="search" class="search" type="search" placeholder="ابحث في الأقسام والخانات…" />
+    <nav class="nav" id="nav"></nav>
+  </aside>
+
+  <main class="main">
+    <section class="hero" id="top">
+      <h2>شرح نظام ERPlink — كل خانة بتفاصيلها</h2>
+      <p>وثيقة تفاعلية تشرح وحدات المنصة، مسارات البيانات، الجداول، والإعدادات. اضغط على أي بطاقة أو صف لعرض التفاصيل في اللوحة الجانبية.</p>
+      <div class="chips">
+        <span class="chip brand">هوية موحدة (أزرق العلامة #4A90F8)</span>
+        <span class="chip">Next.js + Supabase + Clerk</span>
+        <span class="chip">Zid / Salla / Shopify ↔ Odoo / ERPNext</span>
+        <span class="chip">استقبال موثوق (No-Loss)</span>
+      </div>
+    </section>
+
+    <div class="layout">
+      <div id="content"></div>
+      <aside id="detail" class="detail empty">
+        <div>
+          <div style="font-size:1.6rem">👆</div>
+          <div><strong>اختر خانة</strong></div>
+          <div style="margin-top:4px">اضغط على أي عنصر لعرض وظيفته، حقوله، ومساره داخل النظام.</div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="footer-note">
+      المصدر: الكود وملفات <code>docs/architecture/*</code> و<code>supabase/migrations/*</code> و<code>AGENTS.md</code> (مراجعة 2026-11-16). هذه الصفحة توثيقية؛ المخطط والسلوك الحي في الإنتاج هما المرجع النهائي. الجداول المعلّمة ★ حقولها مستنتَجة من الاستخدام لأنها أُنشئت خارج مجلد الترحيلات.
+    </div>
+  </main>
+</div>
+
+<script>
+const BRAND = {
+  primary: '#1366EC', brand: '#4A90F8', zid: '#2563eb', salla: '#059669', shopify: '#15803d', odoo: '#7c3aed', erpnext: '#0f766e'
+};
+
+const sections = [
+  {
+    id: 'overview', title: 'نظرة عامة وهوية', group: 'الأساسيات', hint: 'ما هو النظام وحدوده',
+    type: 'cards',
+    items: [
+      { id:'ov-what', title:'ما هو ERPlink', badge:'b-brand', badgeText:'المنصة', desc:'وسيط تكامل يربط متاجر التجارة (زد/سلة/شوبيفاي) بأنظمة ERP (Odoo/ERPNext) مع مزامنة موثوقة.',
+        path:'docs/architecture/overview.md', fields:['متاجر مصدر: Zid, Salla, Shopify','وجهات ERP: Odoo (XML-RPC) وERPNext (REST للمسارات المخصصة)','واجهات: Next.js App Router + Server Actions + API Routes','مصادقة: Clerk، صلاحيات وتعدد مساحات داخل التطبيق','بيانات: Supabase (service_role)؛ المخطط في supabase/migrations'], notes:[{t:'info',m:'الفوترة يدوية مستقلة عن التكامل (لا Stripe ولا عمولات).'}] },
+      { id:'ov-bound', title:'حدود ووحدات', badge:'b-muted', badgeText:'حدود', desc:'فصل واضح بين واجهة المستخدم، الاستقبال، الطابور، التنفيذ، والإشعارات.',
+        fields:['UI مجمّد أثناء إعادة الهيكلة الداخلية (لا تغيير سلوك/مسارات)','store modules تُجهّز البيانات؛ ERP modules تنفّذ الكتابة','جسم ويب هوك Odoo محفّز فقط — القيم تُقرأ من ERP (مصدر الحقيقة)','التسوية التلقائية الحالية تغطي طلبات Zid (reconcileZidOrders)'], notes:[{t:'warn',m:'التحقق بالمصدر والاختبارات المموّهة لا يثبت جاهزية بيئة إنتاج حية أو توصيل تاجر حقيقي.'}] },
+      { id:'ov-stack', title:'التقنيات والهوية البصرية', badge:'b-brand', badgeText:'هوية', desc:'ألوان وخطوط موحدة مستمدة من هوية الموقع.',
+        fields:['أزرق العلامة: brand #4A90F8 (HSL 216 92% 63%)','أساسي: primary #1366EC مع نص أبيض (AA)','خلفية هادئة calm: HSL 216 26% 97% وحدود زرقاء رمادية','ألوان المنصات: Zid أزرق، Odoo بنفسجي، Salla أخضر، Shopify أخضر','خط الواجهة: Segoe UI / Noto Sans Arabic، اتجاه RTL'], notes:[{t:'ok',m:'تم اعتماد نفس متغيرات الألوان (--brand/--primary/--border/--muted) في هذه الصفحة.'}] }
+    ]
+  },
+  {
+    id: 'identity', title: 'الهوية والمساحات والصلاحيات', group: 'الأساسيات', hint: 'Clerk، المستخدمون، المساحات، الأعضاء',
+    type: 'cards',
+    items: [
+      { id:'id-users', title:'users ★', badge:'b-muted', badgeText:'جدول (مستنتج)', desc:'مستخدمو Clerk المرتبطون بالنظام.', path:'src/lib/*, src/app/actions/*',
+        fields:['id (نص، معرّف Clerk)','email, name','active_workspace_id (المساحة النشطة)','created_at'], notes:[{t:'warn',m:'★ الجدول خارج supabase/migrations؛ الحقول مستنتَجة. عمود phone غير مضمون في كل البيئات — لا تفترضه.'}] },
+      { id:'id-workspaces', title:'workspaces ★ (المحور)', badge:'b-brand', badgeText:'جدول محوري', desc:'كل البيانات تُعزل بمساحة العمل؛ هي مرجع casi لكل الجداول.', path:'src/lib/workspace-*.ts',
+        fields:['id (uuid, PK)','user_id (المالك)','name, subscription_number','archived_at (إغلاق عند انتهاء التجربة/الاشتراك)','created_at — تُشتق منه تجربة 7 أيام'], notes:[{t:'info',m:'فترة التجربة 7 أيام لكل مساحة (من created_at) بدون عمود إضافي؛ الاشتراك المدفوع يلغي أثرها.'}] },
+      { id:'id-members', title:'workspace_members / invitations', badge:'b-muted', badgeText:'الصلاحيات', desc:'أعضاء المساحة وصلاحيات الصفحات ودعوات الانضمام.',
+        fields:['workspace_members: workspace_id, user_id, permissions (JSONB)','workspace_invitations: id, workspace_id, email, invited_by, permissions, status, clerk_invite_id','عزل صلاحيات حسب صفحات (dashboard, connect-store, connect-odoo, mapping-center, transfers, tickets, …)'], notes:[{t:'info',m:'قيد فريد (workspace_id,user_id)؛ حذف المساحة يحذف الأعضاء والدعوات (CASCADE).'}] },
+      { id:'id-auth', title:'المصادقة وتحديد المدير', badge:'b-muted', badgeText:'أمن', desc:'الجلسة من Clerk، وصلاحية المدير من متغير بيئة.',
+        fields:['auth()/clerk مستخدم فقط لمعرفة userId','isAdmin() يتحقق من ADMIN_USER_IDS (قائمة Clerk IDs)','انتحال الجلسة عبر impersonated_user_id cookie (آلية داخلية)','middleware يستثني مسارات عامة مثل /_next/image ونقاط استقبال الويب هوك'], notes:[{t:'ok',m:'الترخيص في التطبيق ليس مبنياً على أدوار Clerk Organizations؛ الحماية مفروضة في الخادم.'}] }
+    ]
+  },
+  {
+    id: 'stores', title: 'ربط المتاجر (Zid / Salla / Shopify)', group: 'التكاملات', hint: 'OAuth، الرموز، الهوية',
+    type: 'cards',
+    items: [
+      { id:'st-zid', title:'Zid — merchant_tokens', badge:'b-zid', badgeText:'Zid', desc:'رموز وربط متجر زد مع إعدادات المزامنة.', path:'src/lib/zid-client.ts, src/lib/zid/*',
+        fields:['id, merchant_id (فريد), store_id, workspace_id','access_token, refresh_token, expires_in, token_type','name, email, mobile, uuid','sync_settings (JSONB)','zid_oauth_pending (منح معلقة مشفّرة/مؤقتة)','zid_embedded_access (وصول مضمّن، token_hash)'], notes:[{t:'info',m:'تسجيل ويب هوك زد يستخدم HTTP Basic مشتقاً (HKDF من ENCRYPTION_KEY)؛ إعادة التسجيل مطلوبة بعد التغيير.'}] },
+      { id:'st-salla', title:'Salla — salla_tokens', badge:'b-salla', badgeText:'Salla', desc:'ربط متجر سلة وتحديث الرموز.', path:'src/lib/salla-client.ts, src/lib/salla/webhook-auth.ts',
+        fields:['merchant_id (فريد), workspace_id','access_token, refresh_token, scope, expires','store_name, store_email, store_domain, store_avatar','sync_settings (JSONB)','ويب هوك: HMAC أصلي أو ترويسة مشتقة x-erplink-webhook-secret'], notes:[{t:'warn',m:'كتالوج أحداث سلة يجب التحقق منه من البوابة/الوثائق؛ لا تُضف حدثاً من الذاكرة.'}] },
+      { id:'st-shopify', title:'Shopify — shopify_tokens', badge:'b-shopify', badgeText:'Shopify', desc:'ربط متجر شوبيفاي بنطاق المتجر.', path:'src/lib/shopify-client.ts, src/lib/shopify-topics.ts',
+        fields:['shop_domain (فريد), workspace_id','access_token, scopes','store_name, store_email, store_domain','sync_settings (JSONB)','topics/كتالوج الأحداث منفصلة عمداً عن الاشتراك الفعلي'], notes:[{t:'info',m:'شوبيفاي يعتمد سر HMAC مشترك مُهيّأ؛ غيابه في الإنتاج خطأ جسيم لمسار التوقيع.'}] },
+      { id:'st-ident', title:'هوية المتجر والعزل', badge:'b-muted', badgeText:'عزل', desc:'كل عملية تُربط بـ workspace + store/merchant لمنع خلط المستأجرين.',
+        fields:['استعلامات field_mappings/الخرائط تُقيد بـ workspace_id','البحث عن سجلات Odoo السابقة يُقيد بـ workspace_id وplatform','إيصالات يتيمة (متجر غير مربوط) تُحفظ بـ workspace_id NULL ولا تُعالج تلقائياً','store_id مضاف لنطاق الخرائط والإعدادات الثابتة (تعدد المتاجر)'], notes:[{t:'ok',m:'الربط الخاطئ بين مساحات مختلفة عُلِج بتقييد الاستعلامات بمساحة التسليم.'}] }
+    ]
+  },
+  {
+    id: 'erp', title: 'ربط الـ ERP والوجهة', group: 'التكاملات', hint: 'Odoo / ERPNext وتثبيت الوجهة',
+    type: 'cards',
+    items: [
+      { id:'erp-conn', title:'erp_connections ★', badge:'b-odoo', badgeText:'Odoo/ERP', desc:'اتصال مساحة العمل بنظام الـ ERP.', path:'src/lib/odoo-client.ts, src/lib/erp-execution-target.ts',
+        fields:['id, workspace_id','erp_type (odoo / erpnext)','url, db_name, username/credentials (مشفّرة)','status, odoo_version (عرض/كشف)','إعدادات ومعلومات إضافية حسب النوع'], notes:[{t:'warn',m:'★ خارج الترحيلات. الأسرار تُخزّن مشفّرة؛ يعتمد التشفير على ENCRYPTION_KEY.'}] },
+      { id:'erp-bind', title:'erp_workspace_bindings', badge:'b-odoo', badgeText:'وجهة', desc:'تثبيت وجهة ERP نشطة واحدة لكل مساحة.', path:'supabase/migrations/*erp_workspace_bindings*',
+        fields:['workspace_id (PK)','erp_connection_id (FK)','erp_type, erp_url, erp_db_name','switched_at','إيصالات الويب هوك تُثبّت erp_connection_id + connection_generation'], notes:[{t:'info',m:'تثبيت الوجهة لكل إيصال يمنع تغيّر الهدف أثناء التنفيذ؛ التبديل يستدعي تنظيف مراجع ERP القديمة حسب السياسة.'}] },
+      { id:'erp-odoo', title:'تنفيذ Odoo', badge:'b-odoo', badgeText:'تنفيذ', desc:'كتابة السجلات والطلبات والمنتجات عبر XML-RPC مع توافق الإصدارات.', path:'src/lib/odoo/*, src/lib/sync/mappings.ts',
+        fields:['المنتجات: تحضير قيم، متغيرات أصلية/منفصلة، مخزون، BoM','العملاء: res.partner وربط حقول/علاقات','الفئات: تسلسل أب/ابن وحسابات وتقييم','الطلبات: قيم، بنود، حالة/فاتورة/استلام، عملة ودفع وتوزيع تحليلي','سجلات مخصصة: execute-operation/records'], notes:[{t:'ok',m:'مطابقة السجلات تتم عبر odoo_entity_links أولاً ثم بدائل آمنة؛ الحقول تُفحص حسب قدرات نسخة Odoo.'}] },
+      { id:'erp-erpnext', title:'تنفيذ ERPNext', badge:'b-muted', badgeText:'ERPNext', desc:'مسار REST للمطابقات المخصصة (DocType).', path:'src/lib/erpnext/*, src/lib/erpnext-engine.ts',
+        fields:['عميل REST وتحويل قيم وحقول DocType','تنفيذ خرائط مخصصة (Custom Mapping)','الربط القياسي (Standard Mapping) والاستيراد اليدوي يستخدمان Odoo حالياً','يتطلب اتصال ERP نشط وصالح للمساحة'], notes:[{t:'warn',m:'وجود وجهتين معاً لنفس المساحة يحتاج تهيئة صريحة وتثبيت هدف لكل تسليم.'}] }
+    ]
+  },
+  {
+    id: 'mapping', title: 'مركز الربط والإعدادات', group: 'الربط', hint: 'Standard / Custom / خرائط ثابتة',
+    type: 'cards',
+    items: [
+      { id:'map-standard', title:'الربط القياسي (Standard Mapping)', badge:'b-brand', badgeText:'إعدادات', desc:'إعدادات افتراضية لكل متجر ولكل كيان داخل مساحة.', path:'src/app/actions/standard-mapping.ts, src/lib/mapping-settings.ts',
+        fields:['standard_mapping_settings: workspace_id, store_type, store_id, entity_type, settings (JSONB)','الكيانات: categories, products, customers, orders (وما يلحقها)','يتحكم في التفعيل/السلوك (enabled_actions, خيارات المزامنة)','مرجع الإعدادات: /api/mapping-center/settings','نطاق المتجر يسمح بإعدادات مختلفة لكل متجر'], notes:[{t:'info',m:'البوابة تقرأ الإعدادات المحفوظة (مصدر الحقيقة) قبل قبول/تخطي الحدث.'}] },
+      { id:'map-custom', title:'الربط المخصص (Custom / field_mappings) ★', badge:'b-brand', badgeText:'خرائط', desc:'خرائط حقول وأحداث موجهة لنماذج Odoo.', path:'src/app/actions/field-mappings.ts, src/lib/sync/mappings.ts',
+        fields:['field_mappings: id, workspace_id, merchant/store scope','event, odoo_model, odoo_webhook_id','تهيئة الحقول والتحويلات','erp_destination_retired_at عند تقاعد الوجهة','تُستشار بعد/إلى جانب القياسي حسب المسار'], notes:[{t:'warn',m:'★ جدول خارج الترحيلات. استعلامه يجب أن يُقيّد دائماً بـ workspace_id لتفادي التداخل بين المساحات.'}] },
+      { id:'map-static', title:'الخرائط الثابتة (Static Mappings)', badge:'b-muted', badgeText:'جداول ربط', desc:'ربط قيم المتجر بمعرّفات وكيانات Odoo لكل (مساحة، منصة، متجر).', path:'src/app/actions/static-mappings.ts',
+        fields:['product_mappings → odoo_product_id','category_mappings → فئة/أب/حسابات/تقييم','order_status_mappings → حالة/فاتورة/استلام','payment_method_mappings → دفتر/طريقة دفع','shipping_method_mappings → ناقل/منتج','tax_mappings, warehouse_mappings, currency_mappings','payment_term_mappings, pricelist_mappings'], notes:[{t:'info',m:'كلها CASCADE مع workspace وفهارس فريدة تشمل store_id. معرّفات Odoo محلية لقاعدة الوجهة الحالية.'}] },
+      { id:'map-fixed', title:'خرائط وقواعد ثابتة/تعريفات', badge:'b-muted', badgeText:'تعريفات', desc:'قوالب جاهزة وقواعد تحويل/شروط.', path:'supabase/migrations/*fixed_mapping*',
+        fields:['fixed_mapping_preset_definitions: preset_key, platform, odoo_model, action, default_field_rows','fixed_mapping_settings: (workspace_id,preset_key) → settings JSONB','fixed_mapping_rules: شروط، إجراءات، عملات/أسعار، أولوية وتفعيل'], notes:[{t:'info',m:'تُستخدم لتوحيد حقول المنتجات والطلبات وتقليل الإعداد اليدوي.'}] },
+      { id:'map-addfield', title:'إضافة حقول مخصصة (Odoo/ERP)', badge:'b-muted', badgeText:'حقول', desc:'إنشاء/إدارة حقول مخصصة لدعم الربط.', path:'src/lib/custom-field-validation.ts, mapping-center/add-field',
+        fields:['تحقق خادمي للأسماء/النوع/القيم المسموحة','تعقيم XML/selection لمنع إدخال غير آمن','تنفيذ عبر ERP وفق الصلاحيات والاتصال','تظهر في مركز الربط للاستخدام داخل الخرائط'], notes:[{t:'warn',m:'أي منطق تحقق خاص بالحقول يجب أن يبقى في وحدة خادمية (ليس في Server Action فقط) للحماية والاختبار.'}] }
+    ]
+  },
+  {
+    id: 'pipeline', title: 'خط الأنابيب والمزامنة (No-Loss)', group: 'التشغيل', hint: 'استقبال → طابور → تنفيذ → سجلات',
+    type: 'cards',
+    items: [
+      { id:'pl-ingress', title:'الاستقبال والتحقق (Ingress)', badge:'b-brand', badgeText:'ويب هوك', desc:'كل تسليم موثّق يُحفظ أولاً ثم يُعالج لاحقاً.', path:'src/app/api/webhooks/*, src/lib/webhook-inbox.ts',
+        fields:['تحقق التوقيع/الاعتماد (Zid Basic مشتق، Salla HMAC/مشتق، Shopify HMAC، Odoo سر نطاق مشتق)','بوابة isWebhookEventEnabled حسب إعدادات الربط','recordWebhookReceipt → webhook_inbox (دائم)','enqueueWebhookEvent → sync_queue (dedup ذري + دمج)','رد 2xx/202 بعد الحفظ فقط؛ 503 عند فشل الحفظ'], notes:[{t:'ok',m:'القاعدة: لا تُرفض التسليمات الموثّقة (التأخير مقبول، الفقد مرفوض). 429 يُستخدم للمجهول فقط.'}] },
+      { id:'pl-dispatch', title:'الإرسال والطابور', badge:'b-brand', badgeText:'Queue', desc:'ربط الإيصال بوظيفة تنفيذ مع تثبيت الوجهة.', path:'src/lib/sync-queue.ts, supabase/migrations/*durable*',
+        fields:['dispatch_webhook_receipt يربط inbox ↔ sync_queue','تثبيت erp_connection_id وconnection_generation','receipt_id فريد، execution_key، dedup_key','دمج تحديثات نفس الكيان أثناء الانتظار (coalescing) دون إسقاط تسليمات مميّزة','جلب عادل بين المساحات وحد تزامن لكل مساحة'], notes:[{t:'info',m:'المعرّف الذري يمثل التسليم/الحدث (delivery id أو بصمة حمولة) وليس الكيان وحده.'}] },
+      { id:'pl-worker', title:'العامل والتنفيذ', badge:'b-brand', badgeText:'Worker', desc:'مشغّل داخل العملية يعالج الطابور بعقود إيجار (lease).', path:'src/lib/sync-queue-runner.ts, src/instrumentation.ts',
+        fields:['إقلاع من instrumentation.ts (عملية Node طويلة)','كل 30ث: drainWebhookInbox → processSyncQueue','claim_sync_job بـ lease_token وlease_expires_at','تسوية Zid كل 10د، أرشفة مساحات كل 6س','SYNC_QUEUE_SELF_RUNNER=true مطلوب في الإنتاج (لا cron موثوق على الهوست)'], notes:[{t:'warn',m:'فجوة قصيرة بعد إعادة التشغيل حتى أول دورة؛ مسار /api/cron/* متاح للتشغيل/الفحص اليدوي.'}] },
+      { id:'pl-odoo-trust', title:'Odoo→المتجر: القراءة مصدر الحقيقة', badge:'b-odoo', badgeText:'ثقة', desc:'جسم ويب هوك Odoo محفّز؛ القيم المعتمدة تُقرأ من ERP.', path:'src/lib/odoo-webhook-trust, src/app/api/webhooks/odoo/*',
+        fields:['قراءة ناجحة للسجل → تجاهل جسم الطلب بالكامل','سجل غير موجود بعد قراءة → مسار حذف/إزالة حقيقي','فشل القراءة → لا اعتماد على الجسم، إعادة محاولة ثم حجر','اعتماد الإزالة/الحذف مشروط بمسار موثّق','لا كتابة في المتجر من جسم الطلب مباشرة'], notes:[{t:'ok',m:'هذه القاعدة تمنع دفع قيم مزيفة عند تعطل/تلاعب؛ الاختبارات تثبّت الفروع الثلاثة.'}] },
+      { id:'pl-outputs', title:'المخرجات والربط الدائم', badge:'b-ok', badgeText:'نتائج', desc:'تسجيل النتيجة وربط الكيانات بين المتجر وOdoo.', path:'src/lib/entity-links.ts, src/app/actions/sync-logs.ts',
+        fields:['sync_logs ★: workspace/store/platform/event, zid_entity_id, odoo_model/record, status, error, payload, resolved_manually','odoo_entity_links: ربط دائم (workspace, platform, store, entity_type, store_entity_id ↔ odoo_model/record) يحل محل الاعتماد على السجلات المنقّاة','data_transfers ★: تتبع الاستيراد اليدوي','تنقية الناجح من sync_logs بعد 72 ساعة (الروابط تبقى)'], notes:[{t:'info',m:'sync_logs سجل تدقيق؛ المطابقة للتحديثات اللاحقة يجب أن تعتمد على الروابط الدائمة.'}] },
+      { id:'pl-failure', title:'الفشل، التعافي، والحجر', badge:'b-danger', badgeText:'موثوقية', desc:'لا نجاح صامت، ولا حذف صامت.', path:'src/lib/sync-queue.ts, docs/reliability/*',
+        fields:['إعادة محاولة حتى max_retries ثم sync_queue_dead (أرشيف استنفاد)','queue_archives لقطات أرشيفية حسب المصدر','انتهاء lease/غموض أثر → outcome_unknown وحجر (next_retry_at=NULL) حتى تسوية','skipped يُسجّل كسطر واضح؛ لا نتيجة = فشل','erp_effects لتتبّع حالة الأثر (in_progress/succeeded/…)'], notes:[{t:'warn',m:'إعادة تشغيل صف outcome_unknown دون تحقق قد يكرر أثراً جانبياً؛ يتطلب فحصاً.'}] }
+    ]
+  },
+  {
+    id: 'pages', title: 'صفحات ووحدات التطبيق', group: 'التشغيل', hint: 'كل قسم في واجهة /app و /admin',
+    type: 'cards',
+    items: [
+      { id:'pg-dash', title:'لوحة التحكم (Dashboard)', badge:'b-brand', badgeText:'/app/dashboard', desc:'ملخص الحالة، النشاط، والتكاملات.', path:'src/app/(app)/app/dashboard/*',
+        fields:['إحصاءات ومؤشرات (تكاملات، مزامنة، نشاط)','توزيع الأحداث والنشاط اليومي (مخبأ قصير)','روابط سريعة للإعداد والربط','عرض حالة المساحة/التجربة عبر شريط التنبيه العلوي'], notes:[] },
+      { id:'pg-connect', title:'ربط المتجر والـ ERP', badge:'b-brand', badgeText:'connect-store / connect-odoo', desc:'تدفقات OAuth والاتصال وحالة الربط.', path:'src/app/(app)/app/connect-store, connect-odoo',
+        fields:['اختيار المنصة (Zid/Salla/Shopify) وبدء OAuth','حفظ الرموز وربطها بالمساحة النشطة','إعداد اتصال Odoo/ERPNext واختباره وحفظه مشفّراً','تثبيت/تبديل الوجهة النشطة للمساحة'], notes:[{t:'info',m:'مسارات connect عامة الدخول كبداية OAuth؛ الربط الفعلي يتحقق في callback بالجلسة والمساحة والحالة.'}] },
+      { id:'pg-map', title:'مركز الربط (Mapping Center)', badge:'b-brand', badgeText:'mapping-center', desc:'إدارة الربط القياسي والمخصص والخرائط الثابتة.', path:'src/app/(app)/app/mapping-center/*',
+        fields:['standard: إعدادات الكيانات لكل متجر','custom & custom/[id]: خرائط حقول مخصصة','add-field & add-field/[id]: إنشاء/عرض حقول','categories والخرائط الثابتة (منتجات/حالات/دفع/شحن/ضرائب/مستودعات/عملات/…)','standard-components: مكوّنات واجهة مشتركة'], notes:[] },
+      { id:'pg-transfer', title:'الاستيراد اليدوي (Initial Transfer)', badge:'b-muted', badgeText:'initial-transfer', desc:'سحب أولي/يدوي للبيانات من المتجر إلى ERP.', path:'src/app/actions/transfers.ts',
+        fields:['startInitialTransfer (Server Action)','قراءة مجزأة (pagination) من واجهات المتجر','تطبيق الخرائط والمطابقة الحالية','تتبع التقدم والنتيجة في data_transfers','إشعار بالنتيجة عبر تيليجرام عند التفعيل'], notes:[] },
+      { id:'pg-logs', title:'سجل المزامنة (Logs)', badge:'b-muted', badgeText:'/app/logs', desc:'قائمة أحداث مع صفحة تفصيل لكل سجل.', path:'src/app/(app)/app/logs, src/app/actions/sync-logs.ts',
+        fields:['قائمة خفيفة (lean) بدون payload/error_message الكبيرين','عرض حسب مساحة، حالة، حدث، مع فهارس داعمة','تفصيل /app/logs/[id]: الحالة، المعرفات، النموذج، الخطأ، الحمولة، إعادة/حل يدوي','تمييز resolved_manually'], notes:[{t:'info',m:'السجلات الناجحة تُنقّى زمنياً؛ الاعتماد التشغيلي الطويل الأمد على الروابط الدائمة.'}] },
+      { id:'pg-queue', title:'الطابور (Queue)', badge:'b-muted', badgeText:'/app/queue', desc:'عرض عناصر الطابور وحالتها التشغيلية.', path:'src/app/(app)/app/queue/*',
+        fields:['عناصر sync_queue: الحدث، المتجر، المحاولات، next_retry_at','حالات تأجيل/استنفاد/حجر (outcome_unknown)','إجراءات إدارية/إعادة إرسال وفق الصلاحيات','يرتبط بإيصالات inbox والنتائج'], notes:[] },
+      { id:'pg-settings', title:'الإعدادات', badge:'b-muted', badgeText:'/app/settings', desc:'المساحة، الفريق، الفوترة، الإشعارات.', path:'src/app/(app)/app/settings/*',
+        fields:['workspace: بيانات المساحة وإدارتها','team: أعضاء ودعوات وصلاحيات','billing: حالة الاشتراك/التجربة والتجديد (يدوي)','notifications: ربط بوتات تيليجرام وإعدادات الإشعار','تبقى متاحة للأدمن/إدارة الفوترة حتى مع إغلاق المساحة وفق البوابات'], notes:[] },
+      { id:'pg-admin', title:'لوحة الإدارة (Admin)', badge:'b-danger', badgeText:'/admin', desc:'إدارة العملاء والاشتراكات والرسائل وأدوات الصحة.', path:'src/app/(app)/admin/*',
+        fields:['clients & [userId]: كشف حساب واشتراكات ومدفوعات','subscriptions & [id]: تسجيل/تمديد/إلغاء/أرشفة/دفعات','messages & [id]: صندوق رسائل نموذج الاتصال','أدوات: queue-health, refresh webhooks, pipeline self-test (حساسة)'], notes:[{t:'warn',m:'أدوات الإدارة قد تُغيّر حالة (تسجيل ويب هوك/اختبار مسار)؛ لا تُشغّلها على إنتاج دون نية.'}] },
+      { id:'pg-contact', title:'نموذج الاتصال والتذاكر', badge:'b-muted', badgeText:'contact / tickets', desc:'حفظ الرسالة أولاً في قاعدة البيانات ثم محاولات خارجية.', path:'src/app/actions/contact.ts, src/lib/contact-messages.ts',
+        fields:['contact_messages: id, name, email, phone, company, message, status, odoo_ticket_id','بدون workspace_id (زائر عام) — لا يُحذف بحذف مساحة','ترتيب: حفظ DB → تذكرة Odoo (اختياري) → بريد (اختياري)','صندوق /admin/messages للقراءة/الأرشفة','tickets يستخدم تكامل Helpdesk Odoo منفصل'], notes:[{t:'ok',m:'نجاح الإرسال يتحقق بحفظ الرسالة أو إنشاء التذكرة؛ فشل كلاهما فقط يُبلّغ المستخدم.'}] }
+    ]
+  },
+  {
+    id: 'billing', title: 'الفوترة والتجربة ودورة المساحة', group: 'الأعمال', hint: 'يدوي، 7 أيام، أرشفة تلقائية',
+    type: 'cards',
+    items: [
+      { id:'bil-trial', title:'التجربة المجانية', badge:'b-brand', badgeText:'7 أيام', desc:'تجربة لكل مساحة تُحسب من وقت إنشائها.', path:'src/lib/workspace-trial.ts, src/lib/subscription-countdown.ts',
+        fields:['TRIAL_DAYS = 7 من workspaces.created_at','لا عمود/ترحيل للتجربة (حساب زمني)','تعمل فقط عند غياب اشتراك نشط غير منتهٍ','created_at غير معروف/فارغ يُعامل "مجهول" لا "منتهٍ" (fail-open)','شريط علوي بعدّاد حي ينقلب عند الصفر'], notes:[] },
+      { id:'bil-sub', title:'الاشتراكات والمدفوعات', badge:'b-brand', badgeText:'يدوي', desc:'تسجيل وإدارة الاشتراك يدوياً من الإدارة.', path:'src/app/actions/subscription-actions.ts',
+        fields:['subscriptions: workspace_id, user_id, start/end_date, months_paid, amount_paid, currency, status, notes, created_by, archived_at','subscription_payments: مبالغ ودفعات متعددة لكل اشتراك','عمليات: register / extend (شهور أو أيام) / cancel / archive / restore / add payment','end_date هو مصدر الحقيقة للانتهاء','لا Stripe، لا عمولات، لا affiliate_id'], notes:[{t:'info',m:'تمديد بالأيام مسموح حتى بعد الانتهاء (يحسب من اليوم)؛ التمديد بالأشهر للاشتراك غير المنتهي.'}] },
+      { id:'bil-archive', title:'إغلاق وأرشفة المساحة', badge:'b-warn', badgeText:'دورة حياة', desc:'إغلاق تلقائي عند انتهاء التجربة/الاشتراك دون تجديد.', path:'src/lib/workspace-archive.ts, src/app/(app)/app/layout.tsx',
+        fields:['archiveExpiredWorkspaces: تمريرة اشتراك منتهٍ + تمريرة تجربة منتهية','يُشغّل كل 6 ساعات وبشكل كسول وعند الطلب','workspaceClosed يقيّد التطبيق (مع استثناءات الأدمن والإعدادات)','إلغاء الأرشفة تلقائياً عند تسجيل/تمديد اشتراك صالح','إنشاء مساحة جديدة يمنح تجربة جديدة خاصة بها'], notes:[{t:'ok',m:'الاشتراك النشط غير المنتهي يمنع الأرشفة حتى لو مضت التجربة.'}] }
+    ]
+  },
+  {
+    id: 'notify', title: 'الإشعارات (تيليجرام) والرسائل', group: 'الأعمال', hint: 'Bots، Outbox، تسليم موثوق',
+    type: 'cards',
+    items: [
+      { id:'nt-bot', title:'ربط بوت تيليجرام', badge:'b-muted', badgeText:'Telegram', desc:'ربط محادثات المستخدمين ببوت لإشعارات المزامنة.', path:'src/lib/telegram-long-poller.ts, src/lib/telegram/link-code.ts',
+        fields:['telegram_bots: workspace_id, bot_token, username, label, status','telegram_bot_chats: bot_id, chat_id, notify_mode, enabled, فلاتر','telegram_bot_codes: أكواد /start قصيرة مؤقتة للربط','المستمع (poller) يُشغّل عند الإقلاع (instrumentation) وليس عبر إجراء فقط'], notes:[{t:'warn',m:'فشل فك تشفير الرمز أو أخطاء getUpdates يجب أن تُسجّل؛ الصمت يجعل الربط يبدو معطلاً بلا سبب.'}] },
+      { id:'nt-outbox', title:'صندوق صادر تيليجرام (Outbox)', badge:'b-muted', badgeText:'موثوقية', desc:'إرسال الإشعارات بمعزل عن عامل المزامنة.', path:'src/lib/telegram-outbox.ts, src/app/actions/telegram-outbox.ts',
+        fields:['telegram_outbox: event_key, bot_id, chat_id, kind, priority, body, status, attempts, next_attempt_at','رسالة واحدة لكل حدث (استبدال/إلغاء التكرار)','مرسل مستقل بمهلة وretry_after ومعالجة 429','فشل الإرسال لا يحجز/يوقف طابور المزامنة','admin-alerts تستخدم نفس الصندوق برسائل مجمعة ومقيّدة'], notes:[{t:'info',m:'يتطلب ترحيل جدول telegram_outbox قبل الاعتماد عليه.'}] }
+    ]
+  },
+  {
+    id: 'dbcore', title: 'جداول أساسية أخرى وملاحظات المخطط', group: 'المرجع', hint: 'جداول خدمية، أرشيف، وإرث',
+    type: 'cards',
+    items: [
+      { id:'db-aux', title:'جداول خدمية وأرشيف', badge:'b-muted', badgeText:'مرجع', desc:'دعم التشغيل، الأرشفة، والتسوية.', path:'supabase/migrations/*',
+        fields:['queue_archives: لقطات عناصر مؤرشفة (pending/frozen/dead/orphans)','sync_reconcile_state: علامة مائية لكل نطاق تسوية','webhook_acceptances: نسخة مشفّرة/أثر قبول','webhook_metrics / webhook_legacy_counters: عدادات استقبال','erp_effects: تتبع أثر التنفيذ البعيد','reliability_backup.* وerp_destination_mapping_archive: نسخ داخلية للترحيل'], notes:[] },
+      { id:'db-legacy', title:'إرث مُزال', badge:'b-danger', badgeText:'لا تعِد', desc:'مسارات وجداول أُزيلت ولا يجب إعادتها.', path:'AGENTS.md',
+        fields:['جداول الشركاء/العمولات/الدفع (affiliate/partner/commission/payout) مُسقطة','affiliate_id أُزيل من الاشتراكات والكود','لا Stripe ولا SSE ويب هوك حي','لا Prisma/Redis/Bull/cron خارجي معتمد','لا تعيد تعريف أعمدة users غير المضمونة دون فحص حي'], notes:[{t:'warn',m:'أي إعادة إدخال لهذه المسارات تخالف قرارات المنتج والبنية الحالية.'}] },
+      { id:'db-source', title:'مصدر الحقيقة وحدود الدقة', badge:'b-muted', badgeText:'دقة', desc:'كيف تقرأ هذه الوثيقة بأمان.',
+        fields:['المخطط: supabase/migrations هو المصدر لجداول الترحيل','الجداول ★ مستنتَجة من الكود (خارج الترحيلات)','السلوك: الكود والخدمات الحية قد تختلف عن التوثيق','الأمان: RLS مفعّل على أغلب الجداول، والكتابة عبر service_role','الوثيقة لا تستبدل فحص البيئة/النشر/المخطط الحي'], notes:[{t:'info',m:'عند التعارض بين ملاحظة تاريخية والكود/SQL الحالي، اعتبر الكود وSQL المُفحَص هو الحاكم.'}] }
+    ]
+  }
+];
+
+const nav = document.getElementById('nav');
+const content = document.getElementById('content');
+const detail = document.getElementById('detail');
+const search = document.getElementById('search');
+
+const groups = [...new Set(sections.map(s=>s.group))];
+function renderNav(activeId){
+  nav.innerHTML = '';
+  groups.forEach(g=>{
+    const h = document.createElement('div'); h.className='nav-group'; h.textContent=g; nav.appendChild(h);
+    sections.filter(s=>s.group===g).forEach(s=>{
+      const b = document.createElement('button'); b.textContent=s.title; b.dataset.id=s.id;
+      b.className = s.id===activeId ? 'active' : '';
+      b.onclick = ()=>document.getElementById(s.id).scrollIntoView({behavior:'smooth', block:'start'});
+      nav.appendChild(b);
+    });
+  });
+}
+
+function badgeHtml(b,t){ return `<span class="badge ${b||'b-muted'}">${t||''}</span>`; }
+
+function renderDetail(item){
+  detail.classList.remove('empty');
+  const fields = (item.fields||[]).map(f=>`<li>${escapeHtml(f)}</li>`).join('');
+  const notes = (item.notes||[]).map(n=>`<div class="note ${n.t}">${escapeHtml(n.m)}</div>`).join('');
+  const extra = item.kv ? `<div class="kv">${item.kv.map(k=>`<div><strong>${escapeHtml(k.k)}:</strong> <code>${escapeHtml(k.v)}</code></div>`).join('')}</div>` : '';
+  detail.innerHTML = `
+    ${badgeHtml(item.badge,item.badgeText)}
+    <h4>${escapeHtml(item.title)}</h4>
+    ${item.path?`<div class="path">${escapeHtml(item.path)}</div>`:''}
+    <p class="desc">${escapeHtml(item.desc||'')}</p>
+    ${fields?`<h5>التفاصيل / الحقول</h5><ul>${fields}</ul>`:''}
+    ${extra}
+    ${notes}
+  `;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+
+function render(filter=''){
+  content.innerHTML = '';
+  const q = filter.trim().toLowerCase();
+  sections.forEach(sec=>{
+    const items = sec.items.filter(it=>{
+      if(!q) return true;
+      const hay = [it.title,it.desc,it.path,...(it.fields||[]),it.badgeText].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    if(!items.length) return;
+    const wrap = document.createElement('section'); wrap.className='section'; wrap.id=sec.id;
+    wrap.innerHTML = `
+      <div class="section-head"><h3>${sec.title}</h3><div class="hint">${sec.hint}</div></div>
+      <div class="grid"></div>
+    `;
+    const grid = wrap.querySelector('.grid');
+    items.forEach(it=>{
+      const c = document.createElement('div'); c.className='card'; c.tabIndex=0; c.dataset.id=it.id;
+      c.innerHTML = `${badgeHtml(it.badge,it.badgeText)}<h4>${escapeHtml(it.title)}</h4><p>${escapeHtml(it.desc||'')}</p>`;
+      const select = ()=>{
+        document.querySelectorAll('.card.selected').forEach(x=>x.classList.remove('selected'));
+        c.classList.add('selected'); renderDetail(it);
+      };
+      c.onclick = select; c.onkeypress = (e)=>{ if(e.key==='Enter') select(); };
+      grid.appendChild(c);
+    });
+    content.appendChild(wrap);
+  });
+  if(!content.children.length){
+    content.innerHTML = `<div class="section"><div class="card"><h4>لا نتائج</h4><p>جرّب كلمة بحث مختلفة.</p></div></div>`;
+  }
+}
+
+search.addEventListener('input', e=>render(e.target.value));
+renderNav('overview');
+render();
+
+// highlight nav on scroll
+const obs = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ renderNav(e.target.id); }});
+},{rootMargin:'-40% 0px -55% 0px', threshold:0.01});
+sections.forEach(s=>{ const el=document.getElementById(s.id); if(el) obs.observe(el); });
+</script>
+</body>
+</html>

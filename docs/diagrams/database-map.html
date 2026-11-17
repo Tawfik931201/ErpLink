@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ERPlink — خريطة قاعدة البيانات</title>
+<style>
+  :root {
+    --bg:#0b1020; --panel:#111936; --panel2:#0e1630; --text:#eaf0ff; --muted:#9fb0da;
+    --border:#24345f; --line:#3a528f; --cascade:#ff6b6b; --setnull:#ffbf69; --logical:#8aa0c8;
+    --hub:#6ea8fe;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif;background:radial-gradient(1400px 700px at 85% -10%,#182856 0%,var(--bg) 55%);color:var(--text)}
+  header{padding:18px 22px 10px;border-bottom:1px solid var(--border);background:rgba(11,16,32,.75);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+  h1{margin:0 0 4px;font-size:1.35rem}
+  .sub{color:var(--muted);font-size:.92rem;line-height:1.6}
+  .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+  .toolbar input{background:#0c1430;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 10px;min-width:220px}
+  .chip{border:1px solid var(--border);background:#0f1836;color:var(--muted);padding:6px 10px;border-radius:999px;cursor:pointer;font-size:.85rem}
+  .chip.active{color:#fff;border-color:var(--hub);background:#16244a}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;color:var(--muted);font-size:.85rem}
+  .leg{display:flex;align-items:center;gap:6px}
+  .sw{width:26px;height:0;border-top:3px solid var(--line)}
+  .sw.cascade{border-color:var(--cascade)} .sw.setnull{border-color:var(--setnull);border-top-style:dashed} .sw.logical{border-color:var(--logical);border-top-style:dotted}
+  .canvas-wrap{padding:14px;overflow:auto}
+  svg{width:100%;min-width:1500px;height:1320px;background:linear-gradient(180deg,#0b1228,#0a1122);border:1px solid var(--border);border-radius:14px}
+  .cluster-title{font-size:14px;font-weight:700;fill:#dce7ff}
+  .cluster-box{fill:rgba(20,30,60,.35);stroke:#2a3d70;stroke-width:1.2;rx:14}
+  .table{cursor:pointer}
+  .t-bg{fill:var(--panel);stroke:#35507f;stroke-width:1.2;rx:10}
+  .t-head{fill:#16244a}
+  .t-name{font-size:12.5px;font-weight:700;fill:#f2f6ff}
+  .t-badge{font-size:9.5px;fill:#ffe3a3}
+  .t-field{font-size:11px;fill:#c9d7f5}
+  .t-key{fill:#9fd0ff}
+  .t-fk{fill:#ffd0a8}
+  .t-note{fill:#a9b4d6;font-style:italic}
+  .edge{fill:none;stroke-width:2.2;opacity:.55}
+  .edge.cascade{stroke:var(--cascade)}
+  .edge.setnull{stroke:var(--setnull);stroke-dasharray:7 5}
+  .edge.logical{stroke:var(--logical);stroke-dasharray:2 5}
+  .dim{opacity:.12 !important}
+  .hi .t-bg{stroke:#9fd0ff;stroke-width:2;filter:drop-shadow(0 0 6px rgba(110,168,254,.35))}
+  .hi-edge{opacity:1 !important;stroke-width:3}
+  .hub .t-bg{stroke:var(--hub);stroke-width:2.4}
+  footer{padding:10px 22px 18px;color:var(--muted);font-size:.86rem;line-height:1.8}
+  a{color:#9fd0ff}
+  @media print{header{position:static} svg{min-width:0;width:1500px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>خريطة قاعدة البيانات — ERPlink</h1>
+  <div class="sub">٩ عناقيد حول <b>workspaces</b>. الحقول المعروضة هي المفاتيح والحالة (3–6 لكل جدول). مرّر/انقر لإبراز العلاقات.</div>
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="ابحث باسم جدول…" />
+    <button class="chip active" data-group="all">الكل</button>
+    <button class="chip" data-group="identity">الهوية</button>
+    <button class="chip" data-group="stores">المتاجر</button>
+    <button class="chip" data-group="dest">الوجهة</button>
+    <button class="chip" data-group="settings">الإعدادات</button>
+    <button class="chip" data-group="maps">خرائط ثابتة</button>
+    <button class="chip" data-group="pipeline">خط الأنابيب</button>
+    <button class="chip" data-group="outputs">المخرجات</button>
+    <button class="chip" data-group="billing">الفوترة</button>
+    <button class="chip" data-group="notify">إشعارات</button>
+  </div>
+  <div class="legend">
+    <span class="leg"><span class="sw cascade"></span>CASCADE — حذف مساحة يحذف الصف</span>
+    <span class="leg"><span class="sw setnull"></span>SET NULL — يبقى الصف بلا مساحة (إيصال يتيم)</span>
+    <span class="leg"><span class="sw logical"></span>منطقي/نصي — بلا FK (store_id, merchant_id، أو بلا workspace)</span>
+    <span class="leg">★ مستنتج من الكود (الجدول خارج مجلد الترحيلات)</span>
+  </div>
+</header>
+<div class="canvas-wrap">
+<svg id="map" viewBox="0 0 1500 1320" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-red" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ff6b6b"/></marker>
+    <marker id="arr-amb" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#ffbf69"/></marker>
+    <marker id="arr-gry" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#8aa0c8"/></marker>
+  </defs>
+
+  <!-- cluster backgrounds -->
+  <g id="clusters">
+    <rect class="cluster-box" x="20" y="20" width="350" height="360"/>
+    <text class="cluster-title" x="350" y="44">الهوية والصلاحيات</text>
+    <rect class="cluster-box" x="390" y="20" width="360" height="360"/>
+    <text class="cluster-title" x="730" y="44">المتاجر والربط (Zid/Salla/Shopify)</text>
+    <rect class="cluster-box" x="770" y="20" width="330" height="220"/>
+    <text class="cluster-title" x="1080" y="44">الوجهة ERP</text>
+    <rect class="cluster-box" x="1120" y="20" width="360" height="360"/>
+    <text class="cluster-title" x="1460" y="44">الإعدادات والربط المخصص</text>
+
+    <rect class="cluster-box" x="20" y="400" width="730" height="320"/>
+    <text class="cluster-title" x="730" y="424">الخرائط الثابتة (Static Mappings) — لكل workspace + platform + store</text>
+    <rect class="cluster-box" x="770" y="260" width="710" height="460"/>
+    <text class="cluster-title" x="1460" y="284">خط الأنابيب (استقبال موثوق → طابور → تنفيذ)</text>
+
+    <rect class="cluster-box" x="20" y="740" width="470" height="300"/>
+    <text class="cluster-title" x="470" y="764">المخرجات والتتبع</text>
+    <rect class="cluster-box" x="510" y="740" width="300" height="300"/>
+    <text class="cluster-title" x="790" y="764">الفوترة</text>
+    <rect class="cluster-box" x="830" y="740" width="650" height="300"/>
+    <text class="cluster-title" x="1460" y="764">الإشعارات والرسائل</text>
+
+    <rect class="cluster-box" x="20" y="1060" width="1460" height="240"/>
+    <text class="cluster-title" x="1460" y="1084">جداول مساعدة/إرث/أرشيف (مختصرة)</text>
+  </g>
+
+  <!-- edges drawn first so tables sit above -->
+  <g id="edges">
+    <!-- workspace hub cascades -->
+    <path id="e-ws-members" class="edge cascade" marker-end="url(#arr-red)" d="M200,165 L200,185"/>
+    <path id="e-ws-inv" class="edge cascade" marker-end="url(#arr-red)" d="M250,165 L280,205"/>
+    <path id="e-ws-mt" class="edge cascade" marker-end="url(#arr-red)" d="M300,140 L430,140"/>
+    <path id="e-ws-st" class="edge cascade" marker-end="url(#arr-red)" d="M300,150 L430,240"/>
+    <path id="e-ws-sht" class="edge cascade" marker-end="url(#arr-red)" d="M300,160 L430,330"/>
+    <path id="e-ws-bind" class="edge cascade" marker-end="url(#arr-red)" d="M300,120 L800,120"/>
+    <path id="e-ws-sms" class="edge cascade" marker-end="url(#arr-red)" d="M300,110 L1150,120"/>
+    <path id="e-ws-fms" class="edge cascade" marker-end="url(#arr-red)" d="M300,105 L1150,210"/>
+    <path id="e-ws-fm" class="edge cascade" marker-end="url(#arr-red)" d="M300,100 L1150,300"/>
+    <path id="e-ws-inbox" class="edge setnull" marker-end="url(#arr-amb)" d="M300,170 L820,360"/>
+    <path id="e-ws-queue" class="edge cascade" marker-end="url(#arr-red)" d="M300,175 L1010,360"/>
+    <path id="e-ws-dead" class="edge cascade" marker-end="url(#arr-red)" d="M300,180 L1200,360"/>
+    <path id="e-ws-logs" class="edge cascade" marker-end="url(#arr-red)" d="M300,190 L120,820"/>
+    <path id="e-ws-links" class="edge cascade" marker-end="url(#arr-red)" d="M300,195 L300,820"/>
+    <path id="e-ws-transfers" class="edge cascade" marker-end="url(#arr-red)" d="M300,200 L430,820"/>
+    <path id="e-ws-subs" class="edge cascade" marker-end="url(#arr-red)" d="M300,205 L560,820"/>
+    <path id="e-ws-bots" class="edge cascade" marker-end="url(#arr-red)" d="M300,210 L880,820"/>
+    <path id="e-ws-outbox" class="edge cascade" marker-end="url(#arr-red)" d="M300,215 L1230,820"/>
+    <path id="e-ws-static" class="edge cascade" marker-end="url(#arr-red)" d="M220,165 L220,450"/>
+    <!-- store -> pending/embedded -->
+    <path id="e-mt-pending" class="edge logical" marker-end="url(#arr-gry)" d="M560,165 L560,195"/>
+    <path id="e-mt-embed" class="edge cascade" marker-end="url(#arr-red)" d="M620,165 L660,195"/>
+    <!-- pipeline chain -->
+    <path id="e-inbox-queue" class="edge logical" marker-end="url(#arr-gry)" d="M930,420 L1010,420"/>
+    <path id="e-queue-dead" class="edge logical" marker-end="url(#arr-gry)" d="M1120,420 L1200,420"/>
+    <path id="e-queue-logs" class="edge logical" marker-end="url(#arr-gry)" d="M1010,470 L180,820"/>
+    <path id="e-queue-effects" class="edge logical" marker-end="url(#arr-gry)" d="M1080,470 L1330,470"/>
+    <!-- billing -->
+    <path id="e-sub-pay" class="edge cascade" marker-end="url(#arr-red)" d="M650,900 L650,930"/>
+    <!-- telegram -->
+    <path id="e-bot-chat" class="edge cascade" marker-end="url(#arr-red)" d="M970,900 L970,930"/>
+    <path id="e-bot-code" class="edge cascade" marker-end="url(#arr-red)" d="M1030,900 L1100,930"/>
+    <path id="e-chat-outbox" class="edge logical" marker-end="url(#arr-gry)" d="M1040,980 L1230,900"/>
+  </g>
+
+  <!-- tables -->
+  <g id="tables">
+    <!-- IDENTITY -->
+    <g class="table hub" id="t-workspaces" data-group="identity" data-links="t-users t-members t-inv t-mt t-st t-sht t-bind t-sms t-fms t-fm t-inbox t-queue t-dead t-logs t-links t-transfers t-subs t-bots t-outbox t-static">
+      <rect class="t-bg" x="40" y="60" width="260" height="105"/><rect class="t-head" x="40" y="60" width="260" height="26" rx="10"/>
+      <text class="t-name" x="290" y="78">workspaces ★</text>
+      <text class="t-field t-key" x="290" y="100">id (uuid, PK) — المحور</text>
+      <text class="t-field t-fk" x="290" y="116">user_id (مالك Clerk)</text>
+      <text class="t-field" x="290" y="132">name · subscription_number</text>
+      <text class="t-field" x="290" y="148">archived_at · created_at</text>
+      <text class="t-note" x="290" y="160">تجربة 7 أيام تُشتق من created_at</text>
+    </g>
+    <g class="table" id="t-users" data-group="identity" data-links="t-workspaces">
+      <rect class="t-bg" x="40" y="175" width="130" height="82"/><rect class="t-head" x="40" y="175" width="130" height="24" rx="10"/>
+      <text class="t-name" x="162" y="191">users ★</text>
+      <text class="t-field t-key" x="162" y="206">id (Clerk, نص)</text>
+      <text class="t-field" x="162" y="220">email · name</text>
+      <text class="t-field" x="162" y="234">active_workspace_id</text>
+      <text class="t-field" x="162" y="248">created_at</text>
+    </g>
+    <g class="table" id="t-members" data-group="identity" data-links="t-workspaces t-users">
+      <rect class="t-bg" x="180" y="185" width="170" height="78"/><rect class="t-head" x="180" y="185" width="170" height="24" rx="10"/>
+      <text class="t-name" x="342" y="201">workspace_members</text>
+      <text class="t-field t-fk" x="342" y="216">workspace_id · user_id</text>
+      <text class="t-field" x="342" y="230">permissions (JSONB)</text>
+      <text class="t-note" x="342" y="244">UNIQUE(workspace,user)</text>
+      <text class="t-badge" x="342" y="256">★ بنية جزئية مستنتجة</text>
+    </g>
+    <g class="table" id="t-inv" data-group="identity" data-links="t-workspaces">
+      <rect class="t-bg" x="180" y="272" width="170" height="96"/><rect class="t-head" x="180" y="272" width="170" height="24" rx="10"/>
+      <text class="t-name" x="342" y="288">workspace_invitations</text>
+      <text class="t-field t-key" x="342" y="303">id (uuid)</text>
+      <text class="t-field t-fk" x="342" y="317">workspace_id · invited_by</text>
+      <text class="t-field" x="342" y="331">email · permissions</text>
+      <text class="t-field" x="342" y="345">status · clerk_invite_id</text>
+    </g>
+
+    <!-- STORES -->
+    <g class="table" id="t-mt" data-group="stores" data-links="t-workspaces t-pending t-embed">
+      <rect class="t-bg" x="410" y="60" width="160" height="120"/><rect class="t-head" x="410" y="60" width="160" height="24" rx="10"/>
+      <text class="t-name" x="562" y="76">merchant_tokens (Zid)</text>
+      <text class="t-field t-key" x="562" y="91">id · merchant_id (UQ)</text>
+      <text class="t-field t-fk" x="562" y="105">workspace_id · store_id</text>
+      <text class="t-field" x="562" y="119">access/refresh/expires</text>
+      <text class="t-field" x="562" y="133">name · email · uuid</text>
+      <text class="t-field" x="562" y="147">sync_settings (JSONB)</text>
+      <text class="t-note" x="562" y="161">CASCADE مع workspace</text>
+    </g>
+    <g class="table" id="t-pending" data-group="stores" data-links="t-mt">
+      <rect class="t-bg" x="410" y="195" width="150" height="80"/><rect class="t-head" x="410" y="195" width="150" height="24" rx="10"/>
+      <text class="t-name" x="552" y="211">zid_oauth_pending</text>
+      <text class="t-field t-key" x="552" y="226">token_hash (PK)</text>
+      <text class="t-field" x="552" y="240">kind · store_id</text>
+      <text class="t-field" x="552" y="254">encrypted_payload</text>
+      <text class="t-field" x="552" y="268">expires_at</text>
+    </g>
+    <g class="table" id="t-embed" data-group="stores" data-links="t-mt t-workspaces">
+      <rect class="t-bg" x="575" y="195" width="155" height="80"/><rect class="t-head" x="575" y="195" width="155" height="24" rx="10"/>
+      <text class="t-name" x="722" y="211">zid_embedded_access</text>
+      <text class="t-field t-key" x="722" y="226">merchant_id (PK→mt)</text>
+      <text class="t-field t-fk" x="722" y="240">workspace_id · user_id</text>
+      <text class="t-field" x="722" y="254">token_hash (SHA-256)</text>
+      <text class="t-field" x="722" y="268">created_at</text>
+    </g>
+    <g class="table" id="t-st" data-group="stores" data-links="t-workspaces">
+      <rect class="t-bg" x="410" y="285" width="150" height="82"/><rect class="t-head" x="410" y="285" width="150" height="24" rx="10"/>
+      <text class="t-name" x="552" y="301">salla_tokens</text>
+      <text class="t-field t-key" x="552" y="316">merchant_id (UQ)</text>
+      <text class="t-field t-fk" x="552" y="330">workspace_id</text>
+      <text class="t-field" x="552" y="344">access/refresh/scope</text>
+      <text class="t-field" x="552" y="358">store_name · sync_settings</text>
+    </g>
+    <g class="table" id="t-sht" data-group="stores" data-links="t-workspaces">
+      <rect class="t-bg" x="575" y="285" width="155" height="82"/><rect class="t-head" x="575" y="285" width="155" height="24" rx="10"/>
+      <text class="t-name" x="722" y="301">shopify_tokens</text>
+      <text class="t-field t-key" x="722" y="316">shop_domain (UQ)</text>
+      <text class="t-field t-fk" x="722" y="330">workspace_id</text>
+      <text class="t-field" x="722" y="344">access_token · scopes</text>
+      <text class="t-field" x="722" y="358">name · sync_settings</text>
+    </g>
+
+    <!-- DESTINATION -->
+    <g class="table" id="t-erp" data-group="dest" data-links="t-workspaces t-bind">
+      <rect class="t-bg" x="790" y="60" width="150" height="105"/><rect class="t-head" x="790" y="60" width="150" height="24" rx="10"/>
+      <text class="t-name" x="932" y="76">erp_connections ★</text>
+      <text class="t-field t-key" x="932" y="91">id · workspace_id</text>
+      <text class="t-field" x="932" y="105">erp_type · url · db_name</text>
+      <text class="t-field" x="932" y="119">status · odoo_version</text>
+      <text class="t-field" x="932" y="133">credentials (مشفّرة)</text>
+      <text class="t-note" x="932" y="147">خارج الترحيلات</text>
+    </g>
+    <g class="table" id="t-bind" data-group="dest" data-links="t-workspaces t-erp">
+      <rect class="t-bg" x="950" y="60" width="130" height="105"/><rect class="t-head" x="950" y="60" width="130" height="24" rx="10"/>
+      <text class="t-name" x="1072" y="76">erp_workspace_bindings</text>
+      <text class="t-field t-key" x="1072" y="91">workspace_id (PK)</text>
+      <text class="t-field t-fk" x="1072" y="105">erp_connection_id</text>
+      <text class="t-field" x="1072" y="119">erp_type · url · db</text>
+      <text class="t-field" x="1072" y="133">switched_at</text>
+      <text class="t-note" x="1072" y="147">وجهة واحدة/مساحة</text>
+    </g>
+
+    <!-- SETTINGS -->
+    <g class="table" id="t-sms" data-group="settings" data-links="t-workspaces">
+      <rect class="t-bg" x="1140" y="60" width="155" height="110"/><rect class="t-head" x="1140" y="60" width="155" height="24" rx="10"/>
+      <text class="t-name" x="1287" y="76">standard_mapping_settings</text>
+      <text class="t-field t-key" x="1287" y="91">id (uuid)</text>
+      <text class="t-field t-fk" x="1287" y="105">workspace_id</text>
+      <text class="t-field" x="1287" y="119">store_type · store_id*</text>
+      <text class="t-field" x="1287" y="133">entity_type</text>
+      <text class="t-field" x="1287" y="147">settings (JSONB)</text>
+      <text class="t-note" x="1287" y="161">*نطاق المتجر أُضيف لاحقاً</text>
+    </g>
+    <g class="table" id="t-fms" data-group="settings" data-links="t-workspaces">
+      <rect class="t-bg" x="1140" y="180" width="155" height="78"/><rect class="t-head" x="1140" y="180" width="155" height="24" rx="10"/>
+      <text class="t-name" x="1287" y="196">fixed_mapping_settings</text>
+      <text class="t-field t-key" x="1287" y="211">(workspace_id,preset_key)</text>
+      <text class="t-field" x="1287" y="225">settings (JSONB)</text>
+      <text class="t-field" x="1287" y="239">updated_at</text>
+    </g>
+    <g class="table" id="t-fm" data-group="settings" data-links="t-workspaces t-logs">
+      <rect class="t-bg" x="1140" y="268" width="155" height="100"/><rect class="t-head" x="1140" y="268" width="155" height="24" rx="10"/>
+      <text class="t-name" x="1287" y="284">field_mappings ★</text>
+      <text class="t-field t-key" x="1287" y="299">id · workspace_id</text>
+      <text class="t-field" x="1287" y="313">merchant_id · store scope</text>
+      <text class="t-field" x="1287" y="327">event · odoo_model/webhook</text>
+      <text class="t-field" x="1287" y="341">mapping config</text>
+      <text class="t-field" x="1287" y="355">erp_destination_retired_at</text>
+    </g>
+    <g class="table" id="t-fmr" data-group="settings" data-links="t-workspaces t-fms">
+      <rect class="t-bg" x="1305" y="180" width="155" height="96"/><rect class="t-head" x="1305" y="180" width="155" height="24" rx="10"/>
+      <text class="t-name" x="1452" y="196">fixed_mapping_rules</text>
+      <text class="t-field t-key" x="1452" y="211">id · workspace_id</text>
+      <text class="t-field" x="1452" y="225">preset_key · rule_type</text>
+      <text class="t-field" x="1452" y="239">condition_* · action_*</text>
+      <text class="t-field" x="1452" y="253">from/to_currency · rate</text>
+      <text class="t-field" x="1452" y="267">enabled · priority</text>
+    </g>
+
+    <!-- STATIC MAPS (aggregated) -->
+    <g class="table" id="t-static" data-group="maps" data-links="t-workspaces">
+      <rect class="t-bg" x="40" y="450" width="690" height="250"/><rect class="t-head" x="40" y="450" width="690" height="28" rx="10"/>
+      <text class="t-name" x="720" y="469">الخرائط الثابتة — 10 جداول (نفس النمط: workspace_id + platform + store_id + مصدر → مرجع ERP)</text>
+      <text class="t-field t-key" x="720" y="494">product_mappings: id, workspace_id, platform, store_id*, source_product_id/name/sku → odoo_product_id</text>
+      <text class="t-field t-key" x="720" y="512">category_mappings: workspace_id, platform, store_id*, source_category_name → odoo_category_id, parent, costing/valuation, accounts</text>
+      <text class="t-field t-key" x="720" y="530">order_status_mappings: workspace_id, platform, store_id*, zid_status → odoo_state, invoice_action, picking_action</text>
+      <text class="t-field t-key" x="720" y="548">payment_method_mappings: workspace_id, platform, store_id*, zid_method → odoo_journal_id, payment_method_id</text>
+      <text class="t-field t-key" x="720" y="566">shipping_method_mappings: workspace_id, platform, store_id*, zid_method_name → odoo_carrier_id, product_id</text>
+      <text class="t-field t-key" x="720" y="584">tax_mappings: workspace_id, platform, store_id*, zid_tax_name → odoo_tax_id</text>
+      <text class="t-field t-key" x="720" y="602">warehouse_mappings: workspace_id, platform, store_id*, zid_location_id/name → odoo_warehouse_id, location_id</text>
+      <text class="t-field t-key" x="720" y="620">currency_mappings: workspace_id, platform, store_id*, zid_currency → odoo_currency_id, conversion_rate, auto_update</text>
+      <text class="t-field t-key" x="720" y="638">payment_term_mappings / pricelist_mappings: workspace_id, platform, store_id*, مصدر → مرجع Odoo</text>
+      <text class="t-note" x="720" y="660">كلها: FK workspace_id → workspaces ON DELETE CASCADE · فهرس فريد يشمل store_id (أُصلح 2026-11-06). معرّفات Odoo أرقام محلية لقاعدة الوجهة.</text>
+      <text class="t-note" x="720" y="678">مرجع: fixed_mapping_preset_definitions (تعريفات presets عامة) · sync_reconcile_state (علامة مائية لكل نطاق).</text>
+    </g>
+
+    <!-- PIPELINE -->
+    <g class="table" id="t-inbox" data-group="pipeline" data-links="t-workspaces t-queue t-accept">
+      <rect class="t-bg" x="790" y="320" width="170" height="150"/><rect class="t-head" x="790" y="320" width="170" height="24" rx="10"/>
+      <text class="t-name" x="952" y="336">webhook_inbox</text>
+      <text class="t-field t-key" x="952" y="351">id · dedup_key</text>
+      <text class="t-field t-fk" x="952" y="365">workspace_id (SET NULL)</text>
+      <text class="t-field" x="952" y="379">platform · store_id · event</text>
+      <text class="t-field" x="952" y="393">status · attempts · payload</text>
+      <text class="t-field" x="952" y="407">queue_id · erp_connection_id</text>
+      <text class="t-field" x="952" y="421">connection_generation</text>
+      <text class="t-field" x="952" y="435">awaiting_erp · next_dispatch_at</text>
+      <text class="t-field" x="952" y="449">durable_version · received_at</text>
+    </g>
+    <g class="table" id="t-queue" data-group="pipeline" data-links="t-workspaces t-inbox t-dead t-logs t-effects">
+      <rect class="t-bg" x="975" y="320" width="170" height="165"/><rect class="t-head" x="975" y="320" width="170" height="24" rx="10"/>
+      <text class="t-name" x="1137" y="336">sync_queue</text>
+      <text class="t-field t-key" x="1137" y="351">id · receipt_id (UQ)</text>
+      <text class="t-field t-fk" x="1137" y="365">workspace_id · store_id</text>
+      <text class="t-field" x="1137" y="379">event · platform · payload</text>
+      <text class="t-field" x="1137" y="393">erp_connection_id · generation</text>
+      <text class="t-field" x="1137" y="407">lease_token · lease_expires_at</text>
+      <text class="t-field" x="1137" y="421">execution_key · dedup_key</text>
+      <text class="t-field" x="1137" y="435">retry/max · next_retry_at</text>
+      <text class="t-field" x="1137" y="449">outcome_unknown</text>
+      <text class="t-note" x="1137" y="463">next_retry_at NULL = مجمّد</text>
+    </g>
+    <g class="table" id="t-dead" data-group="pipeline" data-links="t-queue">
+      <rect class="t-bg" x="1160" y="320" width="150" height="120"/><rect class="t-head" x="1160" y="320" width="150" height="24" rx="10"/>
+      <text class="t-name" x="1302" y="336">sync_queue_dead</text>
+      <text class="t-field t-key" x="1302" y="351">id · original_id (UQ)</text>
+      <text class="t-field" x="1302" y="365">workspace_id · store_id</text>
+      <text class="t-field" x="1302" y="379">event · platform · payload</text>
+      <text class="t-field" x="1302" y="393">error_message · retries</text>
+      <text class="t-field" x="1302" y="407">died_at</text>
+      <text class="t-note" x="1302" y="421">أرشيف الاستنفاد (لا يُحذف)</text>
+    </g>
+    <g class="table" id="t-effects" data-group="pipeline" data-links="t-queue">
+      <rect class="t-bg" x="1325" y="320" width="145" height="120"/><rect class="t-head" x="1325" y="320" width="145" height="24" rx="10"/>
+      <text class="t-name" x="1462" y="336">erp_effects</text>
+      <text class="t-field t-key" x="1462" y="351">operation_key (UQ)</text>
+      <text class="t-field" x="1462" y="365">workspace/platform/store</text>
+      <text class="t-field" x="1462" y="379">erp_connection_id · gen</text>
+      <text class="t-field" x="1462" y="393">entity_id · model</text>
+      <text class="t-field" x="1462" y="407">status · remote_id</text>
+      <text class="t-note" x="1462" y="421">in_progress/succeeded/…</text>
+    </g>
+    <g class="table" id="t-accept" data-group="pipeline" data-links="t-inbox">
+      <rect class="t-bg" x="790" y="480" width="170" height="86"/><rect class="t-head" x="790" y="480" width="170" height="24" rx="10"/>
+      <text class="t-name" x="952" y="496">webhook_acceptances</text>
+      <text class="t-field t-key" x="952" y="511">id · platform</text>
+      <text class="t-field" x="952" y="525">payload_ciphertext · hash</text>
+      <text class="t-field" x="952" y="539">response_status</text>
+      <text class="t-field" x="952" y="553">received_at</text>
+    </g>
+    <g class="table" id="t-recon" data-group="pipeline" data-links="t-workspaces">
+      <rect class="t-bg" x="975" y="500" width="170" height="86"/><rect class="t-head" x="975" y="500" width="170" height="24" rx="10"/>
+      <text class="t-name" x="1137" y="516">sync_reconcile_state</text>
+      <text class="t-field t-key" x="1137" y="531">scope (PK نصي)</text>
+      <text class="t-field" x="1137" y="545">last_success/attempt/error</text>
+      <text class="t-field" x="1137" y="559">items_seen · cursor (JSONB)</text>
+      <text class="t-field" x="1137" y="573">updated_at</text>
+    </g>
+    <g class="table" id="t-metrics" data-group="pipeline" data-links="t-inbox">
+      <rect class="t-bg" x="1160" y="500" width="150" height="86"/><rect class="t-head" x="1160" y="500" width="150" height="24" rx="10"/>
+      <text class="t-name" x="1302" y="516">webhook_metrics</text>
+      <text class="t-field t-key" x="1302" y="531">(store_id,event,platform)</text>
+      <text class="t-field" x="1302" y="545">count · last_at</text>
+      <text class="t-note" x="1302" y="559">عدادات استقبال (سلة)</text>
+      <text class="t-note" x="1302" y="573">+ webhook_legacy_counters</text>
+    </g>
+
+    <!-- OUTPUTS -->
+    <g class="table" id="t-logs" data-group="outputs" data-links="t-workspaces t-queue t-fm">
+      <rect class="t-bg" x="40" y="790" width="150" height="150"/><rect class="t-head" x="40" y="790" width="150" height="24" rx="10"/>
+      <text class="t-name" x="182" y="806">sync_logs ★</text>
+      <text class="t-field t-key" x="182" y="821">id · workspace_id</text>
+      <text class="t-field" x="182" y="835">store_id · platform · event</text>
+      <text class="t-field" x="182" y="849">zid_entity_id · field_mapping</text>
+      <text class="t-field" x="182" y="863">odoo_model · odoo_record_id</text>
+      <text class="t-field" x="182" y="877">status · error_message</text>
+      <text class="t-field" x="182" y="891">payload · resolved_manually</text>
+      <text class="t-field" x="182" y="905">erp_connection_id · gen</text>
+      <text class="t-note" x="182" y="919">تنقية الناجح بعد 72س</text>
+    </g>
+    <g class="table" id="t-links" data-group="outputs" data-links="t-workspaces t-logs">
+      <rect class="t-bg" x="205" y="790" width="155" height="150"/><rect class="t-head" x="205" y="790" width="155" height="24" rx="10"/>
+      <text class="t-name" x="352" y="806">odoo_entity_links</text>
+      <text class="t-field t-key" x="352" y="821">id (uuid)</text>
+      <text class="t-field t-fk" x="352" y="835">workspace_id · store_id</text>
+      <text class="t-field" x="352" y="849">platform · entity_type</text>
+      <text class="t-field" x="352" y="863">store_entity_id</text>
+      <text class="t-field" x="352" y="877">odoo_model · odoo_record_id</text>
+      <text class="t-field" x="352" y="891">erp_connection_id · gen</text>
+      <text class="t-field" x="352" y="905">last_synced_at</text>
+      <text class="t-note" x="352" y="919">دائم (بديل sync_logs)</text>
+    </g>
+    <g class="table" id="t-transfers" data-group="outputs" data-links="t-workspaces">
+      <rect class="t-bg" x="375" y="790" width="100" height="120"/><rect class="t-head" x="375" y="790" width="100" height="24" rx="10"/>
+      <text class="t-name" x="467" y="806">data_transfers ★</text>
+      <text class="t-field t-key" x="467" y="821">id · workspace_id</text>
+      <text class="t-field" x="467" y="835">type · status</text>
+      <text class="t-field" x="467" y="849">total/synced/failed</text>
+      <text class="t-field" x="467" y="863">created_at</text>
+      <text class="t-field" x="467" y="877">completed_at</text>
+      <text class="t-note" x="467" y="891">استيراد يدوي</text>
+    </g>
+
+    <!-- BILLING -->
+    <g class="table" id="t-subs" data-group="billing" data-links="t-workspaces t-pay">
+      <rect class="t-bg" x="530" y="790" width="140" height="150"/><rect class="t-head" x="530" y="790" width="140" height="24" rx="10"/>
+      <text class="t-name" x="662" y="806">subscriptions</text>
+      <text class="t-field t-key" x="662" y="821">id (uuid)</text>
+      <text class="t-field t-fk" x="662" y="835">workspace_id · user_id</text>
+      <text class="t-field" x="662" y="849">start/end_date · months</text>
+      <text class="t-field" x="662" y="863">amount_paid · currency</text>
+      <text class="t-field" x="662" y="877">status (active/cancelled)</text>
+      <text class="t-field" x="662" y="891">notes · created_by</text>
+      <text class="t-field" x="662" y="905">archived_at</text>
+      <text class="t-note" x="662" y="919">منتهي = end_date &lt; اليوم</text>
+    </g>
+    <g class="table" id="t-pay" data-group="billing" data-links="t-subs">
+      <rect class="t-bg" x="530" y="955" width="140" height="72"/><rect class="t-head" x="530" y="955" width="140" height="24" rx="10"/>
+      <text class="t-name" x="662" y="971">subscription_payments</text>
+      <text class="t-field t-key" x="662" y="986">id · subscription_id</text>
+      <text class="t-field" x="662" y="1000">amount · currency · paid_at</text>
+      <text class="t-field" x="662" y="1014">notes · created_by</text>
+    </g>
+    <g class="table" id="t-audit" data-group="billing" data-links="t-workspaces">
+      <rect class="t-bg" x="685" y="790" width="110" height="86"/><rect class="t-head" x="685" y="790" width="110" height="24" rx="10"/>
+      <text class="t-name" x="787" y="806">audit_logs</text>
+      <text class="t-field t-key" x="787" y="821">id · actor/action</text>
+      <text class="t-field" x="787" y="835">target · metadata</text>
+      <text class="t-field" x="787" y="849">created_at</text>
+      <text class="t-note" x="787" y="863">سجل إداري عام</text>
+    </g>
+
+    <!-- NOTIFY -->
+    <g class="table" id="t-bots" data-group="notify" data-links="t-workspaces t-chat t-code t-outbox">
+      <rect class="t-bg" x="850" y="790" width="140" height="110"/><rect class="t-head" x="850" y="790" width="140" height="24" rx="10"/>
+      <text class="t-name" x="982" y="806">telegram_bots</text>
+      <text class="t-field t-key" x="982" y="821">id (uuid)</text>
+      <text class="t-field t-fk" x="982" y="835">workspace_id</text>
+      <text class="t-field" x="982" y="849">bot_token · username</text>
+      <text class="t-field" x="982" y="863">label · status</text>
+      <text class="t-field" x="982" y="877">created_at · linked_at</text>
+    </g>
+    <g class="table" id="t-chat" data-group="notify" data-links="t-bots t-workspaces t-outbox">
+      <rect class="t-bg" x="850" y="910" width="140" height="120"/><rect class="t-head" x="850" y="910" width="140" height="24" rx="10"/>
+      <text class="t-name" x="982" y="926">telegram_bot_chats</text>
+      <text class="t-field t-key" x="982" y="941">id · (bot_id,chat_id) UQ</text>
+      <text class="t-field t-fk" x="982" y="955">bot_id · workspace_id</text>
+      <text class="t-field" x="982" y="969">chat_id · label · language</text>
+      <text class="t-field" x="982" y="983">notify_mode · enabled</text>
+      <text class="t-field" x="982" y="997">workspace/mapping_filter</text>
+    </g>
+    <g class="table" id="t-code" data-group="notify" data-links="t-bots t-workspaces">
+      <rect class="t-bg" x="1005" y="910" width="120" height="96"/><rect class="t-head" x="1005" y="910" width="120" height="24" rx="10"/>
+      <text class="t-name" x="1117" y="926">telegram_bot_codes</text>
+      <text class="t-field t-key" x="1117" y="941">code (PK)</text>
+      <text class="t-field t-fk" x="1117" y="955">workspace_id · bot_id</text>
+      <text class="t-field" x="1117" y="969">chat_id (label مؤقت)</text>
+      <text class="t-field" x="1117" y="983">expires_at</text>
+    </g>
+    <g class="table" id="t-outbox" data-group="notify" data-links="t-workspaces t-bots">
+      <rect class="t-bg" x="1140" y="790" width="160" height="150"/><rect class="t-head" x="1140" y="790" width="160" height="24" rx="10"/>
+      <text class="t-name" x="1292" y="806">telegram_outbox</text>
+      <text class="t-field t-key" x="1292" y="821">id · event_key (UQ معلّق)</text>
+      <text class="t-field t-fk" x="1292" y="835">workspace_id · bot_id</text>
+      <text class="t-field" x="1292" y="849">chat_id · kind · priority</text>
+      <text class="t-field" x="1292" y="863">body · status · attempts</text>
+      <text class="t-field" x="1292" y="877">available/next_attempt_at</text>
+      <text class="t-field" x="1292" y="891">last_error · sent_at</text>
+      <text class="t-note" x="1292" y="905">رسالة واحدة لكل حدث</text>
+    </g>
+    <g class="table" id="t-contact" data-group="notify" data-links="">
+      <rect class="t-bg" x="1315" y="790" width="150" height="140"/><rect class="t-head" x="1315" y="790" width="150" height="24" rx="10"/>
+      <text class="t-name" x="1457" y="806">contact_messages</text>
+      <text class="t-field t-key" x="1457" y="821">id (uuid)</text>
+      <text class="t-field" x="1457" y="835">name · email · phone</text>
+      <text class="t-field" x="1457" y="849">company · message</text>
+      <text class="t-field" x="1457" y="863">status · is_new_customer</text>
+      <text class="t-field" x="1457" y="877">odoo_ticket_id</text>
+      <text class="t-field" x="1457" y="891">email_delivered · read_at</text>
+      <text class="t-note" x="1457" y="905">بلا workspace_id عمداً</text>
+      <text class="t-note" x="1457" y="919">(زائر عام، لا CASCADE)</text>
+    </g>
+
+    <!-- AUX / ARCHIVE -->
+    <g class="table" id="t-aux" data-group="pipeline" data-links="t-workspaces">
+      <rect class="t-bg" x="40" y="1110" width="1420" height="170"/><rect class="t-head" x="40" y="1110" width="1420" height="26" rx="10"/>
+      <text class="t-name" x="1450" y="1128">جداول إضافية (مصغّرة) — نفس نمط العزل بالمساحة أو جداول خدمية</text>
+      <text class="t-field" x="1450" y="1152">queue_archives: workspace_id, source_kind(pending/frozen/dead/orphans), source_table/id, platform/event/store, payload_snapshot, archived_at — CASCADE.</text>
+      <text class="t-field" x="1450" y="1170">fixed_mapping_preset_definitions: preset_key PK, platform, odoo_model, action, category, default_field_rows — تعريفات عامة (ليست لكل مساحة).</text>
+      <text class="t-field" x="1450" y="1188">webhook_legacy_counters: platform PK, count, updated_at — عدّاد التسليمات القديمة (خدمي).</text>
+      <text class="t-field" x="1450" y="1206">reliability_backup.* و erp_destination_mapping_archive: نسخ احتياطية داخلية عند ترحيلات موثوقية/تبديل وجهة (service_role فقط).</text>
+      <text class="t-field" x="1450" y="1224">إرث مُسقط 2026-10-22: partner_profiles, partner_tier_history, partner_commissions, payout_requests, partner_agreements, partner_onboarding_invitations, affiliate_client_invites (affiliate_id أُزيل من subscriptions).</text>
+      <text class="t-field" x="1450" y="1242">الأمان: أغلب الجداول RLS مفعّل؛ الكتابة عبر service_role في الخادم. contact_messages بدون workspace_id وعنصر عام محفوظ أولاً.</text>
+      <text class="t-note" x="1450" y="1260">ملاحظة: تعديلات لاحقة وسّعت نطاق المتجر (store_id) على الخرائط والإعدادات؛ المخطط الحي هو المرجع النهائي.</text>
+    </g>
+  </g>
+</svg>
+</div>
+<footer>
+  <div><a href="./index.html">← الفهرس</a> · <a href="./platform-flow.html">اللوحة 2: كيف تعمل المنصة</a></div>
+  <div>المصدر: <code>supabase/migrations/*.sql</code> (75 ملفاً) + الكود. الجداول المعلّمة ★ مستنتجة لأن إنشاءها سبق مجلد الترحيلات؛ اعتُمدت أعمدة الاستخدام الفعلي (users/workspaces/erp_connections/field_mappings/sync_logs/data_transfers).</div>
+</footer>
+<script>
+(function(){
+  const tables=[...document.querySelectorAll('.table[id^="t-"]')];
+  const edges=[...document.querySelectorAll('.edge')];
+  const byId=id=>document.getElementById(id);
+  const edgeTouches=(e, id)=> (e.id||'').includes(id.replace('t-','')) || e.getAttribute('d').includes(id); // fallback
+
+  function clear(keep){
+    tables.forEach(t=>{t.classList.remove('hi','dim','hub');});
+    edges.forEach(e=>{e.classList.remove('hi-edge','dim');});
+  }
+  function highlight(t){
+    clear();
+    const links=(t.dataset.links||'').split(/\s+/).filter(Boolean);
+    const set=new Set([t.id,...links]);
+    tables.forEach(x=>{ if(set.has(x.id)) x.classList.add('hi'); else x.classList.add('dim'); });
+    // highlight edges by id heuristic: contains short token of either end
+    const tokens=[...set].map(x=>x.replace('t-',''));
+    edges.forEach(e=>{
+      const id=e.id||'';
+      const hit=tokens.filter(tok=>id.includes(tok)).length>=1 && tokens.some(tok=>id.includes(tok));
+      // better: connected to selected or between selected
+      const inSel=tokens.filter(tok=>id.includes(tok));
+      if(inSel.length>=1 && inSel.some(tok=>id.includes(t.id.replace('t-','')) || links.length===0)) e.classList.add('hi-edge'); else e.classList.add('dim');
+    });
+    if(t.id==='t-workspaces') t.classList.add('hub');
+  }
+  tables.forEach(t=>{
+    t.addEventListener('mouseenter',()=>highlight(t));
+    t.addEventListener('mouseleave',clear);
+    t.addEventListener('click',(ev)=>{ev.stopPropagation(); highlight(t); t.dataset.pinned = t.dataset.pinned? '' : '1';});
+  });
+  document.getElementById('map').addEventListener('click',()=>{tables.forEach(t=>t.dataset.pinned=''); clear();});
+
+  // filter chips
+  const chips=[...document.querySelectorAll('.chip')];
+  chips.forEach(c=>c.addEventListener('click',()=>{
+    chips.forEach(x=>x.classList.remove('active')); c.classList.add('active');
+    const g=c.dataset.group;
+    tables.forEach(t=>{ const show = g==='all' || t.dataset.group===g || (g==='maps'&&t.id==='t-static'); t.style.display = show? '' : 'none'; });
+  }));
+
+  // search
+  document.getElementById('search').addEventListener('input',e=>{
+    const q=e.target.value.trim().toLowerCase();
+    if(!q){tables.forEach(t=>t.style.opacity='1'); return;}
+    tables.forEach(t=>{
+      const name=(t.querySelector('.t-name')?.textContent||'').toLowerCase();
+      t.style.opacity = name.includes(q) ? '1' : '0.12';
+      if(name.includes(q)) t.classList.add('hi'); else t.classList.remove('hi');
+    });
+  });
+})();
+</script>
+</body>
+</html>

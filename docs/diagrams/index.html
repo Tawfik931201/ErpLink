@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ERPlink — خرائط ودليل النظام</title>
+  <style>
+    :root {
+      --bg: #f4f7fc; --panel: #ffffff; --panel2: #f8fbff; --text: #162033; --muted: #5b6b86;
+      --brand: #4A90F8; --brand-strong: #1366EC; --border: #dce6f5;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif; background: radial-gradient(1200px 600px at 85% -10%, #e6f0ff 0%, var(--bg) 55%); color: var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 48px 24px 64px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; font-weight: 700; }
+    .lead { color: var(--muted); margin: 0 0 28px; font-size: 1.05rem; line-height: 1.85; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+    .card { display: block; text-decoration: none; color: inherit; background: linear-gradient(180deg, var(--panel), var(--panel2)); border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 20px; transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease; }
+    .card:hover { transform: translateY(-3px); border-color: var(--brand); box-shadow: 0 12px 30px rgba(19,102,236,.12); }
+    .tag { display: inline-block; font-size: .78rem; padding: 4px 10px; border-radius: 999px; margin-bottom: 10px; font-weight: 700; }
+    .tag.db { background: rgba(74,144,248,.14); color: #1d4ed8; }
+    .tag.flow { background: rgba(124,58,237,.12); color: #6d28d9; }
+    .tag.doc { background: rgba(19,102,236,.12); color: #1366EC; }
+    .card h2 { margin: 0 0 8px; font-size: 1.25rem; }
+    .card p { margin: 0; color: var(--muted); line-height: 1.8; font-size: .97rem; }
+    .meta { margin-top: 28px; padding: 16px 18px; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); font-size: .92rem; line-height: 1.85; background: #fff; }
+    code { background: #eef4ff; border: 1px solid #d7e3fb; padding: 1px 6px; border-radius: 6px; color: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>ERPlink — الخرائط ودليل النظام</h1>
+    <p class="lead">مجموعة صفحات تفاعلية تشرح بنية المشروع وتشغيله بالتفصيل: ترابط قاعدة البيانات، تدفق المنصة، ودليل شامل لكل أقسام وخانات النظام — بهوية الموقع الموحدة (أزرق العلامة). تعمل الملفات أوفلاين (HTML/CSS/SVG/JS محلي، بلا مكتبات خارجية).</p>
+
+    <section class="grid">
+      <a class="card" href="../system-guide.html">
+        <span class="tag doc">الدليل الشامل</span>
+        <h2>دليل النظام التفاعلي (كل الخانات)</h2>
+        <p>شرح تفاعلي لكل وحدات النظام: الهوية والمساحات، ربط المتاجر والـ ERP، مركز الربط، خط الأنابيب، السجلات والطابور، الفوترة، الإشعارات، والإدارة. اضغط على أي خانة لعرض تفاصيلها.</p>
+      </a>
+      <a class="card" href="./database-map.html">
+        <span class="tag db">خريطة 1</span>
+        <h2>خريطة قاعدة البيانات</h2>
+        <p>٩ عناقيد حول <code>workspaces</code>، ~٣٤ جدولاً مع الحقول المفتاحية، وأنواع العلاقات (CASCADE / SET NULL / منطقية). تفاعل: إبراز الجيران، تصفية بالمجموعة، وبحث.</p>
+      </a>
+      <a class="card" href="./platform-flow.html">
+        <span class="tag flow">خريطة 2</span>
+        <h2>كيف تعمل المنصة</h2>
+        <p>المسار من التسجيل وربط المتاجر والـ ERP إلى الاستقبال الدائم، الطابور والـ lease، الكتابة، السجلات والإشعارات — مع المسار المعاكس، الاستيراد اليدوي، الفوترة، ومسارات الفشل.</p>
+      </a>
+    </section>
+
+    <div class="meta">
+      <strong>ملاحظات الدقة:</strong> بُنيت الصفحات من <code>supabase/migrations/</code> وملفات <code>docs/architecture/*</code> و<code>AGENTS.md</code> والكود (2026-11-16). الجداول المنشأة خارج مجلد الترحيلات (<code>users</code>، <code>workspaces</code>، <code>erp_connections</code>، <code>field_mappings</code>، <code>sync_logs</code>، <code>data_transfers</code>) حقولها مستنتَجة من الاستخدام وموسومة «مستنتج/★» حيث وردت. الصفحات توثيقية وليست بديلاً عن المخطط أو السلوك الحي.
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ERPlink — كيف تعمل المنصة</title>
+<style>
+  :root{--bg:#0b1020;--panel:#121a36;--panel2:#0f1730;--text:#eaf0ff;--muted:#9fb0da;--border:#25355f;
+    --store:#6ea8fe;--dest:#c792ea;--pipe:#ffbf69;--ok:#7ee787;--warn:#ff8fab;--aux:#7dd3fc}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif;background:radial-gradient(1400px 700px at 80% -10%,#182856 0%,var(--bg) 55%);color:var(--text)}
+  header{padding:18px 22px 12px;border-bottom:1px solid var(--border);background:rgba(11,16,32,.78);backdrop-filter:blur(6px);position:sticky;top:0;z-index:5}
+  h1{margin:0 0 4px;font-size:1.35rem}.sub{color:var(--muted);font-size:.92rem}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;color:var(--muted);font-size:.85rem}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block;margin-left:6px;vertical-align:middle}
+  .canvas-wrap{padding:14px;overflow:auto}
+  svg{width:100%;min-width:1500px;height:1180px;background:linear-gradient(180deg,#0b1228,#0a1122);border:1px solid var(--border);border-radius:14px}
+  .box{fill:var(--panel);stroke:#35507f;stroke-width:1.3;rx:12}
+  .box.store{stroke:rgba(110,168,254,.8)} .box.dest{stroke:rgba(199,146,234,.85)} .box.pipe{stroke:rgba(255,191,105,.85)}
+  .box.ok{stroke:rgba(126,231,135,.85)} .box.warn{stroke:rgba(255,143,171,.85)} .box.aux{stroke:rgba(125,211,252,.8)}
+  .title{font-size:13px;font-weight:700;fill:#f4f8ff}
+  .txt{font-size:11.2px;fill:#cfe0ff}
+  .mut{font-size:10.5px;fill:#9fb0da}
+  .num{font-size:12px;font-weight:800;fill:#0b1020}
+  .badge{fill:#6ea8fe}.badge.pipe{fill:#ffbf69}.badge.ok{fill:#7ee787}.badge.dest{fill:#c792ea}.badge.warn{fill:#ff8fab}.badge.aux{fill:#7dd3fc}
+  .arrow{stroke:#5a78b8;stroke-width:2.4;fill:none;marker-end:url(#arr)}
+  .arrow.main{stroke:#8fb3ff;stroke-width:3}
+  .arrow.rev{stroke:#c792ea;stroke-dasharray:8 5;marker-end:url(#arr-p)}
+  .arrow.aux{stroke:#7dd3fc;stroke-dasharray:6 5;marker-end:url(#arr-c)}
+  .arrow.fail{stroke:#ff8fab;stroke-dasharray:5 4;marker-end:url(#arr-r)}
+  .lane{font-size:12px;font-weight:700;fill:#dce7ff}
+  .lane-bg{fill:rgba(255,255,255,.02);stroke:#223055}
+  .note{font-size:11px;fill:#b9c9ea}
+  footer{padding:10px 22px 18px;color:var(--muted);font-size:.86rem;line-height:1.8}
+  a{color:#9fd0ff}
+  .hi{filter:drop-shadow(0 0 7px rgba(159,208,255,.35))}
+  @media print{header{position:static} svg{min-width:0;width:1500px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>كيف تعمل المنصة — ERPlink</h1>
+  <div class="sub">من التسجيل وربط المتاجر/ERP إلى الاستقبال الدائم، الطابور، التنفيذ، والسجلات — مع المسارات المعاكسة والفشل.</div>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--store)"></i>متاجر ومنصات</span>
+    <span><i class="dot" style="background:var(--pipe)"></i>استقبال/طابور موثوق</span>
+    <span><i class="dot" style="background:var(--dest)"></i>ERP والوجهة</span>
+    <span><i class="dot" style="background:var(--ok)"></i>مخرجات ونجاح</span>
+    <span><i class="dot" style="background:var(--warn)"></i>فشل/حجر صحي</span>
+    <span><i class="dot" style="background:var(--aux)"></i>مسارات مساعدة</span>
+  </div>
+</header>
+<div class="canvas-wrap">
+<svg id="flow" viewBox="0 0 1500 1180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#8fb3ff"/></marker>
+    <marker id="arr-p" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#c792ea"/></marker>
+    <marker id="arr-c" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#7dd3fc"/></marker>
+    <marker id="arr-r" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="#ff8fab"/></marker>
+  </defs>
+
+  <!-- swimlanes -->
+  <rect class="lane-bg" x="20" y="20" width="1460" height="160" rx="10"/>
+  <text class="lane" x="1460" y="44">١) الإعداد والربط</text>
+  <rect class="lane-bg" x="20" y="190" width="1460" height="210" rx="10"/>
+  <text class="lane" x="1460" y="214">٢) الاستقبال الموثوق (متجر → منصة)</text>
+  <rect class="lane-bg" x="20" y="410" width="1460" height="240" rx="10"/>
+  <text class="lane" x="1460" y="434">٣) التنفيذ (طابور → ERP) والمخرجات</text>
+  <rect class="lane-bg" x="20" y="660" width="1460" height="170" rx="10"/>
+  <text class="lane" x="1460" y="684">٤) المسار المعاكس (ERP → متجر) والاستيراد اليدوي</text>
+  <rect class="lane-bg" x="20" y="840" width="1460" height="150" rx="10"/>
+  <text class="lane" x="1460" y="864">٥) الفوترة ودورة الحياة</text>
+  <rect class="lane-bg" x="20" y="1000" width="1460" height="160" rx="10"/>
+  <text class="lane" x="1460" y="1024">٦) الفشل، التعافي، والضمانات</text>
+
+  <!-- SETUP -->
+  <g class="node" data-id="n1">
+    <rect class="box" x="40" y="60" width="180" height="95"/><circle cx="60" cy="80" r="11" class="badge"/><text class="num" x="60" y="84" text-anchor="middle">1</text>
+    <text class="title" x="205" y="84">تسجيل الدخول</text>
+    <text class="txt" x="205" y="104">Clerk يعرّف المستخدم</text>
+    <text class="txt" x="205" y="120">users / workspaces</text>
+    <text class="mut" x="205" y="138">workspace_members للصلاحيات</text>
+  </g>
+  <g class="node" data-id="n2">
+    <rect class="box store" x="240" y="60" width="210" height="95"/><circle cx="260" cy="80" r="11" class="badge"/><text class="num" x="260" y="84" text-anchor="middle">2</text>
+    <text class="title" x="435" y="84">ربط المتجر</text>
+    <text class="txt" x="435" y="104">Zid / Salla / Shopify OAuth</text>
+    <text class="txt" x="435" y="120">merchant_tokens, salla_tokens</text>
+    <text class="mut" x="435" y="138">shopify_tokens + sync_settings</text>
+  </g>
+  <g class="node" data-id="n3">
+    <rect class="box dest" x="470" y="60" width="230" height="95"/><circle cx="490" cy="80" r="11" class="badge dest"/><text class="num" x="490" y="84" text-anchor="middle">3</text>
+    <text class="title" x="685" y="84">ربط ERP وتثبيت الوجهة</text>
+    <text class="txt" x="685" y="104">erp_connections (Odoo/ERPNext)</text>
+    <text class="txt" x="685" y="120">erp_workspace_bindings</text>
+    <text class="mut" x="685" y="138">وجهة نشطة واحدة لكل مساحة</text>
+  </g>
+  <g class="node" data-id="n4">
+    <rect class="box" x="720" y="60" width="250" height="95"/><circle cx="740" cy="80" r="11" class="badge"/><text class="num" x="740" y="84" text-anchor="middle">4</text>
+    <text class="title" x="955" y="84">الضبط والخرائط</text>
+    <text class="txt" x="955" y="104">standard_mapping_settings (JSONB)</text>
+    <text class="txt" x="955" y="120">field_mappings + الخرائط الثابتة</text>
+    <text class="mut" x="955" y="138">منتجات/فئات/طلبات/عملاء…</text>
+  </g>
+  <g class="node" data-id="n4b">
+    <rect class="box aux" x="990" y="60" width="230" height="95"/>
+    <text class="title" x="1205" y="84">تجربة وتفعيل</text>
+    <text class="txt" x="1205" y="104">تجربة 7 أيام من created_at</text>
+    <text class="txt" x="1205" y="120">subscriptions عند الدفع اليدوي</text>
+    <text class="mut" x="1205" y="138">إلغاء الأرشفة عند التسجيل/التمديد</text>
+  </g>
+  <g class="node" data-id="n4c">
+    <rect class="box aux" x="1240" y="60" width="220" height="95"/>
+    <text class="title" x="1445" y="84">إشعارات تيليجرام</text>
+    <text class="txt" x="1445" y="104">telegram_bots → bot_chats</text>
+    <text class="txt" x="1445" y="120">ربط عبر /start &lt;code&gt;</text>
+    <text class="mut" x="1445" y="138">المرسل يعمل بمعزل عن المزامنة</text>
+  </g>
+
+  <!-- INGRESS -->
+  <g class="node" data-id="n5">
+    <rect class="box store" x="40" y="235" width="230" height="140"/><circle cx="60" cy="255" r="11" class="badge pipe"/><text class="num" x="60" y="259" text-anchor="middle">5</text>
+    <text class="title" x="255" y="259">وصول ويب هوك المتجر</text>
+    <text class="txt" x="255" y="279">POST /api/webhooks/{zid|salla|shopify}</text>
+    <text class="txt" x="255" y="295">تحقق التوقيع/الاعتماد أولاً</text>
+    <text class="txt" x="255" y="311">بوابة الإعدادات (enabled_actions)</text>
+    <text class="txt" x="255" y="327">لا رفض لموثّق — تأجيل فقط</text>
+    <text class="mut" x="255" y="345">الهوية تربط بـ workspace+store</text>
+    <text class="mut" x="255" y="361">الأيتام تُحفظ (workspace_id NULL)</text>
+  </g>
+  <g class="node" data-id="n6">
+    <rect class="box pipe" x="300" y="235" width="250" height="140"/><circle cx="320" cy="255" r="11" class="badge pipe"/><text class="num" x="320" y="259" text-anchor="middle">6</text>
+    <text class="title" x="535" y="259">إيصال دائم + قبول مشفّر</text>
+    <text class="txt" x="535" y="279">webhook_inbox (قبل الطابور)</text>
+    <text class="txt" x="535" y="295">dedup_key ذري — تكرار = حميد</text>
+    <text class="txt" x="535" y="311">webhook_acceptances (نسخة مشفّرة)</text>
+    <text class="txt" x="535" y="327">تثبيت الوجهة: erp_connection_id</text>
+    <text class="mut" x="535" y="345">+ connection_generation</text>
+    <text class="mut" x="535" y="361">رد 2xx/202 بعد الحفظ فقط (503 عند فشل)</text>
+  </g>
+  <g class="node" data-id="n7">
+    <rect class="box pipe" x="580" y="235" width="250" height="140"/><circle cx="600" cy="255" r="11" class="badge pipe"/><text class="num" x="600" y="259" text-anchor="middle">7</text>
+    <text class="title" x="815" y="259">إرسال للطابور (ذرّي)</text>
+    <text class="txt" x="815" y="279">dispatch_webhook_receipt()</text>
+    <text class="txt" x="815" y="295">ينشئ sync_queue مرتبطاً بـ receipt</text>
+    <text class="txt" x="815" y="311">execution_key + أقصى محاولات</text>
+    <text class="txt" x="815" y="327">awaiting_erp عند غياب وجهة</text>
+    <text class="mut" x="815" y="345">تسليمات مميّزة تُحتفظ (لا دمج كيان)</text>
+    <text class="mut" x="815" y="361">inbox drain قبل المعالجة كل دورة</text>
+  </g>
+  <g class="node" data-id="n7b">
+    <rect class="box pipe" x="860" y="235" width="280" height="140"/>
+    <text class="title" x="1125" y="259">المشغّل والعامل (self-runner)</text>
+    <text class="txt" x="1125" y="279">instrumentation.ts عند الإقلاع</text>
+    <text class="txt" x="1125" y="295">كل 30ث: drain inbox → process queue</text>
+    <text class="txt" x="1125" y="311">claim_sync_job بـ lease_token</text>
+    <text class="txt" x="1125" y="327">جلب عادل + حد 3/مساحة</text>
+    <text class="mut" x="1125" y="345">تسوية زد كل 10د · أرشفة كل 6س</text>
+    <text class="mut" x="1125" y="361">SYNC_QUEUE_SELF_RUNNER=true</text>
+  </g>
+  <g class="node" data-id="n7c">
+    <rect class="box aux" x="1160" y="235" width="300" height="140"/>
+    <text class="title" x="1445" y="259">بوابة القبول والتخفيف</text>
+    <text class="txt" x="1445" y="279">سقف ديناميكي 120⇄2000 لكل مساحة</text>
+    <text class="txt" x="1445" y="295">المجهول فقط يُرفض (حماية سكربت)</text>
+    <text class="txt" x="1445" y="311">صمام أمان عام → 503 (لا 429)</text>
+    <text class="txt" x="1445" y="327">دفعة كتابة عند الضغط (عدا Odoo)</text>
+    <text class="mut" x="1445" y="345">/api/cron/* للمراقبة اليدوية فقط</text>
+    <text class="mut" x="1445" y="361">لا اعتماد خارجي متاح على الهوست</text>
+  </g>
+
+  <!-- EXECUTION -->
+  <g class="node" data-id="n8">
+    <rect class="box" x="40" y="455" width="250" height="165"/><circle cx="60" cy="475" r="11" class="badge pipe"/><text class="num" x="60" y="479" text-anchor="middle">8</text>
+    <text class="title" x="275" y="479">تجهيز وتنفيذ</text>
+    <text class="txt" x="275" y="499">sync/webhook.ts يجهّز الحمولة</text>
+    <text class="txt" x="275" y="515">sync/mappings.ts يطبّق الخرائط</text>
+    <text class="txt" x="275" y="531">Odoo (XML-RPC) أو ERPNext (REST)</text>
+    <text class="txt" x="275" y="547">قراءة بيانات موثوقة قبل الكتابة</text>
+    <text class="mut" x="275" y="565">مطابقة عبر odoo_entity_links أولاً</text>
+    <text class="mut" x="275" y="581">erp_effects لتتبّع الأثر</text>
+    <text class="mut" x="275" y="597">جسم الويب هوك محفّز لا مصدر</text>
+  </g>
+  <g class="node" data-id="n9">
+    <rect class="box ok" x="310" y="455" width="230" height="165"/><circle cx="330" cy="475" r="11" class="badge ok"/><text class="num" x="330" y="479" text-anchor="middle">9</text>
+    <text class="title" x="525" y="479">المخرجات الدائمة</text>
+    <text class="txt" x="525" y="499">sync_logs (نجاح/فشل/تخطي)</text>
+    <text class="txt" x="525" y="515">odoo_entity_links (ربط دائم)</text>
+    <text class="txt" x="525" y="531">تحديث حالة الطابور/الإيصال</text>
+    <text class="txt" x="525" y="547">telegram_outbox (رسالة/حدث)</text>
+    <text class="mut" x="525" y="565">مرسل تيليجرام مستقل بمهلة</text>
+    <text class="mut" x="525" y="581">+ retry_after و429</text>
+    <text class="mut" x="525" y="597">لا يحجز عامل المزامنة</text>
+  </g>
+  <g class="node" data-id="n10">
+    <rect class="box warn" x="560" y="455" width="250" height="165"/>
+    <text class="title" x="795" y="479">مسارات عدم اليقين</text>
+    <text class="txt" x="795" y="499">إعادة محاولة حتى max_retries</text>
+    <text class="txt" x="795" y="515">استنفاد → sync_queue_dead</text>
+    <text class="txt" x="795" y="531">أرشفة → queue_archives</text>
+    <text class="txt" x="795" y="547">انتهاء lease → outcome_unknown</text>
+    <text class="txt" x="795" y="563">حجر صحي (يتطلب تسوية)</text>
+    <text class="mut" x="795" y="581">لا حذف صامت؛ skipped يُسجَّل</text>
+    <text class="mut" x="795" y="597">لا نتيجة = فشل</text>
+  </g>
+  <g class="node" data-id="n11">
+    <rect class="box dest" x="830" y="455" width="300" height="165"/>
+    <text class="title" x="1115" y="479">أنظمة الوجهة (Odoo/ERPNext)</text>
+    <text class="txt" x="1115" y="499">sale.order · res.partner</text>
+    <text class="txt" x="1115" y="515">product.template/product · category</text>
+    <text class="txt" x="1115" y="531">مخزون/فواتير/حالات حسب الخرائط</text>
+    <text class="txt" x="1115" y="547">ERPNext للمسار المخصص (custom)</text>
+    <text class="mut" x="1115" y="565">Odoo يملك المطابقة والحقول</text>
+    <text class="mut" x="1115" y="581">الهدف مُثبَّت لكل إيصال</text>
+    <text class="mut" x="1115" y="597">تبديل الوجهة يمسح مراجع ERP القديمة</text>
+  </g>
+  <g class="node" data-id="n12">
+    <rect class="box aux" x="1150" y="455" width="310" height="165"/>
+    <text class="title" x="1445" y="479">تسوية واستعادة</text>
+    <text class="txt" x="1445" y="499">reconcileZidOrders (كل 10د)</text>
+    <text class="txt" x="1445" y="515">sync_reconcile_state علامة مائية</text>
+    <text class="txt" x="1445" y="531">أيتام inbox بلا workspace → استرداد يدوي</text>
+    <text class="txt" x="1445" y="547">فحص ذاتي للمسار (pipeline self-test)</text>
+    <text class="mut" x="1445" y="565">تنبيهات أدمن عبر نفس الصندوق</text>
+    <text class="mut" x="1445" y="581">تنقية sync_logs الناجحة بعد 72س</text>
+    <text class="mut" x="1445" y="597">(الروابط الدائمة تبقى)</text>
+  </g>
+
+  <!-- REVERSE + MANUAL -->
+  <g class="node" data-id="r1">
+    <rect class="box dest" x="40" y="705" width="240" height="105"/>
+    <text class="title" x="265" y="729">Odoo Automated Actions</text>
+    <text class="txt" x="265" y="749">/api/webhooks/odoo</text>
+    <text class="txt" x="265" y="765">/api/webhooks/odoo/stock</text>
+    <text class="mut" x="265" y="783">اعتماد مشتق لكل نطاق (secret)</text>
+    <text class="mut" x="265" y="799">مسار أودوو لا يُدفَع (لا إعادة إرسال)</text>
+  </g>
+  <g class="node" data-id="r2">
+    <rect class="box pipe" x="300" y="705" width="260" height="105"/>
+    <text class="title" x="545" y="729">إعادة القراءة من ERP (مصدر الحقيقة)</text>
+    <text class="txt" x="545" y="749">odooClient.read() يُستدعى دائماً</text>
+    <text class="txt" x="545" y="765">نجاح القراءة → يُتجاهل جسم الطلب</text>
+    <text class="txt" x="545" y="783">سجل فارغ → حذف حقيقي فقط</text>
+    <text class="mut" x="545" y="799">خطأ قراءة → إعادة محاولة ثم حجر</text>
+  </g>
+  <g class="node" data-id="r3">
+    <rect class="box store" x="580" y="705" width="240" height="105"/>
+    <text class="title" x="805" y="729">تحديث المتجر/المخزون</text>
+    <text class="txt" x="805" y="749">stock-sync-engine / المنتج</text>
+    <text class="txt" x="805" y="765">APIs زد/سلة/شوبيفاي</text>
+    <text class="mut" x="805" y="783">يحترم إعدادات المزامنة والخرائط</text>
+    <text class="mut" x="805" y="799">نتيجة مُسجَّلة في sync_logs</text>
+  </g>
+  <g class="node" data-id="m1">
+    <rect class="box aux" x="860" y="705" width="280" height="105"/>
+    <text class="title" x="1125" y="729">الاستيراد اليدوي (Manual Transfer)</text>
+    <text class="txt" x="1125" y="749">Server Action: startInitialTransfer</text>
+    <text class="txt" x="1125" y="765">قراءة مجزأة من واجهات المتجر</text>
+    <text class="txt" x="1125" y="783">يستخدم الخرائط والمطابقة الحالية</text>
+    <text class="mut" x="1125" y="799">يتتبّع في data_transfers + إشعار</text>
+  </g>
+  <g class="node" data-id="m2">
+    <rect class="box aux" x="1160" y="705" width="300" height="105"/>
+    <text class="title" x="1445" y="729">فحص الصحة والإدارة</text>
+    <text class="txt" x="1445" y="749">/api/admin/queue-health</text>
+    <text class="txt" x="1445" y="765">refresh webhooks (zid/salla/odoo)</text>
+    <text class="txt" x="1445" y="783">pipeline-selftest (بيانات وهمية)</text>
+    <text class="mut" x="1445" y="799">readiness.blockers = ما يضيّع الطلب</text>
+  </g>
+
+  <!-- BILLING -->
+  <g class="node" data-id="b1">
+    <rect class="box aux" x="40" y="885" width="260" height="85"/>
+    <text class="title" x="285" y="909">تجربة مجانية 7 أيام</text>
+    <text class="txt" x="285" y="929">تُشتق من workspaces.created_at</text>
+    <text class="mut" x="285" y="947">لكل مساحة تجربتها الخاصة</text>
+  </g>
+  <g class="node" data-id="b2">
+    <rect class="box aux" x="320" y="885" width="260" height="85"/>
+    <text class="title" x="565" y="909">اشتراك يدوي (أدمن)</text>
+    <text class="txt" x="565" y="929">register / extend / cancel</text>
+    <text class="mut" x="565" y="947">subscription_payments + audit</text>
+  </g>
+  <g class="node" data-id="b3">
+    <rect class="box warn" x="600" y="885" width="260" height="85"/>
+    <text class="title" x="845" y="909">انتهاء بلا اشتراك</text>
+    <text class="txt" x="845" y="929">archived_at يُضبط (كسول + كل 6س)</text>
+    <text class="mut" x="845" y="947">بوابة "مساحة مغلقة" في التطبيق</text>
+  </g>
+  <g class="node" data-id="b4">
+    <rect class="box ok" x="880" y="885" width="260" height="85"/>
+    <text class="title" x="1125" y="909">تجديد/اشتراك جديد</text>
+    <text class="txt" x="1125" y="929">إلغاء الأرشفة تلقائياً</text>
+    <text class="mut" x="1125" y="947">يُلغي أثر انتهاء التجربة</text>
+  </g>
+  <g class="node" data-id="b5">
+    <rect class="box" x="1160" y="885" width="300" height="85"/>
+    <text class="title" x="1445" y="909">لا Stripe / لا عمولات</text>
+    <text class="txt" x="1445" y="929">دفع يدوي فقط — مصدر الحقيقة DB</text>
+    <text class="mut" x="1445" y="947">شريط تنبيه علوي دائم بالحالة</text>
+  </g>
+
+  <!-- FAILURES / GUARANTEES -->
+  <g class="node" data-id="f1">
+    <rect class="box warn" x="40" y="1045" width="280" height="95"/>
+    <text class="title" x="305" y="1069">محاولات وإعادة الجدولة</text>
+    <text class="txt" x="305" y="1089">retry_count &lt; max_retries → تأجيل</text>
+    <text class="mut" x="305" y="1107">استنفاد → sync_queue_dead</text>
+    <text class="mut" x="305" y="1123">فشل تسليم تيليجرام لا يلمس الطابور</text>
+  </g>
+  <g class="node" data-id="f2">
+    <rect class="box warn" x="340" y="1045" width="300" height="95"/>
+    <text class="title" x="625" y="1069">نتيجة غير معروفة (Quarantine)</text>
+    <text class="txt" x="625" y="1089">انتهاء lease / غموض الأثر</text>
+    <text class="mut" x="625" y="1107">outcome_unknown + next_retry_at=NULL</text>
+    <text class="mut" x="625" y="1123">يتطلب تحققاً قبل إعادة التشغيل</text>
+  </g>
+  <g class="node" data-id="f3">
+    <rect class="box ok" x="660" y="1045" width="380" height="95"/>
+    <text class="title" x="1025" y="1069">ضمانات "لا تضيع ولا ترفض"</text>
+    <text class="txt" x="1025" y="1089">حفظ قبل معالجة · 2xx بعد الديمومة · تكرار ذري حميد</text>
+    <text class="mut" x="1025" y="1107">موثّق لا يُرفض (429 للمجهول فقط) · skipped يُسجَّل · الوجهة مُثبَّتة</text>
+    <text class="mut" x="1025" y="1123">جسم Odoo محفّز لا مصدر · لا أمر خارجي على الهوست</text>
+  </g>
+  <g class="node" data-id="f4">
+    <rect class="box aux" x="1060" y="1045" width="400" height="95"/>
+    <text class="title" x="1445" y="1069">حدود واعية (موثّقة)</text>
+    <text class="txt" x="1445" y="1089">تسوية تلقائية للطلبات (زد) فقط حالياً</text>
+    <text class="mut" x="1445" y="1107">أيتام بدون workspace تتطلب استرداداً · حذف Odoo يتطلب اعتماداً مسجلاً</text>
+    <text class="mut" x="1445" y="1123">المخطط الحي/النشر خارج نطاق هذه اللوحة</text>
+  </g>
+
+  <!-- MAIN ARROWS -->
+  <path class="arrow main" d="M220,108 L240,108"/>
+  <path class="arrow main" d="M450,108 L470,108"/>
+  <path class="arrow main" d="M700,108 L720,108"/>
+  <path class="arrow main" d="M970,108 L990,108"/>
+  <path class="arrow main" d="M1220,108 L1240,108"/>
+
+  <path class="arrow main" d="M270,305 L300,305"/>
+  <path class="arrow main" d="M550,305 L580,305"/>
+  <path class="arrow main" d="M830,305 L860,305"/>
+  <path class="arrow main" d="M1140,305 L1160,305"/>
+
+  <path class="arrow main" d="M1000,375 L1000,430 L165,430 L165,455"/>
+  <path class="arrow main" d="M290,537 L310,537"/>
+  <path class="arrow main" d="M540,537 L560,537"/>
+  <path class="arrow main" d="M810,537 L830,537"/>
+  <path class="arrow aux" d="M1130,537 L1150,537"/>
+
+  <!-- failure branch -->
+  <path class="arrow fail" d="M685,620 L685,640 L200,640 L200,1045"/>
+  <path class="arrow fail" d="M685,620 L685,640 L490,640 L490,1045"/>
+
+  <!-- reverse path -->
+  <path class="arrow rev" d="M280,758 L300,758"/>
+  <path class="arrow rev" d="M560,758 L580,758"/>
+  <path class="arrow rev" d="M700,705 L700,620 L425,620 L425,620"/>
+
+  <!-- manual + admin -->
+  <path class="arrow aux" d="M1000,705 L1000,620 L425,620 L425,620"/>
+  <path class="arrow aux" d="M1140,758 L1160,758"/>
+
+  <!-- billing -->
+  <path class="arrow aux" d="M300,928 L320,928"/>
+  <path class="arrow aux" d="M580,928 L600,928"/>
+  <path class="arrow aux" d="M860,928 L880,928"/>
+
+  <!-- notifications to outbox -->
+  <path class="arrow aux" d="M1350,155 L1350,455"/>
+  <path class="arrow aux" d="M540,537 L540,650 L1350,650 L1350,620"/>
+</svg>
+</div>
+<footer>
+  <div><a href="./index.html">← الفهرس</a> · <a href="./database-map.html">اللوحة 1: خريطة قاعدة البيانات</a></div>
+  <div>المصدر: <code>docs/architecture/overview.md</code>، <code>AGENTS.md</code> (Sync Reliability / No-Loss / Ingress)، وترحيلات الاستقبال الموثوق (<code>20260922</code>، <code>20261103155209</code>، <code>20261116162531</code>). اللوحة تصف التدفق المعماري الحالي؛ سلوك بيئة الإنتاج الحية يعتمد على الإعدادات والنشر.</div>
+</footer>
+<script>
+(function(){
+  const nodes=[...document.querySelectorAll('.node')];
+  nodes.forEach(n=>{
+    n.style.cursor='pointer';
+    n.addEventListener('mouseenter',()=>{nodes.forEach(x=>x.style.opacity=x===n?1:0.35); n.classList.add('hi');});
+    n.addEventListener('mouseleave',()=>{nodes.forEach(x=>x.style.opacity=1); n.classList.remove('hi');});
+  });
+})();
+</script>
+</body>
+</html>
