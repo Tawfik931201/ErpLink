@@ -37,3 +37,11 @@ export function defaultCustomerMatchFields(storeType: string, fields: Record<str
 export function customerMatchCandidateAllowed(candidateField: string, configuredOdooField?: string | null): boolean {
   return !configuredOdooField || candidateField === configuredOdooField
 }
+
+/** True when another source customer already owns the resolved ERP partner. */
+export function customerLinkHasConflict(
+  otherOwners: ReadonlyArray<{ store_entity_id: string }> | null | undefined,
+  sourceCustomerId: string,
+): boolean {
+  return !!otherOwners?.some((row) => String(row.store_entity_id) !== sourceCustomerId)
+}
