@@ -58,6 +58,7 @@ type Row = QueueRow & {
 interface QueueOverview {
   pending: number | null
   frozen: number | null
+  uncertain: number | null
   orphans: number | null | undefined
   dead: number | null
   archived: number | null | undefined
@@ -292,7 +293,9 @@ export default function QueueClient() {
         ? null
         : (overview?.dead ?? 0) + (overview?.archived ?? 0),
   }
-  const frozenCount = overview?.frozen ?? 0
+  // Unknown outcomes are displayed in Frozen for investigation, but must never
+  // be included in the Retry Frozen action's advertised replayable count.
+  const frozenCount = Math.max(0, (overview?.frozen ?? 0) - (overview?.uncertain ?? 0))
   const orphanCount = overview?.orphans ?? 0
 
   const openItem = (id: string) => {
@@ -355,6 +358,14 @@ export default function QueueClient() {
           )}
         >
           {notice}
+        </div>
+      )}
+
+      {(overview?.uncertain ?? 0) > 0 && (
+        <div role="alert" className="border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          {ar
+            ? `توجد ${overview?.uncertain} عملية نتيجتها في أودوو غير مؤكدة. تحتاج مطابقة فعلية مع زد وأودوو قبل إغلاقها؛ زر إعادة تشغيل المجمد لا يعيدها، وقد تمنع تحديثات لاحقة لنفس الطلب.`
+            : `${overview?.uncertain} ERP operations have unknown outcomes. Verify against Zid and Odoo before resolution; Retry Frozen cannot replay them and later updates to those orders may be blocked.`}
         </div>
       )}
 
