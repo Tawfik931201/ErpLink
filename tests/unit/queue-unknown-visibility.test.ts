@@ -18,6 +18,11 @@ describe('Queue unknown ERP outcome visibility', () => {
     expect(dashboard).toContain(".eq('outcome_unknown', false)")
   })
 
+  it('does not mislabel frozen sentinel rows as pending', () => {
+    expect(dashboard).toContain(".neq('next_retry_at', FROZEN_SENTINEL)")
+    expect(dashboard).toContain(": query.not('next_retry_at', 'is', null).neq('next_retry_at', FROZEN_SENTINEL)")
+  })
+
   it('continues to fence later jobs until remote effects are reconciled safely', () => {
     expect(recovery).toContain('other.outcome_unknown')
     expect(recovery).toContain('other.execution_key = q.execution_key')
