@@ -1,4 +1,4 @@
-import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo } from '@/lib/customers/company-fields'
+import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo, pruneUnsupportedCustomerCompanyFields } from '@/lib/customers/company-fields'
 import { applyFixedSettingsToValues, applyRulesToValues } from '@/lib/odoo/value-settings'
 import { resolveShopifyCustomerFullName } from '@/lib/shopify/customers'
 
@@ -28,6 +28,28 @@ export async function prepareOdooCustomer({
   // Company fields always persist, even without explicit mapping rows
   effectiveOdooValues = injectCustomerCompanyFields(effectiveOdooValues, zidData)
   effectiveOdooValues = normalizeCustomerCompanyTypeForOdoo(effectiveOdooValues, majorVersion)
+
+  // Validate optional company fields against the actual target Odoo model.
+  // Odoo 14-20 and installed accounting/localization addons expose different
+  // combinations; the commercial registration must not break a partner update.
+  const optionalFields = ['company_registry', 'company_name', 'vat', 'company_type', 'is_company']
+    .filter((field) => Object.prototype.hasOwnProperty.call(effectiveOdooValues, field))
+  if (optionalFields.length > 0) {
+    try {
+      const available = await client.execute<Record<string, unknown>>(
+        'res.partner', 'fields_get', [optionalFields], { attributes: ['type'] }
+      )
+      effectiveOdooValues = pruneUnsupportedCustomerCompanyFields(effectiveOdooValues, available)
+    } catch (error) {
+      // Conservatively drop the field known absent on standard Odoo 20 rather
+      // than reject every customer because introspection was temporarily down.
+      console.warn('[CustomerSync] Optional company field introspection failed', error)
+      if (majorVersion >= 20) {
+        const fallbackFields = Object.fromEntries(optionalFields.filter((f) => f !== 'company_registry').map((f) => [f, true]))
+        effectiveOdooValues = pruneUnsupportedCustomerCompanyFields(effectiveOdooValues, fallbackFields)
+      }
+    }
+  }
 
   // Shopify and Salla send first_name / last_name separately while the
   // standard presets map name <- a single source, which drops the family
