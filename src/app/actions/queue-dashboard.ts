@@ -47,7 +47,7 @@ export async function getQueueOverview() {
     if (!workspaceId) return authError()
 
     const [pending, frozen, uncertain, dead, archived, orphans] = await Promise.all([
-      countExact('sync_queue', (q: any) => q.eq('workspace_id', workspaceId).not('next_retry_at', 'is', null)),
+      countExact('sync_queue', (q: any) => q.eq('workspace_id', workspaceId).not('next_retry_at', 'is', null).neq('next_retry_at', FROZEN_SENTINEL)),
       countExact('sync_queue', (q: any) =>
         q.eq('workspace_id', workspaceId).or(`next_retry_at.is.null,next_retry_at.eq.${FROZEN_SENTINEL}`)
       ),
@@ -133,7 +133,7 @@ export async function getQueueItems(params: { kind: 'pending' | 'frozen'; limit?
     query =
       params.kind === 'frozen'
         ? query.or(`next_retry_at.is.null,next_retry_at.eq.${FROZEN_SENTINEL}`)
-        : query.not('next_retry_at', 'is', null)
+        : query.not('next_retry_at', 'is', null).neq('next_retry_at', FROZEN_SENTINEL)
 
     const { data, count, error } = await query
     if (error) return { success: false, error: error.message }
