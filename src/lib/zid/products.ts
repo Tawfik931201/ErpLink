@@ -43,7 +43,7 @@ export async function enrichZidProduct(
           // Force API-fetched fields for grouped/bundle product detection.
           // Webhook payloads are often minimal; we must preserve bundle data from the API.
           const pClass = (productData as any).product_class
-          if (pClass === 'grouped_product' || pClass === 'dynamic_bundle' || pClass === 'bundle' || pClass === 'grouped' || pClass === 'voucher') {
+          if (pClass === 'grouped_product' || pClass === 'dynamic_bundle' || pClass === 'bundle' || pClass === 'grouped' || pClass === 'voucher' || pClass === 'downloadable') {
             if ((productData as any).group_products) (data as any).group_products = (productData as any).group_products
             if ((productData as any).grouped_products) (data as any).grouped_products = (productData as any).grouped_products
             if ((productData as any).components) (data as any).components = (productData as any).components
