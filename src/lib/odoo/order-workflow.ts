@@ -686,6 +686,9 @@ export async function ensureSaleOrderTaxes(
     const resolvedPlatform = platform || 'zid'
     const orderStdSettings = await getCachedStandardMappingSettings(workspaceId, resolvedPlatform, 'orders', storeId)
     const enableVat = orderStdSettings?.enable_vat ?? (orderStdSettings as any)?.order?.enable_vat ?? false
+    // Preserve Salla/Shopify's legacy non-VAT behaviour; this zero-tax fix
+    // applies only to the Zid Standard Mapping orders contract.
+    if (!enableVat && resolvedPlatform !== 'zid') return
     // Odoo recalculates default product and shipping taxes during sale.order writes.
     // When Standard Mapping disables VAT, a no-op here silently restores those
     // inherited taxes on status updates even if create had correctly cleared them.
