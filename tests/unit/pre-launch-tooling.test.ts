@@ -169,7 +169,7 @@ describe('the claim is parallel but still atomic per row', () => {
 
   it('claims rows concurrently', () => {
     expect(queue).toContain('CLAIM_CONCURRENCY')
-    expect(queue).toContain('await Promise.all(slice.map(claimOne))')
+    expect(queue).toContain('await Promise.all(slice.map((item) => claimQueueItem(item.id, false)))')
   })
 
   it('keeps the per-row conditional update — the atomicity guarantee', () => {
