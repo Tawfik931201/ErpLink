@@ -960,6 +960,10 @@ export async function buildOrderLineItems(
     }
     if (isCreation && defaultLineTaxCmd) {
       shippingLine[lineTaxField] = [defaultLineTaxCmd]
+    } else if (isCreation && !enableVat) {
+      // Synthetic adjustment lines must not inherit the configured Odoo
+      // product's default sales tax when ERP Link is not applying VAT.
+      shippingLine[lineTaxField] = [[6, 0, []]]
     }
 
     if (shippingProductId) {
@@ -1019,6 +1023,8 @@ export async function buildOrderLineItems(
     }
     if (isCreation && defaultLineTaxCmd) {
       discountLine[lineTaxField] = [defaultLineTaxCmd]
+    } else if (isCreation && !enableVat) {
+      discountLine[lineTaxField] = [[6, 0, []]]
     }
 
     if (discountProductId) {
@@ -1064,6 +1070,8 @@ export async function buildOrderLineItems(
     }
     if (isCreation && defaultLineTaxCmd) {
       codLine[lineTaxField] = [defaultLineTaxCmd]
+    } else if (isCreation && !enableVat) {
+      codLine[lineTaxField] = [[6, 0, []]]
     }
     if (codProductId) {
       codLine['product_id'] = Number(codProductId)
