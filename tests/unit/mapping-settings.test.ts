@@ -404,3 +404,20 @@ describe('every standard_mapping_settings read in src is store-scoped', () => {
     expect(route).toMatch(/getEffectiveStandardMappingSettings\(/)
   })
 })
+
+
+describe('queue-worker settings freshness', () => {
+  it('does not use a process-local TTL cache for ERP execution settings', () => {
+    const engineSettings = fs.readFileSync(
+      path.join(process.cwd(), 'src/lib/sync/settings.ts'),
+      'utf8'
+    )
+    const reader = engineSettings.slice(
+      engineSettings.indexOf('export async function getCachedStandardMappingSettings'),
+      engineSettings.indexOf('// ─── Helper: check if category sync operation')
+    )
+    expect(reader).toMatch(/return getEffectiveStandardMappingSettings\(/)
+    expect(reader).not.toMatch(/ttlCache\.get\(/)
+    expect(reader).not.toMatch(/30_000/)
+  })
+})
