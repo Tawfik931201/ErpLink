@@ -1,5 +1,5 @@
 import { categoryFields, categoryMatchValue } from '@/lib/categories/odoo-values'
-import { customerMatchCandidateAllowed } from '@/lib/customers/matching-settings'
+import { customerLinkHasConflict, customerMatchCandidateAllowed } from '@/lib/customers/matching-settings'
 import { resolveEntityLinkId, STORED_ODOO_ID_FIELD } from '@/lib/entity-links'
 import { withErpCreateIdentity } from '@/lib/erp-effect-context'
 import { getErpExecutionScope } from '@/lib/erp-execution-target'
@@ -284,7 +284,7 @@ export async function findExistingOdooRecord(
         .neq('store_entity_id', zidId)
         .limit(1)
       if (error) throw new CustomerMatchSafetyError('Cannot verify customer ownership: entity links query failed')
-      if (data?.length) {
+      if (customerLinkHasConflict(data, zidId)) {
         throw new CustomerMatchSafetyError(`Customer link conflict: Odoo partner #${recordId} is already linked to a different ${platform} customer (${data[0].store_entity_id}); refusing to overwrite it from ${zidId}`)
       }
     }
