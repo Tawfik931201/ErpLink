@@ -54,6 +54,17 @@ export function isVoucher(data: Record<string, unknown> | null | undefined): boo
   return String(data.product_class ?? '').trim() === 'voucher'
 }
 
+/** True when the payload belongs to a Zid downloadable digital product. */
+export function isDownloadable(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data || typeof data !== 'object') return false
+  return String(data.product_class ?? '').trim() === 'downloadable'
+}
+
+/** Zid product classes whose fulfillment is digital and must never create stock in Odoo. */
+export function isZidDigitalProduct(data: Record<string, unknown> | null | undefined): boolean {
+  return isVoucher(data) || isDownloadable(data)
+}
+
 /**
  * Zid carries bundle components in two shapes:
  *  - an array of {item_id|id, sku, name, quantity} entries, or
