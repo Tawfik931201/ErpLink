@@ -731,7 +731,10 @@ export async function ensureSaleOrderTaxes(
       )
     }
 
-    if (!lines || lines.length === 0) return
+    if (!lines || lines.length === 0) {
+      if (strict) throw new Error('Cannot verify taxes: Odoo sale order has no readable lines')
+      return
+    }
 
     const linesNeedingUpdate: number[] = []
     for (const line of lines) {
@@ -760,6 +763,33 @@ export async function ensureSaleOrderTaxes(
         `[SyncEngine] ✅ Enforced destination tax (${expectedTaxIds.length > 0 ? expectedTaxIds.join(',') : '0%'} ` +
         `for country "${destinationCountryCode || 'Unknown'}" matched "${appliedCountryCode}") on ${linesNeedingUpdate.length} line(s) of sale.order #${odooOrderId}`
       )
+    }
+
+    // A successful RPC acknowledgement alone cannot prove taxes stayed applied.
+    // Odoo customizations may recompute tax_ids during or immediately after a
+    // write. Re-read persisted lines before declaring the Zid event successful.
+    if (strict) {
+      const confirmedLines = await client.searchRead<any>(
+        'sale.order.line',
+        [['order_id', '=', odooOrderId], ['display_type', '=', false]],
+        ['id', taxField],
+      )
+      const expectedLineIds = new Set(lines.map((line: any) => Number(line.id)))
+      if (confirmedLines.length !== expectedLineIds.size ||
+          confirmedLines.some((line: any) => !expectedLineIds.has(Number(line.id)))) {
+        throw new Error('ERP_OUTCOME_UNKNOWN: Odoo order lines changed while validating taxes')
+      }
+      for (const line of confirmedLines) {
+        const raw = line[taxField]
+        if (!Array.isArray(raw)) {
+          throw new Error('Configured order taxes could not be read back')
+        }
+        const current = raw.map(Number).filter((id: number) => Number.isInteger(id) && id > 0)
+        if (current.length !== expectedTaxIds.length ||
+            current.some((id: number) => !expectedTaxIds.includes(id))) {
+          throw new Error('Configured order taxes did not persist in Odoo')
+        }
+      }
     }
   } catch (err: any) {
     if (strict) throw err
@@ -917,7 +947,12 @@ export async function maybeApplyOrderStatusAction(
       })
     }
     await syncConfiguredPayment()
-    if (resolvedPlatform === 'zid') await assertOrderActionResults(client, odooRecordId, row)
+    // Payment, invoice and workflow hooks may cause another Odoo tax recompute.
+    // Verify the *final* persisted line taxes before claiming Zid status success.
+    if (resolvedPlatform === 'zid') {
+      await ensureSaleOrderTaxes(client, odooRecordId, zidData, workspaceId, resolvedPlatform, storeId, true)
+      await assertOrderActionResults(client, odooRecordId, row)
+    }
   } catch (err: any) {
     if ((platform || 'zid') === 'zid' || sallaCreateSettings) throw err
     console.warn('[SyncEngine] Status mapping dispatch failed (non-fatal):', err?.message || err)
