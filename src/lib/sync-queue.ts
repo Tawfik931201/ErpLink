@@ -479,6 +479,7 @@ interface QueueItem {
   updated_at: string | null
   lease_token: string | null
   lease_expires_at: string | null
+  processing_started_at?: string | null
   outcome_unknown: boolean
   erp_connection_id: string | null
   connection_generation: string | null
@@ -596,10 +597,27 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
 
   const productDependencyRank = (item: QueueItem): number => {
     const payload: any = item.payload ?? {}
-    const isChild = Boolean(payload.parent_id ?? payload.parent?.id ?? payload.product?.parent_id ?? payload.product?.parent?.id)
-    if (!isChild) return 0
-    if (/delete|unpublish/i.test(item.event || '')) return 2
-    return 1
+    const isChild = Boolean(
+      payload.parent_id ?? payload.parent?.id ?? payload.product?.parent_id ?? payload.product?.parent?.id
+    )
+    const event = String(item.event || '').toLowerCase()
+    const isCreate = /(?:^|[._])create(?:d)?$/.test(event)
+    const isDelete = /(?:^|[._])(?:delete|deleted|unpublish|unpublished)$/.test(event)
+    const isPublishOrUpdate = /(?:^|[._])(?:publish|published|update|updated)$/.test(event)
+
+    // Product-family dependency order:
+    //  0 parent create
+    //  1 child create(s)
+    //  2 parent update/publish
+    //  3 child update/publish
+    //  4 child delete/unpublish
+    //  5 parent delete/unpublish
+    // This deliberately lets a later-arriving create overtake an earlier
+    // publish/update for the same family, preventing "record not found" noise.
+    if (isCreate) return isChild ? 1 : 0
+    if (isPublishOrUpdate) return isChild ? 3 : 2
+    if (isDelete) return isChild ? 4 : 5
+    return isChild ? 3 : 2
   }
 
   for (const [, list] of perWorkspace) {
@@ -652,28 +670,32 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   // الحل: نفس التحديث المشروط (يبقى ذرّياً **لكل صف** — الشرط
   // `.lte('next_retry_at', now)` هو ما يمنع العاملين من التقاط الصف
   // نفسه)، لكن **بالتوازي** وبحدّ تزامن صغير. رحلة واحدة بدل 50.
-  const CLAIM_CONCURRENCY = 10
-  const claimed: QueueItem[] = []
-  const claimOne = (item: QueueItem) => claimQueueItem(item.id, false)
+  const CLAIM_CONCURRENCY = Math.max(1, Math.min(10, SYNC_QUEUE_CONCURRENCY))
+  let claimedCount = 0
+
+  // Claim only the next execution wave. Previously the whole batch was leased
+  // up-front, so rows could sit leased for minutes without ever reaching ERP.
+  // A deploy/restart during that wait left "ghost" leases. Wave claiming keeps
+  // a lease tightly coupled to work that is about to start.
   for (let offset = 0; offset < batch.length; offset += CLAIM_CONCURRENCY) {
     const slice = batch.slice(offset, offset + CLAIM_CONCURRENCY)
-    const results = await Promise.all(slice.map(claimOne))
-    for (const result of results) {
-      if (result) claimed.push(result)
-    }
+    const results = await Promise.all(slice.map((item) => claimQueueItem(item.id, false)))
+    const claimed = results.filter((item): item is QueueItem => Boolean(item))
+    if (claimed.length === 0) continue
+    claimedCount += claimed.length
+
+    // Finish this claimed wave before leasing the next one. At most the active
+    // execution window can be stranded by a process restart.
+    await processClaimedFairly(claimed)
   }
 
-  if (claimed.length === 0) {
+  if (claimedCount === 0) {
     await maybeCleanup()
     return 0
   }
 
-  // ── توازي متعدد العملاء مع كبح التنافس لكل أودو منفرد ──
-  // يمنع إغراق أي قاعدة أودو واحدة بطلبات متزامنة تتسبب في أقفال (ir.sequence locks)
-  await processClaimedFairly(claimed)
-
   await maybeCleanup()
-  return claimed.length
+  return claimedCount
 }
 
 /**
@@ -832,7 +854,7 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
 async function claimQueueItem(id: string, forceImmediate: boolean): Promise<QueueItem | null> {
   try {
     const { data, error } = await supabase.rpc('claim_sync_job', {
-      p_job_id: id, p_force: forceImmediate, p_lease_seconds: 900,
+      p_job_id: id, p_force: forceImmediate, p_lease_seconds: 60,
     })
     if (error) { getMetricsStore().lastError = 'queue claim unavailable'; return null }
     const item = (Array.isArray(data) ? data[0] : data) as QueueItem | undefined
@@ -857,6 +879,37 @@ async function parkUnknownOutcome(item: QueueItem): Promise<void> {
   if (error) getMetricsStore().lastError = 'unknown outcome quarantine failed; lease expiry recovery required'
 }
 
+async function markQueueItemStarted(item: QueueItem): Promise<boolean> {
+  const activeLeaseMs = Math.max(
+    SYNC_QUEUE_ITEM_TIMEOUT_MS + 60_000,
+    Number(process.env.SYNC_QUEUE_ACTIVE_LEASE_MS) || 180_000
+  )
+  const leaseSeconds = Math.ceil(activeLeaseMs / 1000)
+
+  try {
+    const { data, error } = await supabase.rpc('mark_sync_job_started', {
+      p_job_id: item.id,
+      p_lease_token: item.lease_token,
+      p_lease_seconds: leaseSeconds,
+    })
+    if (!error) return Number(data ?? 0) > 0
+
+    // Backward-compatible deploy window: if the migration has not reached the
+    // database yet, preserve the fenced token and extend the active lease.
+    const { data: fallbackRows, error: fallbackError } = await supabase
+      .from('sync_queue')
+      .update({ lease_expires_at: new Date(Date.now() + activeLeaseMs).toISOString() })
+      .eq('id', item.id)
+      .eq('lease_token', item.lease_token)
+      .gt('lease_expires_at', new Date().toISOString())
+      .select('id')
+    if (fallbackError) return false
+    return (fallbackRows?.length ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 async function processOneItem(item: QueueItem) {
   const metrics = getMetricsStore()
   metrics.processed += 1
@@ -864,11 +917,19 @@ async function processOneItem(item: QueueItem) {
     await parkUnknownOutcome(item)
     return
   }
+  if (!(await markQueueItemStarted(item))) {
+    metrics.lastError = `queue start fence lost: ${item.platform}:${item.event}`
+    return
+  }
+  const activeLeaseMs = Math.max(
+    SYNC_QUEUE_ITEM_TIMEOUT_MS + 60_000,
+    Number(process.env.SYNC_QUEUE_ACTIVE_LEASE_MS) || 180_000
+  )
   const heartbeat = setInterval(() => {
     void (async () => {
       try {
         const { error } = await supabase.from('sync_queue').update({
-          lease_expires_at: new Date(Date.now() + 900_000).toISOString(),
+          lease_expires_at: new Date(Date.now() + activeLeaseMs).toISOString(),
         }).eq('id', item.id).eq('lease_token', item.lease_token)
           .gt('lease_expires_at', new Date().toISOString())
         if (error) metrics.lastError = 'queue heartbeat failed'
