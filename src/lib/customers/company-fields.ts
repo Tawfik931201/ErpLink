@@ -57,3 +57,25 @@ export function normalizeCustomerCompanyTypeForOdoo(
   }
   return values
 }
+
+
+/**
+ * Optional company details are not present in every Odoo database/version.
+ * In particular Odoo 20 may not expose company_registry, even when a
+ * Zid business customer supplies a commercial registration number.
+ * Never send an absent optional field to res.partner.write/create.
+ * The supported-fields map comes from the *connected* Odoo fields_get.
+ */
+export function pruneUnsupportedCustomerCompanyFields(
+  odooValues: Record<string, unknown>,
+  supportedFields: Record<string, unknown>,
+): Record<string, unknown> {
+  const values = { ...odooValues }
+  for (const field of ['company_registry', 'company_name', 'vat', 'company_type', 'is_company']) {
+    if (Object.prototype.hasOwnProperty.call(values, field) &&
+        !Object.prototype.hasOwnProperty.call(supportedFields, field)) {
+      delete values[field]
+    }
+  }
+  return values
+}

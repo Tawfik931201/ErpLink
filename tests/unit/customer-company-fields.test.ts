@@ -1,4 +1,4 @@
-import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo } from '../../src/lib/customers/company-fields'
+import { injectCustomerCompanyFields, normalizeCustomerCompanyTypeForOdoo, pruneUnsupportedCustomerCompanyFields } from '../../src/lib/customers/company-fields'
 
 describe('customer company fields characterization', () => {
   it('fills undefined fields from platform aliases and classifies companies', () => {
@@ -51,4 +51,42 @@ describe('customer company fields characterization', () => {
     expect(normalizeCustomerCompanyTypeForOdoo({ company_type: 'company', is_company: false }, 20))
       .toEqual({ is_company: false })
   })
+  it('filters optional Zid B2B metadata absent on an Odoo 20 partner model', () => {
+    const values = injectCustomerCompanyFields(
+      { name: 'ERPTEST Business', phone: '966500000001' },
+      { tax_number: '300000000000003', commercial_registration: '1010123456', business_name: 'ERPTEST LLC' },
+    )
+    const normalized = normalizeCustomerCompanyTypeForOdoo(values, 20)
+    const supported = {
+      name: {}, phone: {}, vat: {}, company_name: {}, is_company: {},
+    }
+    expect(pruneUnsupportedCustomerCompanyFields(normalized, supported)).toEqual({
+      name: 'ERPTEST Business',
+      phone: '966500000001',
+      vat: '300000000000003',
+      company_name: 'ERPTEST LLC',
+      is_company: true,
+    })
+  })
+
+  it('keeps company_registry on Odoo versions that expose it', () => {
+    const values = injectCustomerCompanyFields({ name: 'B2B' }, { commercial_registration: '1234567890' })
+    const normalized = normalizeCustomerCompanyTypeForOdoo(values, 14)
+    expect(pruneUnsupportedCustomerCompanyFields(normalized, {
+      company_registry: {}, company_type: {},
+    })).toEqual({
+      name: 'B2B',
+      company_registry: '1234567890',
+      company_type: 'company',
+    })
+  })
+
+  it('never mutates caller values while dropping unsupported metadata', () => {
+    const source = { name: 'Business', vat: '123', company_registry: 'CR', is_company: true }
+    expect(pruneUnsupportedCustomerCompanyFields(source, { vat: {}, is_company: {} })).toEqual({
+      name: 'Business', vat: '123', is_company: true,
+    })
+    expect(source.company_registry).toBe('CR')
+  })
+
 })
