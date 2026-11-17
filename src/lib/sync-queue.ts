@@ -1045,6 +1045,18 @@ async function noteWorkspaceFailure(
   }
 }
 
+function isCircuitBreakerFailure(errorMessage?: string): boolean {
+  if (!errorMessage) return false
+  // The breaker protects an unavailable ERP/network. Deterministic business
+  // errors (validation, missing parent dependency, duplicate combination, etc.)
+  // must retry/freeze only their own queue row; otherwise ten bad product
+  // events can park stock/orders for the whole workspace.
+  return /unknown xml-rpc tag|invalid xml-rpc|non-whitespace before first tag|unexpected token\s*</i.test(errorMessage)
+    || /socket hang up|econnreset|epipe|etimedout|econnrefused|enotfound/i.test(errorMessage)
+    || /\b(?:502|503|504)\b|bad gateway|service unavailable|gateway timeout/i.test(errorMessage)
+    || /erp request timed out|network error|fetch failed/i.test(errorMessage)
+}
+
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const metrics = getMetricsStore()
   if (/unknown.outcome|outcome.unknown|uncertain|in.progress|reconciliation required/i.test(errorMessage ?? '')) {
@@ -1054,9 +1066,7 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
 
-  const isOrderPending = typeof errorMessage === 'string' && (/not yet found in Odoo for status update/i).test(errorMessage)
-  if (!isOrderPending) {
-    // كل فشل يمر من هنا — نقطة الربط الوحيدة لقاطع الدائرة لكل عميل.
+  if (isCircuitBreakerFailure(errorMessage)) {
     await noteWorkspaceFailure(item.workspace_id, errorMessage).catch(() => {})
   }
 
