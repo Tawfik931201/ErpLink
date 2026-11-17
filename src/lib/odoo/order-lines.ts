@@ -611,9 +611,17 @@ export async function buildOrderLineItems(
       }
     }
 
-    // If price_unit wasn't set from mapping, derive it
+    // If price_unit wasn't set from mapping, derive it from the amount Zid
+    // actually charged. Zid can expose catalog/net_price (e.g. 100) beside
+    // the order sale price (e.g. price/net_sale_price 81.23) even when it does
+    // not mark the row as discounted. Only preserve the pre-discount/base
+    // price when ERP Link is explicitly representing the discount itself.
     if (!line['price_unit'] && !(platform === 'salla' && line.price_unit === 0)) {
-      line['price_unit'] = (zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0)
+      const representDiscountSeparately =
+        shouldApplyPercentToLine || (addDiscountAsLine && discountMode !== 'percent')
+      line['price_unit'] = representDiscountSeparately
+        ? ((zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0))
+        : ((zidSalePrice > 0) ? zidSalePrice : (zidPrice > 0 ? zidPrice : 0))
     }
 
     if (currencyConversionRate > 0 && currencyConversionRate !== 1.0 && typeof line['price_unit'] === 'number') {
@@ -667,6 +675,19 @@ export async function buildOrderLineItems(
           line[lineTaxField] = [[6, 0, [resolvedMappingTaxId]]]
         } else if (defaultLineTaxCmd) {
           line[lineTaxField] = [defaultLineTaxCmd]
+        } else if (!enableVat && platform === 'zid') {
+          // A Zid order line with an explicit zero tax is authoritative.
+          // Leaving taxes undefined lets Odoo inject the product's default
+          // sales tax and silently changes the order total.
+          const rawTaxAmount = productData.tax_amount ?? productData.discounted_tax_amount
+          const rawTaxPercent = productData.tax_percentage
+          const hasExplicitZeroTax =
+            rawTaxAmount !== undefined && rawTaxAmount !== null &&
+            Number(rawTaxAmount) === 0 &&
+            (rawTaxPercent === undefined || rawTaxPercent === null || Number(rawTaxPercent) === 0)
+          if (hasExplicitZeroTax) {
+            line[lineTaxField] = [[6, 0, []]]
+          }
         }
       }
     }
