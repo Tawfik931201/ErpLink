@@ -55,4 +55,12 @@ describe('durable queue race guards', () => {
     expect(claim.includes('return null')).toBe(true)
     expect(claim.includes('.update(')).toBe(false)
   })
+  it('serializes parent and child product events within one product family', () => {
+    expect(source.includes('const productFamilyId = (item: QueueItem)')).toBe(true)
+    expect(source.includes('const runningProductFamilies = new Set<string>()')).toBe(true)
+    expect(source.includes('serialProductKey(item)')).toBe(true)
+    expect(source.includes('runningProductFamilies.add(productKey)')).toBe(true)
+    expect(source.includes('runningProductFamilies.delete(productKey)')).toBe(true)
+  })
+
 })
