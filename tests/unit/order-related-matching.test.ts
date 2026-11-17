@@ -47,6 +47,15 @@ describe('read-only order relation matching from customer/product settings', () 
     expect(client.search).not.toHaveBeenCalled()
   })
 
+  it('resolves legacy Zid telephone matching from an order customer mobile value', async () => {
+    const { cast, client } = fixture('phone')
+    const result = await resolveOrderRelatedRecord(cast, supabase, identity, 'customers',
+      { id: 1001, mobile: '966599991817' },
+      { match_zid_field: 'telephone', match_odoo_field: 'phone' })
+    expect(result).toMatchObject({ configured: true, recordId: 42, match: { sourceField: 'telephone', targetField: 'phone', value: '966599991817' } })
+    expect(client.search).toHaveBeenCalledWith('res.partner', [['phone', '=', '966599991817']], 2)
+  })
+
   it('preserves a saved mobile match on Odoo 19 by using its confirmed phone replacement', async () => {
     const client = { ...fixture().client, getMajorVersion: jest.fn().mockResolvedValue(19) }
     client.execute.mockResolvedValueOnce([]).mockResolvedValueOnce([{ name: 'phone', ttype: 'char', readonly: false }])
