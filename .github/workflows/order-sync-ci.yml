@@ -44,11 +44,11 @@ jobs:
         run: npm ci
       - name: TypeScript
         run: npm run type-check
-      - name: Orders and queue regression tests
+      - name: Full Jest regression suite (all 140 test files)
         env:
           # Offline Jest fixtures instantiate a Supabase client but never connect.
           # Use non-secret dummy credentials; production credentials are not needed.
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
           SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
-        run: npm test -- --runInBand --testPathPattern='tests/unit/(order-|queue-|odoo-order-|queue-unknown-visibility)'
+        run: npm test -- --runInBand
