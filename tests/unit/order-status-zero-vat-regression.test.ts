@@ -1,22 +1,22 @@
 import type { OdooClient } from '@/lib/odoo-client'
 
-jest.mock('@/lib/sync-runtime', () => ({
+jest.mock('../../src/lib/sync-runtime', () => ({
   supabaseAdmin: {},
   logSync: jest.fn(),
 }))
-jest.mock('@/lib/auto-bootstrap', () => ({ getSmartDefaultOrderState: jest.fn(() => 'draft') }))
-jest.mock('@/lib/entity-links', () => ({ upsertEntityLink: jest.fn() }))
-jest.mock('@/lib/odoo/order-payment', () => ({
+jest.mock('../../src/lib/auto-bootstrap', () => ({ getSmartDefaultOrderState: jest.fn(() => 'draft') }))
+jest.mock('../../src/lib/entity-links', () => ({ upsertEntityLink: jest.fn() }))
+jest.mock('../../src/lib/odoo/order-payment', () => ({
   reconcilePendingPaymentsForOrder: jest.fn(),
   syncOrderPayment: jest.fn(async () => ({})),
 }))
-jest.mock('@/lib/sync/settings', () => ({
+jest.mock('../../src/lib/sync/settings', () => ({
   getCachedStandardMappingSettings: jest.fn(),
 }))
-jest.mock('@/lib/odoo/field-meta', () => ({ getSaleOrderSelectionKeys: jest.fn() }))
+jest.mock('../../src/lib/odoo/field-meta', () => ({ getSaleOrderSelectionKeys: jest.fn() }))
 
-import { ensureSaleOrderTaxes } from '@/lib/odoo/order-workflow'
-import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
+import { ensureSaleOrderTaxes } from '../../src/lib/odoo/order-workflow'
+import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 
 const settings = getCachedStandardMappingSettings as jest.Mock
 
