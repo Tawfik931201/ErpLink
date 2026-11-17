@@ -23,6 +23,45 @@ export interface GenericVariant {
   source?: Record<string, unknown>
 }
 
+/**
+ * Fail fast on malformed source combinations BEFORE touching Odoo.
+ *
+ * Without this preflight a product.template may already be created when an
+ * optionless child fails to match a product.product. Retries then repeatedly
+ * mutate that partial template and leave misleading failed queue jobs.
+ *
+ * Works with Odoo 14–20: only source payload validation, no version API.
+ */
+export function assertCompleteVariantCombinations(variants: GenericVariant[]): void {
+  const seen = new Set<string>()
+  let expectedAttributeKeys: string[] | null = null
+
+  for (const variant of variants) {
+    const entries = Object.entries(variant.attributes ?? {}).map(([key, value]) => [
+      key.trim().toLowerCase(),
+      String(value ?? '').trim().toLowerCase(),
+    ] as const)
+    const sourceId = String(variant.sku || variant.id || 'unknown')
+
+    if (entries.length === 0 || entries.some(([key, value]) => !key || !value)) {
+      throw new Error(`Invalid product variant configuration: missing attribute combination for ${sourceId}`)
+    }
+    const keys = entries.map(([key]) => key).sort()
+    if (new Set(keys).size !== keys.length) {
+      throw new Error(`Invalid product variant configuration: duplicate attribute names for ${sourceId}`)
+    }
+    if (expectedAttributeKeys === null) expectedAttributeKeys = keys
+    else if (keys.join('\\u0000') !== expectedAttributeKeys.join('\\u0000')) {
+      throw new Error(`Invalid product variant configuration: inconsistent attribute groups for ${sourceId}`)
+    }
+    const signature = JSON.stringify(entries.sort(([a], [b]) => a.localeCompare(b)))
+    if (seen.has(signature)) {
+      throw new Error(`Invalid product variant configuration: duplicate attribute combination for ${sourceId}`)
+    }
+    seen.add(signature)
+  }
+}
+
 /** Odoo's automatic attribute lines generate the Cartesian product. */
 export function assertSallaVariantCombinations(variants: GenericVariant[]): void {
   const attributes = new Map<string, Set<string>>()

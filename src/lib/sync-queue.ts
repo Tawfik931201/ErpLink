@@ -1118,11 +1118,76 @@ function isCircuitBreakerFailure(errorMessage?: string): boolean {
     || /erp request timed out|network error|fetch failed/i.test(errorMessage)
 }
 
+/**
+ * A malformed variant can never become valid by replaying the same webhook
+ * payload. Archive it with its full receipt and diagnostic instead of retrying
+ * five times and leaving a permanent queue entry. A corrected Zid event will
+ * have its own durable receipt.
+ *
+ * Never use this path for network errors or uncertain ERP effects.
+ */
+function isInvalidProductVariantInput(item: QueueItem, errorMessage?: string): boolean {
+  return item.platform === 'zid'
+    && /^product[._]/i.test(item.event)
+    && /Invalid product variant configuration:|Cannot create a variant without a complete attribute combination:|Child .* has no attribute combination/i.test(errorMessage ?? '')
+}
+
+async function archiveInvalidProductVariant(item: QueueItem, errorMessage: string): Promise<boolean> {
+  const { data: row, error: readError } = await supabase
+    .from('sync_queue')
+    .select('id,workspace_id,store_id,event,platform,dedup_key,payload,retry_count,receipt_id,erp_connection_id,connection_generation,execution_key')
+    .eq('id', item.id)
+    .eq('lease_token', item.lease_token)
+    .eq('outcome_unknown', false)
+    .maybeSingle()
+  if (readError || !row) return false
+
+  const { error: archiveError } = await supabase.from('sync_queue_dead').insert({
+    original_id: row.id,
+    receipt_id: row.receipt_id,
+    erp_connection_id: row.erp_connection_id,
+    connection_generation: row.connection_generation,
+    execution_key: row.execution_key,
+    workspace_id: row.workspace_id,
+    store_id: row.store_id,
+    event: row.event,
+    platform: row.platform,
+    dedup_key: row.dedup_key,
+    payload: row.payload ?? {},
+    error_message: ('Invalid source product variant; correct its option attributes in Zid before re-sync. ' + errorMessage).slice(0, 1000),
+    retry_count: (row.retry_count ?? 0) + 1,
+  })
+  if (archiveError) {
+    // Replayed archive attempt or another worker won the race; only proceed
+    // when we can verify that THIS queue ID was durably archived.
+    if (archiveError.code !== '23505') return false
+    const { data: alreadyArchived, error: archiveReadError } = await supabase
+      .from('sync_queue_dead').select('original_id').eq('original_id', row.id).maybeSingle()
+    if (archiveReadError || !alreadyArchived) return false
+  }
+
+  const { data: deleted, error: deleteError } = await supabase
+    .from('sync_queue').delete()
+    .eq('id', item.id)
+    .eq('lease_token', item.lease_token)
+    .eq('outcome_unknown', false)
+    .select('id')
+  if (deleteError) return false
+  return (deleted?.length ?? 0) > 0
+}
+
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const metrics = getMetricsStore()
   if (/unknown.outcome|outcome.unknown|uncertain|in.progress|reconciliation required/i.test(errorMessage ?? '')) {
     await parkUnknownOutcome(item)
     return
+  }
+  if (isInvalidProductVariantInput(item, errorMessage)) {
+    if (await archiveInvalidProductVariant(item, errorMessage ?? 'invalid variant payload')) {
+      metrics.lastError = `invalid Zid variant archived (requires source correction): ${item.id}`
+      return
+    }
+    // Archive failure must not cause data loss; retain standard retry/freeze.
   }
   const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
