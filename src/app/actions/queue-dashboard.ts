@@ -46,11 +46,14 @@ export async function getQueueOverview() {
     const workspaceId = await getActiveWorkspaceId()
     if (!workspaceId) return authError()
 
-    const [pending, frozen, dead, archived, orphans] = await Promise.all([
+    const [pending, frozen, uncertain, dead, archived, orphans] = await Promise.all([
       countExact('sync_queue', (q: any) => q.eq('workspace_id', workspaceId).not('next_retry_at', 'is', null)),
       countExact('sync_queue', (q: any) =>
         q.eq('workspace_id', workspaceId).or(`next_retry_at.is.null,next_retry_at.eq.${FROZEN_SENTINEL}`)
       ),
+      // Unknown remote outcomes cannot be replayed automatically; separate them
+      // from ordinary retry-exhausted rows so the UI never implies Retry Frozen fixes them.
+      countExact('sync_queue', (q: any) => q.eq('workspace_id', workspaceId).eq('outcome_unknown', true)),
       countExact('sync_queue_dead', (q: any) => q.eq('workspace_id', workspaceId)),
       // الأرشيف اليدوي (7 أيام) يُعرض داخل تبويب "الأرشيف" نفسه، فعدّاده يُضاف
       // إليه في الواجهة. يُقرأ منفصلاً حتى يبقى معنى `dead` (أرشيف الموتى) واضحاً.
@@ -63,6 +66,7 @@ export async function getQueueOverview() {
       overview: {
         pending,
         frozen,
+        uncertain,
         orphans: orphans.success ? orphans.totalCount : null,
         dead,
         archived,
