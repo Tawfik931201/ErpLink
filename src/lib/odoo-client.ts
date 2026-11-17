@@ -119,14 +119,17 @@ function getAgent(url: string): https.Agent | http.Agent {
   return agent
 }
 
-function createXmlRpcClient(url: string, path: string) {
+function createXmlRpcClient(url: string, path: string, freshConnection = false) {
   const parsed = new URL(url)
   const isHttps = parsed.protocol === 'https:'
+  const freshAgent = isHttps
+    ? new https.Agent({ keepAlive: false })
+    : new http.Agent({ keepAlive: false })
   const options = {
     host: parsed.hostname,
     port: parsed.port ? parseInt(parsed.port) : isHttps ? 443 : 80,
     path,
-    agent: getAgent(url),
+    agent: freshConnection ? freshAgent : getAgent(url),
   }
   return isHttps ? xmlrpc.createSecureClient(options) : xmlrpc.createClient(options)
 }
@@ -149,6 +152,20 @@ function callAsync<T>(client: ReturnType<typeof xmlrpc.createClient>, method: st
       else finish(resolve, value)
     })
   })
+}
+
+/**
+ * Some reverse proxies return an HTML error page for a temporarily failed
+ * XML-RPC request. The `xmlrpc` package then reports parser errors such as
+ * "Unknown XML-RPC tag 'TITLE'" instead of the underlying 502/503 response.
+ * Treat those parser/network failures as transient transport failures.
+ */
+export function isTransientXmlRpcTransportError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return /unknown xml-rpc tag|unexpected token\s*</i.test(message)
+    || /non-whitespace before first tag|invalid xml-rpc/i.test(message)
+    || /socket hang up|econnreset|epipe|etimedout|econnrefused/i.test(message)
+    || /\b(?:502|503|504)\b|bad gateway|service unavailable|gateway timeout/i.test(message)
 }
 
 /** هل الخطأ خطأ مصادقة (⇒ يُبطَل الـuid المخزَّن)؟ */
@@ -285,7 +302,22 @@ export class OdooClient {
     }
 
     try {
-      const result = await callAsync<T>(object, 'execute_kw', rpcParams)
+      let result: T
+      try {
+        result = await callAsync<T>(object, 'execute_kw', rpcParams)
+      } catch (firstErr: any) {
+        // Reads and ORM writes are safe to repeat with the same arguments.
+        // Retry once on a fresh socket when a proxy returned HTML / a stale
+        // keep-alive connection broke. Never auto-retry create/unlink/action
+        // calls here: their outcome may already have been committed remotely.
+        const safeToRetry = readMethods.includes(method) || method === 'write'
+        if (!safeToRetry || !isTransientXmlRpcTransportError(firstErr)) throw firstErr
+        console.warn(
+          `[OdooClient] transient XML-RPC transport failure on ${model}.${method}; retrying once with a fresh connection: ${firstErr?.message ?? String(firstErr)}`
+        )
+        const freshObject = createXmlRpcClient(this.config.url, '/xmlrpc/2/object', true)
+        result = await callAsync<T>(freshObject, 'execute_kw', rpcParams)
+      }
       if (isDebug) {
         console.log(`\n[OdooClient] ← ${model}.${method} RESPONSE:`)
         console.log(JSON.stringify(result, null, 2))
