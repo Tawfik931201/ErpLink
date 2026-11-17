@@ -63,4 +63,16 @@ describe('durable queue race guards', () => {
     expect(source.includes('runningProductFamilies.delete(productKey)')).toBe(true)
   })
 
+  it('does not trip the workspace circuit breaker for deterministic business errors', () => {
+    expect(source.includes('function isCircuitBreakerFailure(errorMessage?: string)')).toBe(true)
+    expect(source.includes('if (isCircuitBreakerFailure(errorMessage))')).toBe(true)
+    expect(source.includes('Parent product template')).toBe(false)
+    const classifier = source.slice(
+      source.indexOf('function isCircuitBreakerFailure'),
+      source.indexOf('async function incrementRetry')
+    )
+    expect(classifier).toMatch(/unknown xml-rpc tag/)
+    expect(classifier).toMatch(/502\|503\|504/)
+  })
+
 })
