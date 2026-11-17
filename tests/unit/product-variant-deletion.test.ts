@@ -78,3 +78,12 @@ describe('wiring pins: native variant executor calls the reconciliation', () => 
     expect(guard(source.replace('pickStaleZidVariants({', 'noReconciliation({'))).toBe(false)
   })
 })
+
+
+describe('variant attribute-line race guards', () => {
+  it('re-reads and consolidates duplicate attribute lines before variant generation', () => {
+    expect(source).toMatch(/ensureSingleAttributeLine\(/)
+    expect(source).toMatch(/lines\.slice\(1\).*flatMap/)
+    expect(source).toMatch(/client\.unlink\('product\.template\.attribute\.line', duplicateIds\)/)
+  })
+})
