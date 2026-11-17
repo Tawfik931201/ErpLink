@@ -7,6 +7,7 @@ import type { OdooClient } from '@/lib/odoo-client'
 import { platformIdField, platformLegacyIdField } from '@/lib/platform-fields'
 import { assertProductWriteAllowed, finiteProductNumber } from '@/lib/products/settings-values'
 import { readAllProductRows, syncVariantPrices } from '@/lib/products/variant-prices'
+import { pickStaleZidVariants } from '@/lib/products/variant-reconciliation'
 import type { GenericVariant } from '@/lib/products/variants'
 import { resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
@@ -333,6 +334,52 @@ export async function syncAsVariants(
   }
   for (const [sourceId, recordId] of variantRecords) {
     await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: sourceId, odoo_model: 'product.product', odoo_record_id: recordId, status: 'success', payload: zidData, trigger_type: triggerType, platform })
+  }
+
+  // Zid reports a removed option value as a parent product.update with a
+  // shorter variants[] list — there is no product.delete for the child. Without
+  // reconciliation the Odoo product.product stayed active while the sync log
+  // said "success". Archive only variants this store previously wrote (prior
+  // success sync_logs) that are absent from the current full list. Guards:
+  // - update of an existing template only (a first create has no stale state);
+  // - non-empty incoming list (empty means unknown, never "remove everything");
+  // - every incoming variant carries an id (otherwise the list is not reliable).
+  const odooVariantIds = generatedVariants.map(v => Number(v.id)).filter(id => Number.isInteger(id) && id > 0)
+  const canReconcile = duplicateId !== null
+    && variants.length > 0
+    && variants.every(v => Boolean(v.id))
+    && odooVariantIds.length > 0
+    && Boolean(mapping.workspace_id)
+  if (canReconcile) {
+    try {
+      const { data: priorLogs } = await supabaseAdmin
+        .from('sync_logs')
+        .select('zid_entity_id, odoo_record_id')
+        .eq('workspace_id', mapping.workspace_id)
+        .eq('platform', platform)
+        .eq('store_id', storeId)
+        .eq('odoo_model', 'product.product')
+        .eq('status', 'success')
+        .in('odoo_record_id', odooVariantIds)
+      const priorLinks = (Array.isArray(priorLogs) ? priorLogs : []).map(row => ({
+        zidEntityId: String((row as any).zid_entity_id ?? ''),
+        odooRecordId: Number((row as any).odoo_record_id),
+      }))
+      const staleIds = pickStaleZidVariants({
+        odooVariantIds,
+        usedOdooVariantIds: usedVariantIds,
+        priorLinks,
+        currentZidVariantIds: variantRecords.keys(),
+      })
+      if (staleIds.length > 0) {
+        await client.write('product.product', staleIds, { active: false })
+        console.info(`[SyncEngine] Archived ${staleIds.length} Zid variant(s) removed from the parent product: #${staleIds.join(', #')}`)
+      }
+    } catch (err: any) {
+      // Reconciliation is a cleanup pass, not the primary sync. A failure here
+      // must not turn an otherwise successful product update into a retry.
+      console.warn(`[SyncEngine] Variant removal reconciliation failed for template #${templateId}:`, err?.message ?? err)
+    }
   }
 
   const successMsg = `Successfully synced product.template #${templateId} and updated ${updatedCount}/${variants.length} variant records.`
