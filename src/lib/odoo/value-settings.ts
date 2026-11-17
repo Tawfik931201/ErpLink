@@ -1,7 +1,7 @@
 import { HARDCODED_FIELD_META } from '@/lib/odoo/field-meta'
 import { extractOrderLocationInfo, resolveWarehouse } from '@/lib/odoo/order-location'
 import type { OdooClient } from '@/lib/odoo-client'
-import { formatBundleInternalNotes, isDynamicBundle, isVoucher } from '@/lib/products/bundle'
+import { formatBundleInternalNotes, isDynamicBundle, isZidDigitalProduct } from '@/lib/products/bundle'
 import { applyProductPriceSettings } from '@/lib/products/settings-values'
 import { resolvePath } from '@/lib/sync-helpers'
 import { supabaseAdmin } from '@/lib/sync-runtime'
@@ -108,11 +108,11 @@ export async function applyFixedSettingsToValues(
       wantsStorable = defaultType === 'product' || values.type === 'product' || values.is_storable === true
     }
 
-    // Dynamic bundles and vouchers are never stocked: record them as service
+    // Dynamic bundles and Zid digital products (voucher/downloadable) are never stocked: record them as service
     // products; bundles additionally keep the picked components as a
     // formatted Internal Notes list. Components themselves sync as ordinary
     // storable products.
-    if (isDynamicBundle(zidData) || isVoucher(zidData)) {
+    if (isDynamicBundle(zidData) || isZidDigitalProduct(zidData)) {
       values.type = 'service'
       values.is_storable = false
       if (isDynamicBundle(zidData)) {

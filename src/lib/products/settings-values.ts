@@ -1,3 +1,4 @@
+import { isZidDigitalProduct } from '@/lib/products/bundle'
 import { resolvePath } from '@/lib/sync-helpers'
 
 /** Empty/null prices are absent; zero is a real price, never a fallback signal. */
@@ -64,6 +65,7 @@ export function applyProductPriceSettings(
 export function shouldSyncProductStock(
   settings: Record<string, any>, data: Record<string, unknown>, platform?: 'zid' | 'salla' | 'shopify',
 ): boolean {
+  if (platform === 'zid' && isZidDigitalProduct(data)) return false
   const type = typeof settings.product_type === 'string' ? settings.product_type : settings.product_type?.default_type
   const allowed = type !== 'service' && settings.inventory?.track_inventory !== false
     && settings.inventory?.sync_enabled !== true && data.is_infinite !== true

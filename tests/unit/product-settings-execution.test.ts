@@ -74,15 +74,21 @@ describe('product Standard Mapping execution', () => {
     expect(values.list_price).toBe(50)
   })
 
-  it('substitutes a voucher as a service product, like a dynamic bundle', async () => {
-    const voucher19 = await applyFixedSettingsToValues({}, {}, { product_class: 'voucher' }, 19, undefined, 'zid', 'product.template')
-    expect(voucher19.type).toBe('service')
-    expect(voucher19.is_storable).toBe(false)
-    const voucher17 = await applyFixedSettingsToValues({}, {}, { product_class: 'voucher' }, 17, undefined, 'zid', 'product.template')
-    expect(voucher17.type).toBe('service')
-    expect(voucher17).not.toHaveProperty('is_storable')
-    // An ordinary product is never recorded as a service product (and with
-    // no inventory settings it is not storable either).
+  it.each(['voucher', 'downloadable'])('substitutes Zid digital class %s as a non-stocked service product', async productClass => {
+    const digital19 = await applyFixedSettingsToValues({}, {}, { product_class: productClass }, 19, undefined, 'zid', 'product.template')
+    expect(digital19.type).toBe('service')
+    expect(digital19.is_storable).toBe(false)
+    const digital17 = await applyFixedSettingsToValues({}, {}, { product_class: productClass }, 17, undefined, 'zid', 'product.template')
+    expect(digital17.type).toBe('service')
+    expect(digital17).not.toHaveProperty('is_storable')
+    expect(shouldSyncProductStock(
+      { product_type: { default_type: 'consu' }, inventory: { track_inventory: true, sync_enabled: false } },
+      { product_class: productClass, quantity: 10 },
+      'zid',
+    )).toBe(false)
+  })
+
+  it('keeps the Standard Mapping product type for an ordinary Zid product', async () => {
     const plain = await applyFixedSettingsToValues({}, {}, { product_class: 'standalone' }, 19, undefined, 'zid', 'product.template')
     expect(plain.type).toBe('consu')
     expect(plain.is_storable).toBe(false)
