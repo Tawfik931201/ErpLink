@@ -1,4 +1,4 @@
-import { defaultCustomerMatchFields, validateCustomerMatchSettings } from '../../src/lib/customers/matching-settings'
+import { customerMatchCandidateAllowed, defaultCustomerMatchFields, validateCustomerMatchSettings } from '../../src/lib/customers/matching-settings'
 
 describe('customer matching capabilities', () => {
   const fields = { id: { type: 'integer', readonly: true }, phone: { type: 'char' }, email: { type: 'char' }, child_ids: { type: 'one2many' } }
