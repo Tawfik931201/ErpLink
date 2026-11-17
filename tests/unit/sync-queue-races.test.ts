@@ -8,6 +8,10 @@ const leaseRecoverySql = fs.readFileSync(
   path.join(process.cwd(), 'supabase/migrations/20261117174500_queue_lease_recovery.sql'),
   'utf8'
 )
+const executeOperation = fs.readFileSync(
+  path.join(process.cwd(), 'src/lib/odoo/execute-operation.ts'),
+  'utf8'
+)
 
 // The superseded coalescing/read-then-delete pins are replaced by stronger
 // receipt identity and fenced leases. Actual worker execution is covered in
@@ -103,4 +107,11 @@ describe('durable queue race guards', () => {
     expect(source).toMatch(/mark_sync_job_started/)
   })
 
+
+  it('retries product publish/update when product.create has not arrived yet', () => {
+    expect(executeOperation).toMatch(/retry after product\.create/)
+    expect(executeOperation).toMatch(/const retryMissingProduct = isProductUpdate && productCreateAllowed/)
+    expect(source).toMatch(/retry after product\\\.create/)
+    expect(source).toMatch(/const isDependencyPending/)
+  })
 })

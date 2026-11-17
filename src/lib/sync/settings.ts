@@ -1,7 +1,5 @@
-import { getErpExecutionScope } from '@/lib/erp-execution-target'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { supabaseAdmin } from '@/lib/sync-runtime'
-import { ttlCache } from '@/lib/ttl-cache'
 
 // ─── Helper: cached standard mapping settings lookup ───
 export async function getCachedStandardMappingSettings(
@@ -11,22 +9,19 @@ export async function getCachedStandardMappingSettings(
   storeId = ''
 ): Promise<Record<string, any> | null> {
   const key = String(storeId ?? '').trim()
-  const generation = getErpExecutionScope()?.connectionGeneration ?? ''
-  return ttlCache.get(
-    `eng:stdsets:${workspaceId}:${storeType}:${key}:${entityType}:${generation}`,
-    30_000,
-    // Delegated to the shared reader: per-store row first, platform default
-    // ('') as fallback, with store_id compared as TEXT on both sides. The
-    // previous inline copy did `r.store_id === storeId`, which never matched a
-    // numeric caller and quietly fell back to store #1's row.
-    () =>
-      getEffectiveStandardMappingSettings(
-        supabaseAdmin,
-        workspaceId,
-        storeType,
-        entityType,
-        key
-      )
+
+  // Correctness boundary: background queue workers may run in a different
+  // Hostinger process from the Mapping Center request that saved settings.
+  // A process-local TTL cache therefore allows a worker to apply old pricing,
+  // language, BoM, or operation-gating rules for up to 30 seconds after Save.
+  // UI reads keep their own cache; ERP execution always reads the authoritative
+  // row so the first webhook after Save uses the settings the merchant sees.
+  return getEffectiveStandardMappingSettings(
+    supabaseAdmin,
+    workspaceId,
+    storeType,
+    entityType,
+    key
   )
 }
 

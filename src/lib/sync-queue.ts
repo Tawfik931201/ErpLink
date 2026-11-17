@@ -1180,13 +1180,16 @@ async function incrementRetry(item: QueueItem, errorMessage?: string) {
     // (SYNC_SEASON_MODE=true) يقصّر التسلسل ليناسب نافذة 30 دقيقة.
     const isRateLimited = typeof errorMessage === 'string' && (/429|rate\s*limit|too\s*many\s*requests/i).test(errorMessage)
     const isConnRefused = typeof errorMessage === 'string' && (/ECONNREFUSED|ETIMEDOUT|502|504/i).test(errorMessage)
-    const isOrderPending = typeof errorMessage === 'string' && (/not yet found in Odoo for status update/i).test(errorMessage)
-    const backoffMinutes = isOrderPending ? 0.2 : computeBackoffMinutes(newCount, {
+    const isDependencyPending = typeof errorMessage === 'string' && (
+      /not yet found in Odoo for status update/i.test(errorMessage)
+      || /not yet found in Odoo for .*retry after product\.create/i.test(errorMessage)
+    )
+    const backoffMinutes = isDependencyPending ? 0.2 : computeBackoffMinutes(newCount, {
       rateLimited: isRateLimited,
       connRefused: isConnRefused,
       season: isSeasonMode(),
     })
-    const jitterMs = isOrderPending ? Math.floor(Math.random() * 3_000) : Math.floor(Math.random() * 60_000)
+    const jitterMs = isDependencyPending ? Math.floor(Math.random() * 3_000) : Math.floor(Math.random() * 60_000)
     // نفس CAS: الحذف/التغيّر السباقي يجعل المطابقة صفراً ولا تُكتب حالة
     // «لإعادة محاولة» على صف لم نمنحها منا محاولتها.
     await supabase
