@@ -27,3 +27,21 @@ export function defaultCustomerMatchFields(storeType: string, fields: Record<str
     match_odoo_field: fields.mobile ? 'mobile' : 'phone',
   }
 }
+
+/**
+ * An explicit Standard Mapping customer field is authoritative for lookup.
+ * A different field (especially an old shared email) must not silently take
+ * priority when the selected telephone/phone match does not resolve.
+ * Durable entity links are checked before these candidate searches.
+ */
+export function customerMatchCandidateAllowed(candidateField: string, configuredOdooField?: string | null): boolean {
+  return !configuredOdooField || candidateField === configuredOdooField
+}
+
+/** True when another source customer already owns the resolved ERP partner. */
+export function customerLinkHasConflict(
+  otherOwners: ReadonlyArray<{ store_entity_id: string }> | null | undefined,
+  sourceCustomerId: string,
+): boolean {
+  return !!otherOwners?.some((row) => String(row.store_entity_id) !== sourceCustomerId)
+}

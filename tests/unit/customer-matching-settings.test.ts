@@ -1,4 +1,4 @@
-import { defaultCustomerMatchFields, validateCustomerMatchSettings } from '../../src/lib/customers/matching-settings'
+import { customerLinkHasConflict, customerMatchCandidateAllowed, defaultCustomerMatchFields, validateCustomerMatchSettings } from '../../src/lib/customers/matching-settings'
 
 describe('customer matching capabilities', () => {
   const fields = { id: { type: 'integer', readonly: true }, phone: { type: 'char' }, email: { type: 'char' }, child_ids: { type: 'one2many' } }
@@ -26,4 +26,18 @@ describe('customer matching capabilities', () => {
     expect(defaultCustomerMatchFields('shopify', fields).match_zid_field).toBe('phone')
     expect(defaultCustomerMatchFields('salla', fields).match_zid_field).toBe('mobile')
   })
+  it('never falls back to email or Odoo record id when Standard Mapping selects phone', () => {
+    const candidates = ['email', 'phone', 'mobile', 'id', 'x_zid_id']
+    expect(candidates.filter(f => customerMatchCandidateAllowed(f, 'phone'))).toEqual(['phone'])
+    expect(candidates.filter(f => customerMatchCandidateAllowed(f, 'email'))).toEqual(['email'])
+    expect(candidates.filter(f => customerMatchCandidateAllowed(f, null))).toEqual(candidates)
+  })
+
+  it('rejects cross-customer reuse of one Odoo partner, including two Zid IDs with shared email', () => {
+    expect(customerLinkHasConflict([{ store_entity_id: '501269872' }], '501269875')).toBe(true)
+    expect(customerLinkHasConflict([{ store_entity_id: '501269875' }], '501269875')).toBe(false)
+    expect(customerLinkHasConflict([], '501269875')).toBe(false)
+    expect(customerLinkHasConflict(null, '501269875')).toBe(false)
+  })
+
 })
