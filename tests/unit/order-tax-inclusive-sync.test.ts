@@ -142,6 +142,52 @@ describe('buildOrderLineItems — Tax-inclusive vs Tax-exclusive pricing across 
     expect(lines[0].tax_ids).toEqual([[6, 0, []]])
   })
 
+  it('clears Odoo product default tax from shipping/COD/discount synthetic lines when VAT mapping is disabled', async () => {
+    const client = createMockClient()
+    const payload = {
+      id: 502215033,
+      products: [{
+        id: 'p-live',
+        sku: 'SKU-115',
+        name: 'Product',
+        quantity: 1,
+        price: 81.23,
+        net_sale_price: 81.23,
+        tax_amount: 0,
+        tax_percentage: 0,
+      }],
+      shipping: { cost: 15, address: { country: { code: 'SA' } } },
+      payment_method: { code: 'zid_cod', title: 'Cash on Delivery' },
+      discounts: [{ amount: 5 }],
+    }
+
+    const lines = await buildOrderLineItems(
+      client,
+      baseMapping,
+      payload,
+      new Map(),
+      {},
+      'zid',
+      {
+        enable_vat: false,
+        prices_include_tax: false,
+        add_shipping_as_line: true,
+        shipping_product_id: 10,
+        add_discount_as_line: true,
+        discount_mode: 'fixed',
+        discount_product_id: 20,
+        add_cod_as_line: true,
+        cod_product_id: 30,
+        cod_amount: 5,
+      },
+      'store-1'
+    )
+
+    for (const line of lines.filter(line => [10, 20, 30].includes(Number(line.product_id)))) {
+      expect(line.tax_ids).toEqual([[6, 0, []]])
+    }
+  })
+
   it('Case 2: With setting enabled (prices_include_tax = true, tax_rate_percent = 15) — calculates 100 SAR before tax for Odoo', async () => {
     const client = createMockClient()
     const stdSettings = {
