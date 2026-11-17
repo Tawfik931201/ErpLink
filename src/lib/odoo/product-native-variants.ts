@@ -487,23 +487,35 @@ export async function syncChildVariantAsVariant(
   }
 
   let parentIds: number[] = []
-  if (fixedMatch?.odoo_field && fixedMatch.zid_field === 'id') {
-    parentIds = await client.search('product.template', [[fixedMatch.odoo_field, '=', String(parentZidId)]], 1)
-  } else {
-    // Field names come from the shared table, but the fallback stays
-    // exception-driven on purpose: an empty result here does NOT retry the
-    // legacy column, only a thrown error does (missing column in Odoo).
-    const searchField = platformIdField(platform)
-    try {
-      parentIds = await client.search('product.template', [[searchField, '=', String(parentZidId)]], 1)
-    } catch {
-      const fallbackField = platformLegacyIdField(platform)
+  // A product.template may not have any store-ID custom columns. On Odoo
+  // 14–20, searching a missing column raises an XML-RPC fault (and emits a
+  // large runtime traceback) even when the later durable-link lookup succeeds.
+  // Probe field metadata first, and fall through to scoped entity links/logs
+  // when the columns are absent or metadata cannot be read.
+  const parentMatchFields = fixedMatch?.odoo_field && fixedMatch.zid_field === 'id'
+    ? [fixedMatch.odoo_field]
+    : [platformIdField(platform), platformLegacyIdField(platform)]
+  try {
+    const parentFieldMeta = await fetchFieldMeta(
+      client,
+      'product.template',
+      parentMatchFields.filter(field => field !== 'id'),
+    )
+    for (const field of parentMatchFields) {
+      if (field === 'id') {
+        if (!Number.isSafeInteger(Number(parentZidId)) || Number(parentZidId) <= 0) continue
+      } else if (!parentFieldMeta.has(field)) {
+        continue
+      }
       try {
-        parentIds = await client.search('product.template', [[fallbackField, '=', String(parentZidId)]], 1)
-      } catch {
-        // Leave parentIds empty
+        parentIds = await client.search('product.template', [[field, '=', field === 'id' ? Number(parentZidId) : String(parentZidId)]], 1)
+        if (parentIds.length > 0) break
+      } catch (err) {
+        console.warn(`[SyncEngine] Parent match via product.template.${field} failed; trying scoped links:`, err)
       }
     }
+  } catch (err) {
+    console.warn('[SyncEngine] Parent product field metadata unavailable; trying scoped links:', err)
   }
   // Fallback 1: Resolve parent template via odoo_entity_links
   if (parentIds.length === 0 && mapping.workspace_id) {
