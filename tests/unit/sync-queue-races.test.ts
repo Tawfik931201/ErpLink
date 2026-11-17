@@ -4,6 +4,10 @@ import path from 'path'
 const source = fs.readFileSync(path.join(process.cwd(), 'src/lib/sync-queue.ts'), 'utf8')
 const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/20261103155209_durable_webhook_execution.sql'), 'utf8')
 const inbox = fs.readFileSync(path.join(process.cwd(), 'src/lib/webhook-inbox.ts'), 'utf8')
+const leaseRecoverySql = fs.readFileSync(
+  path.join(process.cwd(), 'supabase/migrations/20261117174500_queue_lease_recovery.sql'),
+  'utf8'
+)
 
 // The superseded coalescing/read-then-delete pins are replaced by stronger
 // receipt identity and fenced leases. Actual worker execution is covered in
@@ -73,6 +77,30 @@ describe('durable queue race guards', () => {
     )
     expect(classifier).toMatch(/unknown xml-rpc tag/)
     expect(classifier).toMatch(/502\|503\|504/)
+  })
+
+  it('orders product create before publish/update and deletion last', () => {
+    const ordering = source.slice(
+      source.indexOf('const productDependencyRank'),
+      source.indexOf('for (const [, list] of perWorkspace)')
+    )
+    expect(ordering).toMatch(/if \(isCreate\) return isChild \? 1 : 0/)
+    expect(ordering).toMatch(/if \(isPublishOrUpdate\) return isChild \? 3 : 2/)
+    expect(ordering).toMatch(/if \(isDelete\) return isChild \? 4 : 5/)
+  })
+
+  it('claims queue work in execution-sized waves instead of leasing the whole batch', () => {
+    expect(source).toMatch(/for \(let offset = 0; offset < batch\.length; offset \+= CLAIM_CONCURRENCY\)/)
+    expect(source).toMatch(/await processClaimedFairly\(claimed\)/)
+    expect(source).toMatch(/p_lease_seconds: 60/)
+  })
+
+  it('safely requeues expired leases that never started ERP execution', () => {
+    expect(leaseRecoverySql).toMatch(/processing_started_at IS NULL/)
+    expect(leaseRecoverySql).toMatch(/next_retry_at = now\(\)/)
+    expect(leaseRecoverySql).toMatch(/processing_started_at IS NOT NULL/)
+    expect(leaseRecoverySql).toMatch(/ERP_OUTCOME_UNKNOWN: active worker lease expired/)
+    expect(source).toMatch(/mark_sync_job_started/)
   })
 
 })
