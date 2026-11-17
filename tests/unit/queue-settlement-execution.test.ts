@@ -37,6 +37,14 @@ describe('durable queue claims and fencing (offline execution)', () => {
         }
         return { data: 0, error: null }
       }
+      if (name === 'mark_sync_job_started') {
+        const job = jobs.find(j => j.id === args.p_job_id)
+        if (!job || job.lease_token !== args.p_lease_token || job.outcome_unknown ||
+            Date.parse(job.lease_expires_at) <= Date.now()) return { data: 0, error: null }
+        job.processing_started_at ??= new Date().toISOString()
+        job.lease_expires_at = new Date(Date.now() + args.p_lease_seconds * 1000).toISOString()
+        return { data: 1, error: null }
+      }
       if (name !== 'claim_sync_job') throw new Error(`Unexpected RPC ${name}`)
       const job = jobs.find(j => j.id === args.p_job_id)
       if (!job || job.lease_token || job.outcome_unknown || !job.next_retry_at ||
@@ -97,7 +105,7 @@ describe('durable queue claims and fencing (offline execution)', () => {
 
   it('parks an expired worker lease instead of repeating an unknown remote outcome', async () => {
     jobs = [fixture(0)]
-    Object.assign(jobs[0], { lease_token: 'dead-worker', lease_expires_at: '2020-01-01T00:00:00.000Z' })
+    Object.assign(jobs[0], { lease_token: 'dead-worker', processing_started_at: '2020-01-01T00:00:00.000Z', lease_expires_at: '2020-01-01T00:00:00.000Z' })
     await processSyncQueue(1)
     expect(worker).not.toHaveBeenCalled()
     expect(jobs[0].outcome_unknown).toBe(true)

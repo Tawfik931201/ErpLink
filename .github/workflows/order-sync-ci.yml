@@ -1,0 +1,54 @@
+name: Orders synchronization safety checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/odoo/**'
+      - 'src/lib/orders/**'
+      - 'src/lib/sync-queue.ts'
+      - 'src/app/actions/queue-dashboard.ts'
+      - 'src/app/(app)/app/queue/**'
+      - 'tests/unit/order-*.test.ts'
+      - 'tests/unit/queue-*.test.ts'
+      - 'tests/unit/odoo-order-*.test.ts'
+      - '.github/workflows/order-sync-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/lib/odoo/**'
+      - 'src/lib/orders/**'
+      - 'src/lib/sync-queue.ts'
+      - 'src/app/actions/queue-dashboard.ts'
+      - 'src/app/(app)/app/queue/**'
+      - 'tests/unit/order-*.test.ts'
+      - 'tests/unit/queue-*.test.ts'
+      - 'tests/unit/odoo-order-*.test.ts'
+      - '.github/workflows/order-sync-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  order-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: TypeScript
+        run: npm run type-check
+      - name: Orders and queue regression tests
+        env:
+          # Offline Jest fixtures instantiate a Supabase client but never connect.
+          # Use non-secret dummy credentials; production credentials are not needed.
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand --testPathPattern='tests/unit/(order-|queue-|odoo-order-|queue-unknown-visibility)'
