@@ -643,11 +643,25 @@ export async function executeOdooOperation(
 
   if (existingId === null) {
     const isOrderUpdate = odooModel === 'sale.order' && odooOperation === 'update'
+    const isProductUpdate =
+      (odooModel === 'product.template' || odooModel === 'product.product')
+      && odooOperation === 'update'
+    const productCreateAllowed =
+      !mergedSettings.disabled
+      && (
+        !Array.isArray(mergedSettings.enabled_actions)
+        || mergedSettings.enabled_actions.length === 0
+        || mergedSettings.enabled_actions.includes('create')
+      )
+    const retryMissingProduct = isProductUpdate && productCreateAllowed
+
     const msg = isOrderUpdate
       ? `Sale order #${zidEntityId} not yet found in Odoo for status update; rescheduled to retry`
-      : `No matching ${odooModel} record found in Odoo for ${odooOperation}`
+      : retryMissingProduct
+        ? `Product #${zidEntityId} not yet found in Odoo for ${event}; retry after product.create`
+        : `No matching ${odooModel} record found in Odoo for ${odooOperation}`
     console.warn(`[SyncEngine] ${msg}`)
-    const logStatus = isOrderUpdate ? 'failed' : 'skipped'
+    const logStatus = (isOrderUpdate || retryMissingProduct) ? 'failed' : 'skipped'
     await logSync({ id: existingLogId, workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: odooModel, status: logStatus, error_message: msg, payload: zidData, trigger_type: triggerType })
     return { mappingId: mapping.id, mappingName: mapping.name, model: odooModel, status: logStatus, message: msg }
   }
