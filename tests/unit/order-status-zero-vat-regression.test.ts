@@ -68,7 +68,7 @@ describe('enforce configured order taxes after Zid status writes', () => {
   it('does not perform an unnecessary Odoo write when zero-tax lines are already correct', async () => {
     settings.mockResolvedValue({ enable_vat: false })
     const { client } = clientFor(19, [[], []])
-    await ensureSaleOrderTaxes(client, 47, { id: 502216416 }, 'ws-test', '', '', true)
+    await ensureSaleOrderTaxes(client, 47, { id: 502216416 }, 'ws-test', 'zid', '', true)
     expect(client.write).not.toHaveBeenCalled()
   })
 
