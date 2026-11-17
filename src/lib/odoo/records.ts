@@ -10,6 +10,16 @@ import { resolveZidMatchValue, toNameString } from '@/lib/sync-helpers'
 import { supabaseAdmin } from '@/lib/sync-runtime'
 import type { OdooFieldMeta } from '@/lib/sync-types'
 
+function invalidOdooFieldFromError(err: unknown): string | null {
+  const message = String((err as any)?.message || '')
+  const invalid = message.match(/Invalid field ['"]([^'"]+)['"]/i)
+  if (invalid?.[1]) return invalid[1]
+  // Odoo 20 res.partner.write may surface removed fields as a raw ORM KeyError
+  // rather than the older "Invalid field" validation message.
+  const keyError = message.match(/KeyError:\s*['"]([^'"]+)['"]/i)
+  return keyError?.[1] || null
+}
+
 // ─── Helper: safe Odoo create with field-level error fallback ──────────────────
 export async function safeCreateOdooRecord(
   client: OdooClient,
@@ -38,9 +48,8 @@ async function createOdooRecordWithFallback(
     return await client.create(model, values)
   } catch (err: any) {
     // If error is from an invalid field rejected by Odoo ORM, prune it and retry
-    const invalidFieldMatch = String(err?.message || '').match(/Invalid field ['"]([^'"]+)['"]/i)
-    if (invalidFieldMatch && invalidFieldMatch[1]) {
-      const badField = invalidFieldMatch[1]
+    const badField = invalidOdooFieldFromError(err)
+    if (badField) {
       if (badField in values) {
         console.warn(`[SyncEngine] ⚠️ Pruning invalid field "${badField}" from ${model} create and retrying: ${err.message}`)
         const cleanValues = { ...values }
@@ -132,9 +141,8 @@ export async function safeWriteOdooRecord(
     return true
   } catch (err: any) {
     // If error is from an invalid field rejected by Odoo ORM, prune it and retry
-    const invalidFieldMatch = String(err?.message || '').match(/Invalid field ['"]([^'"]+)['"]/i)
-    if (invalidFieldMatch && invalidFieldMatch[1]) {
-      const badField = invalidFieldMatch[1]
+    const badField = invalidOdooFieldFromError(err)
+    if (badField) {
       if (badField in values) {
         console.warn(`[SyncEngine] ⚠️ Pruning invalid field "${badField}" from ${model} write and retrying: ${err.message}`)
         const cleanValues = { ...values }
