@@ -31,7 +31,7 @@ describe('Zid out-of-order order webhooks', () => {
     })
 
     it('reschedules non-existent sale.order updates as failed instead of dropping as skipped', () => {
-      expect(engine).toContain("isOrderUpdate ? 'failed' : 'skipped'")
+      expect(engine).toMatch(/isOrderUpdate\s*\|\|\s*retryMissingProduct\)\s*\?\s*'failed'\s*:\s*'skipped'/)
       expect(engine).toContain("not yet found in Odoo for status update; rescheduled to retry")
     })
 
