@@ -65,26 +65,42 @@ BEGIN
     RAISE EXCEPTION 'Source identity, update time, ERP ID and reviewer must match the quarantined receipt';
   END IF;
 
+  -- The asserted Odoo identity must already be durably linked to this exact
+  -- Zid order, same workspace, store and ERP connection generation.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.odoo_entity_links link
+    WHERE link.workspace_id = job.workspace_id
+      AND link.platform = job.platform
+      AND link.store_id = job.store_id
+      AND link.store_entity_id = job.payload->>'id'
+      AND link.odoo_model = 'sale.order'
+      AND link.odoo_record_id = (p_evidence->>'verified_odoo_order_id')::integer
+      AND link.erp_connection_id = job.erp_connection_id
+      AND link.connection_generation = job.connection_generation
+  ) THEN
+    RAISE EXCEPTION 'Remote order identity does not match the pinned ERP entity link';
+  END IF;
+
   comparison := p_evidence->'mapped_order_comparison';
   IF comparison IS NULL OR jsonb_typeof(comparison) <> 'object'
     OR coalesce(comparison->>'expected_total', '') = ''
     OR coalesce(comparison->>'actual_total', '') = ''
     OR coalesce(comparison->>'expected_state', '') = ''
     OR coalesce(comparison->>'actual_state', '') = ''
-    OR comparison->>'lines_verified' <> 'true' THEN
+    OR coalesce(comparison->>'lines_verified', '') <> 'true' THEN
     RAISE EXCEPTION 'An explicit mapped order total/state/line comparison is required';
   END IF;
 
   IF p_decision = 'confirmed_applied' AND (
-    comparison->>'expected_total' <> comparison->>'actual_total'
+    ((comparison->>'expected_total')::numeric IS DISTINCT FROM (comparison->>'actual_total')::numeric)
     OR comparison->>'expected_state' <> comparison->>'actual_state'
-    OR comparison->>'workflow_verified' <> 'true'
+    OR coalesce(comparison->>'workflow_verified', '') <> 'true'
   ) THEN
     RAISE EXCEPTION 'Cannot mark applied: mapped amount, state or workflow differs from Odoo';
   END IF;
 
   IF p_decision = 'confirmed_no_remote_effect' AND
-    (p_evidence->>'no_remote_effect_verified' <> 'true' OR job.retry_count >= job.max_retries) THEN
+    (coalesce(p_evidence->>'no_remote_effect_verified', '') <> 'true' OR job.retry_count >= job.max_retries) THEN
     RAISE EXCEPTION 'Safe retry requires independent proof of no effect and remaining retry budget';
   END IF;
 
