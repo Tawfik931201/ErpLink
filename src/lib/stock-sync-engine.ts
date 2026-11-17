@@ -880,27 +880,24 @@ async function pushStockToZid(params: {
   const roundedQty = Math.round(quantity)
 
   if (isChildVariant && parentId) {
-    // Variants are documented to carry their own stocks[] per location and are
-    // written via the variants endpoint on the PARENT. The flat
-    // locations/stock-update payload targets the parent record, which Zid
-    // treats as stock-disabled while variants exist — so it never moves a
-    // variant's quantity. Use the documented variants path instead.
-    await ZidAPI.products.variants(creds, parentId, {
-      variants: [
-        {
-          id: zidProductId,
-          is_deleted: false,
-          stocks: [
-            {
-              available_quantity: roundedQty,
-              is_infinite: false,
-              location: zidLocationId,
-            },
-          ],
-        },
-      ],
-    })
-    console.info(`[StockSync] ✅ Updated Zid variant #${zidProductId} (parent ${parentId}) @ location ${zidLocationId} → ${quantity}`)
+    // A child variant is a product in its own right, with its own per-location
+    // stock records. Update ONLY those records through the dedicated partial
+    // stock endpoint (PATCH /v1/products/{variant_id}/stocks/), which touches
+    // nothing but stock.
+    //
+    // The old path used POST /v1/products/{parent}/variants/. Zid documents
+    // that as a full replacement: every field we did not send (price,
+    // sale_price, sku, barcode, attributes, weight, cost) was reset — which is
+    // why pushing a variant's quantity zeroed its selling price. Never go back
+    // to that endpoint for a stock-only update.
+    await ZidAPI.products.stocks.bulkUpdate(creds, zidProductId, [
+      {
+        location: zidLocationId,
+        available_quantity: roundedQty,
+        is_infinite: false,
+      },
+    ])
+    console.info(`[StockSync] ✅ Updated Zid variant #${zidProductId} stock (parent ${parentId}) @ location ${zidLocationId} → ${quantity}`)
     return 'pushed'
   }
 

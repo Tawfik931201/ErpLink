@@ -160,10 +160,15 @@ describe('the Zid push handles variants (nested under a parent)', () => {
     expect(source).toMatch(/findVariantByMatch\(p as Record<string, any>, 'barcode', value\)/)
   })
 
-  it('writes a child variant through the variants endpoint on its parent, not the flat locations payload', () => {
+  it('updates a child variant stock with the partial stock endpoint, not the full-replace variants POST', () => {
     expect(source).toMatch(/const isChildVariant = \(zidProduct as any\)\.structure === 'child'/)
-    expect(source).toMatch(/ZidAPI\.products\.variants\(creds, parentId,/)
-    expect(source).toMatch(/stocks: \[[\s\S]*available_quantity: roundedQty/)
+    // The variant is a product with its own stock records; PATCH those only.
+    expect(source).toMatch(/ZidAPI\.products\.stocks\.bulkUpdate\(creds, zidProductId, \[/)
+    expect(source).toMatch(/location: zidLocationId/)
+    expect(source).toMatch(/available_quantity: roundedQty/)
+    // POST /variants/ is a full replacement that zeroes price/sale_price/sku;
+    // it must never be used for a quantity-only update again.
+    expect(source).not.toMatch(/ZidAPI\.products\.variants\(creds, parentId,/)
   })
 
   it('keeps the flat locations stock-update for standalone products', () => {
@@ -193,5 +198,14 @@ describe('self-check: the pins actually detect a reverted rule', () => {
     expect(guardFn(readSource(ENGINE_PATH))).toBe(true)
     const tampered = readSource(ENGINE_PATH).replace('? undefined : sallaBranchId', ': sallaBranchId')
     expect(guardFn(tampered)).toBe(false)
+  })
+
+  it('fails when the variant stock push reverts to the price-clobbering variants POST', () => {
+    const guardFn = (src: string) =>
+      has(src, /ZidAPI\.products\.stocks\.bulkUpdate\(creds, zidProductId, \[/)
+      && !has(src, /ZidAPI\.products\.variants\(creds, parentId,/)
+    expect(guardFn(readSource(ENGINE_PATH))).toBe(true)
+    const reverted = 'await ZidAPI.products.variants(creds, parentId, { variants: [{ id: zidProductId, stocks: [] }] })'
+    expect(guardFn(reverted)).toBe(false)
   })
 })
