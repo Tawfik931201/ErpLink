@@ -1,0 +1,30 @@
+name: Customer matching safety checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/customers/**'
+      - 'src/lib/odoo/records.ts'
+      - 'tests/unit/customer-matching-settings.test.ts'
+      - '.github/workflows/customer-match-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  customer-matching:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: TypeScript
+        run: npm run type-check
+      - name: Customer matching unit tests
+        run: npm test -- --runInBand tests/unit/customer-matching-settings.test.ts
