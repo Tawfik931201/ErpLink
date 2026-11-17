@@ -88,6 +88,12 @@ function fixture(options: { customerFound?: boolean; missingModel?: string; fail
       return []
     }),
     searchRead: jest.fn(async (model: string, domain: unknown[][]) => {
+      // Post-status financial integrity checks must read back a persisted SO
+      // line. This fixture models the configured 15% VAT tax #5, not an empty
+      // Odoo result (which would correctly fail the new strict verification).
+      if (model === 'sale.order.line' && domain.some(term => term[0] === 'order_id')) {
+        return [{ id: 81, tax_id: [5], tax_ids: [5] }]
+      }
       if (model === 'sale.order') return [{ id: 50, partner_id: [11, 'Existing buyer'], company_id: [7, 'Existing company'], currency_id: [4, 'SAR'], pricelist_id: [20, 'SAR pricelist'], state: 'draft', amount_total: 200 }]
       if (model === options.missingModel) return []
       if (model === 'res.company' && domain.some(term => term[0] === 'id' && term[1] === '=' && term[2] === 7)) {

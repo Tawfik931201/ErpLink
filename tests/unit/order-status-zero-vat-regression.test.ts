@@ -20,7 +20,7 @@ import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 
 const settings = getCachedStandardMappingSettings as jest.Mock
 
-function clientFor(major: number, initialTaxes: number[][], canWrite = true) {
+function clientFor(major: number, initialTaxes: number[][], canWrite = true, persists = true) {
   const lines = initialTaxes.map((tax_ids, index) => ({
     id: index + 1, name: index ? 'Shipping' : 'Product',
     tax_ids, tax_id: tax_ids,
@@ -29,7 +29,7 @@ function clientFor(major: number, initialTaxes: number[][], canWrite = true) {
     getMajorVersion: jest.fn(async () => major),
     searchRead: jest.fn(async () => lines),
     write: jest.fn(async (_model: string, ids: number[], values: Record<string, unknown>) => {
-      if (canWrite) {
+      if (canWrite && persists) {
         const command = values.tax_ids || values.tax_id
         for (const id of ids) {
           const taxIds = (command as number[][][])[0][2]
@@ -77,6 +77,34 @@ describe('enforce configured order taxes after Zid status writes', () => {
     const { client } = clientFor(19, [[5]], false)
     await expect(ensureSaleOrderTaxes(client, 47, { id: 502216416 },
       'ws-test', 'zid', '', true)).rejects.toThrow('Odoo rejected the configured order taxes')
+  })
+
+  it('rejects a successful Odoo write that silently fails to persist zero VAT', async () => {
+    settings.mockResolvedValue({ enable_vat: false })
+    const { client } = clientFor(19, [[5], [5]], true, false)
+    await expect(ensureSaleOrderTaxes(client, 47, { id: 502216416 },
+      'ws-test', 'zid', '', true)).rejects.toThrow('Configured order taxes did not persist')
+    expect(client.write).toHaveBeenCalledTimes(1)
+    expect(client.searchRead).toHaveBeenCalledTimes(2)
+  })
+
+  it('detects VAT reintroduced even when no tax write appeared necessary initially', async () => {
+    settings.mockResolvedValue({ enable_vat: false })
+    const { client, lines } = clientFor(19, [[]])
+    ;(client.searchRead as jest.Mock).mockImplementationOnce(async () => lines.map(l => ({ ...l })))
+      .mockImplementationOnce(async () => [{ ...lines[0], tax_ids: [5] }])
+    await expect(ensureSaleOrderTaxes(client, 48, { id: 502216440 },
+      'ws-test', 'zid', '', true)).rejects.toThrow('Configured order taxes did not persist')
+    expect(client.write).not.toHaveBeenCalled()
+  })
+
+  it('verifies taxes using persisted Odoo line IDs rather than trusting a changed line set', async () => {
+    settings.mockResolvedValue({ enable_vat: false })
+    const { client } = clientFor(19, [[5]])
+    ;(client.searchRead as jest.Mock).mockResolvedValueOnce([{ id: 1, tax_ids: [5] }])
+      .mockResolvedValueOnce([{ id: 2, tax_ids: [] }])
+    await expect(ensureSaleOrderTaxes(client, 49, { id: 502216586 },
+      'ws-test', 'zid', '', true)).rejects.toThrow('Odoo order lines changed')
   })
 
   it('preserves an explicitly configured VAT regime instead of clearing its correct tax', async () => {
