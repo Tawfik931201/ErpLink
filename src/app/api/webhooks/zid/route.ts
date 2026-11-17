@@ -864,7 +864,15 @@ async function handleProductEvent(
     return 'skipped'
   }
 
-  const { enqueueWebhookEvent } = await import('@/lib/sync-queue')
+  // Zid can deliver product.publish before product.create. Defer only publish
+  // events briefly so a later create can be processed first by the queue's
+  // existing product-family dependency ordering. Keep durable receipts and
+  // the existing missing-create retry as a fallback for longer delays.
+  const { enqueueWebhookEvent, coalesceWindowMs } = await import('@/lib/sync-queue')
+  const isPublish = /^product[._]publish(?:ed)?$/i.test(event)
+  const nextRetryAt = isPublish
+    ? new Date(Date.now() + Math.max(30_000, coalesceWindowMs())).toISOString()
+    : undefined
   const queued = await enqueueWebhookEvent({
     acceptBeforeErp: true,
     workspaceId,
@@ -872,6 +880,7 @@ async function handleProductEvent(
     event,
     platform: 'zid',
     payload: data,
+    nextRetryAt,
   })
   if (queued.error) {
     console.error('[Zid Webhook] durable enqueue failed:', { event, storeId, error: queued.error })
