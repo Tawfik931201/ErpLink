@@ -840,6 +840,70 @@ export async function ensureSaleOrderTaxes(
  * payment.invoice COD row is authoritative; never manufacture an extra line
  * on a locked or already invoiced order. The merchant must reconcile it.
  */
+/**
+ * Last financial gate before a Zid status action creates/posts an invoice.
+ * Compare the actual persisted Odoo sale.order total (after all settings,
+ * taxes, shipping, discounts, and COD) against the authoritative Zid order
+ * total. Legacy confirmed orders can predate a changed Standard Mapping and
+ * cannot safely have their lines mutated during a status webhook.
+ */
+export async function assertZidOrderTotalBeforeInvoice(
+  client: OdooClient,
+  saleOrderId: number,
+  zidData: Record<string, unknown>,
+  settings: Record<string, any> | null | undefined,
+): Promise<void> {
+  const value = zidData.order_total ??
+    (zidData.payment_summary as Record<string, unknown> | undefined)?.total
+  if (value === null || value === undefined || value === '') {
+    // Partial webhooks are allowed; full Zid enrichment normally provides the
+    // authoritative order_total. Never infer an amount from product totals.
+    return
+  }
+  const sourceTotal = Number(String(value).replace(/,/g, ''))
+  if (!Number.isFinite(sourceTotal) || sourceTotal < 0) {
+    throw new Error('order_invoice_source_total_invalid_requires_review')
+  }
+
+  const rateRaw = settings?._currency_conversion_rate ?? settings?.currency_conversion_rate ?? 1
+  const rate = Number(rateRaw)
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error('order_invoice_conversion_rate_invalid_requires_review')
+  }
+
+  const [record] = await client.searchRead<any>(
+    'sale.order', [['id', '=', saleOrderId]],
+    ['id', 'amount_total', 'currency_id'], 1,
+  )
+  if (!record) throw new Error('order_invoice_original_sale_order_unreadable')
+  const actual = Number(record.amount_total)
+  if (!Number.isFinite(actual)) {
+    throw new Error('order_invoice_total_unreadable_requires_review')
+  }
+  // Native-currency comparisons must confirm the underlying currency; do not
+  // accept equal bare numbers if source currency and ERP currency differ.
+  const sourceCurrency = String(zidData.currency_code || '').trim().toUpperCase()
+  if (sourceCurrency && rate === 1) {
+    const raw = record.currency_id
+    const currencyId = Number(Array.isArray(raw) ? raw[0] : raw)
+    if (!Number.isSafeInteger(currencyId) || currencyId <= 0) {
+      throw new Error('order_invoice_currency_unreadable_requires_review')
+    }
+    const [currency] = await client.searchRead<any>(
+      'res.currency', [['id', '=', currencyId]], ['id', 'name'], 1,
+    )
+    const targetCode = String(currency?.name || '').trim().toUpperCase()
+    if (!targetCode || targetCode !== sourceCurrency) {
+      throw new Error('order_invoice_currency_mismatch_requires_review')
+    }
+  }
+
+  const expected = Math.round(sourceTotal * rate * 100) / 100
+  if (Math.abs(actual - expected) > 0.05) {
+    throw new Error(`order_invoice_total_mismatch_requires_review:${saleOrderId}:${expected}:${actual}`)
+  }
+}
+
 export async function assertZidCodFeeBeforeInvoice(
   client: OdooClient,
   saleOrderId: number,
@@ -1025,6 +1089,7 @@ export async function maybeApplyOrderStatusAction(
           workspaceId, resolvedPlatform, 'orders', storeId,
         )
         await assertZidCodFeeBeforeInvoice(client, odooRecordId, zidData, orderSettings)
+        await assertZidOrderTotalBeforeInvoice(client, odooRecordId, zidData, orderSettings)
       }
       const zidEntityId = String(zidData.id || (zidData as any).order_id || '')
       const applyInvoice = () => applyOrderInvoiceAction(
