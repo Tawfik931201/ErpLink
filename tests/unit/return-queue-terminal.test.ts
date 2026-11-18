@@ -6,6 +6,11 @@ describe('terminal return business validation', () => {
     'return_damaged_requires_financial_review',
     'return_receipt_quantity_invalid',
     'return_receipt_quantity_exceeds_original:197',
+    'return_fallback_order_line_ambiguous:QA-SKU',
+    'return_fallback_unit_price_unavailable:QA-SKU',
+    'return_fallback_product_not_found:QA-SKU',
+    'return_configured_product_not_found:QA-SKU',
+    'return_configured_customer_not_found',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)

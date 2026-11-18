@@ -40,6 +40,7 @@ import {
 import {
   extractStoreReturnReason,
   extractZidReceivedReturnLines,
+  extractPricedZidReceivedReturnLines,
   returnDedupeKey,
   returnSnapshotSignature,
   type ReturnSettings,
@@ -364,12 +365,40 @@ function extractPayloadProducts(payload: Record<string, unknown>): StoreReturnLi
 async function resolveCustomerPartner(
   client: OdooClient,
   payload: Record<string, unknown>,
-  orderStdSettings?: Record<string, any> | null
+  orderStdSettings?: Record<string, any> | null,
+  identity?: { workspaceId: string; platform: PlatformKey; storeId: string },
 ): Promise<number | null> {
   const custSettings = orderStdSettings || {}
   const defaultCustId = Number(custSettings.order?.default_customer_id || custSettings.default_customer_id)
   if (custSettings.customer_fallback_policy === 'default_customer' && Number.isInteger(defaultCustId) && defaultCustId > 0) {
     return defaultCustId
+  }
+
+  // Missing original SO: match the partner by the SAVED Customers tab fields,
+  // not an arbitrary first email/phone/name hit. A configured miss is a
+  // reviewable business mismatch, not permission to attach a different buyer.
+  if (identity) {
+    const raw = payload as any
+    const customer = raw.customer || raw.order?.customer || {}
+    const source: Record<string, unknown> = {
+      ...customer,
+      id: customer.id ?? raw.customer_id,
+      telephone: customer.telephone ?? customer.mobile ?? customer.phone,
+      mobile: customer.mobile ?? customer.phone ?? customer.telephone,
+      phone: customer.phone ?? customer.mobile ?? customer.telephone,
+    }
+    const matchSettings = await getCachedStandardMappingSettings(
+      identity.workspaceId, identity.platform, 'customers', identity.storeId
+    )
+    const match = await resolveOrderRelatedRecord(client, supabaseAdmin,
+      identity, 'customers', source, matchSettings,
+      () => readOrderRelatedDetails(client, identity, 'customers', source))
+    if (match.configured) {
+      if (!match.recordId) {
+        throw new Error('return_configured_customer_not_found')
+      }
+      return match.recordId
+    }
   }
 
   const p = payload as any
@@ -462,8 +491,13 @@ async function createFromPayloadWithoutOrder(
   rawLines: readonly StoreReturnLine[]
 ): Promise<ReturnOutcome> {
   const { client, platform, workspaceId, storeId, orderId, settings, orderStdSettings } = input
-  const lines = rawLines.length > 0 ? rawLines : extractPayloadProducts(input.payload)
-  if (lines.length === 0) return skipped('no_return_lines')
+  // Never infer an entire Zid return from order.products. Those are the sold
+  // quantities, NOT received returned units. Correct financial data requires
+  // a readable completed return receipt and its original unit prices.
+  const lines = platform === 'zid'
+    ? extractPricedZidReceivedReturnLines(input.payload)
+    : (rawLines.length > 0 ? rawLines : extractPayloadProducts(input.payload))
+  if (lines.length === 0) return skipped('no_received_return_lines')
   const signature = returnSnapshotSignature(lines, `${platform}:${orderId}`)
   const key = returnDedupeKey(platform, orderId, signature)
   const existing = await resolveEntityLinkId({
@@ -478,25 +512,49 @@ async function createFromPayloadWithoutOrder(
   const defaultProductId = Number(orderStdSettings?.order?.default_product_id || orderStdSettings?.default_product_id)
   const orderDiscountPercent = resolveOrderDiscountPercent(input.payload)
   const resolved: OdooReturnLine[] = []
+  const productsMatching = platform === 'zid'
+    ? await getCachedStandardMappingSettings(workspaceId, platform, 'products', storeId)
+    : null
   for (const line of lines) {
-    let productId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
-    if (!productId && Number.isInteger(defaultProductId) && defaultProductId > 0) {
+    let productId: number | null = null
+    if (platform === 'zid') {
+      const source: Record<string, unknown> = {
+        id: line.storeProductId, product_id: line.storeProductId,
+        sku: line.sku, name: line.name,
+      }
+      const identity = { workspaceId, platform, storeId }
+      const match = await resolveOrderRelatedRecord(
+        client, supabaseAdmin, identity, 'products', source, productsMatching,
+        () => readOrderRelatedDetails(client, identity, 'products', source))
+      productId = match.configured ? match.recordId
+        : await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+      if (match.configured && !productId) {
+        throw new Error('return_configured_product_not_found:' + (line.sku || line.storeProductId))
+      }
+    } else {
+      productId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+    }
+    if (!productId && Number.isInteger(defaultProductId) && defaultProductId > 0 &&
+        !productsMatching?.match_zid_field && !productsMatching?.match_odoo_field) {
       productId = defaultProductId
     }
-    if (!productId) continue
-    const discount = resolveLineDiscountPercent(line, input.payload, orderDiscountPercent)
+    if (!productId) throw new Error('return_fallback_product_not_found:' + (line.sku || line.storeProductId))
+    // Zid fallback unit amounts are taken from its already-discounted order
+    // snapshot. Applying a second percentage discount would double refund.
+    const discount = platform === 'zid' ? 0
+      : resolveLineDiscountPercent(line, input.payload, orderDiscountPercent)
     resolved.push({
       productId,
       quantity: Math.abs(line.quantity),
-      priceUnit: line.priceUnit || 0,
+      priceUnit: Number(line.priceUnit ?? 0),
       name: line.name || '',
       taxIds: [],
       discount: discount > 0 ? discount : undefined,
     })
   }
-  if (resolved.length === 0) return skipped('no_matching_products')
 
-  const partnerId = await resolveCustomerPartner(client, input.payload, orderStdSettings)
+  const partnerId = await resolveCustomerPartner(client, input.payload, orderStdSettings,
+    { workspaceId, platform, storeId })
   if (!partnerId) return skipped('customer_not_found')
 
   const majorVersion = await client.getMajorVersion().catch(() => 17)
@@ -675,6 +733,21 @@ async function createFromPayloadWithoutOrder(
       client.create('sale.order', coreVals)
     )
   }
+
+  // The ERP effect ledger may recover a prior ID. Read the actual negative
+  // sale order and all persisted lines before logging a successful fallback.
+  const expectedLines: OdooReturnLine[] = orderLines.map(entry => {
+    const v = entry[2] as Record<string, unknown>
+    return {
+      productId: Number(v.product_id),
+      quantity: Math.abs(Number(v.product_uom_qty)),
+      priceUnit: Number(v.price_unit),
+      name: String(v.name || ''),
+      taxIds: [],
+    }
+  })
+  await assertNegativeSaleOrderPersisted(client, Number(created),
+    `${platform}:${orderId}`, expectedLines)
 
   if (input.autoConfirm) {
     try {

@@ -107,6 +107,16 @@ describe('Zid remaining quantities follow the documented contract', () => {
   const returnsEngine = read('src', 'lib', 'returns', 'engine.ts')
   const returnsZid = read('src', 'lib', 'returns', 'zid.ts')
 
+  it('never fakes a missing-original Zid refund from sold order quantity or random matching', () => {
+    expect(returnsEngine).toContain("platform === 'zid'")
+    expect(returnsEngine).toContain('extractPricedZidReceivedReturnLines(input.payload)')
+    expect(returnsEngine).toContain("resolveOrderRelatedRecord(client, supabaseAdmin,")
+    expect(returnsEngine).toContain("'customers', source, matchSettings")
+    expect(returnsEngine).toContain('return_configured_customer_not_found')
+    expect(returnsEngine).toContain("return_configured_product_not_found")
+    expect(returnsEngine).toContain('await assertNegativeSaleOrderPersisted(client, Number(created)')
+  })
+
   it('assigns a cumulative return snapshot identity instead of reusing root sale.order effects', () => {
     expect(returnsEngine).toContain("withErpCreateIdentity(effectIdentity")
     expect(returnsEngine).toContain("returnSnapshotSignature(cumulative")

@@ -1,4 +1,4 @@
-import { extractZidReceivedReturnLines } from '@/lib/returns/detect'
+import { extractZidReceivedReturnLines, extractPricedZidReceivedReturnLines } from '@/lib/returns/detect'
 
 const product = (overrides: Record<string, unknown> = {}) => ({
   id: 'return-line-1',
@@ -68,6 +68,52 @@ describe('Zid completed returns use actual receipt quantities', () => {
       .toBe('return_receipt_quantity_invalid')
     expect(extractZidReceivedReturnLines({ order_status: { code: 'reversed' } }))
       .toEqual({ known: false, lines: [] })
+  })
+
+  it('fallback uses received 1 of 3 and preserved net 301 SAR unit, never sold quantity 3', () => {
+    const order = {
+      ...payload([product()]),
+      products: [{ id: 'store-product-1', sku: 'QA-SKU', name: 'QA',
+        quantity: 3, discounted_total: 903, discounted_tax_amount: 0, price: 301 }],
+    }
+    expect(extractPricedZidReceivedReturnLines(order)).toEqual([{
+      storeProductId: 'store-product-1',
+      sku: 'QA-SKU',
+      quantity: 1,
+      priceUnit: 301,
+      name: 'QA',
+    }])
+  })
+
+  it('fallback creates no financial effect for not received only', () => {
+    const order = {
+      ...payload([product({ received_quantity: 0, not_received_quantity: 3 })]),
+      products: [{ id: 'store-product-1', sku: 'QA-SKU', quantity: 3, price: 301 }],
+    }
+    expect(extractPricedZidReceivedReturnLines(order)).toEqual([])
+  })
+
+  it('fallback refuses an unknown receipt, missing original product price or ambiguous price bands', () => {
+    expect(() => extractPricedZidReceivedReturnLines({ products: [] }))
+      .toThrow('return_receipt_quantities_unknown')
+    expect(() => extractPricedZidReceivedReturnLines({
+      ...payload([product()]),
+      products: [{ id: 'store-product-1', sku: 'QA-SKU', quantity: 3 }],
+    })).toThrow('return_fallback_unit_price_unavailable')
+    expect(() => extractPricedZidReceivedReturnLines({
+      ...payload([product()]),
+      products: [
+        { id: 'store-product-1', sku: 'QA-SKU', quantity: 1, price: 100 },
+        { id: 'store-product-1', sku: 'QA-SKU', quantity: 2, price: 200 },
+      ],
+    })).toThrow('return_fallback_order_line_ambiguous')
+  })
+
+  it('fallback refuses damaged items instead of refunding the entire order', () => {
+    expect(() => extractPricedZidReceivedReturnLines({
+      ...payload([product({ damaged_quantity: 1, not_received_quantity: 1 })]),
+      products: [{ id: 'store-product-1', sku: 'QA-SKU', quantity: 3, price: 301 }],
+    })).toThrow('return_damaged_requires_financial_review')
   })
 
   it('accepts a full properly received return and a repeated webhook snapshot', () => {
