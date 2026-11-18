@@ -261,6 +261,75 @@ except Exception:
 }
 
 /**
+ * Repairs an existing stock webhook registration after deploys / legacy
+ * migrations. Odoo automation rules patch model methods in the registry; old
+ * rules can survive with a stale patch in long-lived workers, and older ERP
+ * Link versions could leave more than one stock.quant rule for one workspace.
+ *
+ * Keep one canonical rule, remove exact-name duplicates, then toggle the
+ * canonical rule off/on so Odoo rebuilds the automation registry patch.
+ */
+export async function reconcileOdooStockWebhook(
+  config: OdooConfig,
+  workspaceId: string,
+  preferred?: { baseAutomationId?: number; serverActionId?: number } | null,
+): Promise<{ baseAutomationId: number; serverActionId?: number } | null> {
+  const client = new OdooClient(config)
+  const exactName = `ErpLink Automated Action: stock.quant (${workspaceId}): Stock`
+  const rules = await client.searchRead<any>(
+    'base.automation',
+    [['name', '=', exactName]],
+    ['id', 'active', 'action_server_ids'],
+    50
+  )
+  if (!rules.length) return null
+
+  const preferredId = Number(preferred?.baseAutomationId || 0)
+  const canonical =
+    rules.find(rule => Number(rule.id) === preferredId) ??
+    rules.sort((a, b) => Number(b.id) - Number(a.id))[0]
+
+  const canonicalId = Number(canonical.id)
+  const canonicalActionIds = Array.isArray(canonical.action_server_ids)
+    ? canonical.action_server_ids.map((id: unknown) => Number(id)).filter(Number.isInteger)
+    : []
+  const canonicalActionId =
+    canonicalActionIds.find((id: number) => id === Number(preferred?.serverActionId || 0)) ??
+    canonicalActionIds[0]
+
+  for (const duplicate of rules) {
+    const duplicateId = Number(duplicate.id)
+    if (duplicateId === canonicalId) continue
+    const duplicateActionIds = Array.isArray(duplicate.action_server_ids)
+      ? duplicate.action_server_ids.map((id: unknown) => Number(id)).filter(Number.isInteger)
+      : []
+    await client.unlink('base.automation', [duplicateId])
+    for (const actionId of duplicateActionIds) {
+      if (!canonicalActionIds.includes(actionId)) {
+        try {
+          await client.unlink('ir.actions.server', [actionId])
+        } catch (err: any) {
+          console.warn(
+            `[OdooWebhook] Failed to remove duplicate stock server action #${actionId}:`,
+            err?.message || err
+          )
+        }
+      }
+    }
+  }
+
+  // Writing a critical automation field forces base_automation._update_registry()
+  // and broadcasts the registry change to other Odoo workers.
+  await client.write('base.automation', [canonicalId], { active: false })
+  await client.write('base.automation', [canonicalId], { active: true })
+
+  return {
+    baseAutomationId: canonicalId,
+    ...(canonicalActionId ? { serverActionId: canonicalActionId } : {}),
+  }
+}
+
+/**
  * Registers an Automated Action on `stock.quant` so Odoo notifies us whenever
  * a product's stock balance changes (purchases, sales, inventory adjustments …).
  * Uses the same version detection as `registerOdooWebhook`, targeting the
