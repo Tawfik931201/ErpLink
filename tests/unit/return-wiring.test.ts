@@ -57,9 +57,23 @@ describe('returns are intercepted before any order write', () => {
     expect(block).toContain('waiting for the completed reversal event')
   })
 
-  it('leaves the default mode untouched (falls through to the normal sync)', () => {
+  it('explicit nothing bypasses locked-order cancellation and logs a genuine skip', () => {
+    const block = engine.slice(signal, firstWrite)
+    expect(block).toContain("configuredReturnSettings")
+    expect(block).toContain("explicitReturnMode.trim() && returnSettings.mode === 'nothing'")
+    expect(block).toContain("returns_disabled_by_standard_mapping")
+    expect(block).toContain("status: 'skipped'")
+    expect(block).toContain("await logSync({")
+    const skipAt = block.indexOf('returns_disabled_by_standard_mapping')
+    expect(skipAt).toBeGreaterThan(-1)
+    expect(skipAt).toBeLessThan(block.indexOf('processReturnEvent('))
+    expect(block).toContain("if (returnSettings.mode !== 'nothing')")
+  })
+
+  it('preserves the original status-action behavior for workspaces without a configured mode', () => {
+    expect(engine).toContain("const explicitReturnMode = (configuredReturnSettings as any)?.mode")
+    expect(engine).toContain("typeof explicitReturnMode === 'string'")
     expect(engine).toContain("if (returnSettings.mode !== 'nothing')")
-    expect(engine).toContain('normalizeReturnSettings(')
   })
 
   it('logs the outcome instead of returning an unlogged success', () => {
