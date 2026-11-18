@@ -261,6 +261,80 @@ export function extractSallaRefundedLines(
   return items ? extractLinesFromArray(items) : []
 }
 
+
+/**
+ * The Zid reversal webhook embeds the completed reverse requests, including
+ * received_quantity, not_received_quantity and damaged_quantity. These are
+ * NOT interchangeable with reversed_quantity. In live QA, 3 units were
+ * requested, only 1 received, and the actual refundable amount was one unit.
+ * view-for-return reports zero remaining for that *whole request* and cannot
+ * distinguish the 1 good unit from the 2 never received.
+ *
+ * Prefer cumulative, id-deduplicated received quantities from the webhook.
+ * Unknown, damaged or grouped-component returns are blocked for review rather
+ * than guessed as a full financial return.
+ */
+export function extractZidReceivedReturnLines(
+  payload: Record<string, unknown> | null | undefined
+): { known: boolean; lines: StoreReturnLine[]; error?: string } {
+  if (!payload) return { known: false, lines: [] }
+  const order = asRecord(payload.order)
+  const many = payload.reverse_order_label_requests ?? order?.reverse_order_label_requests
+  const single = payload.reverse_order_label_request ?? order?.reverse_order_label_request
+  const requests = Array.isArray(many) && many.length > 0
+    ? many
+    : single ? [single] : []
+  if (requests.length === 0) return { known: false, lines: [] }
+
+  const seen = new Set<string>()
+  const lines: StoreReturnLine[] = []
+  for (let index = 0; index < requests.length; index++) {
+    const req = asRecord(requests[index])
+    if (!req) return { known: false, lines: [], error: 'return_request_unreadable' }
+    const id = toText(req.id) || `index:${index}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    if (!Array.isArray(req.products)) {
+      return { known: false, lines: [], error: 'return_receipt_products_missing' }
+    }
+    for (const raw of req.products) {
+      const item = asRecord(raw)
+      if (!item || item.received_quantity === undefined || item.received_quantity === null) {
+        return { known: false, lines: [], error: 'return_received_quantity_missing' }
+      }
+      const received = Number(item.received_quantity)
+      const damaged = Number(item.damaged_quantity ?? 0)
+      const notReceived = Number(item.not_received_quantity ?? 0)
+      const requested = Number(item.reversed_quantity ?? item.quantity)
+      if ([received, damaged, notReceived, requested].some(n => !Number.isInteger(n) || n < 0) ||
+          received + damaged + notReceived > requested) {
+        return { known: false, lines: [], error: 'return_receipt_quantity_invalid' }
+      }
+      if (damaged > 0) {
+        return { known: false, lines: [], error: 'return_damaged_requires_financial_review' }
+      }
+      const product = asRecord(item.product)
+      const orderProduct = asRecord(item.order_product)
+      if (asRecord(orderProduct?.meta)?.group_product_id) {
+        return { known: false, lines: [], error: 'return_grouped_components_require_review' }
+      }
+      const sku = firstText(item, ['sku']) ||
+        firstText(orderProduct || {}, ['sku']) ||
+        firstText(product || {}, ['sku'])
+      const storeProductId =
+        firstText(item, ['product_uuid', 'product_id']) ||
+        firstText(product || {}, ['id'])
+      if (received > 0) {
+        if (!sku && !storeProductId) {
+          return { known: false, lines: [], error: 'return_receipt_product_unidentified' }
+        }
+        lines.push({ sku, storeProductId, quantity: received })
+      }
+    }
+  }
+  return { known: true, lines }
+}
+
 const ZID_LINE_ARRAY_KEYS = ['products', 'items', 'order_products'] as const
 
 /**
