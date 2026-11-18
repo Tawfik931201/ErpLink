@@ -9,6 +9,7 @@ import { isReturnSignal } from '@/lib/returns/detect'
 
 const original: OriginalSaleOrder = {
   id: 62, name: 'S00062', state: 'sale', partnerId: 15,
+  pricelistId: 1,
   companyId: 1, warehouseId: 1, invoiceIds: [], lines: [],
 }
 const untaxed: OdooReturnLine[] = [{
