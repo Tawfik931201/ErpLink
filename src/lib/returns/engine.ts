@@ -46,6 +46,7 @@ import {
 import {
   createCreditNote,
   createNegativeSaleOrder,
+  assertNegativeSaleOrderPersisted,
   createStockReturn,
   findInvoiceForOrder,
   findOriginalSaleOrder,
@@ -774,6 +775,9 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
         payload: input.payload,
         platform,
       })
+      // An RPC create acknowledgement is not proof of a persisted return.
+      // Unknown results are quarantined instead of reissuing financial writes.
+      await assertNegativeSaleOrderPersisted(client, odooRecordId, original.name, lines)
       actions.push(`negative_so:${odooRecordId}`)
       if (input.autoConfirm) {
         await client.execute('sale.order', 'action_confirm', [[odooRecordId]])
