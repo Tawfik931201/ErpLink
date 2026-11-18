@@ -1021,15 +1021,73 @@ export async function createStockReturn(
   options?: {
     orderName?: string
     pickingAction?: string
+    originalLines?: readonly SaleOrderLineInfo[]
   }
 ): Promise<StockReturnResult> {
   const physicalLines = await selectPhysicalReturnLines(client, lines, majorVersion)
-  if (physicalLines.length === 0) return { pickingIds: [], returnedQty: 0 }
+  if (!physicalLines.length && !lines.some(line => line.saleLineId)) {
+    return { pickingIds: [], returnedQty: 0 }
+  }
   const moves = await readDeliveredMoves(client, orderId, options?.orderName, majorVersion)
   const byPicking = new Map<number, { moveId: number; productId: number; quantity: number }[]>()
   const remaining = new Map<number, number>()
-  for (const line of physicalLines) {
-    remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+  const addMove = (move: DeliveredMove, quantity: number) => {
+    if (quantity <= 0) return
+    const list = byPicking.get(move.pickingId) || []
+    const existing = list.find(item => item.moveId === move.id)
+    if (existing) {
+      // Never return an Odoo move twice when parent and child are represented
+      // simultaneously as independent sale-order financial lines.
+      throw new Error('return_grouped_mixed_parent_component_requires_review')
+    }
+    list.push({ moveId: move.id, productId: move.productId, quantity })
+    byPicking.set(move.pickingId, list)
+  }
+  const potentialLines = [
+    ...physicalLines,
+    ...lines.filter(line =>
+      !physicalLines.includes(line) && line.saleLineId &&
+      moves.some(move => move.saleLineId === line.saleLineId)
+    ),
+  ]
+  for (const line of potentialLines) {
+    const direct = moves.some(move => move.productId === line.productId &&
+      (!line.saleLineId || !move.saleLineId || move.saleLineId === line.saleLineId))
+    if (direct) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    if (!line.saleLineId) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    const original = options?.originalLines?.find(item => item.id === line.saleLineId)
+    const components = moves.filter(move =>
+      move.saleLineId === line.saleLineId && move.productId !== line.productId)
+    if (!original || original.orderedQty <= 0 || !components.length) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    // Phantom BoM / grouped sale: parent is one PRICED sale.order.line, while
+    // Odoo delivered one or more component stock.moves linked via sale_line_id.
+    // Scale exactly by original parent ordered units: 1 of 2 parents with
+    // component shipments A×6 and C×4 means returning A×3 and C×2.
+    const fraction = Math.abs(line.quantity) / original.orderedQty
+    if (fraction <= 0 || fraction > 1 + 0.000001) {
+      throw new Error('return_grouped_parent_quantity_invalid')
+    }
+    for (const move of components) {
+      if (lines.some(item =>
+        item.saleLineId !== line.saleLineId && item.productId === move.productId
+      )) {
+        throw new Error('return_grouped_mixed_parent_component_requires_review')
+      }
+      const quantity = move.quantity * fraction
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error('return_grouped_stock_quantity_invalid')
+      }
+      addMove(move, quantity)
+    }
   }
 
   for (const move of moves) {
@@ -1037,9 +1095,7 @@ export async function createStockReturn(
     if (need <= 0) continue
     const take = Math.min(need, move.quantity)
     if (take <= 0) continue
-    const list = byPicking.get(move.pickingId) || []
-    list.push({ moveId: move.id, productId: move.productId, quantity: take })
-    byPicking.set(move.pickingId, list)
+    addMove(move, take)
     remaining.set(move.productId, need - take)
   }
 
