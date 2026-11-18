@@ -916,6 +916,7 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       const stock = await createStockReturn(client, original.id, lines, majorVersion, {
         orderName: original.name,
         pickingAction,
+        originalLines: original.lines,
       })
       if (!settings.create_credit_note && stock.pickingIds.length === 0) {
         return skipped('return_no_stock_effect_and_credit_note_disabled')
