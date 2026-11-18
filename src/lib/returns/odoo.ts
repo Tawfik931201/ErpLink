@@ -571,11 +571,11 @@ export async function createNegativeSaleOrder(
     }
 
     // Taxes: replicate from original line if present, otherwise fallback to standard mapping default taxes
-    if (line.taxIds && line.taxIds.length > 0) {
-      lineVals[taxField] = [[6, 0, line.taxIds]]
-    } else if (defaultTaxes.length > 0) {
-      lineVals[taxField] = [[6, 0, defaultTaxes]]
-    }
+    // Always send an explicit M2M command. Odoo's product/customer default
+    // taxes otherwise silently reappear on an untaxed negative return line.
+    lineVals[taxField] = [[6, 0,
+      line.taxIds?.length ? line.taxIds : defaultTaxes
+    ]]
 
     // Analytic accounts: replicate from original line if present, otherwise fallback to evaluated standard mapping analytics
     if (line.analyticDistribution && Object.keys(line.analyticDistribution).length > 0) {
@@ -761,6 +761,15 @@ export async function createStockReturn(
     remaining.set(move.productId, need - take)
   }
 
+  // Do not create a credit note for inventory that Odoo has never shipped.
+  // In the live QA run this returned { pickingIds: [], returnedQty: 0 } and
+  // the caller posted a financial credit anyway, incorrectly reporting success.
+  const missing = [...remaining.entries()].filter(([, qty]) => qty > 0.000001)
+  if (missing.length > 0) {
+    throw new Error('stock_return_missing_delivered_moves:' +
+      missing.map(([id, qty]) => `${id}:${qty}`).join(','))
+  }
+
   const pickingIds: number[] = []
   let returnedQty = 0
   const pickingAction = String(options?.pickingAction || '')
@@ -780,7 +789,13 @@ export async function createStockReturn(
           context: { skip_backorder: true, skip_sms: true },
         })
       } catch (valErr: any) {
-        console.warn(`[Returns] button_validate on return picking #${created} failed:`, valErr?.message || valErr)
+        throw new Error(`stock_return_validate_failed:${created}: ${valErr?.message || valErr}`)
+      }
+      const [validated] = await client.searchRead<any>(
+        'stock.picking', [['id', '=', created]], ['id', 'state'], 1
+      )
+      if (validated?.state !== 'done') {
+        throw new Error(`stock_return_not_done:${created}:${validated?.state || 'missing'}`)
       }
     } else {
       console.info(`[Returns] Return picking #${created} kept as draft (picking_action="${pickingAction}")`)
@@ -887,9 +902,9 @@ export async function createCreditNote(
       if (line.discount !== undefined && line.discount > 0) {
         lineVals.discount = line.discount
       }
-      if (line.taxIds && line.taxIds.length > 0) {
-        lineVals.tax_ids = [[6, 0, line.taxIds]]
-      }
+      // Explicitly clear Odoo product defaults for tax-exempt returns.
+      // Omitting tax_ids made live Zid 139.25 SAR returns post as 160.14 SAR.
+      lineVals.tax_ids = [[6, 0, line.taxIds || []]]
       if (line.productUomId) {
         lineVals.product_uom_id = line.productUomId
       }
@@ -919,6 +934,53 @@ export async function createCreditNote(
   const creditId = await client.create('account.move', values)
   if (!creditId) throw new Error('credit_note_not_created')
 
+  // A posted credit note is a real financial effect. Verify persisted taxes
+  // before posting AND after posting: Odoo can reapply partner/product defaults
+  // during either operation. Never log success for a silently taxed refund.
+  const assertPersistedCreditTaxes = async () => {
+    const [move] = await client.searchRead<any>(
+      'account.move', [['id', '=', creditId]],
+      ['id', 'state', 'invoice_line_ids', 'amount_total'], 1
+    )
+    if (!move) throw new Error(`credit_note_readback_missing:${creditId}`)
+    const invoiceLineIds = many2manyIds(move.invoice_line_ids)
+    if (invoiceLineIds.length !== lines.length) {
+      throw new Error(`credit_note_line_count_mismatch:${creditId}:${invoiceLineIds.length}/${lines.length}`)
+    }
+    const persisted = await client.searchRead<any>(
+      'account.move.line', [['id', 'in', invoiceLineIds]],
+      ['id', 'product_id', 'quantity', 'tax_ids'], invoiceLineIds.length
+    )
+    const expected = lines.map(line => ({
+      productId: line.productId, quantity: Math.abs(line.quantity),
+      taxes: [...(line.taxIds || [])].map(Number).sort((a, b) => a - b),
+    }))
+    for (const row of persisted || []) {
+      const productId = many2oneId(row.product_id)
+      const taxes = many2manyIds(row.tax_ids).sort((a, b) => a - b)
+      const qty = toNumber(row.quantity)
+      const ix = expected.findIndex(line =>
+        line.productId === productId &&
+        Math.abs(line.quantity - qty) < 0.000001 &&
+        line.taxes.length === taxes.length &&
+        line.taxes.every((tax, index) => tax === taxes[index])
+      )
+      if (ix < 0) throw new Error(`credit_note_tax_or_quantity_mismatch:${creditId}:${productId}`)
+      expected.splice(ix, 1)
+    }
+    if (expected.length > 0) {
+      throw new Error(`credit_note_lines_missing:${creditId}:${expected.length}`)
+    }
+    if (lines.every(line => !line.taxIds?.length)) {
+      const expectedUntaxedTotal = Math.round(lines.reduce((sum, line) =>
+        sum + Math.abs(line.quantity) * line.priceUnit * (1 - (line.discount || 0) / 100), 0) * 100) / 100
+      if (Math.abs(toNumber(move.amount_total) - expectedUntaxedTotal) > 0.011) {
+        throw new Error(`credit_note_total_mismatch:${creditId}:${move.amount_total}/${expectedUntaxedTotal}`)
+      }
+    }
+  }
+  await assertPersistedCreditTaxes()
+
   const invoiceAction = String(options?.invoiceAction || '')
   // If explicitly 'create', keep as draft; if contains 'post' or not specified, post
   const shouldPost = invoiceAction
@@ -929,8 +991,13 @@ export async function createCreditNote(
     try {
       await client.execute('account.move', 'action_post', [[creditId]])
     } catch (postErr: any) {
-      console.warn(`[Returns] action_post on credit note #${creditId} failed:`, postErr?.message || postErr)
+      throw new Error(`credit_note_post_failed:${creditId}: ${postErr?.message || postErr}`)
     }
+    await assertPersistedCreditTaxes()
+    const [posted] = await client.searchRead<any>(
+      'account.move', [['id', '=', creditId]], ['id', 'state'], 1
+    )
+    if (posted?.state !== 'posted') throw new Error(`credit_note_not_posted:${creditId}`)
   } else {
     console.info(`[Returns] Credit note #${creditId} kept as draft (invoice_action="${invoiceAction}")`)
   }
