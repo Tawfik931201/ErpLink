@@ -104,9 +104,13 @@ async function reconcileStoredWebhook(
       apiKey: decrypt(erpConn.password),
     },
     workspaceId,
-    refs
+    { baseAutomationId: refs.base_automation_id, serverActionId: refs.server_action_id }
   )
-  const canonical = repaired || refs
+  // ERP webhook RPC uses camelCase; the saved Standard Mapping schema is
+  // snake_case. Keep one canonical persisted shape in all store settings.
+  const canonical: OdooStockWebhookRefs = repaired
+    ? { base_automation_id: repaired.baseAutomationId, server_action_id: repaired.serverActionId }
+    : refs
   await persistWebhookRefs(canonical, storeType)
   return canonical
 }

@@ -152,7 +152,9 @@ describe('the Zid push handles variants (nested under a parent)', () => {
 
   it('fetches extended product lists so nested variants are visible', () => {
     expect(source).toMatch(/const res = await ZidAPI\.products\.list\(creds, \{ page_size: 100, barcode: value, extended: true \}\)/)
-    expect(source).toMatch(/const res = await ZidAPI\.products\.list\(creds, \{ page_size: 100, page, extended: true \}\)/)
+    expect(source).toMatch(/const res = await ZidAPI\.products\.list\(creds, \{ page_size: pageSize, page, extended: true \}\)/)
+    expect(source).toContain('const pageSize = 100')
+    expect(source).toContain('page * pageSize >= count')
   })
 
   it('matches a variant SKU/barcode inside parent.variants[]', () => {

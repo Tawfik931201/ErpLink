@@ -682,6 +682,55 @@ interface DeliveredMove {
   quantity: number
 }
 
+/**
+ * An Odoo create RPC returning an ID does not prove that the expected
+ * negative sale-order lines persisted. An inconclusive readback is an
+ * UNKNOWN remote outcome and must be reconciled, not replayed blindly.
+ */
+export async function assertNegativeSaleOrderPersisted(
+  client: OdooClient,
+  createdId: number,
+  originalName: string,
+  expectedLines: readonly OdooReturnLine[]
+): Promise<void> {
+  try {
+    if (!Number.isInteger(createdId) || createdId <= 0 || !expectedLines.length) {
+      throw new Error('invalid_created_id_or_lines')
+    }
+    const [order] = await client.searchRead<any>(
+      'sale.order', [['id', '=', createdId]],
+      ['id', 'origin', 'client_order_ref', 'order_line'], 1
+    )
+    if (!order || order.origin !== originalName ||
+        order.client_order_ref !== returnRefFor(originalName)) {
+      throw new Error('missing_or_wrong_negative_so_header')
+    }
+    const ids = many2manyIds(order.order_line)
+    if (ids.length !== expectedLines.length) throw new Error('negative_so_line_count_mismatch')
+    const actual = await client.searchRead<any>(
+      'sale.order.line', [['id', 'in', ids]],
+      ['id', 'product_id', 'product_uom_qty', 'price_unit'], ids.length
+    )
+    const remaining = expectedLines.map(line => ({
+      productId: line.productId,
+      quantity: -Math.abs(line.quantity),
+      priceUnit: line.priceUnit,
+    }))
+    for (const row of actual || []) {
+      const ix = remaining.findIndex(line =>
+        line.productId === many2oneId(row.product_id) &&
+        Math.abs(line.quantity - toNumber(row.product_uom_qty)) < 0.000001 &&
+        Math.abs(line.priceUnit - toNumber(row.price_unit)) < 0.011
+      )
+      if (ix < 0) throw new Error('negative_so_line_mismatch')
+      remaining.splice(ix, 1)
+    }
+    if (remaining.length) throw new Error('negative_so_lines_missing')
+  } catch (error: any) {
+    throw new Error('ERP_OUTCOME_UNKNOWN:negative_so_readback:' + String(error?.message || error).slice(0, 180))
+  }
+}
+
 async function readDeliveredMoves(
   client: OdooClient,
   orderId: number,
@@ -852,6 +901,46 @@ export interface StockReturnResult {
   returnedQty: number
 }
 
+/**
+ * Stock pickings must contain only tracked, stockable goods. Odoo 18-20
+ * models these as type=consu + is_storable=true; 14-17 use type=product.
+ * Service, COD, shipping, digital and financial-only lines remain eligible
+ * for the credit note, but can never require a delivered stock.move.
+ *
+ * Fail closed when product metadata cannot be read: treating an unknown
+ * physical product as a service would silently skip an inventory return.
+ */
+export async function selectPhysicalReturnLines(
+  client: OdooClient,
+  lines: readonly OdooReturnLine[],
+  _majorVersion: number
+): Promise<OdooReturnLine[]> {
+  const ids = [...new Set(lines.map(line => line.productId).filter(id => id > 0))]
+  if (!ids.length) return []
+  let products: any[]
+  try {
+    products = await client.searchRead<any>(
+      'product.product', [['id', 'in', ids]], ['id', 'type', 'is_storable'], ids.length
+    )
+  } catch {
+    // is_storable does not exist on older Odoo versions.
+    products = await client.searchRead<any>(
+      'product.product', [['id', 'in', ids]], ['id', 'type'], ids.length
+    )
+  }
+  const byId = new Map((products || []).map(product => [Number(product.id), product]))
+  for (const id of ids) {
+    if (!byId.has(id)) throw new Error('stock_return_product_lookup_incomplete:' + id)
+  }
+  return lines.filter(line => {
+    const product = byId.get(line.productId)
+    if (!product) return false
+    if (product.is_storable === true) return true
+    if (product.is_storable === false) return false
+    return product.type === 'product'
+  })
+}
+
 export async function createStockReturn(
   client: OdooClient,
   orderId: number,
@@ -862,10 +951,12 @@ export async function createStockReturn(
     pickingAction?: string
   }
 ): Promise<StockReturnResult> {
+  const physicalLines = await selectPhysicalReturnLines(client, lines, majorVersion)
+  if (physicalLines.length === 0) return { pickingIds: [], returnedQty: 0 }
   const moves = await readDeliveredMoves(client, orderId, options?.orderName, majorVersion)
   const byPicking = new Map<number, { moveId: number; productId: number; quantity: number }[]>()
   const remaining = new Map<number, number>()
-  for (const line of lines) {
+  for (const line of physicalLines) {
     remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
   }
 
