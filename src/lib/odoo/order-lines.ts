@@ -1,4 +1,5 @@
 import { paymentKeysFromOrder, resolveAnalyticDistribution, toOdooAnalyticFields } from '@/lib/odoo/analytic-distribution'
+import { normalizeMappedZidUnitPrice, zidSaleUnitPrice } from '@/lib/orders/zid-line-pricing'
 import { fetchFieldMeta } from '@/lib/odoo/field-meta'
 import { convertCurrencyAmount } from '@/lib/odoo/order-currency'
 import { extractOrderLocationInfo, resolveShippingCarrier } from '@/lib/odoo/order-location'
@@ -552,7 +553,13 @@ export async function buildOrderLineItems(
       if (fm.erpField === 'price_unit' && typeof val === 'number' && val > 0 && pricesIncludeTax && taxRatePercent > 0 && !isSallaNetPrice) {
         val = Math.round((val / (1 + (taxRatePercent / 100))) * 100) / 100
       }
-      line[fm.erpField] = val
+      // Price-unit mappings to totals must be divided by quantity. Odoo
+      // multiplies price_unit by product_uom_qty when computing the subtotal.
+      line[fm.erpField] = fm.erpField === 'price_unit' && platform === 'zid'
+        ? normalizeMappedZidUnitPrice(
+            fm.zidField, val, Number(productData.quantity ?? productData.qty ?? 1)
+          )
+        : val
     }
 
     // Apply line-level discount (Option A)
@@ -564,9 +571,15 @@ export async function buildOrderLineItems(
     const sallaItemDiscount = platform === 'salla' ? readSallaAmount(resolvePath(productData, 'amounts.total_discount')) : undefined
     let zidPrice = numFromKeys(productData, orderItemBasePriceKeys)
       || numFromKeys(productData, ['total_before', 'total']) / qty
-    let zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
-      || numFromKeys(productData, ['discounted_total', 'total']) / qty
-      || zidPrice
+    // Zid discounted_total is a LINE TOTAL, not a price per item. The old
+    // fallback selected it ahead of price and wrote 2 × 1002 instead of
+    // 2 × 501. Preserve historical Salla/Shopify processing unchanged.
+    let zidSalePrice = platform === 'zid'
+      ? zidSaleUnitPrice(productData, qty, zidPrice)
+      : (numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price',
+          'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
+          || numFromKeys(productData, ['discounted_total', 'total']) / qty
+          || zidPrice)
     const zidDiscountDirect = numFromKeys(productData, ['discount', 'discount_percentage'])
 
     if (sallaNetPrice !== undefined) {
