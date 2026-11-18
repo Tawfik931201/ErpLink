@@ -5,6 +5,7 @@ import {
   extractZidRemainingLines,
   isReturnSignal,
   zidReturnRefundsOrderFees,
+  verifiedZidFallbackRefundTotal,
   isSallaReturnEvent,
   isZidReturnStatus,
   returnDedupeKey,
@@ -324,3 +325,51 @@ describe('Zid full reversal fee-refund accounting', () => {
   })
 })
 
+
+describe('Zid missing-original negative-SO money safety', () => {
+  const item = [{ storeProductId: 'p1', sku: 'QA', quantity: 1, priceUnit: 301 }]
+
+  it('refunds only the 301 SAR product even when 316 SAR was reversed', () => {
+    expect(verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ id: 'r1', reverse_total: 316, refund_total: 301 }],
+    }, item)).toBe(301)
+  })
+
+  it('blocks a second, unrefunded 15 SAR shipping charge before an Odoo write', () => {
+    expect(() => verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ id: 'r1', reverse_total: 316, refund_total: 301 }],
+    }, item, 15)).toThrow('return_fallback_refund_total_mismatch_requires_review')
+  })
+
+  it('allows 15 SAR shipping when the completed receipt actually refunds it', () => {
+    expect(verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ reverse_total: 316, refund_total: 316 }],
+    }, item, 15)).toBe(316)
+  })
+
+  it('adds original Zid VAT, not a second implicit VAT on an exempt order', () => {
+    expect(verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ reverse_total: 301, refund_total: 301 }],
+    }, [{ ...item[0], priceUnit: 261.74, taxAmountPerUnit: 39.26 }])).toBe(301)
+  })
+
+  it('deduplicates repeated requests but sums distinct cumulative receipts', () => {
+    expect(verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [
+        { id: 'one', refund_total: 301 },
+        { id: 'one', refund_total: 301 },
+        { id: 'two', refund_total: 301 },
+      ],
+    }, [{ ...item[0], quantity: 2 }])).toBe(602)
+  })
+
+  it('rejects missing or invalid source monetary amounts', () => {
+    expect(() => verifiedZidFallbackRefundTotal({}, item)).toThrow('return_fallback_refund_total_missing')
+    expect(() => verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ refund_total: null }],
+    }, item)).toThrow('return_fallback_refund_total_missing')
+    expect(() => verifiedZidFallbackRefundTotal({
+      reverse_order_label_requests: [{ refund_total: 99 }],
+    }, item)).toThrow('return_fallback_refund_total_mismatch_requires_review')
+  })
+})
