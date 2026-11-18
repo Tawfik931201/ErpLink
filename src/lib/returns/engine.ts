@@ -736,13 +736,16 @@ async function createFromPayloadWithoutOrder(
 
   // The ERP effect ledger may recover a prior ID. Read the actual negative
   // sale order and all persisted lines before logging a successful fallback.
-  const expectedLines: OdooReturnLine[] = orderLines.map(([, , v]) => ({
-    productId: Number(v.product_id),
-    quantity: Math.abs(Number(v.product_uom_qty)),
-    priceUnit: Number(v.price_unit),
-    name: String(v.name || ''),
-    taxIds: [],
-  }))
+  const expectedLines: OdooReturnLine[] = orderLines.map(entry => {
+    const v = entry[2] as Record<string, unknown>
+    return {
+      productId: Number(v.product_id),
+      quantity: Math.abs(Number(v.product_uom_qty)),
+      priceUnit: Number(v.price_unit),
+      name: String(v.name || ''),
+      taxIds: [],
+    }
+  })
   await assertNegativeSaleOrderPersisted(client, Number(created),
     `${platform}:${orderId}`, expectedLines)
 
