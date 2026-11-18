@@ -16,6 +16,7 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
+import { withErpCreateIdentity } from '@/lib/erp-effect-context'
 import { resolveOrderRelatedRecord } from '@/lib/orders/related-matching'
 import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
 import { supabaseAdmin } from '@/lib/sync-runtime'
@@ -659,8 +660,13 @@ async function createFromPayloadWithoutOrder(
 
   let created: number
   try {
-    created = await client.create('sale.order', soVals)
+    created = await withErpCreateIdentity('return-fallback:' + signature, () =>
+      client.create('sale.order', soVals)
+    )
   } catch (err) {
+    if (/ERP_OUTCOME_UNKNOWN|ERP_EFFECT_UNCERTAIN/i.test(String((err as Error)?.message || err))) {
+      throw err // The first remote create may already exist: do not retry it.
+    }
     const coreVals = {
       partner_id: partnerId,
       client_order_ref: soVals.client_order_ref,
@@ -670,7 +676,9 @@ async function createFromPayloadWithoutOrder(
     }
     if (soVals.pricelist_id) (coreVals as any).pricelist_id = soVals.pricelist_id
     if (soVals.warehouse_id) (coreVals as any).warehouse_id = soVals.warehouse_id
-    created = await client.create('sale.order', coreVals)
+    created = await withErpCreateIdentity('return-fallback:' + signature, () =>
+      client.create('sale.order', coreVals)
+    )
   }
 
   if (input.autoConfirm) {
@@ -770,11 +778,26 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
     let odooRecordId: number | undefined
 
     if (settings.mode === 'negative_so') {
-      odooRecordId = await createNegativeSaleOrder(client, original, lines, effectiveReason, {
-        orderStdSettings: input.orderStdSettings,
-        payload: input.payload,
-        platform,
-      })
+      // This create happens inside the parent order's ERP effect context.
+      // Without an explicit return identity it collides with the root sale.order
+      // creation effect and silently reuses the ORIGINAL sale order ID.
+      // Use the cumulative return receipt so a later equal-size partial return
+      // gets a new identity while webhook replays share the existing one.
+      const receipt = platform === 'zid' ? extractZidReceivedReturnLines(input.payload) : null
+      const cumulative = receipt?.known
+        ? receipt.lines
+        : input.refundedLines?.length
+          ? input.refundedLines
+          : lines.map(line => ({ storeProductId: String(line.productId), sku: '', quantity: line.quantity }))
+      const effectIdentity = 'return-negative:' + original.name + ':' +
+        returnSnapshotSignature(cumulative, platform + ':' + orderId)
+      odooRecordId = await withErpCreateIdentity(effectIdentity, () =>
+        createNegativeSaleOrder(client, original, lines, effectiveReason, {
+          orderStdSettings: input.orderStdSettings,
+          payload: input.payload,
+          platform,
+        })
+      )
       // An RPC create acknowledgement is not proof of a persisted return.
       // Unknown results are quarantined instead of reissuing financial writes.
       await assertNegativeSaleOrderPersisted(client, odooRecordId, original.name, lines)
