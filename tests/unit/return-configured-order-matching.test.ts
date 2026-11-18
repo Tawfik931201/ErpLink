@@ -55,7 +55,7 @@ describe('returns use Orders Standard Mapping matching fields', () => {
     const result = await findOriginalSaleOrder(client, params)
     expect(result?.id).toBe(67)
     expect(client.searchRead.mock.calls[0][1]).toEqual([
-      ['client_order_ref', '=', 502218013], ['state', '!=', 'cancel'],
+      ['client_order_ref', '=', '502218013'], ['state', '!=', 'cancel'],
     ])
     expect(ownership).toHaveBeenCalledWith(expect.anything(), 67, {
       workspaceId: 'ws', platform: 'zid', storeId: '3172448', storeEntityId: '502218013',
