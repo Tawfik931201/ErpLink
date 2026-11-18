@@ -629,12 +629,13 @@ export async function buildOrderLineItems(
     // the order sale price (e.g. price/net_sale_price 81.23) even when it does
     // not mark the row as discounted. Only preserve the pre-discount/base
     // price when ERP Link is explicitly representing the discount itself.
-    if (!line['price_unit'] && !(platform === 'salla' && line.price_unit === 0)) {
+    if (line['price_unit'] === undefined || line['price_unit'] === null || line['price_unit'] === '') {
       const representDiscountSeparately =
         shouldApplyPercentToLine || (addDiscountAsLine && discountMode !== 'percent')
       line['price_unit'] = representDiscountSeparately
         ? ((zidPrice > 0) ? zidPrice : (zidSalePrice > 0 ? zidSalePrice : 0))
-        : ((zidSalePrice > 0) ? zidSalePrice : (zidPrice > 0 ? zidPrice : 0))
+        : (platform === 'zid' ? zidSalePrice
+            : ((zidSalePrice > 0) ? zidSalePrice : (zidPrice > 0 ? zidPrice : 0)))
     }
 
     if (currencyConversionRate > 0 && currencyConversionRate !== 1.0 && typeof line['price_unit'] === 'number') {
