@@ -104,7 +104,7 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
 
       for (const row of rows) {
         const categoryId = String(row.store_entity_id || '')
-        if (!/^\\d+$/.test(categoryId)) continue
+        if (!/^\d+$/.test(categoryId)) continue
         remaining -= 1
         result.checked += 1
         const missingScope = scopeFor([workspaceId, storeId, 'missing', categoryId])
