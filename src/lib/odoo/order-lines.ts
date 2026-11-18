@@ -11,6 +11,7 @@ import { supabaseAdmin } from '@/lib/sync-runtime'
 import type { FieldMappingItem, FieldMappingRow, OdooFieldMeta } from '@/lib/sync-types'
 import type { VatCountryRule } from '@/lib/zid/order-helpers'
 import { isOrderCreationEvent, isSaudiShippingAddress, resolveEffectiveTaxRate, resolveOrderCountryCode, resolveOrderDiscountAmount, resolveOrderVatTax, resolveZidCodAmount, resolveZidShippingCost } from '@/lib/zid/order-helpers'
+import { resolveZidLineUnitSalePrice } from '@/lib/orders/zid-line-unit-price'
 import { readOrderRelatedDetails } from '@/lib/zid/order-related-data'
 
 // ─── Helper: build sale.order.line items for sale.order mappings ────────────
@@ -564,9 +565,13 @@ export async function buildOrderLineItems(
     const sallaItemDiscount = platform === 'salla' ? readSallaAmount(resolvePath(productData, 'amounts.total_discount')) : undefined
     let zidPrice = numFromKeys(productData, orderItemBasePriceKeys)
       || numFromKeys(productData, ['total_before', 'total']) / qty
-    let zidSalePrice = numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
-      || numFromKeys(productData, ['discounted_total', 'total']) / qty
-      || zidPrice
+    // Zid discounted_total is an extended line total (quantity × unit amount).
+    // Never feed it directly into Odoo price_unit. Keep non-Zid adapters unchanged.
+    let zidSalePrice = platform === 'zid'
+      ? resolveZidLineUnitSalePrice(productData, qty, zidPrice)
+      : (numFromKeys(productData, ['net_sale_price', 'gross_sale_price', 'sale_price', 'price_after_discount', 'discounted_price', 'discounted_total', 'price'])
+        || numFromKeys(productData, ['discounted_total', 'total']) / qty
+        || zidPrice)
     const zidDiscountDirect = numFromKeys(productData, ['discount', 'discount_percentage'])
 
     if (sallaNetPrice !== undefined) {
