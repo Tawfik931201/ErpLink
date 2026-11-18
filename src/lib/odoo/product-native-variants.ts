@@ -186,7 +186,7 @@ export async function syncAsVariants(
       templateId,
       attrId,
       desiredValueIds,
-      platform === 'salla',
+      platform === 'salla' || platform === 'zid',
     )
     console.info(
       `[SyncEngine] Ensured single product.template.attribute.line #${lineId} for attribute "${attrName}" with values: [${desiredValueIds.join(', ')}]`
@@ -204,10 +204,10 @@ export async function syncAsVariants(
       const written = await client.write('product.template', [templateId], {
         attribute_line_ids: [[6, 0, allLineIds]]
       })
-      if (!written && platform === 'salla') throw new Error(`Odoo rejected variant generation for product #${templateId}`)
+      if (!written && (platform === 'salla' || platform === 'zid')) throw new Error(`Odoo rejected variant generation for product #${templateId}`)
       console.info(`[SyncEngine] Wrote attribute_line_ids [[6,0,[${allLineIds.join(',')}]]] to template #${templateId} to trigger variant generation.`)
     } catch (err: any) {
-      if (platform === 'salla') throw err
+      if (platform === 'salla' || platform === 'zid') throw err
       console.warn(`[SyncEngine] Failed to trigger variant generation via write (non-critical): ${err?.message ?? err}`)
     }
   }
@@ -337,7 +337,7 @@ export async function syncAsVariants(
       console.info(`[SyncEngine] Matched webhook variant (SKU: ${variant.sku}) to Odoo product.product #${matchingOdooVar.id}`)
 
       const written = await client.write('product.product', [matchingOdooVar.id], detailValues)
-      if (!written && platform === 'salla') throw new Error(`Odoo rejected Salla variant #${matchingOdooVar.id}`)
+      if (!written && (platform === 'salla' || platform === 'zid')) throw new Error(`Odoo rejected ${platform} variant #${matchingOdooVar.id}`)
       if (finiteProductNumber(variantValues.list_price) !== undefined) variantPrices.set(matchingOdooVar.id, Number(variantValues.list_price))
       await syncProductStockQuantities(client, matchingOdooVar.id, { ...variant.source, quantity: variant.quantity }, mergedSettings || {}, mapping.workspace_id, platform)
       updatedCount++
@@ -378,9 +378,9 @@ export async function syncAsVariants(
     }
   }
 
-  const priceSync = await syncVariantPrices(client, templateId, variantPrices, false, platform === 'salla')
+  const priceSync = await syncVariantPrices(client, templateId, variantPrices, false, platform === 'salla' || platform === 'zid')
   if (!priceSync.represented) {
-    if (platform === 'salla') throw new Error(priceSync.reason || 'Odoo cannot represent the Salla variant prices')
+    if (platform === 'salla' || platform === 'zid') throw new Error(priceSync.reason || `Odoo cannot represent the ${platform} variant prices`)
     await logSync({ workspace_id: mapping.workspace_id, field_mapping_id: mapping.id, event, store_id: storeId, zid_entity_id: zidEntityId, odoo_model: 'product.template', odoo_record_id: templateId, status: 'skipped', error_message: 'Variant prices cannot be represented as attribute extras (prices kept as-is)', payload: { ...zidData, reason: priceSync.reason }, trigger_type: triggerType, platform })
   }
   for (const [sourceId, recordId] of variantRecords) {
@@ -423,12 +423,14 @@ export async function syncAsVariants(
         currentZidVariantIds: variantRecords.keys(),
       })
       if (staleIds.length > 0) {
-        await client.write('product.product', staleIds, { active: false })
+        const archived = await client.write('product.product', staleIds, { active: false })
+        if (!archived) throw new Error(`Odoo rejected archiving stale ${platform} variants: ${staleIds.join(', ')}`)
         console.info(`[SyncEngine] Archived ${staleIds.length} Zid variant(s) removed from the parent product: #${staleIds.join(', #')}`)
       }
     } catch (err: any) {
-      // Reconciliation is a cleanup pass, not the primary sync. A failure here
-      // must not turn an otherwise successful product update into a retry.
+      // Zid variant deletion is part of the requested final state: surface failure
+      // so the event can retry instead of falsely reporting success.
+      if (platform === 'zid') throw err
       console.warn(`[SyncEngine] Variant removal reconciliation failed for template #${templateId}:`, err?.message ?? err)
     }
   }
