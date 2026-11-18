@@ -52,17 +52,31 @@ export interface CategoryDeleteAuditResult {
 
 export async function reconcileZidDeletedCategories(now = new Date()): Promise<CategoryDeleteAuditResult> {
   const result: CategoryDeleteAuditResult = { checked: 0, confirmedMissing: 0, enqueued: 0, errors: [] }
+  // A global persistent offset prevents early stores from consuming every
+  // cycle's remote-call budget while later merchants are never inspected.
+  const schedulerScope = scopeFor(['merchant-scheduler'])
+  const schedulerCursor = await readCursor(schedulerScope)
+  const startOffset = Number.isSafeInteger(schedulerCursor.offset) && Number(schedulerCursor.offset) >= 0
+    ? Number(schedulerCursor.offset) : 0
   const { data: merchants, error: merchantError } = await supabase
     .from('merchant_tokens').select('merchant_id,store_id,workspace_id')
-    .not('workspace_id', 'is', null).limit(100)
+    .not('workspace_id', 'is', null)
+    .order('merchant_id', { ascending: true })
+    .range(startOffset, startOffset + 99)
   if (merchantError) {
     result.errors.push('category audit merchant discovery unavailable')
     return result
   }
+  if (!(merchants ?? []).length) {
+    await persistState(schedulerScope, { offset: 0 }, now.toISOString())
+    return result
+  }
 
   let remaining = MAX_REMOTE_CALLS_PER_CYCLE
+  let visited = 0
   for (const merchant of merchants ?? []) {
     if (remaining <= 0) break
+    visited += 1
     const workspaceId = String(merchant.workspace_id || '')
     const merchantId = String(merchant.merchant_id || merchant.store_id || '')
     const storeId = String(merchant.store_id || merchant.merchant_id || '')
@@ -144,5 +158,6 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
         (error instanceof Error ? error.message.slice(0, 180) : 'category audit failed'))
     }
   }
+  await persistState(schedulerScope, { offset: startOffset + visited }, now.toISOString())
   return result
 }
