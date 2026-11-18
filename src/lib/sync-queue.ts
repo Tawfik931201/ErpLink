@@ -1123,7 +1123,7 @@ function isCircuitBreakerFailure(errorMessage?: string): boolean {
  * These rows freeze immediately; independent later events still run.
  */
 export function isTerminalReturnReview(errorMessage?: string): boolean {
-  return /^(?:return_grouped_components_require_review|return_damaged_requires_financial_review|return_receipt_quantity_invalid|return_receipt_quantity_exceeds_original|return_request_unreadable)(?::|$)/.test(String(errorMessage || ''))
+  return /^(?:return_grouped_components_require_review|return_damaged_requires_financial_review|return_receipt_quantity_invalid|return_receipt_quantity_exceeds_original|return_request_unreadable|return_fallback_order_line_ambiguous|return_fallback_unit_price_unavailable|return_fallback_product_not_found|return_configured_product_not_found|return_configured_customer_not_found)(?::|$)/.test(String(errorMessage || ''))
 }
 
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
