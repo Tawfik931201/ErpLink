@@ -127,8 +127,9 @@ describe('Zid remaining quantities follow the documented contract', () => {
     expect(returnsEngine).toContain(': line.orderedQty')
   })
 
-  it('does not let two order lines of one product return the same units twice', () => {
-    expect(returnsEngine).toContain('consumed')
+  it('uses capped per-sale-line allocation so duplicate products cannot over-refund', () => {
+    expect(returnsEngine).toContain('incrementalReturnLineQuantities(original.lines, targets, ledger)')
+    expect(returnsEngine).toContain('isCumulativeFullReturn(regularLines, targets)')
   })
 
   it('only trusts a response that actually contains a products array', () => {
