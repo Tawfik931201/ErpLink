@@ -15,6 +15,10 @@ describe('terminal return business validation', () => {
     'return_order_match_conflicts_with_durable_link',
     'return_mode_changed_existing_financial_effect_requires_review',
     'return_stock_without_credit_note_requires_review',
+    'return_grouped_mixed_parent_component_requires_review',
+    'return_grouped_parent_quantity_invalid',
+    'return_grouped_stock_quantity_invalid',
+    'return_grouped_partial_inventory_effect_requires_review',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)
