@@ -16,6 +16,10 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
+import { resolveOrderRelatedRecord } from '@/lib/orders/related-matching'
+import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
+import { supabaseAdmin } from '@/lib/sync-runtime'
+import { readOrderRelatedDetails } from '@/lib/zid/order-related-data'
 import {
   extractOrderLocationInfo,
   paymentKeysFromOrder,
@@ -85,12 +89,38 @@ function skipped(message: string): ReturnOutcome {
 async function resolveStoreLines(
   client: OdooClient,
   platform: PlatformKey,
-  lines: readonly StoreReturnLine[]
+  lines: readonly StoreReturnLine[],
+  identity?: { workspaceId: string; storeId: string },
 ): Promise<{ byProduct: Map<number, number>; unresolved: number }> {
   const byProduct = new Map<number, number>()
   let unresolved = 0
+  // Match the same product.product and match fields as normal order lines.
+  // Source return UUIDs are not a substitute for a merchant's saved SKU,
+  // barcode or custom match pair.
+  const matchSettings = identity
+    ? await getCachedStandardMappingSettings(identity.workspaceId, platform, 'products', identity.storeId)
+    : null
   for (const line of lines) {
-    const odooId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+    let odooId: number | null
+    if (identity && platform === 'zid') {
+      const source: Record<string, unknown> = {
+        id: line.storeProductId, product_id: line.storeProductId,
+        sku: line.sku, name: line.name,
+      }
+      const match = await resolveOrderRelatedRecord(client, supabaseAdmin,
+        { workspaceId: identity.workspaceId, platform, storeId: identity.storeId },
+        'products', source, matchSettings,
+        () => readOrderRelatedDetails(client, {
+          workspaceId: identity.workspaceId, platform, storeId: identity.storeId,
+        }, 'products', source))
+      odooId = match.configured ? match.recordId
+        : await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+      if (match.configured && !odooId) {
+        throw new Error('return_configured_product_not_found:' + (line.sku || line.storeProductId))
+      }
+    } else {
+      odooId = await resolveOdooProductId(client, platform, line.storeProductId, line.sku)
+    }
     if (!odooId) {
       unresolved += 1
       continue
@@ -225,14 +255,15 @@ async function buildReturnLines(
     const receipt = extractZidReceivedReturnLines(input.payload)
     if (receipt.error) throw new Error(receipt.error)
     if (!receipt.known) throw new Error('return_receipt_quantities_unknown')
-    const { byProduct, unresolved } = await resolveStoreLines(client, platform, receipt.lines)
+    const { byProduct, unresolved } = await resolveStoreLines(client, platform, receipt.lines, { workspaceId: input.workspaceId, storeId: input.storeId })
     if (unresolved > 0) throw new Error('return_receipt_products_unmapped')
     targets = byProduct
   } else if (input.remaining?.known) {
     const { byProduct, unresolved } = await resolveStoreLines(
       client,
       platform,
-      input.remaining.lines
+      input.remaining.lines,
+      { workspaceId: input.workspaceId, storeId: input.storeId },
     )
     // Zid documents that `view-for-return` lists ONLY products that can still
     // come back, so a product missing from the list has nothing left to
@@ -250,7 +281,7 @@ async function buildReturnLines(
       if (target > 0) targets.set(line.productId, target)
     }
   } else if (input.refundedLines && input.refundedLines.length > 0) {
-    targets = (await resolveStoreLines(client, platform, input.refundedLines)).byProduct
+    targets = (await resolveStoreLines(client, platform, input.refundedLines, { workspaceId: input.workspaceId, storeId: input.storeId })).byProduct
   } else {
     // Zid can report a partial return with no readable view-for-return API.
     // Guessing "everything was returned" corrupts inventory and credits.
