@@ -208,6 +208,14 @@ describe('Order Status Mapping Table — Stock Picking & Invoice Actions', () =>
     expect(tabSource).toContain('إلغاء الفاتورة')
   })
 
+  it('temporarily unlocks Odoo 20 orders while enforcing configured taxes and restores the lock', () => {
+    const source = readStripped('src/lib/odoo/order-workflow.ts')
+    expect(source).toContain('if (majorVersion >= 20)')
+    expect(source).toContain("client.write('sale.order', [odooOrderId], { locked: false })")
+    expect(source).toContain("client.write('sale.order.line', linesNeedingUpdate")
+    expect(source).toContain("client.write('sale.order', [odooOrderId], { locked: true })")
+  })
+
   it('bypasses Odoo stock SMS confirmation when auto-validating a picking', () => {
     const source = readStripped('src/lib/odoo/order-workflow.ts')
     expect(source).toContain(
