@@ -86,7 +86,7 @@ function skipped(message: string): ReturnOutcome {
   return { handled: true, status: 'skipped', message, actions: [] }
 }
 
-async function resolveStoreLines(
+export async function resolveStoreLines(
   client: OdooClient,
   platform: PlatformKey,
   lines: readonly StoreReturnLine[],
