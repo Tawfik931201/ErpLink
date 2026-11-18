@@ -693,6 +693,7 @@ interface DeliveredMove {
   id: number
   pickingId: number
   productId: number
+  saleLineId: number | null
   quantity: number
 }
 
@@ -782,33 +783,38 @@ async function readDeliveredMoves(
   if (pickingIds.length === 0) return []
 
   const qtyField = majorVersion >= 17 ? 'quantity' : 'quantity_done'
+  const domainMoves: any[] = [
+    ['picking_id', 'in', pickingIds], ['state', '=', 'done'],
+  ]
+  const limit = Math.max(pickingIds.length * 50, 100)
   let moves: any[] = []
+  let availableQtyField = qtyField
   try {
-    moves = await client.searchRead<any>(
-      'stock.move',
-      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
-      ['id', 'picking_id', 'product_id', qtyField],
-      Math.max(pickingIds.length * 50, 100)
-    )
+    moves = await client.searchRead<any>('stock.move', domainMoves,
+      ['id', 'picking_id', 'product_id', 'sale_line_id', qtyField], limit)
   } catch {
-    moves = await client.searchRead<any>(
-      'stock.move',
-      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
-      ['id', 'picking_id', 'product_id', 'product_uom_qty'],
-      Math.max(pickingIds.length * 50, 100)
-    )
-    return (moves || []).map(m => ({
-      id: Number(m.id),
-      pickingId: many2oneId(m.picking_id) || 0,
-      productId: many2oneId(m.product_id) || 0,
-      quantity: toNumber(m.product_uom_qty),
-    }))
+    try {
+      // Not every Odoo sale/stock module version has sale_line_id.
+      // Without it, reject grouped stock returns instead of guessing moves.
+      moves = await client.searchRead<any>('stock.move', domainMoves,
+        ['id', 'picking_id', 'product_id', qtyField], limit)
+    } catch {
+      availableQtyField = 'product_uom_qty'
+      try {
+        moves = await client.searchRead<any>('stock.move', domainMoves,
+          ['id', 'picking_id', 'product_id', 'sale_line_id', availableQtyField], limit)
+      } catch {
+        moves = await client.searchRead<any>('stock.move', domainMoves,
+          ['id', 'picking_id', 'product_id', availableQtyField], limit)
+      }
+    }
   }
   return (moves || []).map(m => ({
     id: Number(m.id),
     pickingId: many2oneId(m.picking_id) || 0,
     productId: many2oneId(m.product_id) || 0,
-    quantity: toNumber(m[qtyField]),
+    saleLineId: many2oneId(m.sale_line_id),
+    quantity: toNumber(m[availableQtyField]),
   }))
 }
 
