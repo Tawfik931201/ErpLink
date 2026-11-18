@@ -1117,14 +1117,25 @@ function isCircuitBreakerFailure(errorMessage?: string): boolean {
     || /erp request timed out|network error|fetch failed/i.test(errorMessage)
 }
 
+/**
+ * Business decisions that cannot improve through another identical webhook
+ * must stay visible for manual review, not burn queue leases and retries.
+ * These rows freeze immediately; independent later events still run.
+ */
+export function isTerminalReturnReview(errorMessage?: string): boolean {
+  return /^(?:return_grouped_components_require_review|return_damaged_requires_financial_review|return_receipt_quantity_invalid|return_request_unreadable)(?::|$)/.test(String(errorMessage || ''))
+}
+
 async function incrementRetry(item: QueueItem, errorMessage?: string) {
   const metrics = getMetricsStore()
   if (/unknown.outcome|outcome.unknown|uncertain|in.progress|reconciliation required/i.test(errorMessage ?? '')) {
     await parkUnknownOutcome(item)
     return
   }
-  const newCount = (item.retry_count || 0) + 1
   const maxRetries = item.max_retries || SYNC_QUEUE_MAX_RETRIES
+  const newCount = isTerminalReturnReview(errorMessage)
+    ? maxRetries
+    : (item.retry_count || 0) + 1
 
   if (isCircuitBreakerFailure(errorMessage)) {
     await noteWorkspaceFailure(item.workspace_id, errorMessage).catch(() => {})
