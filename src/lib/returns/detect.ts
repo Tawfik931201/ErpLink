@@ -166,20 +166,9 @@ export function isReturnSignal(
     const ev = String(event || '').toLowerCase()
     if (ev.includes('reversed') || ev.includes('refund') || ev.includes('return')) return true
     if (!data) return false
-    if (
-      hasZidReturnLabelRequest(data.reverse_order_label_request) ||
-      hasZidReturnLabelRequest(data.reverse_order_label_requests)
-    ) {
-      return true
-    }
+    // "Return in progress" is NOT a completed return: the merchant may
+    // cancel it. Do not mutate Odoo stock or create credit notes yet.
     const nestedOrder = asRecord(data.order)
-    if (
-      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_request) ||
-      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_requests)
-    ) {
-      return true
-    }
-    // Check all standard and custom Zid status locations (including Arabic display names)
     const status =
       data.order_status ??
       nestedOrder?.order_status ??
@@ -192,7 +181,21 @@ export function isReturnSignal(
       data.current_status ??
       data.new_status ??
       data.order_status_code
-    return isZidReturnStatus(status, true)
+    if (isZidReturnStatus(status, true) && !isZidReturnStatus(status)) return false
+    if (
+      hasZidReturnLabelRequest(data.reverse_order_label_request) ||
+      hasZidReturnLabelRequest(data.reverse_order_label_requests)
+    ) {
+      return true
+    }
+    if (
+      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_request) ||
+      hasZidReturnLabelRequest(nestedOrder?.reverse_order_label_requests)
+    ) {
+      return true
+    }
+    // Check all standard and custom Zid status locations (including Arabic display names)
+    return isZidReturnStatus(status)
   }
   if (platform === 'salla') {
     if (isSallaReturnEvent(event)) return true
