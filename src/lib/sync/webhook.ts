@@ -8,6 +8,7 @@ import type { FieldMappingRow, SyncEngineResult } from '@/lib/sync-types'
 import { enrichZidCustomer } from '@/lib/zid/customers'
 import { enrichZidOrder } from '@/lib/zid/orders'
 import { enrichZidProduct } from '@/lib/zid/products'
+import { isStaleZidProductEvent } from '@/lib/zid/product-version-fence'
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
@@ -129,6 +130,32 @@ async function processWebhookEventInternal(
     : 'zid'
   )
   if (syncPlatform === 'zid') {
+    // An older create/publish/update must not overwrite a newer successful
+    // version. Check BEFORE enriching with Zid API: the GET endpoint may be
+    // eventually consistent too. Deletions are handled separately; they may
+    // carry only an ID and no reliable update timestamp.
+    if (isProduct && !normalizedEvent.includes('delete')) {
+      const productEntityId = String(data.id ?? data.product_id ?? '')
+      if (productEntityId && resolvedWorkspaceId &&
+          await isStaleZidProductEvent(resolvedWorkspaceId, storeIdStr, productEntityId, data)) {
+        await logSync({
+          workspace_id: resolvedWorkspaceId,
+          field_mapping_id: '',
+          event,
+          store_id: storeIdStr,
+          zid_entity_id: productEntityId,
+          odoo_model: 'product.template',
+          status: 'skipped',
+          error_message: 'stale_zid_product_event: newer successfully synced source version already exists',
+          payload: data,
+          trigger_type: 'automatic',
+          platform: 'zid',
+        })
+        result.processed += 1
+        result.skipped += 1
+        return result
+      }
+    }
     if (normalizedEvent.startsWith('customer.')) {
       data = await enrichZidCustomer(data, storeIdStr, isLegacyDelivery)
     }
