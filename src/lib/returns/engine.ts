@@ -41,6 +41,7 @@ import {
   extractStoreReturnReason,
   extractZidReceivedReturnLines,
   zidReturnRefundsOrderFees,
+  verifiedZidFallbackRefundTotal,
   extractPricedZidReceivedReturnLines,
   returnDedupeKey,
   returnSnapshotSignature,
@@ -651,7 +652,11 @@ async function createFromPayloadWithoutOrder(
   const paymentTermId = Number(orderStdSettings?.order?.default_payment_term_id || orderStdSettings?.default_payment_term_id)
   const companyId = Number(orderStdSettings?.company_id || orderStdSettings?.order?.company_id)
 
-  const orderLines = resolved.map(line => {
+  if (platform === 'zid' && lines.some(line => Number(line.taxAmountPerUnit ?? 0) > 0.000001) && !taxToApply) {
+    throw new Error('return_fallback_source_tax_mapping_missing')
+  }
+
+  const orderLines = resolved.map((line, index) => {
     const lineVals: Record<string, unknown> = {
       product_id: line.productId,
       name: line.name || `Return - ${orderId}`,
@@ -661,7 +666,11 @@ async function createFromPayloadWithoutOrder(
     if (line.discount !== undefined && line.discount > 0) {
       lineVals.discount = line.discount
     }
-    if (taxToApply) {
+    if (platform === 'zid') {
+      // Use source VAT, not Odoo's default 15% on a tax-exempt Zid item.
+      const sourceVat = Number(lines[index]?.taxAmountPerUnit ?? 0) > 0.000001
+      lineVals[taxField] = [[6, 0, sourceVat && taxToApply ? [taxToApply] : []]]
+    } else if (taxToApply) {
       lineVals[taxField] = [[6, 0, [taxToApply]]]
     }
     if (evaluatedAnalyticFields && Object.keys(evaluatedAnalyticFields).length > 0) {
@@ -670,10 +679,14 @@ async function createFromPayloadWithoutOrder(
     return [0, 0, lineVals]
   })
 
+  // Zid may exclude shipping/COD even when every product was reversed.
+  const refundFees = platform !== 'zid' || zidReturnRefundsOrderFees(input.payload)
+  let refundedFeeGross = 0
+
   // Shipping line
   const shippingCost = resolveZidShippingCost(input.payload)
   const addShipping = !!orderStdSettings?.order?.add_shipping_as_line || !!orderStdSettings?.add_shipping_as_line || !!orderStdSettings?.shipping_product_id
-  if (addShipping && shippingCost > 0) {
+  if (refundFees && addShipping && shippingCost > 0) {
     let shippingProdId = Number(orderStdSettings?.shipping_product_id || orderStdSettings?.order?.shipping_product_id)
     if (!shippingProdId && orderStdSettings?.shipping_product_sku) {
       shippingProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.shipping_product_sku))) || 0
@@ -685,7 +698,9 @@ async function createFromPayloadWithoutOrder(
         product_uom_qty: -1,
         price_unit: shippingCost,
       }
-      if (taxToApply) shipVals[taxField] = [[6, 0, [taxToApply]]]
+      if (platform === 'zid') shipVals[taxField] = [[6, 0, []]]
+      else if (taxToApply) shipVals[taxField] = [[6, 0, [taxToApply]]]
+      if (platform === 'zid') refundedFeeGross += shippingCost
       if (evaluatedAnalyticFields) Object.assign(shipVals, evaluatedAnalyticFields)
       orderLines.push([0, 0, shipVals])
     }
@@ -694,7 +709,7 @@ async function createFromPayloadWithoutOrder(
   // COD fee line
   const codFee = resolveZidCodAmount(input.payload)
   const addCod = !!orderStdSettings?.order?.add_cod_as_line || !!orderStdSettings?.add_cod_as_line || !!orderStdSettings?.cod_product_id
-  if (addCod && codFee > 0) {
+  if (refundFees && addCod && codFee > 0) {
     let codProdId = Number(orderStdSettings?.cod_product_id || orderStdSettings?.order?.cod_product_id)
     if (!codProdId && orderStdSettings?.cod_product_sku) {
       codProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.cod_product_sku))) || 0
@@ -706,7 +721,9 @@ async function createFromPayloadWithoutOrder(
         product_uom_qty: -1,
         price_unit: codFee,
       }
-      if (taxToApply) codVals[taxField] = [[6, 0, [taxToApply]]]
+      if (platform === 'zid') codVals[taxField] = [[6, 0, []]]
+      else if (taxToApply) codVals[taxField] = [[6, 0, [taxToApply]]]
+      if (platform === 'zid') refundedFeeGross += codFee
       if (evaluatedAnalyticFields) Object.assign(codVals, evaluatedAnalyticFields)
       orderLines.push([0, 0, codVals])
     }
@@ -716,7 +733,7 @@ async function createFromPayloadWithoutOrder(
   const discountMode = String(orderStdSettings?.order?.discount_mode || orderStdSettings?.discount_mode || 'percent')
   const orderDiscountAmount = resolveOrderDiscountAmount(input.payload)
   const addDiscount = !!orderStdSettings?.order?.add_discount_as_line || !!orderStdSettings?.add_discount_as_line
-  if (addDiscount && discountMode !== 'percent' && orderDiscountAmount > 0) {
+  if (platform !== 'zid' && addDiscount && discountMode !== 'percent' && orderDiscountAmount > 0) {
     let discProdId = Number(orderStdSettings?.discount_product_id || orderStdSettings?.order?.discount_product_id)
     if (!discProdId && orderStdSettings?.discount_product_sku) {
       discProdId = (await resolveOdooProductId(client, platform, '', String(orderStdSettings.discount_product_sku))) || 0
@@ -733,6 +750,11 @@ async function createFromPayloadWithoutOrder(
       orderLines.push([0, 0, discVals])
     }
   }
+
+  // Verify the real Zid refund amount before issuing a negative SO.
+  const expectedZidRefund = platform === 'zid'
+    ? verifiedZidFallbackRefundTotal(input.payload, lines, refundedFeeGross)
+    : null
 
   const storeReason = extractStoreReturnReason(input.payload, platform)
   const effectiveReason =
@@ -789,6 +811,20 @@ async function createFromPayloadWithoutOrder(
   })
   await assertNegativeSaleOrderPersisted(client, Number(created),
     `${platform}:${orderId}`, expectedLines)
+
+  // Odoo can reapply fiscal-position taxes on create; verify the actual total.
+  if (expectedZidRefund !== null) {
+    const [persisted] = await client.searchRead<any>(
+      'sale.order', [['id', '=', Number(created)]], ['id', 'amount_total'], 1,
+    )
+    const actual = Number(persisted?.amount_total)
+    if (!persisted || !Number.isFinite(actual) ||
+        Math.abs(Math.abs(actual) - expectedZidRefund) > 0.021) {
+      throw new Error('ERP_OUTCOME_UNKNOWN:return_fallback_persisted_total_mismatch:' +
+        (Number.isFinite(actual) ? actual.toFixed(2) : 'missing') + ':' +
+        expectedZidRefund.toFixed(2))
+    }
+  }
 
   if (input.autoConfirm) {
     try {

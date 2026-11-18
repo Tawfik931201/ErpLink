@@ -49,6 +49,8 @@ export interface StoreReturnLine {
   quantity: number
   name?: string
   priceUnit?: number
+  /** Actual source VAT per unit already included in the Zid order total. */
+  taxAmountPerUnit?: number
 }
 
 const ZID_RETURN_STATUSES = new Set(['reversed', 'partially_reversed', 'reverse_in_progress'])
@@ -393,6 +395,9 @@ export function extractPricedZidReceivedReturnLines(
     return {
       ...line,
       priceUnit: Math.round(unit * 1e6) / 1e6,
+      ...(includedTax > 0 && Number.isFinite(ordered) && ordered > 0
+        ? { taxAmountPerUnit: Math.round((includedTax / ordered) * 1e6) / 1e6 }
+        : {}),
       name: firstText(product, ['name', 'product_name', 'title']) || line.name,
     }
   })
@@ -506,6 +511,59 @@ export function zidReturnRefundsOrderFees(
     }
   }
   return true
+}
+
+
+/**
+ * Project the negative sale order for a missing original against the real
+ * money refunded by completed Zid return receipts, not the order grand total.
+ * A full 316 SAR reversal may only refund 301 SAR worth of products.
+ */
+export function verifiedZidFallbackRefundTotal(
+  payload: Record<string, unknown>,
+  lines: readonly StoreReturnLine[],
+  refundedFeeGross = 0,
+): number {
+  const order = asRecord(payload.order)
+  const many = payload.reverse_order_label_requests ?? order?.reverse_order_label_requests
+  const single = payload.reverse_order_label_request ?? order?.reverse_order_label_request
+  const requests = Array.isArray(many) && many.length > 0
+    ? many : single ? [single] : []
+  if (requests.length === 0) throw new Error('return_fallback_refund_total_missing')
+
+  let refunded = 0
+  const seen = new Set<string>()
+  for (let i = 0; i < requests.length; i++) {
+    const request = asRecord(requests[i])
+    const key = toText(request?.id) || ('index:' + i)
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (!request || request.refund_total === undefined || request.refund_total === null) {
+      throw new Error('return_fallback_refund_total_missing')
+    }
+    const total = Number(request.refund_total)
+    if (!Number.isFinite(total) || total < 0) throw new Error('return_fallback_refund_total_invalid')
+    refunded += total
+  }
+  if (!Number.isFinite(refundedFeeGross) || refundedFeeGross < 0) {
+    throw new Error('return_fallback_fee_invalid')
+  }
+  const projected = lines.reduce((sum, line) => {
+    const quantity = Number(line.quantity)
+    const netUnit = Number(line.priceUnit)
+    const sourceVatUnit = Number(line.taxAmountPerUnit ?? 0)
+    if (![quantity, netUnit, sourceVatUnit].every(Number.isFinite) ||
+        quantity < 0 || netUnit < 0 || sourceVatUnit < 0) {
+      throw new Error('return_fallback_line_amount_invalid')
+    }
+    return sum + quantity * (netUnit + sourceVatUnit)
+  }, refundedFeeGross)
+
+  if (Math.abs(Math.round(projected * 100) / 100 - Math.round(refunded * 100) / 100) > 0.021) {
+    throw new Error('return_fallback_refund_total_mismatch_requires_review:' +
+      projected.toFixed(2) + ':' + refunded.toFixed(2))
+  }
+  return Math.round(refunded * 100) / 100
 }
 
 export function returnSnapshotSignature(lines: readonly StoreReturnLine[], extra = ''): string {
