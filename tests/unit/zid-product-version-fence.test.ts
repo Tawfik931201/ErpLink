@@ -1,13 +1,13 @@
 import {
   hasNewerSuccessfulProductVersion, isStaleZidProductEvent, zidProductVersion,
-} from '@/lib/zid/product-version-fence'
-import { getErpExecutionScope } from '@/lib/erp-execution-target'
-import { supabaseAdmin } from '@/lib/sync-runtime'
+} from '../../src/lib/zid/product-version-fence'
+import { getErpExecutionScope } from '../../src/lib/erp-execution-target'
+import { supabaseAdmin } from '../../src/lib/sync-runtime'
 
-jest.mock('@/lib/erp-execution-target', () => ({
+jest.mock('../../src/lib/erp-execution-target', () => ({
   getErpExecutionScope: jest.fn(),
 }))
-jest.mock('@/lib/sync-runtime', () => ({
+jest.mock('../../src/lib/sync-runtime', () => ({
   supabaseAdmin: { from: jest.fn() },
 }))
 
