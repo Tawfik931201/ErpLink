@@ -1,7 +1,7 @@
 /** Merge full current Zid product details over a potentially stale webhook. */
 export function mergeZidProductPayload(
   webhook: Record<string, unknown>,
-  current: Record<string, unknown>
+  current: object
 ): Record<string, unknown> {
   return { ...webhook, ...current }
 }
