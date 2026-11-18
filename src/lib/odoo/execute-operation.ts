@@ -263,7 +263,7 @@ export async function executeOdooOperation(
         orderStdSettings: mergedSettings,
       })
 
-      if (outcome.handled && outcome.status !== 'skipped') {
+      if (outcome.handled) {
         console.info(`[Returns] ${execPlatform} order ${returnOrderId}: ${outcome.message}`)
         await logSync({
           id: existingLogId,
@@ -275,11 +275,14 @@ export async function executeOdooOperation(
           odoo_model: 'sale.order',
           odoo_record_id: outcome.odooRecordId ?? null,
           status: outcome.status,
-          error_message: outcome.status === 'failed' ? outcome.message : null,
+          error_message: outcome.status !== 'success' ? outcome.message : null,
           payload: zidData,
           trigger_type: triggerType,
           platform: execPlatform,
         })
+        // Returning nothing_to_return, missing-original or unknown quantities
+        // must NEVER flow through a normal order update and become a
+        // misleading success against the original sale.order.
         return {
           mappingId: mapping.id,
           mappingName: mapping.name,
@@ -287,19 +290,6 @@ export async function executeOdooOperation(
           status: outcome.status,
           odooRecordId: outcome.odooRecordId,
           message: outcome.message,
-        }
-      }
-      if (outcome.handled) {
-        console.info(`[Returns] ${execPlatform} order ${returnOrderId}: ${outcome.message} (continuing with normal sync)`)
-        if (outcome.message.startsWith('nothing_to_return') || outcome.message.startsWith('already_applied')) {
-          return {
-            mappingId: mapping.id,
-            mappingName: mapping.name,
-            model: 'sale.order',
-            status: 'success',
-            odooRecordId: outcome.odooRecordId,
-            message: outcome.message,
-          }
         }
       }
     }
