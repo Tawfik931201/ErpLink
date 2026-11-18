@@ -244,26 +244,10 @@ async function buildReturnLines(
   } else if (input.refundedLines && input.refundedLines.length > 0) {
     targets = (await resolveStoreLines(client, platform, input.refundedLines)).byProduct
   } else {
-    // If view-for-return was unavailable but this is a reversal/return event,
-    // all lines of the original order are treated as returned (or target lines).
-    const ev = String(input.event || '').toLowerCase()
-    const rawStatus = (input.payload?.order as any)?.order_status ?? input.payload?.order_status ?? (input.payload?.order as any)?.status ?? input.payload?.status
-    const statusCode = String((rawStatus && typeof rawStatus === 'object') ? (rawStatus.code || rawStatus.name || '') : (rawStatus || '')).toLowerCase()
-    const isReversal =
-      ev.includes('reversed') ||
-      ev.includes('refund') ||
-      statusCode.includes('reverse') ||
-      statusCode.includes('مرتجع') ||
-      statusCode.includes('مسترجع') ||
-      Boolean(input.payload?.reverse_order_label_request)
-    if (platform === 'zid' && isReversal) {
-      console.info(`[Returns] Zid view-for-return state unconfirmed; treating reversal "${input.orderId}" as all items returned`)
-      for (const line of original.lines) {
-        if (line.orderedQty > 0) targets.set(line.productId, line.orderedQty)
-      }
-    } else {
-      throw new Error('return_quantities_unknown')
-    }
+    // Zid can report a partial return with no readable view-for-return API.
+    // Guessing "everything was returned" corrupts inventory and credits.
+    // Require an authoritative quantity snapshot instead of inventing a full return.
+    throw new Error('return_quantities_unknown')
   }
 
   // If all regular lines are returned (or this is a full reversal), also include delivery, COD, and discount lines
