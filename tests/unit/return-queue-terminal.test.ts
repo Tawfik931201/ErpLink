@@ -11,6 +11,8 @@ describe('terminal return business validation', () => {
     'return_fallback_product_not_found:QA-SKU',
     'return_configured_product_not_found:QA-SKU',
     'return_configured_customer_not_found',
+    'return_order_match_missing_but_linked:57',
+    'return_order_match_conflicts_with_durable_link',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)
