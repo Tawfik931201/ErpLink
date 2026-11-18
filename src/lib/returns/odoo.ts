@@ -15,6 +15,10 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
+import { assertSaleOrderLinkOwnership } from '@/lib/orders/matching'
+import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
+import { resolveZidMatchValue } from '@/lib/sync-helpers'
+import { supabaseAdmin } from '@/lib/sync-runtime'
 import {
   extractOrderLocationInfo,
   paymentKeysFromOrder,
@@ -289,6 +293,57 @@ export async function findOriginalSaleOrder(
 ): Promise<OriginalSaleOrder | null> {
   const { workspaceId, platform, storeId, orderId, orderCode } = params
   const candidatesToLink = [orderId, orderCode].filter((id): id is string => Boolean(id && String(id).trim()))
+
+  // Returns must respect the same configured Orders match pair as order
+  // updates. If explicitly configured, never fall back to an unrelated
+  // client_order_ref / name / platform ID when the configured key is missing.
+  // This also protects a store's original sale.order from cross-order credits.
+  const orderSettings = await getCachedStandardMappingSettings(
+    workspaceId, platform, 'orders', storeId
+  )
+  const sourceField = String(orderSettings?.match_zid_field || '').trim()
+  const targetField = String(orderSettings?.match_odoo_field || '').trim()
+  if (sourceField || targetField) {
+    if (!sourceField || !targetField) throw new Error('return_order_match_pair_incomplete')
+    const raw = resolveZidMatchValue(params.payload || {}, sourceField)
+    const sourceValue = raw ?? (sourceField === 'id' ? orderId : undefined)
+    if (sourceValue === undefined || sourceValue === null || sourceValue === '') {
+      throw new Error('return_order_match_source_missing:' + sourceField)
+    }
+    // Odoo text references are strings even when Zid sends a numeric ID.
+    const typedValue = targetField === 'id' ? Number(sourceValue) : String(sourceValue)
+    if (targetField === 'id' && (!Number.isSafeInteger(typedValue) || Number(typedValue) <= 0)) {
+      throw new Error('return_order_match_invalid_id')
+    }
+    const found = await client.searchRead<any>('sale.order',
+      [[targetField, '=', typedValue], ['state', '!=', 'cancel']],
+      ['id', 'amount_total'], 2)
+    if (found.length > 1) throw new Error('return_order_match_ambiguous:' + targetField)
+    if (!found.length) return null
+    const recordId = Number(found[0].id)
+    if (!Number.isSafeInteger(recordId) || recordId <= 0 ||
+        Number(found[0].amount_total) < 0) {
+      throw new Error('return_order_match_invalid:' + targetField)
+    }
+    const linkedId = await resolveEntityLinkId({
+      workspaceId, platform, storeId, odooModel: 'sale.order',
+      storeEntityId: orderId,
+    })
+    if (linkedId && linkedId !== recordId) {
+      throw new Error('return_order_match_conflicts_with_durable_link')
+    }
+    await assertSaleOrderLinkOwnership(supabaseAdmin, recordId, {
+      workspaceId, platform, storeId, storeEntityId: orderId,
+    })
+    const original = await readSaleOrder(client, recordId)
+    if (!original) throw new Error('return_order_match_readback_missing')
+    const saved = await upsertEntityLink(
+      { workspaceId, platform, storeId, odooModel: 'sale.order', storeEntityId: orderId },
+      recordId,
+    )
+    if (!saved) throw new Error('return_order_match_link_not_saved')
+    return original
+  }
 
   // 1. Resolve via durable entity links (primary)
   for (const id of candidatesToLink) {
