@@ -182,6 +182,45 @@ describe('createOdooPayment and version handling', () => {
     expect(executedMethods).toContain('account.payment.action_post')
   })
 
+  it('forces a real journal entry when creating payments on Odoo 20', async () => {
+    const createCalls: any[] = []
+    const client: any = {
+      getMajorVersion: async () => 20,
+      searchRead: async (model: string) => model === 'account.payment.method.line'
+        ? [{ id: 45, name: 'Manual Inbound' }]
+        : [],
+      create: jest.fn(),
+      execute: jest.fn(async (model: string, method: string, args: any[], kwargs?: any) => {
+        if (model === 'account.payment' && method === 'create') {
+          createCalls.push({ args, kwargs })
+          return 101
+        }
+        return true
+      }),
+    }
+
+    const paymentId = await createOdooPayment(client, {
+      partnerId: 12,
+      amount: 250,
+      journalId: 8,
+      date: '2026-11-18',
+      ref: 'Zid Order #O20',
+      post: false,
+    })
+
+    expect(paymentId).toBe(101)
+    expect(client.create).not.toHaveBeenCalled()
+    expect(createCalls).toHaveLength(1)
+    expect(createCalls[0].args[0]).toMatchObject({
+      payment_type: 'inbound',
+      partner_type: 'customer',
+      partner_id: 12,
+      journal_id: 8,
+      payment_method_line_id: 45,
+    })
+    expect(createCalls[0].kwargs).toEqual({ context: { force_payment_move: true } })
+  })
+
   it('uses payment_method_id on Odoo 14', async () => {
     let createdPayload: any = null
 
