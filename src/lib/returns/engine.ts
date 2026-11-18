@@ -29,6 +29,7 @@ import {
 } from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
 import type { PlatformKey } from '@/lib/platform-fields'
+import { incrementalReturnLineQuantities, isCumulativeFullReturn } from './allocation'
 import {
   resolveOrderDiscountAmount,
   resolveOrderVatTax,
@@ -293,34 +294,28 @@ async function buildReturnLines(
 
   // If all regular lines are returned (or this is a full reversal), also include delivery, COD, and discount lines
   const regularLines = original.lines.filter(l => !isFeeOrServiceLine(l, input.orderStdSettings))
-  const isFullReturn =
-    regularLines.length === 0 ||
-    regularLines.every(l => (targets.get(l.productId) || 0) >= l.orderedQty)
+  const isFullReturn = isCumulativeFullReturn(regularLines, targets)
 
   if (isFullReturn) {
+    const fees = new Map<number, number>()
     for (const line of original.lines) {
       if (isFeeOrServiceLine(line, input.orderStdSettings)) {
-        targets.set(line.productId, Math.max(1, Math.abs(line.orderedQty)))
+        fees.set(line.productId, (fees.get(line.productId) || 0) + Math.abs(line.orderedQty))
       }
     }
+    for (const [productId, qty] of fees) targets.set(productId, qty)
   }
 
   const orderDiscountPercent = resolveOrderDiscountPercent(input.payload)
 
-  // One product can appear on several order lines (different prices/discounts).
-  // The target is per product, so it is spent once: without this budget the
-  // second line would repeat the full quantity, and a credit note would refund
-  // more than the customer paid.
-  const consumed = new Map<number, number>()
+  // Preserve the unit price/discount/taxes of each original sale line. A
+  // product-level receipt may be spread across several lines; never assign
+  // more than the original line's quantity or re-refund its prior price band.
+  const allocations = incrementalReturnLineQuantities(original.lines, targets, ledger)
   const out: OdooReturnLine[] = []
-  for (const line of original.lines) {
-    const target = targets.get(line.productId) || 0
-    if (target <= 0) continue
-    const already = ledger.get(line.productId) || 0
-    const available = Math.max(0, target - already - (consumed.get(line.productId) || 0))
-    const quantity = available
+  for (const [index, line] of original.lines.entries()) {
+    const quantity = allocations[index]
     if (quantity <= 0) continue
-    consumed.set(line.productId, (consumed.get(line.productId) || 0) + quantity)
 
     let discount = line.discount && line.discount > 0 ? line.discount : undefined
     if (!discount && !isFeeOrServiceLine(line, input.orderStdSettings)) {
