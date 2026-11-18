@@ -33,6 +33,7 @@ import {
 
 import {
   extractStoreReturnReason,
+  extractZidReceivedReturnLines,
   returnDedupeKey,
   returnSnapshotSignature,
   type ReturnSettings,
@@ -220,7 +221,14 @@ async function buildReturnLines(
   // quantity is derived from the order itself. Salla gives the refunded lines
   // directly. Whichever source exists, the result is a per-product total.
   let targets = new Map<number, number>()
-  if (input.remaining?.known) {
+  if (platform === 'zid') {
+    const receipt = extractZidReceivedReturnLines(input.payload)
+    if (receipt.error) throw new Error(receipt.error)
+    if (!receipt.known) throw new Error('return_receipt_quantities_unknown')
+    const { byProduct, unresolved } = await resolveStoreLines(client, platform, receipt.lines)
+    if (unresolved > 0) throw new Error('return_receipt_products_unmapped')
+    targets = byProduct
+  } else if (input.remaining?.known) {
     const { byProduct, unresolved } = await resolveStoreLines(
       client,
       platform,
