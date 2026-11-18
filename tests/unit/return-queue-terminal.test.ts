@@ -5,6 +5,7 @@ describe('terminal return business validation', () => {
     'return_grouped_components_require_review',
     'return_damaged_requires_financial_review',
     'return_receipt_quantity_invalid',
+    'return_receipt_quantity_exceeds_original:197',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)
