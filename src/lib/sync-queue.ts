@@ -8,6 +8,7 @@
  */
 
 import { createHash } from 'crypto'
+import { productFamilyKey, selectQueueClaimWave } from './queue-claim-planner'
 
 import { isCommercePlatform } from './erp-execution-target'
 import { admitWorkspaceEvent, getActiveWorkspaceIds } from './ingress-admission'
@@ -677,15 +678,16 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   // up-front, so rows could sit leased for minutes without ever reaching ERP.
   // A deploy/restart during that wait left "ghost" leases. Wave claiming keeps
   // a lease tightly coupled to work that is about to start.
-  for (let offset = 0; offset < batch.length; offset += CLAIM_CONCURRENCY) {
-    const slice = batch.slice(offset, offset + CLAIM_CONCURRENCY)
-    const results = await Promise.all(slice.map((item) => claimQueueItem(item.id, false)))
+  let unclaimed = [...batch]
+  while (unclaimed.length > 0) {
+    // Claim only tasks that can actually execute immediately. Otherwise a
+    // claimed item can expire while waiting behind the workspace/product lock.
+    const wave = selectQueueClaimWave(unclaimed, CLAIM_CONCURRENCY, MAX_CONCURRENT_PER_WORKSPACE)
+    unclaimed = wave.remaining
+    const results = await Promise.all(wave.selected.map((item) => claimQueueItem(item.id, false)))
     const claimed = results.filter((item): item is QueueItem => Boolean(item))
     if (claimed.length === 0) continue
     claimedCount += claimed.length
-
-    // Finish this claimed wave before leasing the next one. At most the active
-    // execution window can be stranded by a process restart.
     await processClaimedFairly(claimed)
   }
 
@@ -759,19 +761,22 @@ export async function processWorkspaceQueue(
   }
   if (items.length === 0) return empty
 
-  const claimed: QueueItem[] = []
-  for (const item of items) {
-    const locked = await claimQueueItem(item.id, forceImmediate)
-    if (locked) claimed.push(locked)
+  let claimedCount = 0
+  let unclaimed = items
+  while (unclaimed.length > 0) {
+    const wave = selectQueueClaimWave(unclaimed, SYNC_QUEUE_CONCURRENCY, MAX_CONCURRENT_PER_WORKSPACE)
+    unclaimed = wave.remaining
+    const locked = await Promise.all(wave.selected.map((item) => claimQueueItem(item.id, forceImmediate)))
+    const claimed = locked.filter((item): item is QueueItem => Boolean(item))
+    claimedCount += claimed.length
+    if (claimed.length) await processClaimedFairly(claimed)
   }
-  if (claimed.length === 0) return empty
-
-  await processClaimedFairly(claimed)
+  if (claimedCount === 0) return empty
 
   const after = getMetricsStore()
   return {
-    claimed: claimed.length,
-    processed: claimed.length,
+    claimed: claimedCount,
+    processed: claimedCount,
     succeeded: after.succeeded - before.succeeded,
     retried: after.retried - before.retried,
   }
@@ -788,19 +793,6 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
   const runningProductFamilies = new Set<string>()
   let activeWorkers = 0
 
-  const serialProductKey = (item: QueueItem): string | null => {
-    if (!/^(product[._]|product$)/i.test(item.event || '')) return null
-    const payload: any = item.payload ?? {}
-    const parentId = payload.parent_id
-      ?? payload.parent?.id
-      ?? payload.product?.parent_id
-      ?? payload.product?.parent?.id
-    const ownId = extractEntityId(payload)
-    const family = parentId ?? ownId
-    if (family === undefined || family === null || family === '') return null
-    return `${item.workspace_id || 'unknown'}|${item.platform || 'unknown'}|${item.store_id || 'unknown'}|${String(family)}`
-  }
-
   return new Promise<void>((resolve) => {
     function scheduleNext() {
       if (pending.length === 0 && activeWorkers === 0) {
@@ -812,7 +804,7 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
         const itemIdx = pending.findIndex((item) => {
           const ws = item.workspace_id || 'unknown'
           const currentRunning = runningPerWorkspace.get(ws) || 0
-          const productKey = serialProductKey(item)
+          const productKey = productFamilyKey(item)
           return currentRunning < MAX_CONCURRENT_PER_WORKSPACE
             && (!productKey || !runningProductFamilies.has(productKey))
         })
@@ -825,13 +817,20 @@ async function processClaimedFairly(claimed: QueueItem[]): Promise<void> {
 
         const [item] = pending.splice(itemIdx, 1)
         const ws = item.workspace_id || 'unknown'
-        const productKey = serialProductKey(item)
+        const productKey = productFamilyKey(item)
         runningPerWorkspace.set(ws, (runningPerWorkspace.get(ws) || 0) + 1)
         if (productKey) runningProductFamilies.add(productKey)
         activeWorkers++
 
         processOneItem(item)
-          .catch(() => {})
+          .catch(async (error: unknown) => {
+            // Never silently discard a rejected worker promise: the remote
+            // ERP write might already have happened, so quarantine by fence.
+            getMetricsStore().lastError = error instanceof Error
+              ? error.message.slice(0, 250) : 'uncaught queue worker error'
+            console.error('[sync-queue] worker rejected; quarantining uncertain outcome')
+            await parkUnknownOutcome(item)
+          })
           .finally(() => {
             activeWorkers--
             if (productKey) runningProductFamilies.delete(productKey)
