@@ -207,4 +207,11 @@ describe('Order Status Mapping Table — Stock Picking & Invoice Actions', () =>
     expect(tabSource).toContain('تأكيد/ترحيل الفاتورة فقط')
     expect(tabSource).toContain('إلغاء الفاتورة')
   })
+
+  it('bypasses Odoo stock SMS confirmation when auto-validating a picking', () => {
+    const source = readStripped('src/lib/odoo/order-workflow.ts')
+    expect(source).toContain(
+      "client.execute('stock.picking', 'button_validate', [pId], { context: { skip_sms: true } })"
+    )
+  })
 })

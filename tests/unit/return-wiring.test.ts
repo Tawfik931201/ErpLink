@@ -50,6 +50,13 @@ describe('returns are intercepted before any order write', () => {
     expect(block).toContain("execPlatform === 'salla'")
   })
 
+  it('skips Zid reverse_in_progress before the generic locked-order write path', () => {
+    const block = engine.slice(execPlatform, signal)
+    expect(block).toContain('isZidReturnStatus(transientReturnStatus, true)')
+    expect(block).toContain("status: 'skipped'")
+    expect(block).toContain('waiting for the completed reversal event')
+  })
+
   it('leaves the default mode untouched (falls through to the normal sync)', () => {
     expect(engine).toContain("if (returnSettings.mode !== 'nothing')")
     expect(engine).toContain('normalizeReturnSettings(')

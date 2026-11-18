@@ -14,7 +14,7 @@ import { allPlatformIdFieldNames, platformIdFieldNames } from '@/lib/platform-fi
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
 import { isDynamicBundle } from '@/lib/products/bundle'
 import { assertProductWriteAllowed } from '@/lib/products/settings-values'
-import { extractSallaRefundedLines, isReturnSignal, type StoreReturnLine } from '@/lib/returns/detect'
+import { extractSallaRefundedLines, isReturnSignal, isZidReturnStatus, type StoreReturnLine } from '@/lib/returns/detect'
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
 import { getPlatformFromEvent } from '@/lib/sync/events'
@@ -191,6 +191,42 @@ export async function executeOdooOperation(
 
   // Product photos are never synced (2026-11-09): no gallery capability
   // assertion, so a weird image shape can never fail the whole product sync.
+
+  // Zid's reverse_in_progress is a transient return workflow state, not a
+  // completed return. Never let it fall through to the generic sale.order
+  // update path: delivered orders can already be locked in Odoo 17+, and a
+  // normal update may then attempt to rewrite taxes/lines and fail before the
+  // completed reversal event arrives.
+  if (odooModel === 'sale.order' && odooOperation === 'update' && execPlatform === 'zid') {
+    const transientReturnStatus =
+      (zidData as any)?.order_status ??
+      (zidData as any)?.display_status ??
+      (zidData as any)?.status
+    if (isZidReturnStatus(transientReturnStatus, true) && !isZidReturnStatus(transientReturnStatus)) {
+      const message = 'Zid return is still in progress; waiting for the completed reversal event'
+      await logSync({
+        id: existingLogId,
+        workspace_id: mapping.workspace_id,
+        field_mapping_id: mapping.id,
+        event,
+        store_id: storeId,
+        zid_entity_id: zidEntityId,
+        odoo_model: 'sale.order',
+        status: 'skipped',
+        error_message: message,
+        payload: zidData,
+        trigger_type: triggerType,
+        platform: execPlatform,
+      })
+      return {
+        mappingId: mapping.id,
+        mappingName: mapping.name,
+        model: 'sale.order',
+        status: 'skipped',
+        message,
+      }
+    }
+  }
 
   // ── Returns: intercept an order update that is really a return ───────────
   // A return is NOT a new Odoo operation: `enabled_actions` in
