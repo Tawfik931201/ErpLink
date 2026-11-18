@@ -833,6 +833,7 @@ export async function readStockReturnLedger(
   orderId: number,
   orderName: string,
   majorVersion: number,
+  originalLines?: readonly SaleOrderLineInfo[],
 ): Promise<Map<number, number>> {
   const ledger = new Map<number, number>()
   const delivered = await readDeliveredMoves(client, orderId, orderName, majorVersion)
@@ -856,16 +857,47 @@ export async function readStockReturnLedger(
       Math.max(ids.length * 50, 100),
     )
   }
-  const originals = new Map(delivered.map(move => [move.id, move.productId]))
+  const originals = new Map(delivered.map(move => [move.id, move]))
+  const returnedByOrigin = new Map<number, number>()
+  const groups = new Map<number, DeliveredMove[]>()
+  const originalByLine = new Map((originalLines || []).map(line => [line.id, line]))
   for (const row of returns || []) {
     const originId = many2oneId(row.origin_returned_move_id)
-    if (!originId || !originals.has(originId)) continue
-    const id = originals.get(originId)!
+    const source = originId ? originals.get(originId) : undefined
+    if (!source) continue
     const planned = toNumber(row.product_uom_qty)
     const actual = toNumber(row[qtyField])
     const quantity = row.state === 'done' && actual > 0 ? actual : planned
     if (!Number.isFinite(quantity) || quantity <= 0) continue
-    ledger.set(id, (ledger.get(id) || 0) + quantity)
+    returnedByOrigin.set(originId!, (returnedByOrigin.get(originId!) || 0) + quantity)
+    const saleLine = source.saleLineId ? originalByLine.get(source.saleLineId) : null
+    if (saleLine && saleLine.productId !== source.productId) {
+      const current = groups.get(saleLine.id) || []
+      if (!current.some(move => move.id === source.id)) current.push(source)
+      groups.set(saleLine.id, current)
+    } else {
+      ledger.set(source.productId, (ledger.get(source.productId) || 0) + quantity)
+    }
+  }
+
+  // A grouped/phantom sale has one parent-priced order line and several
+  // delivered component stock moves. The inventory receipt ledger MUST
+  // count returned PARENT units, not sum component units (3+2 != 1).
+  for (const [lineId] of groups) {
+    const original = originalByLine.get(lineId)!
+    const componentMoves = delivered.filter(move =>
+      move.saleLineId === lineId && move.productId !== original.productId)
+    if (!componentMoves.length || original.orderedQty <= 0) {
+      throw new Error('return_grouped_stock_quantity_invalid')
+    }
+    const parentUnits = componentMoves.map(move =>
+      original.orderedQty * (returnedByOrigin.get(move.id) || 0) / move.quantity)
+    if (parentUnits.some(value => !Number.isFinite(value) || value < 0) ||
+        Math.max(...parentUnits) - Math.min(...parentUnits) > 0.000001) {
+      throw new Error('return_grouped_partial_inventory_effect_requires_review')
+    }
+    const qty = parentUnits[0]
+    ledger.set(original.productId, (ledger.get(original.productId) || 0) + qty)
   }
   return ledger
 }
