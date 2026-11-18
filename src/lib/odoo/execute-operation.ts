@@ -17,7 +17,6 @@ import { assertProductWriteAllowed } from '@/lib/products/settings-values'
 import { extractSallaRefundedLines, isReturnSignal, type StoreReturnLine } from '@/lib/returns/detect'
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
-import { fetchZidReturnState } from '@/lib/returns/zid'
 import { getPlatformFromEvent } from '@/lib/sync/events'
 import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
 import { resolveZidMatchValue } from '@/lib/sync-helpers'
@@ -218,35 +217,10 @@ export async function executeOdooOperation(
         ''
       )
 
-      let remaining: { known: boolean; lines: StoreReturnLine[] } | undefined
-      if (execPlatform === 'zid') {
-        const injected = (zidData as any).__returnRemaining
-        if (injected && typeof injected.known === 'boolean') {
-          remaining = injected
-        } else {
-          try {
-            const { resolveZidOrderTokenScope } = await import('@/lib/zid/order-enrichment')
-            const tokenRow = await resolveZidOrderTokenScope(storeId || mapping.merchant_id || '', mapping.workspace_id)
-            if (tokenRow) {
-              const { getAccessToken } = await import('@/lib/zid/token')
-              const storedTokens = await getAccessToken(tokenRow.merchant_id)
-              remaining = await fetchZidReturnState(
-                {
-                  authorization: storedTokens.authorization || '',
-                  managerToken: storedTokens.accessToken,
-                  storeId: tokenRow.store_id || tokenRow.merchant_id,
-                },
-                returnOrderId
-              )
-            }
-          } catch (err: any) {
-            console.warn(
-              `[Returns] Failed to read Zid view-for-return for order ${returnOrderId}:`,
-              err?.message ?? err
-            )
-          }
-        }
-      }
+      // Zid's webhook enrichment already includes completed reversal receipts
+      // with received/not-received quantities. Never block a queue lease with
+      // a second network call to view-for-return (which loses that distinction).
+      // The return engine validates those receipts before any Odoo write.
 
       const outcome = await processReturnEvent({
         client,
@@ -258,7 +232,6 @@ export async function executeOdooOperation(
         payload: zidData,
         settings: returnSettings,
         refundedLines: execPlatform === 'salla' ? extractSallaRefundedLines(zidData) : undefined,
-        remaining,
         autoConfirm: Boolean((mergedSettings as any)?.order?.auto_confirm),
         orderStdSettings: mergedSettings,
       })
