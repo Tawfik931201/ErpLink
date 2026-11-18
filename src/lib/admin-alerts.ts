@@ -39,6 +39,7 @@ export interface AdminAlertCondition {
 interface HealthSnapshot {
   pending: number
   frozen: number
+  unknownOutcome: number
   deadLetter: number
   inboxFailed: number
   telegramPending: number
@@ -61,13 +62,15 @@ async function readHealth(): Promise<HealthSnapshot> {
   const [
     pending,
     frozen,
+    unknownOutcome,
     deadLetter,
     inboxFailed,
     telegramPending,
     telegramFailed,
   ] = await Promise.all([
     safe(() => supabase.from('sync_queue').select('id', { count: 'exact', head: true }).not('next_retry_at', 'is', null)),
-    safe(() => supabase.from('sync_queue').select('id', { count: 'exact', head: true }).is('next_retry_at', null)),
+    safe(() => supabase.from('sync_queue').select('id', { count: 'exact', head: true }).is('next_retry_at', null).eq('outcome_unknown', false)),
+    safe(() => supabase.from('sync_queue').select('id', { count: 'exact', head: true }).eq('outcome_unknown', true)),
     safe(() => supabase.from('sync_queue_dead').select('id', { count: 'exact', head: true })),
     safe(() => supabase.from('webhook_inbox').select('id', { count: 'exact', head: true }).eq('status', 'failed')),
     safe(() => supabase.from('telegram_outbox').select('id', { count: 'exact', head: true }).eq('status', 'pending')),
@@ -95,6 +98,7 @@ async function readHealth(): Promise<HealthSnapshot> {
   return {
     pending,
     frozen,
+    unknownOutcome,
     deadLetter,
     inboxFailed,
     telegramPending,
@@ -126,6 +130,14 @@ export function evaluateAlertConditions(health: HealthSnapshot): AdminAlertCondi
       ar: `أقدم طلب منتظر مضى عليه ${minutes} دقيقة (الحد ${ALERT_THRESHOLDS.oldestPendingAgeSec / 60} دقيقة)`,
       en: `The oldest pending request is ${minutes} minutes old (limit ${ALERT_THRESHOLDS.oldestPendingAgeSec / 60} min)`,
       value: String(health.oldestPendingAgeSec),
+    })
+  }
+  if (health.unknownOutcome > 0) {
+    conditions.push({
+      key: 'outcome_unknown',
+      ar: `${health.unknownOutcome} عملية نتيجة تنفيذها في ERP غير مؤكدة — تحتاج تسوية مع أودوو قبل أي إعادة محاولة؛ لا تعِد تشغيلها تلقائياً`,
+      en: `${health.unknownOutcome} ERP operation(s) have unknown outcomes — reconcile against ERP before retrying; never auto-replay`,
+      value: String(health.unknownOutcome),
     })
   }
   if (health.frozen > 0) {

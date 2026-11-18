@@ -1,7 +1,15 @@
+/** Merge full current Zid product details over a potentially stale webhook. */
+export function mergeZidProductPayload(
+  webhook: Record<string, unknown>,
+  current: object
+): Record<string, unknown> {
+  return { ...webhook, ...current }
+}
+
 export async function enrichZidProduct(
   data: Record<string, unknown>,
   storeIdStr: string,
-  isLegacyDelivery: boolean,
+  _isLegacyDelivery: boolean,
 ): Promise<Record<string, unknown>> {
   const productId = data.id || data.product_id
   if (productId) {
@@ -33,13 +41,11 @@ export async function enrichZidProduct(
           const apiAttributes = Array.isArray(productData.attributes) && productData.attributes.length > 0 ? productData.attributes : null
           const apiStructure = productData.structure && productData.structure !== 'standalone' ? productData.structure : null
           const apiHasOptions = (productData as any).has_options === true
-          //legacy: API يفوز عليه الجسم (المتصل غير المصادق محفز فقط)
-          data = isLegacyDelivery
-            ? { ...data, ...productData }
-            : {
-                ...productData,
-                ...data,
-              }
+          // The Zid API is the current source of truth. An older product.publish
+          // webhook can arrive AFTER product.update and must never overwrite the
+          // latest name, price, stock or variants fetched here. Keep webhook-only
+          // metadata as a fallback when the API omits it.
+          data = mergeZidProductPayload(data, productData)
           // Force API-fetched fields for grouped/bundle product detection.
           // Webhook payloads are often minimal; we must preserve bundle data from the API.
           const pClass = (productData as any).product_class

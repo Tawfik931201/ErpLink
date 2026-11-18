@@ -113,7 +113,11 @@ export function decrypt(text: string): string {
       const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
       let decrypted = decipher.update(encryptedText)
       decrypted = Buffer.concat([decrypted, decipher.final()])
-      const result = decrypted.toString('utf8')
+      // AES-CBC has no authentication tag. With a wrong rotated key, random
+      // padding can occasionally be valid; Buffer.toString silently replaces
+      // invalid UTF-8 with U+FFFD and returns junk credentials. Reject invalid
+      // byte sequences and continue trying the operator-provided legacy keys.
+      const result = new TextDecoder('utf-8', { fatal: true }).decode(decrypted)
       if (result) return result
     } catch {
       // try next key

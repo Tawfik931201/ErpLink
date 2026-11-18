@@ -105,6 +105,7 @@ describe('the alert conditions are measured, not guessed', () => {
   const healthy = {
     pending: 10,
     frozen: 0,
+    unknownOutcome: 0,
     deadLetter: 0,
     inboxFailed: 0,
     telegramPending: 0,
@@ -124,6 +125,12 @@ describe('the alert conditions are measured, not guessed', () => {
       oldestPendingAgeSec: ALERT_THRESHOLDS.oldestPendingAgeSec + 60,
     })
     expect(conditions.map((c) => c.key)).toContain('oldest_pending')
+  })
+
+  it('warns separately on unknown ERP outcomes without encouraging blind replay', () => {
+    const conditions = evaluateAlertConditions({ ...healthy, unknownOutcome: 2 })
+    expect(conditions.map((c) => c.key)).toContain('outcome_unknown')
+    expect(conditions.find((c) => c.key === 'outcome_unknown')?.en).toContain('never auto-replay')
   })
 
   it('fires on frozen rows, dead letters and failed receipts', () => {
@@ -169,7 +176,8 @@ describe('the claim is parallel but still atomic per row', () => {
 
   it('claims rows concurrently', () => {
     expect(queue).toContain('CLAIM_CONCURRENCY')
-    expect(queue).toContain('await Promise.all(slice.map((item) => claimQueueItem(item.id, false)))')
+    expect(queue).toContain('selectQueueClaimWave(unclaimed, CLAIM_CONCURRENCY, MAX_CONCURRENT_PER_WORKSPACE)')
+    expect(queue).toContain('await Promise.all(wave.selected.map((item) => claimQueueItem(item.id, false)))')
   })
 
   it('keeps the per-row conditional update — the atomicity guarantee', () => {
