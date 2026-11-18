@@ -316,6 +316,7 @@ export async function executeOdooOperation(
           zid_entity_id: returnOrderId,
           odoo_model: 'sale.order',
           odoo_record_id: outcome.odooRecordId ?? null,
+          suppressEntityLink: true,
           status: outcome.status,
           error_message: outcome.status !== 'success' ? outcome.message : null,
           payload: zidData,

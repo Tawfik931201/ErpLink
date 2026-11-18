@@ -43,6 +43,12 @@ export async function logSync(entry: {
    * Omit it and no link is written — ERPNext callers do exactly that.
    */
   platform?: string
+  /**
+   * A return is a financial child effect, not the store's original entity.
+   * Log its actual ERP ID without ever overwriting the durable store order
+   * link (which must keep pointing to the ORIGINAL sale.order).
+   */
+  suppressEntityLink?: boolean
 }) {
   console.info(`[SyncEngine] logSync status="${entry.status}" event="${entry.event}" model="${entry.odoo_model}" trigger_type="${entry.trigger_type || 'automatic'}" id="${entry.id || 'new'}"`)
   try {
@@ -172,7 +178,7 @@ export async function logSync(entry: {
       // Durable entity link (best-effort, never fails the sync): a later
       // update/delete for the same store entity resolves the Odoo record
       // from odoo_entity_links instead of the purged/transient sync_logs.
-      if (logData.status === 'success' && entry.platform && logData.odoo_record_id && entry.zid_entity_id) {
+      if (!entry.suppressEntityLink && logData.status === 'success' && entry.platform && logData.odoo_record_id && entry.zid_entity_id) {
         void upsertEntityLink(
           {
             workspaceId: entry.workspace_id,
