@@ -11,7 +11,7 @@ import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
 import { supabaseAdmin } from '@/lib/sync-runtime'
 import { ttlCache } from '@/lib/ttl-cache'
 import type { VatCountryRule } from '@/lib/zid/order-helpers'
-import { resolveOrderVatTax, resolveZidStatus } from '@/lib/zid/order-helpers'
+import { resolveOrderVatTax, resolveZidCodAmount, resolveZidStatus } from '@/lib/zid/order-helpers'
 
 // ─── Helper: resolve platform order status → Odoo state ──────────────────────
 // Uses DB order_status_mappings table; falls back to defaults from settings.
@@ -831,6 +831,66 @@ export async function ensureSaleOrderTaxes(
   }
 }
 
+/**
+ * Financial preflight for Zid's explicitly mapped COD fee.
+ *
+ * Order lines are intentionally immutable after Odoo confirmation. If a
+ * historic sale.order predates today's COD mapping, status actions must not
+ * post an under-valued invoice and then claim webhook success. A nonzero Zid
+ * payment.invoice COD row is authoritative; never manufacture an extra line
+ * on a locked or already invoiced order. The merchant must reconcile it.
+ */
+export async function assertZidCodFeeBeforeInvoice(
+  client: OdooClient,
+  saleOrderId: number,
+  zidData: Record<string, unknown>,
+  settings: Record<string, any> | null | undefined,
+): Promise<void> {
+  const order = settings?.order || {}
+  const configured = order.add_cod_as_line ?? settings?.add_cod_as_line
+  if (configured !== true) return
+  const fee = resolveZidCodAmount(zidData)
+  if (!(fee > 0)) return
+
+  const rawId = order.cod_product_id ?? settings?.cod_product_id
+  const productId = Number(rawId)
+  if (!Number.isSafeInteger(productId) || productId <= 0) {
+    // Even if a merchant configured an SKU-only fallback, an invoice should
+    // never post without an actual Odoo fee line to reconcile against.
+    throw new Error('order_cod_fee_product_not_configured_requires_review')
+  }
+
+  const lines = await client.searchRead<any>(
+    'sale.order.line',
+    [['order_id', '=', saleOrderId], ['display_type', '=', false]],
+    ['id', 'product_id', 'price_total'],
+    200,
+  )
+  const matching = (lines || []).filter(line => {
+    const raw = line.product_id
+    const id = Number(Array.isArray(raw) ? raw[0] : raw)
+    return id === productId
+  })
+  if (!matching.length) {
+    throw new Error(`order_cod_fee_missing_on_sale_order_requires_review:${saleOrderId}:${fee}`)
+  }
+
+  // price_total is the actual persisted amount including applied Odoo tax,
+  // unlike price_unit which is pre-tax when prices_include_tax is enabled.
+  // The same currency conversion rate used by the order-line builder must
+  // apply to the incoming Zid COD fee before comparing the amounts.
+  const rateRaw = settings?._currency_conversion_rate ?? settings?.currency_conversion_rate ?? 1
+  const rate = Number(rateRaw)
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error('order_cod_fee_currency_rate_invalid_requires_review')
+  }
+  const actual = matching.reduce((sum: number, line: any) => sum + Number(line.price_total ?? NaN), 0)
+  const expected = Math.round(fee * rate * 100) / 100
+  if (!Number.isFinite(actual) || Math.abs(actual - expected) > 0.02) {
+    throw new Error(`order_cod_fee_amount_mismatch_requires_review:${saleOrderId}:${expected}:${actual}`)
+  }
+}
+
 export async function maybeApplyOrderStatusAction(
   client: OdooClient,
   odooRecordId: number,
@@ -960,6 +1020,12 @@ export async function maybeApplyOrderStatusAction(
     // 2c. Invoice action (create, post, create_and_post, cancel)
     const invoiceAction = row.invoice_action
     if (invoiceAction) {
+      if (resolvedPlatform === 'zid' && /^(?:create|post|create_and_post)$/.test(invoiceAction)) {
+        const orderSettings = await getCachedStandardMappingSettings(
+          workspaceId, resolvedPlatform, 'orders', storeId,
+        )
+        await assertZidCodFeeBeforeInvoice(client, odooRecordId, zidData, orderSettings)
+      }
       const zidEntityId = String(zidData.id || (zidData as any).order_id || '')
       const applyInvoice = () => applyOrderInvoiceAction(
         client,
