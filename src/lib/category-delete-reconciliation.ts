@@ -158,6 +158,8 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
         (error instanceof Error ? error.message.slice(0, 180) : 'category audit failed'))
     }
   }
-  await persistState(schedulerScope, { offset: startOffset + visited }, now.toISOString())
+  const nextMerchantOffset = visited >= (merchants ?? []).length && (merchants ?? []).length < 100
+    ? 0 : startOffset + visited
+  await persistState(schedulerScope, { offset: nextMerchantOffset }, now.toISOString())
   return result
 }
