@@ -319,7 +319,21 @@ export async function findOriginalSaleOrder(
       [[targetField, '=', typedValue], ['state', '!=', 'cancel']],
       ['id', 'amount_total'], 2)
     if (found.length > 1) throw new Error('return_order_match_ambiguous:' + targetField)
-    if (!found.length) return null
+    if (!found.length) {
+      // A merchant may change the matching pair AFTER an order has been
+      // delivered/refunded. Failure to find the newly configured field is
+      // NOT evidence that the original order never existed. Falling back to
+      // a new negative SO here creates a second financial return and can
+      // replace the durable link to the original sale order.
+      const linkedOriginal = await resolveEntityLinkId({
+        workspaceId, platform, storeId, odooModel: 'sale.order',
+        storeEntityId: orderId,
+      })
+      if (linkedOriginal) {
+        throw new Error('return_order_match_missing_but_linked:' + linkedOriginal)
+      }
+      return null
+    }
     const recordId = Number(found[0].id)
     if (!Number.isSafeInteger(recordId) || recordId <= 0 ||
         Number(found[0].amount_total) < 0) {
