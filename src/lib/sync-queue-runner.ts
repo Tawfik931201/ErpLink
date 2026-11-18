@@ -41,8 +41,8 @@ function envInterval(name: string, fallbackMs: number, minMs: number): number {
   return Number.isFinite(raw) && raw >= minMs ? raw : fallbackMs
 }
 
-/** تصريف الطابور كل 30 ثانية افتراضياً (بديل cron كل دقيقة). */
-const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 30_000, 5_000)
+/** تصريف الطابور كل 10 ثوانٍ افتراضياً (قابل للضبط من البيئة). */
+const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 10_000, 5_000)
 
 /** تسوية زد كل 10 دقائق افتراضياً (نفس-periodic كـ cron التسوية). */
 const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000, 60_000)
@@ -146,6 +146,13 @@ async function runReconcileCycle(): Promise<void> {
     const result = await reconcileZidOrders()
     if (result.stopped === 'error') {
       console.error('[sync-queue] reconcile cycle failed:', result.errors.join('; '))
+    }
+    // Zid API category deletes can fail to emit a category.delete delivery.
+    // A bounded, twice-confirmed 404 audit repairs only known entity links.
+    const { reconcileZidDeletedCategories } = await import('./category-delete-reconciliation')
+    const categories = await reconcileZidDeletedCategories()
+    if (categories.errors.length > 0) {
+      console.warn('[sync-queue] category deletion audit issues:', categories.errors.join('; '))
     }
   } catch (error: unknown) {
     console.error(
