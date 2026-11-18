@@ -242,7 +242,19 @@ export async function createOdooPayment(
     }
   }
 
-  const paymentId = await client.create('account.payment', paymentValues)
+  // Odoo 20 may keep a posted account.payment without a journal entry when
+  // Accounting is installed and the journal has no explicit outstanding
+  // account. Our reconciliation path needs move_id, so force Odoo 20 to assign
+  // its standard outstanding-receipts account at creation time. Odoo 14–19
+  // keep their existing create behaviour unchanged.
+  const paymentId = major >= 20
+    ? await client.execute<number>(
+        'account.payment',
+        'create',
+        [paymentValues],
+        { context: { force_payment_move: true } }
+      )
+    : await client.create('account.payment', paymentValues)
   if (params.post === false) return paymentId
 
   // Post payment to generate move lines
