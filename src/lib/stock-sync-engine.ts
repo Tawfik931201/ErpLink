@@ -754,8 +754,9 @@ async function findZidProductByMatch(
     return null
   }
   let page = 1
+  const pageSize = 100
   for (let i = 0; i < 10; i++) {
-    const res = await ZidAPI.products.list(creds, { page_size: 100, page, extended: true })
+    const res = await ZidAPI.products.list(creds, { page_size: pageSize, page, extended: true })
     const items = Array.isArray(res.data?.results) ? res.data.results : []
     const bySku = items.find((p: any) => String(p.sku || '').trim() === value)
     if (bySku) return bySku
@@ -773,8 +774,13 @@ async function findZidProductByMatch(
         || findVariantByMatch(p as Record<string, any>, 'barcode', value)
       if (nested) return nested
     }
-    const count = res.data?.count ?? items.length
-    if (items.length === 0 || page * items.length >= count) break
+    const count = Number(res.data?.count ?? items.length)
+    // The last page is usually shorter than page_size. Multiplying the page
+    // number by that shorter length (e.g. 2 * 68 for 168 results) incorrectly
+    // asks Zid for page 3 and turns a permanent "product not found" into a
+    // retrying HTTP 404. Stop on a partial page or when the fixed page window
+    // has reached the reported count.
+    if (items.length === 0 || items.length < pageSize || page * pageSize >= count) break
     page++
   }
   return null
