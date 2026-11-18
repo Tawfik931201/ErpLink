@@ -1066,7 +1066,7 @@ export async function processFullDelivery(client: OdooClient, odooModel: string,
           }
         }
 
-        await client.execute('stock.picking', 'button_validate', [pId])
+        await client.execute('stock.picking', 'button_validate', [pId], { context: { skip_sms: true } })
         console.info(`[SyncEngine] Validated picking #${pId} for order #${orderId}`)
       } catch (pickErr: any) {
         console.warn(`[SyncEngine] Failed to validate picking #${pId}:`, pickErr?.message || pickErr)
