@@ -95,7 +95,7 @@ describe('durable queue race guards', () => {
   })
 
   it('claims queue work in execution-sized waves instead of leasing the whole batch', () => {
-    expect(source).toMatch(/for \(let offset = 0; offset < batch\.length; offset \+= CLAIM_CONCURRENCY\)/)
+    expect(source).toContain('selectQueueClaimWave(unclaimed, CLAIM_CONCURRENCY, MAX_CONCURRENT_PER_WORKSPACE)')
     expect(source).toMatch(/await processClaimedFairly\(claimed\)/)
     expect(source).toMatch(/p_lease_seconds: 60/)
   })
