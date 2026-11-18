@@ -13,6 +13,8 @@ describe('terminal return business validation', () => {
     'return_configured_customer_not_found',
     'return_order_match_missing_but_linked:57',
     'return_order_match_conflicts_with_durable_link',
+    'return_mode_changed_existing_financial_effect_requires_review',
+    'return_stock_without_credit_note_requires_review',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)

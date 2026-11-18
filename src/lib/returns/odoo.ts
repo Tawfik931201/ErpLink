@@ -812,6 +812,58 @@ async function readDeliveredMoves(
   }))
 }
 
+/**
+ * Authoritative inventory ledger for returns that intentionally have no
+ * Credit Note (create_credit_note=false). Replaying the same Zid return must
+ * NOT create another incoming stock.picking simply because there is no
+ * out_refund to dedupe against.
+ *
+ * Read the original delivered move IDs and the return moves Odoo relates
+ * through origin_returned_move_id. Include non-cancelled draft moves so an
+ * outcome-unknown return awaiting validation cannot be recreated.
+ */
+export async function readStockReturnLedger(
+  client: OdooClient,
+  orderId: number,
+  orderName: string,
+  majorVersion: number,
+): Promise<Map<number, number>> {
+  const ledger = new Map<number, number>()
+  const delivered = await readDeliveredMoves(client, orderId, orderName, majorVersion)
+  if (!delivered.length) return ledger
+  const ids = delivered.map(move => move.id)
+  const qtyField = majorVersion >= 17 ? 'quantity' : 'quantity_done'
+  let returns: any[]
+  try {
+    returns = await client.searchRead<any>(
+      'stock.move',
+      [['origin_returned_move_id', 'in', ids], ['state', '!=', 'cancel']],
+      ['id', 'origin_returned_move_id', 'product_id', 'state', qtyField, 'product_uom_qty'],
+      Math.max(ids.length * 50, 100),
+    )
+  } catch {
+    // Some older Odoo versions do not expose the modern quantity field.
+    returns = await client.searchRead<any>(
+      'stock.move',
+      [['origin_returned_move_id', 'in', ids], ['state', '!=', 'cancel']],
+      ['id', 'origin_returned_move_id', 'product_id', 'state', 'product_uom_qty'],
+      Math.max(ids.length * 50, 100),
+    )
+  }
+  const originals = new Map(delivered.map(move => [move.id, move.productId]))
+  for (const row of returns || []) {
+    const originId = many2oneId(row.origin_returned_move_id)
+    if (!originId || !originals.has(originId)) continue
+    const id = originals.get(originId)!
+    const planned = toNumber(row.product_uom_qty)
+    const actual = toNumber(row[qtyField])
+    const quantity = row.state === 'done' && actual > 0 ? actual : planned
+    if (!Number.isFinite(quantity) || quantity <= 0) continue
+    ledger.set(id, (ledger.get(id) || 0) + quantity)
+  }
+  return ledger
+}
+
 async function createReturnPicking(
   client: OdooClient,
   pickingId: number,

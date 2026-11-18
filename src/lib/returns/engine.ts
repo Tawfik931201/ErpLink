@@ -55,6 +55,7 @@ import {
   findOriginalSaleOrder,
   readCreditNoteReturnLedger,
   readNegativeReturnLedger,
+  readStockReturnLedger,
   resolveOdooProductId,
   type OdooReturnLine,
   type OriginalSaleOrder,
@@ -246,10 +247,46 @@ async function buildReturnLines(
 ): Promise<OdooReturnLine[]> {
   if (input.settings.mode === 'negative_so' && original.lines.length === 0) return []
 
-  const ledger =
-    input.settings.mode === 'negative_so'
-      ? await readNegativeReturnLedger(client, original.name)
-      : await readCreditNoteReturnLedger(client, original.name)
+  // A merchant may change return modes while a completed Zid webhook is
+  // being delivered again. Do not issue a second financial return in a new
+  // mode when this original already has an effect from the previous mode.
+  const negativeLedger = await readNegativeReturnLedger(client, original.name)
+  const creditLedger = await readCreditNoteReturnLedger(client, original.name)
+  const hasReturned = (ledger: ReadonlyMap<number, number>) =>
+    [...ledger.values()].some(qty => qty > 0.000001)
+  if (input.settings.mode === 'negative_so' && hasReturned(creditLedger)) {
+    throw new Error('return_mode_changed_existing_financial_effect_requires_review')
+  }
+  if (input.settings.mode !== 'negative_so' && hasReturned(negativeLedger)) {
+    throw new Error('return_mode_changed_existing_financial_effect_requires_review')
+  }
+  // In no-credit-note mode the invoice ledger is necessarily empty. Use
+  // Odoo's actual incoming return moves so duplicate webhooks cannot mint
+  // another stock.picking. If the user changes from no-credit to credit,
+  // fail closed rather than silently issuing a second inventory/financial
+  // effect based on inconsistent ledgers.
+  let ledger: Map<number, number> =
+    input.settings.mode === 'negative_so' ? negativeLedger : creditLedger
+  if (input.settings.mode !== 'negative_so') {
+    const majorVersion = await client.getMajorVersion().catch(() => 17)
+    const stockLedger = await readStockReturnLedger(
+      client, original.id, original.name, majorVersion,
+    )
+    if (input.settings.create_credit_note) {
+      for (const [productId, returnedQty] of stockLedger) {
+        if (returnedQty > (creditLedger.get(productId) || 0) + 0.000001) {
+          throw new Error('return_stock_without_credit_note_requires_review')
+        }
+      }
+    } else {
+      // An earlier credit note and its picking represent the same physical
+      // receipt: use MAX rather than SUM to avoid a double-count.
+      ledger = new Map(creditLedger)
+      for (const [productId, quantity] of stockLedger) {
+        ledger.set(productId, Math.max(ledger.get(productId) || 0, quantity))
+      }
+    }
+  }
 
   // Zid only ever gives us "remaining returnable", so the cumulative returned
   // quantity is derived from the order itself. Salla gives the refunded lines
@@ -880,6 +917,9 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
         orderName: original.name,
         pickingAction,
       })
+      if (!settings.create_credit_note && stock.pickingIds.length === 0) {
+        return skipped('return_no_stock_effect_and_credit_note_disabled')
+      }
       actions.push(`stock_return:${stock.pickingIds.join(',') || 'none'}`)
       odooRecordId = original.id
 
