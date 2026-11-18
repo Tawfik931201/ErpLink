@@ -4,7 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 
 import { decrypt } from '@/lib/crypto'
 import { getInventorySyncSettings } from '@/lib/inventory-sync-settings'
-import { registerOdooStockWebhook, unregisterOdooStockWebhook } from '@/lib/odoo-webhook'
+import { reconcileOdooStockWebhook, registerOdooStockWebhook, unregisterOdooStockWebhook } from '@/lib/odoo-webhook'
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -39,40 +39,76 @@ async function persistWebhookRefs(refs: OdooStockWebhookRefs | null, storeType: 
   const user = await getOrCreateDbUser(userId)
   if (!user.active_workspace_id) throw new Error('No active workspace')
 
-  // Platform-default row (store_id = ''): the stock webhook refs are
-  // store_type-level (one Automated Action per workspace), inherited by every
-  // store of the platform via the per-store → '' fallback. Since migration
-  // 20261013 the unique key is (workspace_id, store_type, store_id,
-  // entity_type) — the old 3-column ON CONFLICT spec matches no constraint
-  // and Postgres rejects it ("no unique ... matching the ON CONFLICT").
+  // The stock webhook is platform-level, not store-level. Keep the default row
+  // and every enabled/legacy store row on the same canonical refs so an old
+  // per-store reference can never resurrect an orphan Odoo automation.
   const { data, error } = await supabase
     .from('standard_mapping_settings')
-    .select('settings')
+    .select('store_id, settings')
     .eq('workspace_id', user.active_workspace_id)
     .eq('store_type', storeType)
-    .eq('store_id', '')
     .eq('entity_type', 'products')
-    .maybeSingle()
   if (error) throw error
 
-  const settings = (data?.settings || {}) as Record<string, any>
-  const inventory = { ...((settings.inventory || {}) as Record<string, any>) }
-  inventory.odoo_stock_webhook = refs
-  settings.inventory = inventory
+  const rows = (data || []) as Array<{ store_id: string; settings: Record<string, any> | null }>
+  const byStore = new Map(rows.map(row => [row.store_id || '', row]))
+  if (!byStore.has('')) byStore.set('', { store_id: '', settings: {} })
+
+  const upserts = Array.from(byStore.values())
+    .filter(row => {
+      if ((row.store_id || '') === '') return true
+      const inv = ((row.settings || {}).inventory || {}) as Record<string, any>
+      return inv.sync_enabled === true || !!inv.odoo_stock_webhook
+    })
+    .map(row => {
+      const settings = { ...(row.settings || {}) } as Record<string, any>
+      settings.inventory = {
+        ...((settings.inventory || {}) as Record<string, any>),
+        odoo_stock_webhook: refs,
+      }
+      return {
+        workspace_id: user.active_workspace_id,
+        store_type: storeType,
+        store_id: row.store_id || '',
+        entity_type: 'products',
+        settings,
+        updated_at: new Date().toISOString(),
+      }
+    })
 
   const { error: upErr } = await supabase.from('standard_mapping_settings').upsert(
-    {
-      workspace_id: user.active_workspace_id,
-      store_type: storeType,
-      store_id: '',
-      entity_type: 'products',
-      settings,
-      updated_at: new Date().toISOString(),
-    },
+    upserts,
     { onConflict: 'workspace_id, store_type, store_id, entity_type' }
   )
   if (upErr) throw upErr
   return refs
+}
+
+async function reconcileStoredWebhook(
+  workspaceId: string,
+  refs: OdooStockWebhookRefs,
+  storeType: InventoryStoreType
+): Promise<OdooStockWebhookRefs> {
+  const { data: erpConn } = await supabase
+    .from('erp_connections')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  if (!erpConn) throw new Error('ERP not connected')
+
+  const repaired = await reconcileOdooStockWebhook(
+    {
+      url: erpConn.url,
+      db: erpConn.db_name || '',
+      username: erpConn.username,
+      apiKey: decrypt(erpConn.password),
+    },
+    workspaceId,
+    refs
+  )
+  const canonical = repaired || refs
+  await persistWebhookRefs(canonical, storeType)
+  return canonical
 }
 
 /**
@@ -101,13 +137,14 @@ export async function enableOdooStockWebhook(
 
     const ownRefs = await getWebhookRefs(workspaceId, storeType)
     if (ownRefs?.base_automation_id) {
-      return { success: true, refs: ownRefs }
+      const canonical = await reconcileStoredWebhook(workspaceId, ownRefs, storeType)
+      return { success: true, refs: canonical }
     }
 
     const otherRefs = await getWebhookRefs(workspaceId, otherStoreType(storeType))
     if (otherRefs?.base_automation_id) {
-      const persisted = await persistWebhookRefs(otherRefs, storeType)
-      return { success: true, refs: persisted }
+      const canonical = await reconcileStoredWebhook(workspaceId, otherRefs, storeType)
+      return { success: true, refs: canonical }
     }
 
     const { data: erpConn } = await supabase
@@ -131,8 +168,8 @@ export async function enableOdooStockWebhook(
       base_automation_id: created.baseAutomationId,
       server_action_id: created.serverActionId,
     }
-    const persisted = await persistWebhookRefs(refs, storeType)
-    return { success: true, refs: persisted }
+    const canonical = await reconcileStoredWebhook(workspaceId, refs, storeType)
+    return { success: true, refs: canonical }
   } catch (error: any) {
     console.error('[InventorySync] Enable webhook failed:', error)
     return { success: false, error: error.message || 'Failed to enable inventory sync webhook' }
