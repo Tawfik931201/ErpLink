@@ -1,16 +1,16 @@
-import { findOriginalSaleOrder } from '@/lib/returns/odoo'
-import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
-import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
-import { assertSaleOrderLinkOwnership } from '@/lib/orders/matching'
+import { findOriginalSaleOrder } from '../../src/lib/returns/odoo'
+import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
+import { resolveEntityLinkId, upsertEntityLink } from '../../src/lib/entity-links'
+import { assertSaleOrderLinkOwnership } from '../../src/lib/orders/matching'
 
-jest.mock('@/lib/sync/settings', () => ({
+jest.mock('../../src/lib/sync/settings', () => ({
   getCachedStandardMappingSettings: jest.fn(),
 }))
-jest.mock('@/lib/entity-links', () => ({
+jest.mock('../../src/lib/entity-links', () => ({
   resolveEntityLinkId: jest.fn().mockResolvedValue(null),
   upsertEntityLink: jest.fn().mockResolvedValue(true),
 }))
-jest.mock('@/lib/orders/matching', () => ({
+jest.mock('../../src/lib/orders/matching', () => ({
   assertSaleOrderLinkOwnership: jest.fn().mockResolvedValue(undefined),
 }))
 
