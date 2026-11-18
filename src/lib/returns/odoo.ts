@@ -752,17 +752,26 @@ async function readDeliveredMoves(
   orderName: string | undefined,
   majorVersion: number
 ): Promise<DeliveredMove[]> {
+  // Odoo attaches the original sale_id to BOTH the outgoing delivery and
+  // the incoming return. Before this guard a completed grouped return caused
+  // readStockReturnLedger to count the incoming return as another ORIGINAL
+  // delivery, producing a false partial-inventory error on webhook replay.
+  // Only outgoing done pickings can define the original delivery baseline.
   const domain: any[] = orderName
-    ? ['&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName], ['state', '=', 'done']]
-    : [['sale_id', '=', orderId], ['state', '=', 'done']]
+    ? ['&', '&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName],
+      ['state', '=', 'done'], ['picking_type_code', '=', 'outgoing']]
+    : [['sale_id', '=', orderId], ['state', '=', 'done'], ['picking_type_code', '=', 'outgoing']]
 
   let pickings = await client.searchRead<any>('stock.picking', domain, ['id'], 100)
 
   // If no done pickings found, check for assigned/confirmed outgoing pickings and validate them
   if (!pickings || pickings.length === 0) {
     const pendingDomain: any[] = orderName
-      ? ['&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName], ['state', 'in', ['assigned', 'confirmed', 'waiting']]]
-      : [['sale_id', '=', orderId], ['state', 'in', ['assigned', 'confirmed', 'waiting']]]
+      ? ['&', '&', '|', ['sale_id', '=', orderId], ['origin', '=', orderName],
+        ['state', 'in', ['assigned', 'confirmed', 'waiting']],
+        ['picking_type_code', '=', 'outgoing']]
+      : [['sale_id', '=', orderId], ['state', 'in', ['assigned', 'confirmed', 'waiting']],
+        ['picking_type_code', '=', 'outgoing']]
     const pending = await client.searchRead<any>('stock.picking', pendingDomain, ['id'], 20)
     if (pending && pending.length > 0) {
       for (const p of pending) {
