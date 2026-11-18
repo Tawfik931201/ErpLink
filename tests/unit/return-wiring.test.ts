@@ -76,6 +76,15 @@ describe('returns are intercepted before any order write', () => {
     expect(engine).toContain("if (returnSettings.mode !== 'nothing')")
   })
 
+  it('never overwrites original order link with an Odoo return child ID', () => {
+    const returnBlock = engine.slice(signal, firstWrite)
+    const runtime = read('src', 'lib', 'sync-runtime.ts')
+    expect(returnBlock).toContain('suppressEntityLink: true')
+    expect(returnBlock).toContain('odoo_record_id: outcome.odooRecordId ?? null')
+    expect(runtime).toContain('!entry.suppressEntityLink')
+    expect(runtime).toContain('upsertEntityLink(')
+  })
+
   it('logs the outcome instead of returning an unlogged success', () => {
     const block = engine.slice(signal, firstWrite)
     expect(block).toContain('await logSync({')
