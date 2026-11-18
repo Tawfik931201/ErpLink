@@ -125,6 +125,14 @@ describe('Odoo return picking compatibility', () => {
     expect(returnsOdoo).toContain("'origin_returned_move_id'")
   })
 
+  it('reuses and confirms Odoo 20 draft return pickings before validation', () => {
+    expect(returnsOdoo).toContain("'return_id', '=', pickingId")
+    expect(returnsOdoo).toContain('Reusing Odoo 20 draft return picking')
+    expect(returnsOdoo).toContain("'action_confirm', [[created]]")
+    expect(returnsOdoo).toContain("'action_assign', [[created]]")
+    expect(returnsOdoo).toContain("'button_validate', [[created]]")
+  })
+
   it('keeps the legacy return wizard path for Odoo 14-19', () => {
     expect(returnsOdoo).toContain("client.create('stock.return.picking'")
     expect(returnsOdoo).toContain("'action_create_returns'")
