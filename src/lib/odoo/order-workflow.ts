@@ -4,6 +4,7 @@ import { withErpCreateIdentity } from '@/lib/erp-effect-context'
 import { resolveSettingsStoreKey } from '@/lib/mapping-settings'
 import { getSaleOrderSelectionKeys } from '@/lib/odoo/field-meta'
 import { createOrderInvoice } from '@/lib/odoo/order-invoice'
+import { reconcileInclusiveDraftInvoice } from '@/lib/odoo/order-invoice-integrity'
 import { reconcilePendingPaymentsForOrder, syncOrderPayment } from '@/lib/odoo/order-payment'
 import type { OdooClient } from '@/lib/odoo-client'
 import { assertOrderActionResults } from '@/lib/orders/action-results'
@@ -474,6 +475,18 @@ async function applyOrderInvoiceAction(
   zidEntityId: string,
 ): Promise<void> {
   if (!action || action === 'none') return
+  // VAT-inclusive orders already have an exclusive price on the SO. On invoice
+  // creation, verify the *draft invoice* before the first accounting post.
+  // Leave all other tax modes, platforms and existing posted invoices untouched.
+  const ensureInclusiveInvoiceParity = async (invoiceIds: number[]) => {
+    if (platform !== 'zid' || invoiceIds.length !== 1) return
+    const settings = await getCachedStandardMappingSettings(workspaceId, platform, 'orders', storeId)
+    const inclusive = settings?.prices_include_tax ?? (settings as any)?.order?.prices_include_tax
+    const vatEnabled = settings?.enable_vat ?? (settings as any)?.order?.enable_vat
+    if (inclusive === true && vatEnabled === true) {
+      await reconcileInclusiveDraftInvoice(client, orderId, invoiceIds[0])
+    }
+  }
   try {
     const orders = await client.searchRead<any>('sale.order', [['id', '=', orderId]], ['name', 'state', 'invoice_ids'])
     const order = orders?.[0]
@@ -527,6 +540,7 @@ async function applyOrderInvoiceAction(
       }
 
       if (existingInvoiceIds.length > 0) {
+        if (action === 'create_and_post') await ensureInclusiveInvoiceParity(existingInvoiceIds)
         const invoices = await client.searchRead<any>(
           'account.move',
           [['id', 'in', existingInvoiceIds], ['move_type', '=', 'out_invoice']],
@@ -594,6 +608,7 @@ async function applyOrderInvoiceAction(
         if (directId) invoiceIds = [directId]
       }
       if (invoiceIds.length > 0) {
+        await ensureInclusiveInvoiceParity(invoiceIds)
         const invoicesToPost = await client.searchRead<any>(
           'account.move',
           [['id', 'in', invoiceIds], ['move_type', '=', 'out_invoice'], ['state', '=', 'draft']],
@@ -657,6 +672,11 @@ async function applyOrderInvoiceAction(
     }
   } catch (err: any) {
     console.warn(`[SyncEngine] Invoice action "${action}" failed for order #${orderId} (status "${zidStatus}"):`, err?.message || err)
+    // Incorrect invoice totals are financial failures, not optional workflow
+    // warnings: surface them to the caller before the queue acknowledges success.
+    if (platform === 'zid' && String(err?.message || '').startsWith('order_invoice_total_mismatch_requires_review')) {
+      throw err
+    }
   }
 }
 
