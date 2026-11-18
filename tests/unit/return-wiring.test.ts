@@ -116,6 +116,21 @@ describe('Zid remaining quantities follow the documented contract', () => {
   })
 })
 
+describe('Odoo return picking compatibility', () => {
+  const returnsOdoo = read('src', 'lib', 'returns', 'odoo.ts')
+
+  it('uses the Odoo 20 public stock.picking action_return API', () => {
+    expect(returnsOdoo).toContain('if (majorVersion >= 20)')
+    expect(returnsOdoo).toContain("'stock.picking', 'action_return'")
+    expect(returnsOdoo).toContain("'origin_returned_move_id'")
+  })
+
+  it('keeps the legacy return wizard path for Odoo 14-19', () => {
+    expect(returnsOdoo).toContain("client.create('stock.return.picking'")
+    expect(returnsOdoo).toContain("'action_create_returns'")
+  })
+})
+
 describe('platform endpoints and operation names', () => {
   it('reads Zid remaining quantities from the documented endpoint', () => {
     expect(zidClient).toContain('/view-for-return')
