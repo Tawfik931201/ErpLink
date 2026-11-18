@@ -118,6 +118,23 @@ describe('durable ERP create reservations', () => {
     expect(rows().size).toBe(5)
   })
 
+  it('never reuses the original sale.order ID as a negative return and isolates repeated partial returns', async () => {
+    let next = 80
+    const remote = jest.fn(async () => next++)
+    const root = () => effect(remote)
+    const negative = (snapshot: string) => withErpCreateIdentity(
+      'return-negative:S00080:' + snapshot,
+      () => effect(remote, { origin: 'S00080', client_order_ref: 'RET:S00080' })
+    )
+    const originalId = await withErpExecutionContext(context, root)
+    const firstReturn = await withErpExecutionContext(context, () => negative('one-received'))
+    const replayed = await withErpExecutionContext(context, () => negative('one-received'))
+    const secondPartial = await withErpExecutionContext(context, () => negative('two-received'))
+    expect([originalId, firstReturn, replayed, secondPartial]).toEqual([80, 81, 81, 82])
+    expect(remote).toHaveBeenCalledTimes(3)
+    expect(rows().size).toBe(3)
+  })
+
   it('permits retry following a confirmed ERP rejection', async () => {
     const fault = Object.assign(new Error('Rejected'), { faultCode: 1 })
     const create = jest.fn().mockRejectedValueOnce(fault).mockResolvedValueOnce(42)
