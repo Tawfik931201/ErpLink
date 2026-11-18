@@ -88,7 +88,7 @@ describe('Zid VAT-inclusive invoice total reconciliation', () => {
   })
 
   it('does not duplicate VAT, and inherits the explicit SO VAT IDs when needed', async () => {
-    const { client, taxes, price } = makeClient({ invoicePrice: 115, invoiceTaxIds: [] })
+    const { client, taxes, price } = makeClient({ invoicePrice: 132.25, invoiceTaxIds: [] })
     await expect(reconcileInclusiveDraftInvoice(client, 55, 99)).resolves.toBeUndefined()
     expect(price()).toBe(100)
     expect(taxes()).toEqual([5])
