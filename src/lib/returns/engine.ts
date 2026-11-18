@@ -270,7 +270,7 @@ async function buildReturnLines(
   if (input.settings.mode !== 'negative_so') {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
     const stockLedger = await readStockReturnLedger(
-      client, original.id, original.name, majorVersion,
+      client, original.id, original.name, majorVersion, original.lines,
     )
     if (input.settings.create_credit_note) {
       for (const [productId, returnedQty] of stockLedger) {
@@ -916,6 +916,7 @@ export async function processReturnEvent(input: ReturnEventInput): Promise<Retur
       const stock = await createStockReturn(client, original.id, lines, majorVersion, {
         orderName: original.name,
         pickingAction,
+        originalLines: original.lines,
       })
       if (!settings.create_credit_note && stock.pickingIds.length === 0) {
         return skipped('return_no_stock_effect_and_credit_note_disabled')

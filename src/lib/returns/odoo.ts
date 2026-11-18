@@ -693,6 +693,7 @@ interface DeliveredMove {
   id: number
   pickingId: number
   productId: number
+  saleLineId: number | null
   quantity: number
 }
 
@@ -782,33 +783,38 @@ async function readDeliveredMoves(
   if (pickingIds.length === 0) return []
 
   const qtyField = majorVersion >= 17 ? 'quantity' : 'quantity_done'
+  const domainMoves: any[] = [
+    ['picking_id', 'in', pickingIds], ['state', '=', 'done'],
+  ]
+  const limit = Math.max(pickingIds.length * 50, 100)
   let moves: any[] = []
+  let availableQtyField = qtyField
   try {
-    moves = await client.searchRead<any>(
-      'stock.move',
-      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
-      ['id', 'picking_id', 'product_id', qtyField],
-      Math.max(pickingIds.length * 50, 100)
-    )
+    moves = await client.searchRead<any>('stock.move', domainMoves,
+      ['id', 'picking_id', 'product_id', 'sale_line_id', qtyField], limit)
   } catch {
-    moves = await client.searchRead<any>(
-      'stock.move',
-      [['picking_id', 'in', pickingIds], ['state', '=', 'done']],
-      ['id', 'picking_id', 'product_id', 'product_uom_qty'],
-      Math.max(pickingIds.length * 50, 100)
-    )
-    return (moves || []).map(m => ({
-      id: Number(m.id),
-      pickingId: many2oneId(m.picking_id) || 0,
-      productId: many2oneId(m.product_id) || 0,
-      quantity: toNumber(m.product_uom_qty),
-    }))
+    try {
+      // Not every Odoo sale/stock module version has sale_line_id.
+      // Without it, reject grouped stock returns instead of guessing moves.
+      moves = await client.searchRead<any>('stock.move', domainMoves,
+        ['id', 'picking_id', 'product_id', qtyField], limit)
+    } catch {
+      availableQtyField = 'product_uom_qty'
+      try {
+        moves = await client.searchRead<any>('stock.move', domainMoves,
+          ['id', 'picking_id', 'product_id', 'sale_line_id', availableQtyField], limit)
+      } catch {
+        moves = await client.searchRead<any>('stock.move', domainMoves,
+          ['id', 'picking_id', 'product_id', availableQtyField], limit)
+      }
+    }
   }
   return (moves || []).map(m => ({
     id: Number(m.id),
     pickingId: many2oneId(m.picking_id) || 0,
     productId: many2oneId(m.product_id) || 0,
-    quantity: toNumber(m[qtyField]),
+    saleLineId: many2oneId(m.sale_line_id),
+    quantity: toNumber(m[availableQtyField]),
   }))
 }
 
@@ -827,6 +833,7 @@ export async function readStockReturnLedger(
   orderId: number,
   orderName: string,
   majorVersion: number,
+  originalLines?: readonly SaleOrderLineInfo[],
 ): Promise<Map<number, number>> {
   const ledger = new Map<number, number>()
   const delivered = await readDeliveredMoves(client, orderId, orderName, majorVersion)
@@ -850,16 +857,47 @@ export async function readStockReturnLedger(
       Math.max(ids.length * 50, 100),
     )
   }
-  const originals = new Map(delivered.map(move => [move.id, move.productId]))
+  const originals = new Map(delivered.map(move => [move.id, move]))
+  const returnedByOrigin = new Map<number, number>()
+  const groups = new Map<number, DeliveredMove[]>()
+  const originalByLine = new Map((originalLines || []).map(line => [line.id, line]))
   for (const row of returns || []) {
     const originId = many2oneId(row.origin_returned_move_id)
-    if (!originId || !originals.has(originId)) continue
-    const id = originals.get(originId)!
+    const source = originId ? originals.get(originId) : undefined
+    if (!source) continue
     const planned = toNumber(row.product_uom_qty)
     const actual = toNumber(row[qtyField])
     const quantity = row.state === 'done' && actual > 0 ? actual : planned
     if (!Number.isFinite(quantity) || quantity <= 0) continue
-    ledger.set(id, (ledger.get(id) || 0) + quantity)
+    returnedByOrigin.set(originId!, (returnedByOrigin.get(originId!) || 0) + quantity)
+    const saleLine = source.saleLineId ? originalByLine.get(source.saleLineId) : null
+    if (saleLine && saleLine.productId !== source.productId) {
+      const current = groups.get(saleLine.id) || []
+      if (!current.some(move => move.id === source.id)) current.push(source)
+      groups.set(saleLine.id, current)
+    } else {
+      ledger.set(source.productId, (ledger.get(source.productId) || 0) + quantity)
+    }
+  }
+
+  // A grouped/phantom sale has one parent-priced order line and several
+  // delivered component stock moves. The inventory receipt ledger MUST
+  // count returned PARENT units, not sum component units (3+2 != 1).
+  for (const [lineId] of groups) {
+    const original = originalByLine.get(lineId)!
+    const componentMoves = delivered.filter(move =>
+      move.saleLineId === lineId && move.productId !== original.productId)
+    if (!componentMoves.length || original.orderedQty <= 0) {
+      throw new Error('return_grouped_stock_quantity_invalid')
+    }
+    const parentUnits = componentMoves.map(move =>
+      original.orderedQty * (returnedByOrigin.get(move.id) || 0) / move.quantity)
+    if (parentUnits.some(value => !Number.isFinite(value) || value < 0) ||
+        Math.max(...parentUnits) - Math.min(...parentUnits) > 0.000001) {
+      throw new Error('return_grouped_partial_inventory_effect_requires_review')
+    }
+    const qty = parentUnits[0]
+    ledger.set(original.productId, (ledger.get(original.productId) || 0) + qty)
   }
   return ledger
 }
@@ -1015,15 +1053,73 @@ export async function createStockReturn(
   options?: {
     orderName?: string
     pickingAction?: string
+    originalLines?: readonly SaleOrderLineInfo[]
   }
 ): Promise<StockReturnResult> {
   const physicalLines = await selectPhysicalReturnLines(client, lines, majorVersion)
-  if (physicalLines.length === 0) return { pickingIds: [], returnedQty: 0 }
+  if (!physicalLines.length && !lines.some(line => line.saleLineId)) {
+    return { pickingIds: [], returnedQty: 0 }
+  }
   const moves = await readDeliveredMoves(client, orderId, options?.orderName, majorVersion)
   const byPicking = new Map<number, { moveId: number; productId: number; quantity: number }[]>()
   const remaining = new Map<number, number>()
-  for (const line of physicalLines) {
-    remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+  const addMove = (move: DeliveredMove, quantity: number) => {
+    if (quantity <= 0) return
+    const list = byPicking.get(move.pickingId) || []
+    const existing = list.find(item => item.moveId === move.id)
+    if (existing) {
+      // Never return an Odoo move twice when parent and child are represented
+      // simultaneously as independent sale-order financial lines.
+      throw new Error('return_grouped_mixed_parent_component_requires_review')
+    }
+    list.push({ moveId: move.id, productId: move.productId, quantity })
+    byPicking.set(move.pickingId, list)
+  }
+  const potentialLines = [
+    ...physicalLines,
+    ...lines.filter(line =>
+      !physicalLines.includes(line) && line.saleLineId &&
+      moves.some(move => move.saleLineId === line.saleLineId)
+    ),
+  ]
+  for (const line of potentialLines) {
+    const direct = moves.some(move => move.productId === line.productId &&
+      (!line.saleLineId || !move.saleLineId || move.saleLineId === line.saleLineId))
+    if (direct) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    if (!line.saleLineId) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    const original = options?.originalLines?.find(item => item.id === line.saleLineId)
+    const components = moves.filter(move =>
+      move.saleLineId === line.saleLineId && move.productId !== line.productId)
+    if (!original || original.orderedQty <= 0 || !components.length) {
+      remaining.set(line.productId, (remaining.get(line.productId) || 0) + Math.abs(line.quantity))
+      continue
+    }
+    // Phantom BoM / grouped sale: parent is one PRICED sale.order.line, while
+    // Odoo delivered one or more component stock.moves linked via sale_line_id.
+    // Scale exactly by original parent ordered units: 1 of 2 parents with
+    // component shipments A×6 and C×4 means returning A×3 and C×2.
+    const fraction = Math.abs(line.quantity) / original.orderedQty
+    if (fraction <= 0 || fraction > 1 + 0.000001) {
+      throw new Error('return_grouped_parent_quantity_invalid')
+    }
+    for (const move of components) {
+      if (lines.some(item =>
+        item.saleLineId !== line.saleLineId && item.productId === move.productId
+      )) {
+        throw new Error('return_grouped_mixed_parent_component_requires_review')
+      }
+      const quantity = move.quantity * fraction
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        throw new Error('return_grouped_stock_quantity_invalid')
+      }
+      addMove(move, quantity)
+    }
   }
 
   for (const move of moves) {
@@ -1031,9 +1127,7 @@ export async function createStockReturn(
     if (need <= 0) continue
     const take = Math.min(need, move.quantity)
     if (take <= 0) continue
-    const list = byPicking.get(move.pickingId) || []
-    list.push({ moveId: move.id, productId: move.productId, quantity: take })
-    byPicking.set(move.pickingId, list)
+    addMove(move, take)
     remaining.set(move.productId, need - take)
   }
 

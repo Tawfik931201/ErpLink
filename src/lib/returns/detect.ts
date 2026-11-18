@@ -316,7 +316,19 @@ export function extractZidReceivedReturnLines(
       const product = asRecord(item.product)
       const orderProduct = asRecord(item.order_product)
       if (asRecord(orderProduct?.meta)?.group_product_id) {
-        return { known: false, lines: [], error: 'return_grouped_components_require_review' }
+        // In Zid's completed FULL grouped return receipt the parent is the
+        // single refundable financial line. Its child components are listed
+        // with reversed_quantity=3/2 etc but received_quantity=0 even when
+        // the parent has been received. Never refund the children at zero
+        // price OR add their quantities to the parent. Inventory is returned
+        // from the parent sale.line's actual Odoo delivered component moves.
+        //
+        // Explicit component-only receipts remain unsupported for automatic
+        // financial valuation, and are terminal manual review instead.
+        if (received > 0 || damaged > 0 || notReceived > 0) {
+          return { known: false, lines: [], error: 'return_grouped_components_require_review' }
+        }
+        continue
       }
       const sku = firstText(item, ['sku']) ||
         firstText(orderProduct || {}, ['sku']) ||
