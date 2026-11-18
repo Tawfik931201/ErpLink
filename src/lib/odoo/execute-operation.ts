@@ -239,7 +239,40 @@ export async function executeOdooOperation(
     (execPlatform === 'zid' || execPlatform === 'salla') &&
     isReturnSignal(execPlatform, event, zidData)
   ) {
-    const returnSettings = normalizeReturnSettings((mergedSettings as any)?.order?.returns || (mergedSettings as any)?.returns)
+    const configuredReturnSettings =
+      (mergedSettings as any)?.order?.returns || (mergedSettings as any)?.returns
+    const returnSettings = normalizeReturnSettings(configuredReturnSettings)
+    // Explicit "nothing" in saved Standard Mapping means NO return effect.
+    // Falling through to regular order status_actions can try to cancel an
+    // already invoiced/locked sale.order, retry forever and violate the saved
+    // return setting. Preserve legacy fall-through ONLY when no return mode
+    // was explicitly configured (older workspaces without returns setup).
+    const explicitReturnMode = (configuredReturnSettings as any)?.mode
+    if (typeof explicitReturnMode === 'string' &&
+        explicitReturnMode.trim() && returnSettings.mode === 'nothing') {
+      const message = 'returns_disabled_by_standard_mapping'
+      await logSync({
+        id: existingLogId,
+        workspace_id: mapping.workspace_id,
+        field_mapping_id: mapping.id,
+        event,
+        store_id: storeId,
+        zid_entity_id: zidEntityId,
+        odoo_model: 'sale.order',
+        status: 'skipped',
+        error_message: message,
+        payload: zidData,
+        trigger_type: triggerType,
+        platform: execPlatform,
+      })
+      return {
+        mappingId: mapping.id,
+        mappingName: mapping.name,
+        model: 'sale.order',
+        status: 'skipped',
+        message,
+      }
+    }
     if (returnSettings.mode !== 'nothing') {
       const nestedOrder = (zidData.order && typeof zidData.order === 'object')
         ? (zidData.order as Record<string, unknown>)
