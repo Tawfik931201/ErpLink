@@ -4,6 +4,7 @@ import {
   extractStoreReturnReason,
   extractZidRemainingLines,
   isReturnSignal,
+  zidReturnRefundsOrderFees,
   isSallaReturnEvent,
   isZidReturnStatus,
   returnDedupeKey,
@@ -282,3 +283,44 @@ describe('extractStoreReturnReason', () => {
     expect(extractStoreReturnReason({})).toBe('')
   })
 })
+
+describe('Zid full reversal fee-refund accounting', () => {
+  it('excludes shipping from the credit when Zid reverses 316 but refunds only 301 SAR', () => {
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{
+        id: 'QA-return-1', reverse_total: 316, refund_total: 301,
+        products: [{ received_quantity: 1 }],
+      }],
+    })).toBe(false)
+  })
+
+  it('allows fee credit only when Zid explicitly refunds the full reversed amount', () => {
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ reverse_total: 316, refund_total: 316 }],
+    })).toBe(true)
+  })
+
+  it('supports completed requests nested under order', () => {
+    expect(zidReturnRefundsOrderFees({
+      order: { reverse_order_label_requests: [{ reverse_total: '316.00', refund_total: '316.00' }] },
+    })).toBe(true)
+  })
+
+  it('fails closed for unreadable or missing financial totals', () => {
+    expect(zidReturnRefundsOrderFees({ reverse_order_label_requests: [{ products: [] }] })).toBe(false)
+    expect(zidReturnRefundsOrderFees({ reverse_order_label_requests: [] })).toBe(false)
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ reverse_total: 316, refund_total: 'not-a-number' }],
+    })).toBe(false)
+  })
+
+  it('does not include fees when any partial reversal excludes them', () => {
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [
+        { id: 'one', reverse_total: 100, refund_total: 100 },
+        { id: 'two', reverse_total: 216, refund_total: 201 },
+      ],
+    })).toBe(false)
+  })
+})
+

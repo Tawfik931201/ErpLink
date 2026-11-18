@@ -475,6 +475,39 @@ export function extractZidRemainingLines(
  * after its `sync_queue` row settles (the dedup index only covers pending
  * rows). FNV-1a, because the module stays import-free.
  */
+/**
+ * Zid distinguishes reverse_total (order value requested for reversal) from
+ * refund_total (money actually refundable). A completed full reversal may
+ * exclude shipping/COD fees, e.g. 316 SAR reversed but only 301 SAR refunded.
+ * Including the original service fee in an Odoo credit note in that case
+ * over-credits the customer. Missing or inconsistent totals are not consent
+ * to refund the fee.
+ */
+export function zidReturnRefundsOrderFees(
+  payload: Record<string, unknown> | null | undefined
+): boolean {
+  if (!payload) return false
+  const order = asRecord(payload.order)
+  const many = payload.reverse_order_label_requests ?? order?.reverse_order_label_requests
+  const single = payload.reverse_order_label_request ?? order?.reverse_order_label_request
+  const requests = Array.isArray(many) && many.length > 0
+    ? many
+    : single ? [single] : []
+  if (requests.length === 0) return false
+
+  for (const raw of requests) {
+    const request = asRecord(raw)
+    if (!request || request.refund_total == null || request.reverse_total == null) return false
+    const refunded = Number(request.refund_total)
+    const reversed = Number(request.reverse_total)
+    if (!Number.isFinite(refunded) || !Number.isFinite(reversed) ||
+        reversed <= 0 || refunded < 0 || Math.abs(refunded - reversed) > 0.01) {
+      return false
+    }
+  }
+  return true
+}
+
 export function returnSnapshotSignature(lines: readonly StoreReturnLine[], extra = ''): string {
   const parts = lines
     .map(line => `${line.storeProductId || line.sku}:${line.quantity}`)

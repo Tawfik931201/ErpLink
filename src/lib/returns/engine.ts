@@ -40,6 +40,7 @@ import {
 import {
   extractStoreReturnReason,
   extractZidReceivedReturnLines,
+  zidReturnRefundsOrderFees,
   extractPricedZidReceivedReturnLines,
   returnDedupeKey,
   returnSnapshotSignature,
@@ -330,11 +331,14 @@ async function buildReturnLines(
     throw new Error('return_quantities_unknown')
   }
 
-  // If all regular lines are returned (or this is a full reversal), also include delivery, COD, and discount lines
+  // Full product return is not necessarily a refund of shipping/COD.
+  // Zid's refund_total can be less than reverse_total: in that case only
+  // returned products are refundable, even when the whole order was reversed.
   const regularLines = original.lines.filter(l => !isFeeOrServiceLine(l, input.orderStdSettings))
   const isFullReturn = isCumulativeFullReturn(regularLines, targets)
+  const includeFees = platform !== 'zid' || zidReturnRefundsOrderFees(input.payload)
 
-  if (isFullReturn) {
+  if (isFullReturn && includeFees) {
     const fees = new Map<number, number>()
     for (const line of original.lines) {
       if (isFeeOrServiceLine(line, input.orderStdSettings)) {
