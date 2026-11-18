@@ -752,8 +752,38 @@ async function readDeliveredMoves(
 async function createReturnPicking(
   client: OdooClient,
   pickingId: number,
-  moves: readonly { moveId: number; productId: number; quantity: number }[]
+  moves: readonly { moveId: number; productId: number; quantity: number }[],
+  majorVersion: number
 ): Promise<number | null> {
+  // Odoo 20 removed the stock.return.picking wizard model. The supported
+  // public RPC entry point is stock.picking.action_return(), which creates
+  // the return picking and returns an action with its res_id. Odoo 14-19
+  // continue to use the transient wizard below.
+  if (majorVersion >= 20) {
+    const result = await client.execute<any>('stock.picking', 'action_return', [[pickingId]])
+    const newPickingId = Number(result?.res_id ?? result?.resId ?? 0)
+    if (!Number.isInteger(newPickingId) || newPickingId <= 0) return null
+
+    const returnMoves = await client.searchRead<any>(
+      'stock.move',
+      [['picking_id', '=', newPickingId], ['state', '!=', 'cancel']],
+      ['id', 'product_id', 'origin_returned_move_id', 'product_uom_qty'],
+      200
+    )
+    const desiredByOrigin = new Map(
+      moves.map(move => [move.moveId, Math.abs(move.quantity)] as const)
+    )
+    for (const returnMove of returnMoves || []) {
+      const originMoveId = many2oneId(returnMove.origin_returned_move_id)
+      const desiredQty = originMoveId ? desiredByOrigin.get(originMoveId) : undefined
+      const quantity = desiredQty ?? 0
+      await client.write('stock.move', [Number(returnMove.id)], {
+        product_uom_qty: quantity,
+      })
+    }
+    return newPickingId
+  }
+
   const wizardId = await client.create('stock.return.picking', {
     picking_id: pickingId,
     product_return_moves: moves.map(m => [
@@ -834,7 +864,7 @@ export async function createStockReturn(
     : true
 
   for (const [pickingId, pickingMoves] of byPicking.entries()) {
-    const created = await createReturnPicking(client, pickingId, pickingMoves)
+    const created = await createReturnPicking(client, pickingId, pickingMoves, majorVersion)
     if (!created) {
       throw new Error(`stock_return_not_created: picking ${pickingId}`)
     }
