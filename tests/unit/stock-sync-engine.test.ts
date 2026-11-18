@@ -171,6 +171,12 @@ describe('the Zid push handles variants (nested under a parent)', () => {
     expect(source).not.toMatch(/ZidAPI\.products\.variants\(creds, parentId,/)
   })
 
+  it('stops Zid product pagination on a partial final page instead of requesting an invalid next page', () => {
+    expect(source).toMatch(/const pageSize = 100/)
+    expect(source).toMatch(/items\.length < pageSize \|\| page \* pageSize >= count/)
+    expect(source).not.toMatch(/page \* items\.length >= count/)
+  })
+
   it('keeps the flat locations stock-update for standalone products', () => {
     expect(source).toMatch(/await ZidAPI\.locations\.stockUpdate\(creds, zidLocationId, \[/)
   })

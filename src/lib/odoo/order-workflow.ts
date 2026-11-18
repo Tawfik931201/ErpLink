@@ -755,10 +755,44 @@ export async function ensureSaleOrderTaxes(
 
     if (linesNeedingUpdate.length > 0) {
       const taxCmd = expectedTaxIds.length > 0 ? [[6, 0, expectedTaxIds]] : [[6, 0, []]]
-      const written = await client.write('sale.order.line', linesNeedingUpdate, {
-        [taxField]: taxCmd,
-      })
-      if (strict && !written) throw new Error('Odoo rejected the configured order taxes')
+      // Odoo 20 forbids changing tax_ids once a sale order is locked. Status
+      // actions such as Delivered can lock the order before this strict
+      // post-workflow tax verification runs. Temporarily unlock only when a
+      // tax correction is actually needed, then restore the original lock.
+      let relockAfterTaxWrite = false
+      if (majorVersion >= 20) {
+        try {
+          const [orderState] = await client.searchRead<any>(
+            'sale.order',
+            [['id', '=', odooOrderId]],
+            ['id', 'locked'],
+            1
+          )
+          if (orderState?.locked === true) {
+            const unlocked = await client.write('sale.order', [odooOrderId], { locked: false })
+            if (strict && !unlocked) throw new Error('Odoo rejected temporary unlock for configured taxes')
+            relockAfterTaxWrite = unlocked === true
+          }
+        } catch (unlockErr) {
+          if (strict) throw unlockErr
+          console.warn(
+            `[SyncEngine] Could not temporarily unlock sale.order #${odooOrderId} before tax enforcement:`,
+            (unlockErr as any)?.message || unlockErr
+          )
+        }
+      }
+
+      try {
+        const written = await client.write('sale.order.line', linesNeedingUpdate, {
+          [taxField]: taxCmd,
+        })
+        if (strict && !written) throw new Error('Odoo rejected the configured order taxes')
+      } finally {
+        if (relockAfterTaxWrite) {
+          const relocked = await client.write('sale.order', [odooOrderId], { locked: true })
+          if (strict && !relocked) throw new Error('Odoo rejected restoring the sale order lock after configured taxes')
+        }
+      }
       console.info(
         `[SyncEngine] ✅ Enforced destination tax (${expectedTaxIds.length > 0 ? expectedTaxIds.join(',') : '0%'} ` +
         `for country "${destinationCountryCode || 'Unknown'}" matched "${appliedCountryCode}") on ${linesNeedingUpdate.length} line(s) of sale.order #${odooOrderId}`
