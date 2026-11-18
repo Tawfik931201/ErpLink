@@ -1,16 +1,16 @@
-import { resolveStoreLines } from '@/lib/returns/engine'
-import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
-import { resolveOrderRelatedRecord } from '@/lib/orders/related-matching'
-import { resolveOdooProductId } from '@/lib/returns/odoo'
+import { resolveStoreLines } from '../../src/lib/returns/engine'
+import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
+import { resolveOrderRelatedRecord } from '../../src/lib/orders/related-matching'
+import { resolveOdooProductId } from '../../src/lib/returns/odoo'
 
-jest.mock('@/lib/sync/settings', () => ({
+jest.mock('../../src/lib/sync/settings', () => ({
   getCachedStandardMappingSettings: jest.fn(),
 }))
-jest.mock('@/lib/orders/related-matching', () => ({
+jest.mock('../../src/lib/orders/related-matching', () => ({
   resolveOrderRelatedRecord: jest.fn(),
 }))
-jest.mock('@/lib/returns/odoo', () => ({
-  ...jest.requireActual('@/lib/returns/odoo'),
+jest.mock('../../src/lib/returns/odoo', () => ({
+  ...jest.requireActual('../../src/lib/returns/odoo'),
   resolveOdooProductId: jest.fn(),
 }))
 
