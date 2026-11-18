@@ -124,7 +124,7 @@ describe('durable ERP create reservations', () => {
     const root = () => effect(remote)
     const negative = (snapshot: string) => withErpCreateIdentity(
       'return-negative:S00080:' + snapshot,
-      () => effect(remote, { origin: 'S00080', client_order_ref: 'RET:S00080' })
+      () => effect(remote, { name: 'RET:S00080' })
     )
     const originalId = await withErpExecutionContext(context, root)
     const firstReturn = await withErpExecutionContext(context, () => negative('one-received'))
