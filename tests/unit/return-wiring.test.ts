@@ -93,6 +93,13 @@ describe('Zid remaining quantities follow the documented contract', () => {
   const returnsEngine = read('src', 'lib', 'returns', 'engine.ts')
   const returnsZid = read('src', 'lib', 'returns', 'zid.ts')
 
+  it('assigns a cumulative return snapshot identity instead of reusing root sale.order effects', () => {
+    expect(returnsEngine).toContain("withErpCreateIdentity(effectIdentity")
+    expect(returnsEngine).toContain("returnSnapshotSignature(cumulative")
+    expect(returnsEngine).toContain("assertNegativeSaleOrderPersisted(client")
+    expect(returnsEngine).toContain("withErpCreateIdentity('return-fallback:' + signature")
+  })
+
   it('treats a product missing from view-for-return as fully returned', () => {
     // Documented: the endpoint lists ONLY products that can still come back,
     // so absence means remaining = 0. Treating it as "not returned" makes a
