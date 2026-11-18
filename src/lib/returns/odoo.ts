@@ -310,8 +310,13 @@ export async function findOriginalSaleOrder(
     if (sourceValue === undefined || sourceValue === null || sourceValue === '') {
       throw new Error('return_order_match_source_missing:' + sourceField)
     }
+    // Odoo text references are strings even when Zid sends a numeric ID.
+    const typedValue = targetField === 'id' ? Number(sourceValue) : String(sourceValue)
+    if (targetField === 'id' && (!Number.isSafeInteger(typedValue) || Number(typedValue) <= 0)) {
+      throw new Error('return_order_match_invalid_id')
+    }
     const found = await client.searchRead<any>('sale.order',
-      [[targetField, '=', sourceValue], ['state', '!=', 'cancel']],
+      [[targetField, '=', typedValue], ['state', '!=', 'cancel']],
       ['id', 'amount_total'], 2)
     if (found.length > 1) throw new Error('return_order_match_ambiguous:' + targetField)
     if (!found.length) return null
