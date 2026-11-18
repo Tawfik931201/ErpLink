@@ -760,6 +760,43 @@ async function createReturnPicking(
   // the return picking and returns an action with its res_id. Odoo 14-19
   // continue to use the transient wizard below.
   if (majorVersion >= 20) {
+    // Retry safety: action_return() is not transactional with our later
+    // validation RPC. If validation fails after the return picking is created,
+    // the queue retries and would otherwise mint another draft return each time.
+    // Reuse an existing non-cancelled return only when its origin move/quantity
+    // set exactly matches the requested return.
+    const existingReturns = await client.searchRead<any>(
+      'stock.picking',
+      [['return_id', '=', pickingId], ['state', 'not in', ['done', 'cancel']]],
+      ['id', 'state', 'move_ids'],
+      20
+    )
+    const desiredByOrigin = new Map(
+      moves.map(move => [move.moveId, Math.abs(move.quantity)] as const)
+    )
+    for (const candidate of existingReturns || []) {
+      const candidateMoves = await client.searchRead<any>(
+        'stock.move',
+        [['picking_id', '=', Number(candidate.id)], ['state', '!=', 'cancel']],
+        ['id', 'origin_returned_move_id', 'product_uom_qty'],
+        200
+      )
+      if (candidateMoves.length !== desiredByOrigin.size) continue
+      let exact = true
+      for (const move of candidateMoves) {
+        const originMoveId = many2oneId(move.origin_returned_move_id)
+        const desired = originMoveId ? desiredByOrigin.get(originMoveId) : undefined
+        if (desired === undefined || Math.abs(toNumber(move.product_uom_qty) - desired) > 0.000001) {
+          exact = false
+          break
+        }
+      }
+      if (exact) {
+        console.info(`[Returns] Reusing Odoo 20 draft return picking #${candidate.id} after a retry`)
+        return Number(candidate.id)
+      }
+    }
+
     const result = await client.execute<any>('stock.picking', 'action_return', [[pickingId]])
     const newPickingId = Number(result?.res_id ?? result?.resId ?? 0)
     if (!Number.isInteger(newPickingId) || newPickingId <= 0) return null
@@ -769,9 +806,6 @@ async function createReturnPicking(
       [['picking_id', '=', newPickingId], ['state', '!=', 'cancel']],
       ['id', 'product_id', 'origin_returned_move_id', 'product_uom_qty'],
       200
-    )
-    const desiredByOrigin = new Map(
-      moves.map(move => [move.moveId, Math.abs(move.quantity)] as const)
     )
     for (const returnMove of returnMoves || []) {
       const originMoveId = many2oneId(returnMove.origin_returned_move_id)
@@ -870,6 +904,18 @@ export async function createStockReturn(
     }
     if (shouldValidate) {
       try {
+        const [beforeValidate] = await client.searchRead<any>(
+          'stock.picking', [['id', '=', created]], ['id', 'state'], 1
+        )
+        if (beforeValidate?.state === 'draft') {
+          await client.execute('stock.picking', 'action_confirm', [[created]])
+        }
+        const [afterConfirm] = await client.searchRead<any>(
+          'stock.picking', [['id', '=', created]], ['id', 'state'], 1
+        )
+        if (afterConfirm && afterConfirm.state !== 'assigned' && afterConfirm.state !== 'done') {
+          await client.execute('stock.picking', 'action_assign', [[created]])
+        }
         await client.execute('stock.picking', 'button_validate', [[created]], {
           context: { skip_backorder: true, skip_sms: true },
         })
