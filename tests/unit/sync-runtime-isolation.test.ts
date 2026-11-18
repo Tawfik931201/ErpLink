@@ -4,6 +4,7 @@ jest.mock('@supabase/supabase-js', () => ({
 }))
 jest.mock('../../src/lib/entity-links', () => ({ upsertEntityLink: jest.fn() }))
 
+import { upsertEntityLink } from '../../src/lib/entity-links'
 import { logSync } from '../../src/lib/sync-runtime'
 import { supabase } from '../mocks/supabase'
 
@@ -41,6 +42,38 @@ describe('sync runtime log workspace isolation', () => {
     const writes = supabase.calls.filter(c => c.op === 'update')
     expect(writes).toHaveLength(2)
     for (const write of writes) expect(write.filters).toEqual(expect.arrayContaining([['id', 'log-b'], ['workspace_id', 'workspace-a']]))
+  })
+
+  it('retains Odoo return child id in logs without overwriting the original durable sale order link', async () => {
+    const updateLink = upsertEntityLink as jest.Mock
+    updateLink.mockClear()
+    await logSync({
+      workspace_id: 'workspace-a', field_mapping_id: '',
+      event: 'order.status.update', store_id: 'store-a',
+      zid_entity_id: 'order-1', odoo_model: 'sale.order',
+      odoo_record_id: 85, status: 'success', platform: 'zid',
+      payload: { order_status: { code: 'reversed' } },
+      suppressEntityLink: true,
+    })
+    const written = supabase.calls.find(c => c.table === 'sync_logs' && c.op === 'insert')
+    expect(written?.args[0]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ odoo_record_id: 85, status: 'success' }),
+    ]))
+    expect(updateLink).not.toHaveBeenCalled()
+  })
+
+  it('continues to persist durable links for ordinary successful order writes', async () => {
+    const updateLink = upsertEntityLink as jest.Mock
+    updateLink.mockClear()
+    await logSync({
+      workspace_id: 'workspace-a', field_mapping_id: '',
+      event: 'order.create', store_id: 'store-a',
+      zid_entity_id: 'order-1', odoo_model: 'sale.order',
+      odoo_record_id: 57, status: 'success', platform: 'zid', payload: {},
+    })
+    expect(updateLink).toHaveBeenCalledWith(expect.objectContaining({
+      storeEntityId: 'order-1', odooModel: 'sale.order',
+    }), 57)
   })
 
   it('preserves same-workspace record precedence', async () => {
