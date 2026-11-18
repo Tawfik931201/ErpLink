@@ -335,6 +335,57 @@ export function extractZidReceivedReturnLines(
   return { known: true, lines }
 }
 
+/**
+ * Missing-original fallback cannot derive a return from the whole Zid order:
+ * it must use ACTUALLY RECEIVED cumulative quantities and independently verify
+ * the unit financial amount against the Zid order product snapshot. If there
+ * are two identical product rows with different price bands and no line ID,
+ * fail for review instead of assigning an arbitrary customer refund.
+ */
+export function extractPricedZidReceivedReturnLines(
+  payload: Record<string, unknown>,
+): StoreReturnLine[] {
+  const receipt = extractZidReceivedReturnLines(payload)
+  if (receipt.error) throw new Error(receipt.error)
+  if (!receipt.known) throw new Error('return_receipt_quantities_unknown')
+  const order = asRecord(payload.order)
+  const products = Array.isArray(payload.products) ? payload.products
+    : Array.isArray(order?.products) ? order.products : []
+  const normalizeId = (value: unknown) => toText(value).toLowerCase().replace(/-/g, '')
+
+  return receipt.lines.map(line => {
+    const found = products.filter(raw => {
+      const product = asRecord(raw)
+      if (!product) return false
+      const sku = firstText(product, ['sku', 'product_sku'])
+      const id = firstText(product, ['id', 'product_id', 'product_uuid'])
+      return (line.sku && sku && sku === line.sku) ||
+        (line.storeProductId && id && normalizeId(id) === normalizeId(line.storeProductId))
+    })
+    if (found.length !== 1) {
+      throw new Error('return_fallback_order_line_ambiguous:' + (line.sku || line.storeProductId))
+    }
+    const product = asRecord(found[0])!
+    const ordered = Number(product.quantity)
+    const discounted = product.discounted_total ?? product.total
+    const includedTax = Number(product.discounted_tax_amount ?? product.tax_amount ?? 0)
+    const explicitUnit = product.net_sale_price ?? product.net_price ?? product.price ?? product.price_unit
+    const unit = discounted !== undefined && discounted !== null && discounted !== '' &&
+      Number.isFinite(Number(discounted)) && Number.isFinite(includedTax) &&
+      Number.isFinite(ordered) && ordered > 0
+      ? (Number(discounted) - includedTax) / ordered
+      : explicitUnit === undefined || explicitUnit === null ? NaN : Number(explicitUnit)
+    if (!Number.isFinite(unit) || unit < 0) {
+      throw new Error('return_fallback_unit_price_unavailable:' + (line.sku || line.storeProductId))
+    }
+    return {
+      ...line,
+      priceUnit: Math.round(unit * 1e6) / 1e6,
+      name: firstText(product, ['name', 'product_name', 'title']) || line.name,
+    }
+  })
+}
+
 const ZID_LINE_ARRAY_KEYS = ['products', 'items', 'order_products'] as const
 
 /**
