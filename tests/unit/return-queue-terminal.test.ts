@@ -23,6 +23,10 @@ describe('terminal return business validation', () => {
     'order_cod_fee_missing_on_sale_order_requires_review:73:5',
     'order_cod_fee_currency_rate_invalid_requires_review',
     'order_cod_fee_amount_mismatch_requires_review:73:5:10',
+    'order_invoice_total_mismatch_requires_review:53:375.5:355.5',
+    'order_invoice_currency_mismatch_requires_review',
+    'order_invoice_source_total_invalid_requires_review',
+    'order_invoice_conversion_rate_invalid_requires_review',
     'return_request_unreadable',
   ])('freezes deterministic review reason %s rather than retrying it', reason => {
     expect(isTerminalReturnReview(reason)).toBe(true)
