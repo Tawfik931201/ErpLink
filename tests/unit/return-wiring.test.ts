@@ -116,6 +116,14 @@ describe('Zid remaining quantities follow the documented contract', () => {
   const returnsEngine = read('src', 'lib', 'returns', 'engine.ts')
   const returnsZid = read('src', 'lib', 'returns', 'zid.ts')
 
+  it('deduplicates stock when create_credit_note is disabled instead of relying on out_refund', () => {
+    expect(returnsEngine).toContain('readStockReturnLedger(')
+    expect(returnsEngine).toContain('input.settings.create_credit_note')
+    expect(returnsEngine).toContain('return_no_stock_effect_and_credit_note_disabled')
+    expect(returnsEngine).toContain('return_mode_changed_existing_financial_effect_requires_review')
+    expect(returnsEngine).toContain('return_stock_without_credit_note_requires_review')
+  })
+
   it('never fakes a missing-original Zid refund from sold order quantity or random matching', () => {
     expect(returnsEngine).toContain("platform === 'zid'")
     expect(returnsEngine).toContain('extractPricedZidReceivedReturnLines(input.payload)')
