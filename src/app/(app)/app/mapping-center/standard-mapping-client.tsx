@@ -474,21 +474,41 @@ export default function StandardMappingClient({
     }
   }, [fetchOdooCustomerFields, standardSubTab])
 
-  // ── Customer Accounts (Receivable/Payable) ──
-  useEffect(() => {
-    if (!hasOdooConnection || standardSubTab !== 'customers') return
+  // ── Customer Accounts: read from active Odoo; force refresh bypasses cache ──
+  const fetchCustomerAccounts = useCallback(async (force = false) => {
+    if (!hasOdooConnection) {
+      setReceivableAccountOptions([])
+      setPayableAccountOptions([])
+      return
+    }
     setIsLoadingAccounts(true)
-    const companyIdNum = customerCompanyId ? Number(customerCompanyId) : undefined
-    import('@/app/actions/odoo').then(({ getOdooAccountsByType }) => {
-      Promise.all([
-        getOdooAccountsByType('receivable', companyIdNum),
-        getOdooAccountsByType('payable', companyIdNum),
-      ]).then(([receivableRes, payableRes]) => {
-        if (receivableRes.success) setReceivableAccountOptions(receivableRes.options || [])
-        if (payableRes.success) setPayableAccountOptions(payableRes.options || [])
-      }).finally(() => setIsLoadingAccounts(false))
-    })
-  }, [hasOdooConnection, customerCompanyId, standardSubTab])
+    try {
+      const { getOdooAccountsByType } = await import('@/app/actions/odoo')
+      const companyIdNum = customerCompanyId ? Number(customerCompanyId) : undefined
+      const [receivableRes, payableRes] = await Promise.all([
+        getOdooAccountsByType('receivable', companyIdNum, force),
+        getOdooAccountsByType('payable', companyIdNum, force),
+      ])
+      if (!receivableRes.success || !payableRes.success) {
+        throw new Error(receivableRes.error || payableRes.error || 'Could not load Odoo accounts')
+      }
+      setReceivableAccountOptions(receivableRes.options || [])
+      setPayableAccountOptions(payableRes.options || [])
+    } catch (error) {
+      console.error('Failed to load accounts from connected Odoo:', error)
+      toast({
+        title: lang === 'ar' ? 'تعذر تحميل حسابات أودو' : 'Could not load Odoo accounts',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      })
+    } finally {
+      setIsLoadingAccounts(false)
+    }
+  }, [hasOdooConnection, customerCompanyId, lang, toast])
+
+  useEffect(() => {
+    if (standardSubTab === 'customers') void fetchCustomerAccounts(false)
+  }, [fetchCustomerAccounts, standardSubTab])
 
   // ── Odoo Companies ──
   const fetchCompanies = useCallback(async () => {
@@ -2477,6 +2497,7 @@ export default function StandardMappingClient({
                   receivableAccountOptions={receivableAccountOptions}
                   payableAccountOptions={payableAccountOptions}
                   isLoadingAccounts={isLoadingAccounts}
+                  refreshCustomerAccounts={() => void fetchCustomerAccounts(true)}
                   customerCompanyId={customerCompanyId}
                   setCustomerCompanyId={setCustomerCompanyId}
                   customerLinkCompany={customerLinkCompany}
