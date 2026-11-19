@@ -5,6 +5,7 @@ describe('terminal return business validation', () => {
     'return_grouped_components_require_review',
     'return_damaged_requires_financial_review',
     'return_receipt_quantity_invalid',
+    'return_receipt_quantities_unreconciled_requires_review',
     'return_receipt_quantity_exceeds_original:197',
     'return_fallback_order_line_ambiguous:QA-SKU',
     'return_fallback_unit_price_unavailable:QA-SKU',
