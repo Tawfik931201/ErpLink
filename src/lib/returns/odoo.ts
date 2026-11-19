@@ -178,7 +178,7 @@ export async function readSaleOrder(
   const lines: SaleOrderLineInfo[] = []
   if (lineIds.length > 0) {
     const majorVersion = await client.getMajorVersion().catch(() => 17)
-    const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+    const taxField = await resolveReturnLineTaxField(client, majorVersion)
     const uomField = majorVersion >= 18 ? 'product_uom_id' : 'product_uom'
     const fullLineFields = [
       'id',
@@ -200,34 +200,19 @@ export async function readSaleOrder(
         fullLineFields,
         lineIds.length
       )
-    } catch {
+    } catch (error) {
+      // An invalid optional column must not trigger a request for the
+      // opposite-version tax field. Preserve the actual initial error if
+      // even the minimal safe read fails.
       try {
-        const altTaxField = taxField === 'tax_ids' ? 'tax_id' : 'tax_ids'
-        const altUomField = uomField === 'product_uom_id' ? 'product_uom' : 'product_uom_id'
-        rows = await client.searchRead<any>(
-          'sale.order.line',
-          [['id', 'in', lineIds]],
-          [
-            'id',
-            'product_id',
-            'name',
-            'product_uom_qty',
-            'qty_delivered',
-            'price_unit',
-            'discount',
-            altUomField,
-            altTaxField,
-            ...(majorVersion >= 16 ? ['analytic_distribution'] : ['analytic_account_id', 'analytic_tag_ids']),
-          ],
-          lineIds.length
-        )
-      } catch {
         rows = await client.searchRead<any>(
           'sale.order.line',
           [['id', 'in', lineIds]],
           ['id', 'product_id', 'name', 'product_uom_qty', 'qty_delivered', 'price_unit', 'discount'],
           lineIds.length
         )
+      } catch {
+        throw error
       }
     }
     for (const row of rows || []) {
@@ -559,6 +544,29 @@ export async function readNegativeReturnLedger(
   return ledger
 }
 
+/**
+ * Resolve sale.order.line taxes using the fields exposed by the connected Odoo.
+ * Odoo 20 (and customized installations) must never receive a guessed tax_id.
+ * Failing closed also avoids silently creating a return with wrong taxes.
+ */
+export async function resolveReturnLineTaxField(
+  client: OdooClient,
+  majorVersion?: number,
+): Promise<'tax_id' | 'tax_ids'> {
+  const fields = await client.execute<Record<string, unknown>>(
+    'sale.order.line',
+    'fields_get',
+    [],
+    { attributes: ['type'] },
+  )
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'tax_ids')) return 'tax_ids'
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'tax_id')) return 'tax_id'
+  throw new Error(
+    'return_tax_field_missing: neither tax_ids nor tax_id exists on sale.order.line' +
+    (majorVersion ? ` (Odoo ${majorVersion})` : ''),
+  )
+}
+
 export interface NegativeSaleOrderOptions {
   orderStdSettings?: Record<string, any> | null
   payload?: Record<string, unknown>
@@ -573,7 +581,7 @@ export async function createNegativeSaleOrder(
   options?: NegativeSaleOrderOptions
 ): Promise<number> {
   const majorVersion = await client.getMajorVersion().catch(() => 17)
-  const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+  const taxField = await resolveReturnLineTaxField(client, majorVersion)
   const values: Record<string, unknown> = {
     partner_id: original.partnerId,
     client_order_ref: returnRefFor(original.name),
