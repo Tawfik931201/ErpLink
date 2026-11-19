@@ -1288,7 +1288,7 @@ export async function dryRunMatch(args: {
   }
 }
 
-export async function getOdooAccountsByType(type: 'receivable' | 'payable', companyId?: number) {
+export async function getOdooAccountsByType(type: 'receivable' | 'payable', companyId?: number, force = false) {
   try {
     const connRes = await getActiveWorkspaceErpConnection()
     if (!connRes.success || !connRes.connection) {
@@ -1300,16 +1300,16 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
       return { success: true, options: [] }
     }
 
-    const options = await ttlCache.get(
-      `odoo:accounts:${connRes.connection.id}:${type}:${companyId || 'all'}`,
-      TTL_OPTIONS_MS,
+    const cacheKey = `odoo:accounts:${connRes.connection.id}:${type}:${companyId || 'all'}`
+    if (force) ttlCache.delete(cacheKey)
+    const options = await ttlCache.get(cacheKey, TTL_OPTIONS_MS,
       async () => {
         const client = createOdooClient(connRes.connection)
 
         const fieldsMeta = await client.execute<Record<string, any>>(
           'account.account',
           'fields_get',
-          [['account_type', 'user_type_id', 'company_id', 'company_ids']],
+          [['account_type', 'user_type_id', 'company_id', 'company_ids', 'code', 'name']],
           { attributes: ['name', 'type'] }
         )
 
@@ -1331,15 +1331,15 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
           }
         }
 
-        const records = await client.execute<Array<[number, string]>>(
-          'account.account',
-          'name_search',
-          ['', domain, 'ilike', 300]
+        const accountFields = ['id', 'name']
+        if (fieldsMeta?.code) accountFields.push('code')
+        const records = await client.execute<Array<Record<string, unknown>>>(
+          'account.account', 'search_read', [domain],
+          { fields: accountFields, limit: 500, order: 'id asc' }
         )
-
-        return records.map(([id, label]) => ({
-          value: String(id),
-          label: label || String(id),
+        return records.map(record => ({
+          value: String(record.id),
+          label: [record.code, record.name].filter(Boolean).join(' — ') || String(record.id),
         }))
       }
     )
