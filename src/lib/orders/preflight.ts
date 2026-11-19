@@ -97,12 +97,19 @@ export async function validateOrderPayload(
   const companyModels = new Set(['res.partner', 'product.product', 'account.tax', 'account.analytic.account', 'account.account', 'stock.warehouse', 'product.pricelist', 'account.payment.term', 'account.fiscal.position'])
   const orderCompany = Number(values.company_id || 0)
   for (const [model, ids] of references) {
-    const rows = await client.searchRead<{ id: number; company_id?: number | [number, string] | false }>(model, [['id', 'in', [...ids]]], companyModels.has(model) ? ['id', 'company_id'] : ['id'], ids.size)
+    const modelSchema = companyModels.has(model) ? await fields(client, model) : null
+    const hasSingleCompany = !!modelSchema?.company_id
+    const hasMultipleCompanies = model === 'account.account' && !!modelSchema?.company_ids
+    const readFields = ['id', ...(hasSingleCompany ? ['company_id'] : []), ...(hasMultipleCompanies ? ['company_ids'] : [])]
+    const rows = await client.searchRead<{ id: number; company_id?: number | [number, string] | false; company_ids?: number[] }>(model, [['id', 'in', [...ids]]], readFields, ids.size)
     const found = new Set(rows.map(row => row.id))
     if ([...ids].some(id => !found.has(id))) throw new Error(`Configured order references a missing or inaccessible ${model} record`)
     if (orderCompany && rows.some(row => {
       const companyId = Array.isArray(row.company_id) ? row.company_id[0] : row.company_id
-      return companyId && companyId !== orderCompany
+      if (hasMultipleCompanies && Array.isArray(row.company_ids) && row.company_ids.length) {
+        return !row.company_ids.includes(orderCompany)
+      }
+      return hasSingleCompany && companyId && companyId !== orderCompany
     })) throw new Error(`Configured order ${model} belongs to another Odoo company`)
   }
 }
