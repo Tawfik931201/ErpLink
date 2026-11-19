@@ -34,6 +34,7 @@ interface CustomerSettingsTabProps {
   receivableAccountOptions: { value: string; label: string }[]
   payableAccountOptions: { value: string; label: string }[]
   isLoadingAccounts: boolean
+  refreshCustomerAccounts: () => void
   customerCompanyId: string
   setCustomerCompanyId: (val: string) => void
   customerLinkCompany: boolean
@@ -71,6 +72,7 @@ export function CustomerSettingsTab({
   receivableAccountOptions,
   payableAccountOptions,
   isLoadingAccounts,
+  refreshCustomerAccounts,
   customerCompanyId,
   setCustomerCompanyId,
   customerLinkCompany,
@@ -141,6 +143,19 @@ export function CustomerSettingsTab({
             : 'Default receivable and payable ledger accounts for customer records in Odoo'
         }
       >
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            onClick={refreshCustomerAccounts}
+            disabled={isLoadingAccounts}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+            aria-label={lang === 'ar' ? 'تحديث حسابات أودو' : 'Refresh Odoo accounts'}
+            title={lang === 'ar' ? 'جلب أحدث الحسابات من أودو المتصل' : 'Fetch latest accounts from connected Odoo'}
+          >
+            <RefreshCw className={cn('h-4 w-4', isLoadingAccounts && 'animate-spin')} />
+            {lang === 'ar' ? 'تحديث الحسابات' : 'Refresh accounts'}
+          </button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-foreground/80">
