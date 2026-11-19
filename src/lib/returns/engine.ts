@@ -59,6 +59,7 @@ import {
   readNegativeReturnLedger,
   readStockReturnLedger,
   resolveOdooProductId,
+  resolveReturnLineTaxField,
   type OdooReturnLine,
   type OriginalSaleOrder,
   type SaleOrderLineInfo,
@@ -600,7 +601,7 @@ async function createFromPayloadWithoutOrder(
   if (!partnerId) return skipped('customer_not_found')
 
   const majorVersion = await client.getMajorVersion().catch(() => 17)
-  const taxField = majorVersion >= 18 ? 'tax_ids' : 'tax_id'
+  const taxField = await resolveReturnLineTaxField(client, majorVersion)
 
   // Resolve VAT / taxes from Standard Mapping
   const { taxId: vatTaxId } = resolveOrderVatTax(input.payload, {
