@@ -27,6 +27,17 @@ describe('Zid completed returns use actual receipt quantities', () => {
     })
   })
 
+  it('flags a completed reversal with requested goods but no receipt counters (S00109)', () => {
+    const result = extractZidReceivedReturnLines(payload([
+      product({ reversed_quantity: 2, received_quantity: 0, not_received_quantity: 0, damaged_quantity: 0 }),
+      product({ reversed_quantity: 1, received_quantity: 0, not_received_quantity: 0, damaged_quantity: 0 }),
+    ]))
+    expect(result).toEqual({
+      known: false, lines: [],
+      error: 'return_receipt_quantities_unreconciled_requires_review',
+    })
+  })
+
   it('ignores quantities not received by the merchant', () => {
     expect(extractZidReceivedReturnLines(payload([
       product({ received_quantity: 0, not_received_quantity: 3 }),
