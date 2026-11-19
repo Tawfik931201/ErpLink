@@ -332,6 +332,19 @@ export function extractZidReceivedReturnLines(
         }
         continue
       }
+      // A completed Zid reversal may show requested quantities while all
+      // receipt counters remain zero. That is NOT evidence that goods were
+      // received or that a financial refund is due. Previously this silently
+      // returned an empty list and logged nothing_to_return.
+      // Check only real financial lines; grouped components are placeholders.
+      const status = toText(asRecord(payload.order_status)?.code ||
+        asRecord(order?.order_status)?.code ||
+        payload.order_status || order?.order_status).toLowerCase()
+      if ((status === 'reversed' || status === 'partially_reversed') &&
+          received + damaged + notReceived < requested) {
+        return { known: false, lines: [],
+          error: 'return_receipt_quantities_unreconciled_requires_review' }
+      }
       const sku = firstText(item, ['sku']) ||
         firstText(orderProduct || {}, ['sku']) ||
         firstText(product || {}, ['sku'])
