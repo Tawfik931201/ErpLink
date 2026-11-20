@@ -60,7 +60,25 @@ export async function recordWebhookReceipt(receipt: WebhookReceipt): Promise<Rec
     .select('id')
     .maybeSingle()
 
-  if (!error && data) return { ok: true, id: (data as { id: string }).id }
+  if (!error && data) {
+    // The receipt is already durable. Notification failures must never reject
+    // the webhook or prevent its later Odoo dispatch.
+    if (receipt.workspaceId) {
+      try {
+        const { recordAppNotification } = await import('./app-notifications')
+        await recordAppNotification({
+          workspaceId: receipt.workspaceId,
+          platform: receipt.platform,
+          event: receipt.event,
+          eventKey: 'arrival:' + String((data as { id: string }).id),
+          status: 'received',
+        })
+      } catch (notificationError) {
+        console.warn('[Webhook Inbox] Notification enqueue unavailable')
+      }
+    }
+    return { ok: true, id: (data as { id: string }).id }
+  }
 
   const code = (error as { code?: string } | null)?.code
   if (code === '23505') {
