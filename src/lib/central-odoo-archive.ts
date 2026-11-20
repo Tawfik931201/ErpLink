@@ -11,6 +11,7 @@ type Values = Record<string, RecordValue>
 const MODELS = {
   contact: 'x_erplink_contact_message',
   support: 'x_erplink_support_ticket',
+  supportMessage: 'x_erplink_support_message',
   event: 'x_erplink_event',
   context: 'x_erplink_context',
 } as const
