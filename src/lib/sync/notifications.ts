@@ -125,4 +125,18 @@ export async function notifySyncForRecord(
     details,
   }
   await notifySyncResult({ workspaceId: wsId, record: summary, eventKey: eventKey ?? null }).catch(() => {})
+  // Independent best-effort channel; does not change Odoo commits or mapping.
+  try {
+    const { recordAppNotification } = await import('@/lib/app-notifications')
+    await recordAppNotification({
+      workspaceId: wsId,
+      platform: 'zid',
+      event,
+      eventKey: 'result:' + (eventKey || [storeId || '', event, record.odooRecordId || '', record.status, mappingId].join(':')),
+      status: summary.status === 'processing' ? 'received' : summary.status,
+      reference: details?.orderNumber ? String(details.orderNumber) : details?.productSku ? String(details.productSku) : null,
+    })
+  } catch {
+    console.warn('[Sync Notifications] App notification enqueue unavailable')
+  }
 }
