@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useAuth } from '@clerk/nextjs'
 
 type Notice = {
   id: string; userId: string; workspaceId: string; title: string; body: string
@@ -70,6 +71,7 @@ function keyBytes(base64url: string): Uint8Array {
 }
 
 export default function BrowserNotifications() {
+  const { isSignedIn, isLoaded } = useAuth()
   const [scope, setScope] = useState<{ userId: string; workspaceId: string; publicKey: string | null } | null>(null)
   const [items, setItems] = useState<Notice[]>([])
   const [opened, setOpened] = useState(false)
@@ -94,6 +96,7 @@ export default function BrowserNotifications() {
   }, [])
 
   useEffect(() => {
+    if (!isLoaded || !isSignedIn) return
     let active = true
     async function boot() {
       try {
@@ -106,16 +109,38 @@ export default function BrowserNotifications() {
         if ('serviceWorker' in navigator) {
           const registration = await navigator.serviceWorker.getRegistration('/erp-push-sw.js')
           const subscription = await registration?.pushManager.getSubscription()
-          if (active) setEnabled(Boolean(subscription))
+          if (subscription) {
+            // Rebind a shared browser to the currently authenticated user/workspace.
+            const sync = await fetch('/api/browser-notifications/subscription', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(subscription.toJSON()),
+            })
+            if (active && sync.ok) setEnabled(true)
+          } else if (active) setEnabled(false)
         }
       } catch (error) { console.warn('[notifications] boot failed', error) }
     }
     void boot()
     return () => { active = false }
-  }, [refresh])
+  }, [refresh, isLoaded, isSignedIn])
 
   useEffect(() => {
-    if (!scope) return
+    if (!isLoaded || isSignedIn !== false) return
+    setScope(null)
+    setItems([])
+    setEnabled(false)
+    // Stop push delivery to a browser after local sign-out and purge local history.
+    if ('serviceWorker' in navigator) {
+      void navigator.serviceWorker.getRegistration('/erp-push-sw.js')
+        .then(reg => reg?.pushManager.getSubscription())
+        .then(push => push?.unsubscribe())
+        .catch(() => {})
+    }
+    if ('indexedDB' in window) indexedDB.deleteDatabase(DB)
+  }, [isLoaded, isSignedIn])
+
+  useEffect(() => {
+    if (!scope || !isSignedIn) return
     const load = () => { if (document.visibilityState === 'visible') void refresh(scope) }
     const timer = window.setInterval(load, 60_000)
     document.addEventListener('visibilitychange', load)
@@ -125,7 +150,7 @@ export default function BrowserNotifications() {
       document.removeEventListener('visibilitychange', load)
       navigator.serviceWorker?.removeEventListener('message', load)
     }
-  }, [scope, refresh])
+  }, [scope, refresh, isSignedIn])
 
   const subscribe = async () => {
     if (!scope || !scope.publicKey || !('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -176,7 +201,7 @@ export default function BrowserNotifications() {
     } finally { setBusy(false) }
   }
 
-  if (!scope) return null
+  if (!scope || !isSignedIn) return null
   const unread = items.filter(n => !n.read).length
   return (
     <div className="fixed bottom-5 left-5 z-[80] font-sans" dir="rtl">
@@ -211,7 +236,7 @@ export default function BrowserNotifications() {
       )}
       <button type="button" aria-label={`الإشعارات، ${unread} غير مقروء`} onClick={() => setOpened(p => !p)}
         className="relative flex h-12 w-12 items-center justify-center rounded-full bg-emerald-700 text-2xl text-white shadow-lg">
-        ♧
+        🔔
         {unread > 0 && <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-red-600 px-1 text-center text-xs">{unread > 99 ? '99+' : unread}</span>}
       </button>
     </div>
