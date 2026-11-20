@@ -9,7 +9,8 @@ create table if not exists public.browser_push_subscriptions (
   auth_secret text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  last_scanned_at timestamptz not null default now()
+  last_scanned_at timestamptz not null default now(),
+  last_receipt_id uuid null
 );
 create index if not exists browser_push_subscriptions_workspace_idx
   on public.browser_push_subscriptions(workspace_id);
