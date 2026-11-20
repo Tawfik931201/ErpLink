@@ -388,7 +388,7 @@ export async function getSyncLogById(logId: string) {
         if (archived.length) {
           const entry = archived[0]
           let details: Record<string, unknown> = {}
-          try { details = JSON.parse(entry.x_details || '{}') } catch { /* historic text */ }
+          try { details = JSON.parse(entry.x_details || '{}') } catch {}
           const archiveLog: SyncLogRow = {
             id: entry.x_source_uuid,
             event: entry.x_event_type || null,
