@@ -539,6 +539,7 @@ export default function ProductMappingDialog({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-muted/50 border-b border-border">
+                <th className="text-center px-2 py-2.5 font-bold text-muted-foreground w-[54px]" scope="col">{lang === 'ar' ? 'م' : '#'}</th>
                 <th className="text-start px-3 py-2.5 font-bold text-muted-foreground w-1/2">
                   {lang === 'ar' ? 'منتج المتجر (زد)' : 'Store Product (Zid)'}
                 </th>
@@ -554,6 +555,7 @@ export default function ProductMappingDialog({
               {/* Add New Row Mode */}
               {editingId === 'new' && (
                 <tr className="bg-muted/15 border-b border-border animate-in fade-in duration-200">
+                  <td className="px-2 py-2.5 text-center tabular-nums text-muted-foreground">—</td>
                   <td className="px-3 py-2.5">
                     <SearchableSelect
                       options={storeProductOptions}
@@ -595,19 +597,19 @@ export default function ProductMappingDialog({
 
               {isLoading ? (
                 <tr>
-                  <td colSpan={3} className="text-center py-10 text-muted-foreground">
+                  <td colSpan={4} className="text-center py-10 text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin mx-auto mb-1" />
                     <span>{lang === 'ar' ? 'جاري تحميل جدول الربط...' : 'Loading mappings...'}</span>
                   </td>
                 </tr>
               ) : filteredMappings.length === 0 && editingId !== 'new' ? (
                 <tr>
-                  <td colSpan={3} className="text-center py-10 text-muted-foreground">
+                  <td colSpan={4} className="text-center py-10 text-muted-foreground">
                     {lang === 'ar' ? 'لا توجد منتجات مرتبطة يدوياً بعد' : 'No manual product mappings yet'}
                   </td>
                 </tr>
               ) : (
-                filteredMappings.map(m => {
+                filteredMappings.map((m, index) => {
                   const isEditing = editingId === m.id
 
                   // Resolve Odoo Product Label
@@ -621,6 +623,7 @@ export default function ProductMappingDialog({
                   if (isEditing) {
                     return (
                       <tr key={m.id} className="bg-muted/15 border-b border-border">
+                        <td className="px-2 py-2.5 text-center tabular-nums text-muted-foreground">{index + 1}</td>
                         <td className="px-3 py-2.5 align-middle">
                           <span className="text-xs font-semibold text-foreground bg-muted px-2.5 py-1.5 rounded-lg border border-border text-start inline-block max-w-full truncate">
                             {storeLabel}
@@ -660,6 +663,7 @@ export default function ProductMappingDialog({
 
                   return (
                     <tr key={m.id} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
+                      <td className="px-2 py-3 text-center tabular-nums text-muted-foreground">{index + 1}</td>
                       <td className="px-3 py-3 font-semibold text-foreground">{storeLabel}</td>
                       <td className="px-3 py-3 font-medium text-muted-foreground">{odooLabel}</td>
                       <td className="px-3 py-3">
