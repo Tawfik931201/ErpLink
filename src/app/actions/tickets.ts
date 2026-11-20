@@ -328,6 +328,30 @@ export async function createTicket(formData: FormData) {
  * along with attachment details (name, mimetype).
  */
 export async function getTicketMessages(ticketId: number) {
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      const rows = await readArchive<{
+        id: number
+        x_message: string | false
+        x_submitted_at: string | false
+        x_author_email: string | false
+        create_date: string
+      }>('supportMessage', [['x_support_ticket_id', '=', ticket.id]],
+        ['id','x_message','x_submitted_at','x_author_email','create_date'],
+        { limit: 100, order: 'create_date asc' })
+      const messages: OdooMessage[] = rows.map(row => ({
+        id: row.id,
+        body: row.x_message || '',
+        date: row.x_submitted_at || row.create_date,
+        author_id: [0, row.x_author_email || 'Support'],
+        attachment_ids: [],
+      }))
+      return { success: true, messages, attachments: [] as OdooAttachment[] }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central ticket read failed' }
+    }
+  }
   const { userId } = await auth()
   if (!userId) {
     throw new Error('Unauthorized')
@@ -397,6 +421,30 @@ export async function sendTicketMessage(formData: FormData) {
   const files = formData.getAll('attachments') as File[]
 
   const ticketId = parseInt(ticketIdStr, 10)
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      if (ticket.x_status === 'closed') return { success: false, error: 'Ticket is closed' }
+      if (!messageContent?.trim()) return { success: false, error: 'Message cannot be empty' }
+      if (files.some(file => file.size > 0)) {
+        return { success: false, error: 'Attachments to central-only tickets are not supported yet' }
+      }
+      await upsertArchive('supportMessage', 'central-message:' + crypto.randomUUID(), {
+        x_name: 'Support reply',
+        x_support_ticket_id: ticket.id,
+        x_helpdesk_ticket_id: 0,
+        x_author_email: email,
+        x_user_id: userId,
+        x_workspace_uuid: ticket.x_workspace_uuid || '',
+        x_message: messageContent.trim(),
+        x_submitted_at: new Date().toISOString().replace('T',' ').slice(0,19),
+      })
+      revalidatePath('/app/tickets')
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central support reply failed' }
+    }
+  }
   if (isNaN(ticketId)) {
     return { success: false, error: 'Invalid ticket ID' }
   }
@@ -514,6 +562,17 @@ export async function sendTicketMessage(formData: FormData) {
  * Closes a support ticket by moving it to the "Closed" stage in Odoo.
  */
 export async function closeTicket(ticketId: number) {
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      const updated = await updateArchiveBySource('support', ticket.x_source_uuid || '', { x_status: 'closed' })
+      if (!updated) throw new Error('Central ticket not updated')
+      revalidatePath('/app/tickets')
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central ticket close failed' }
+    }
+  }
   const { userId } = await auth()
   if (!userId) {
     return { success: false, error: 'Unauthorized' }
