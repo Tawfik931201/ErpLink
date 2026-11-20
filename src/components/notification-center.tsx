@@ -47,7 +47,7 @@ export default function NotificationCenter() {
     } else {
       try { setLastSeen(localStorage.getItem('erp-notifications-last-seen') || '') } catch {}
     }
-  }, [open, items, refresh])
+  }, [open])
   const toggle = async () => {
     if (!configured || busy || !('serviceWorker' in navigator) || !('PushManager' in window)) return
     setBusy(true); setError('')
