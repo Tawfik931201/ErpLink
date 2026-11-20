@@ -92,7 +92,7 @@ export default function NotificationCenter() {
         <Bell className="h-5 w-5" />
         {unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[10px] text-white">{Math.min(unread, 30)}</span>}
       </button>
-      {open && <div className="absolute bottom-full left-0 z-[100] mb-3 max-h-[65vh] w-[min(350px,90vw)] overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl" dir="rtl">
+      {open && <div className="absolute top-full left-0 z-[100] mt-2 md:bottom-full md:top-auto md:mb-3 md:mt-0 max-h-[65vh] w-[min(350px,90vw)] overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl" dir="rtl">
         <div className="mb-3 flex items-center justify-between">
           <strong className="text-sm">الإشعارات</strong>
           <button aria-label="إغلاق" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
