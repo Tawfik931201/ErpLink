@@ -56,7 +56,8 @@ function mapSummary(row: OdooContact): ContactMessageListRow {
 }
 
 export function useOdooContactInbox(): boolean {
-  return process.env.ERPLINK_ARCHIVE_ODOO_CONTACTS_READ_PRIMARY === 'true'
+  // Default to central Odoo once credentials exist; allow explicit rollback.
+  return process.env.ERPLINK_ARCHIVE_ODOO_CONTACTS_READ_PRIMARY !== 'false'
 }
 
 export async function odooContactList(params: {
