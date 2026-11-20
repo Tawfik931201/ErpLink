@@ -25,11 +25,6 @@ const channelName = (ticket: SupportDiscussTicket) => `ERP Link Support #${ticke
 const channelTag = (ticket: SupportDiscussTicket) =>
   `erplink-support-ticket:${ticket.id}:${ticket.x_workspace_uuid || ''}:${ticket.x_source_uuid || ''}`
 
-function escapeHtml(value: string) {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-}
-
 export async function findSupportDiscussChannel(ticket: SupportDiscussTicket): Promise<number | null> {
   const rows = await centralDiscussCall<ChannelRow[]>('discuss.channel', 'search_read',
     [[['name', '=', channelName(ticket)], ['channel_type', '=', 'group']]],
@@ -46,8 +41,10 @@ export async function ensureSupportDiscussChannel(ticket: SupportDiscussTicket):
   // A private group with only the connected support staff member. Additional
   // Odoo staff can be invited through Discuss; the external customer never
   // receives access to the central Odoo database.
+  const supportLogin = process.env.ERPLINK_ARCHIVE_ODOO_USERNAME
+  if (!supportLogin) throw new Error('Central Odoo support login is unavailable')
   const users = await centralDiscussCall<Array<{ partner_id: [number, string] | false }>>(
-    'res.users', 'search_read', [[['id', '=', 2]]],
+    'res.users', 'search_read', [[['login', '=', supportLogin]]],
     { fields: ['partner_id'], limit: 1 })
   const supportPartnerId = users[0]?.partner_id?.[0]
   if (!supportPartnerId) throw new Error('Central Odoo support partner is unavailable')
@@ -72,7 +69,8 @@ export async function postSupportDiscussMessage(
   ticket: SupportDiscussTicket, authorName: string, message: string,
 ): Promise<number> {
   const channelId = await ensureSupportDiscussChannel(ticket)
-  const body = `<p><strong>${escapeHtml(authorName)}</strong></p><p>${escapeHtml(message).replace(/\n/g, '<br/>')}</p>`
+  // Odoo Discuss escapes message_post plain text itself; do not double-encode HTML.
+  const body = `${authorName}: ${message}`
   return centralDiscussCall<number>('discuss.channel', 'message_post', [[channelId]], {
     body, message_type: 'comment', subtype_xmlid: 'mail.mt_comment',
   })
