@@ -428,7 +428,15 @@ interface OutboxGlobals {
 
 const g = globalThis as unknown as OutboxGlobals
 
-const OUTBOX_INTERVAL_MS = 2_000
+// Keep Telegram durable delivery independent of the Odoo sync worker.
+// A 2-second idle poll produced ~43,200 Supabase REST reads per day per process.
+// Ten seconds retains prompt notifications while avoiding ~80% of idle reads.
+// Operators can temporarily lower this interval without a code change.
+const requestedOutboxIntervalMs = Number(process.env.TELEGRAM_OUTBOX_POLL_INTERVAL_MS)
+export const OUTBOX_INTERVAL_MS =
+  Number.isFinite(requestedOutboxIntervalMs) && requestedOutboxIntervalMs >= 2_000
+    ? Math.min(60_000, Math.trunc(requestedOutboxIntervalMs))
+    : 10_000
 
 /** يبدأ مُرسّل الصندوق — مرة واحدة لكل عملية. */
 export function startTelegramOutboxRunner(): void {

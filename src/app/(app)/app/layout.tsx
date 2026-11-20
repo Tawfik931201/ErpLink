@@ -8,6 +8,7 @@ import { getMyActiveSubscription } from '@/app/actions/subscription-actions'
 import { getCurrentUserPermissions, checkPendingInvitations } from '@/app/actions/workspace-members'
 import { hasAnyWorkspace } from '@/app/actions/workspaces'
 import MobileNav from '@/components/mobile-nav'
+import NotificationCenter from '@/components/notification-center'
 import SidebarNav, { type NavSection } from '@/components/sidebar-nav'
 import SubscriptionBanner from '@/components/subscription/SubscriptionBanner'
 import { Logo } from '@/components/ui/logo'
@@ -238,12 +239,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <SidebarNav sections={navSections} />
           </div>
           <div className="p-4 mt-auto border-t border-border bg-secondary/10 flex flex-col overflow-visible">
-            <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} />
+            <div className="flex items-center gap-2"><NotificationCenter /><UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} /></div>
           </div>
         </aside>
         <main className="min-w-0 flex-1 overflow-auto">
           <MobileNav sections={navSections} dir={dir}>
-            <UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} placement="header" />
+            <NotificationCenter /><UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} placement="header" />
           </MobileNav>
           <div className="mx-auto w-full max-w-7xl p-3 sm:p-6 md:p-8">
             {workspaceClosed ? (
