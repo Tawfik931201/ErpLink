@@ -127,3 +127,23 @@ export function archiveDatetime(value: string | null | undefined): string | fals
   if (!Number.isFinite(time.getTime())) return false
   return time.toISOString().replace('T', ' ').slice(0, 19)
 }
+
+/** Server-only access to the central Odoo Discuss models for support tickets. */
+export async function centralDiscussCall<T>(
+  model: 'discuss.channel' | 'mail.message' | 'res.users',
+  method: 'search_read' | 'search' | 'create' | 'message_post' | 'read',
+  args: unknown[],
+  kwargs: Record<string, unknown> = {},
+): Promise<T> {
+  const cfg = config()
+  if (!cfg) throw new Error('Central Odoo archive credentials are not configured')
+  const key = [cfg.url, cfg.db, cfg.username, cfg.password].join('|')
+  if (!authentication || authentication.key !== key) {
+    const uid = await rpc<number | false>(cfg, 'common', 'authenticate',
+      [cfg.db, cfg.username, cfg.password, {}])
+    if (!uid) throw new Error('Central Odoo archive authentication failed')
+    authentication = { key, uid }
+  }
+  return rpc<T>(cfg, 'object', 'execute_kw',
+    [cfg.db, authentication.uid, cfg.password, model, method, args, kwargs])
+}
