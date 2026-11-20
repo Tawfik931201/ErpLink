@@ -22,10 +22,10 @@ export async function GET(req: NextRequest) {
     : new Date(Date.now() - 24 * 3600000).toISOString()
 
   const { data, error } = await supabase.from('webhook_inbox')
-    .select('id,created_at,event,store_id,payload')
+    .select('id,received_at,event,store_id,payload')
     .eq('workspace_id', workspaceId).eq('platform', 'zid')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
+    .gte('received_at', since)
+    .order('received_at', { ascending: false })
     .limit(60)
   if (error) return NextResponse.json({ error: 'Feed unavailable' }, { status: 503 })
   const items = (data || []).filter(row => /^(order|product)[._]/i.test(row.event || ''))
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       return {
         id: row.id,
         workspaceId, userId,
-        event: row.event, createdAt: row.created_at,
+        event: row.event, createdAt: row.received_at,
         title: order
           ? (created ? 'طلب جديد من زد' : 'تحديث طلب من زد')
           : (created ? 'منتج جديد من زد' : 'تحديث منتج من زد'),
