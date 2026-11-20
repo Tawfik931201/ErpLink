@@ -12,6 +12,13 @@ describe('idle Supabase API ingest budget', () => {
     expect(code).toContain('telegramBotPresenceUntil')
   })
 
+  it('does not scan link codes when no Telegram bots are registered', () => {
+    const code = read('telegram-long-poller.ts')
+    expect(code).toContain('POLLER_IDLE_REFRESH_MS = 120_000')
+    expect(code).toContain("if (!botErr && (botRows?.length ?? 0) === 0)")
+    expect(code).toContain('bots.clear()')
+  })
+
   it('uses an adaptive idle queue poll, rather than polling every ten seconds forever', () => {
     const code = read('sync-queue-runner.ts')
     expect(code).toContain("envInterval('SYNC_QUEUE_IDLE_INTERVAL_MS', 60_000, 15_000)")
