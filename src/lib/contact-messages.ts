@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto'
+
 import { supabase } from './supabase'
 import { archiveDatetime, isOdooArchiveEnabled, upsertArchive, updateArchiveBySource } from './central-odoo-archive'
 import { odooContactById, odooContactList, odooContactNewCount, odooSetContactStatus, useOdooContactInbox } from './central-contact-inbox'
@@ -82,6 +84,28 @@ export async function insertContactMessage(
   input: ContactMessageInput,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   try {
+    // The verified migration makes central Odoo the primary home of contact
+    // submissions. Preserve a Supabase fallback if the administrative ERP is
+    // temporarily unavailable; the independent contact backfill reconciles it.
+    if (isOdooArchiveEnabled()) {
+      const sourceId = randomUUID()
+      try {
+        await upsertArchive('contact', sourceId, {
+          x_name: input.name,
+          x_contact_name: input.name,
+          x_email: input.email,
+          x_phone: input.phone,
+          x_company: input.company,
+          x_subject: 'Public contact form',
+          x_message: input.message,
+          x_status: 'new',
+          x_submitted_at: archiveDatetime(new Date().toISOString()),
+        })
+        return { ok: true, id: sourceId }
+      } catch (archiveError) {
+        console.error('[contact] primary Odoo save failed, using durable Supabase fallback:', archiveError)
+      }
+    }
     const { data, error } = await supabase
       .from('contact_messages')
       .insert([
