@@ -30,7 +30,6 @@ import {
 } from '@/app/actions/queue-dashboard'
 import { useLanguage } from '@/components/language-provider'
 import { Button } from '@/components/ui/button'
-import { queueArchiveDaysLeft } from '@/lib/queue-archive'
 import { cn } from '@/lib/utils'
 
 import {
@@ -243,8 +242,8 @@ export default function QueueClient() {
     const list = ids.filter(Boolean)
     if (list.length === 0) return
     const message = ar
-      ? `أرشفة ${list.length} عنصر؟\n\nسيخرج من الطابور فوراً ولن يُرسل إلى أودوو. تبقى نسخة كاملة في الأرشيف 7 أيام (قابلة للاستعادة)، ثم تُحذف نهائياً تلقائياً.\n\nأرشِف فقط ما تعرف أنه مكرر أو أُرسل سابقاً.`
-      : `Archive ${list.length} item(s)?\n\nThey leave the queue immediately and will not be sent to Odoo. A full copy stays in the archive for 7 days (restorable), then is permanently deleted automatically.\n\nArchive only what you know is a duplicate or was already sent.`
+      ? `أرشفة ${list.length} عنصر؟\n\nسيخرج من الطابور فوراً ولن يُرسل إلى أودوو. تبقى نسخة كاملة في الأرشيف دون حذف تلقائي ويمكن استعادتها.\n\nأرشِف فقط ما تعرف أنه مكرر أو أُرسل سابقاً.`
+      : `Archive ${list.length} item(s)?\n\nThey leave the queue immediately and will not be sent to Odoo. A full copy stays in the archive without automatic deletion and can be restored.\n\nArchive only what you know is a duplicate or was already sent.`
     if (!confirm(message)) return
 
     setArchiving(true)
@@ -256,8 +255,8 @@ export default function QueueClient() {
       setSelected(new Set())
       await afterMutation(
         ar
-          ? `أُرشف ${res.archived} عنصر — يمكن استعادته من تبويب "الأرشيف" خلال 7 أيام.`
-          : `Archived ${res.archived} item(s) — restorable from the "Archive" tab for 7 days.`
+          ? `أُرشف ${res.archived} عنصر — يمكن استعادته من تبويب "الأرشيف" دون مهلة انتهاء.`
+          : `Archived ${res.archived} item(s) — restorable from the "Archive" tab without an expiry deadline.`
       )
     } else {
       notify(res.error || (ar ? 'فشلت الأرشفة' : 'Archive failed'), true)
@@ -484,8 +483,8 @@ export default function QueueClient() {
           </Button>
           <span className="text-[10px] text-muted-foreground">
             {ar
-              ? 'الأرشفة تُخرج العنصر من الطابور وتُبقيه 7 أيام قابلاً للاستعادة.'
-              : 'Archiving removes the item from the queue and keeps it restorable for 7 days.'}
+              ? 'الأرشفة تُخرج العنصر من الطابور وتُبقيه قابلاً للاستعادة دون حذف تلقائي.'
+              : 'Archiving removes the item from the queue and keeps it restorable without automatic deletion.'}
           </span>
         </div>
       )}
@@ -495,13 +494,12 @@ export default function QueueClient() {
         <div className="border border-border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-foreground/70">
-              {ar ? 'مؤرشف يدوياً — يُحذف نهائياً بعد 7 أيام' : 'Archived by hand — deleted after 7 days'}
+              {ar ? 'مؤرشف يدوياً — دون حذف تلقائي' : 'Archived by hand — no automatic deletion'}
             </span>
             <span className="text-[10px] font-bold tabular-nums text-muted-foreground">{archives.length}</span>
           </div>
           <ul className="divide-y divide-border">
             {archives.map((a) => {
-              const daysLeft = queueArchiveDaysLeft(a.expires_at)
               const ref = a.entity_id || a.original_id || a.source_id
               return (
                 <li
@@ -519,17 +517,8 @@ export default function QueueClient() {
                     {ref}
                   </span>
                   <span className="text-muted-foreground">{formatQueueDate(a.archived_at, ar)}</span>
-                  <span
-                    className={cn(
-                      'tabular-nums',
-                      daysLeft === 0 ? 'text-destructive' : 'text-muted-foreground'
-                    )}
-                  >
-                    {daysLeft === null
-                      ? '—'
-                      : ar
-                        ? `يُحذف بعد ${daysLeft} يوم`
-                        : `${daysLeft}d left`}
+                  <span className="text-muted-foreground">
+                    {ar ? 'محفوظ دون انتهاء' : 'Retained indefinitely'}
                   </span>
                   <Button
                     size="sm"
@@ -671,7 +660,7 @@ export default function QueueClient() {
                               handleArchive([row.id])
                             }}
                             disabled={archiving}
-                            title={ar ? 'أرشفة (تُستعاد خلال 7 أيام)' : 'Archive (restorable for 7 days)'}
+                            title={ar ? 'أرشفة (قابلة للاستعادة دائمًا)' : 'Archive (no automatic deletion)'}
                             aria-label={ar ? 'أرشفة العنصر' : 'Archive item'}
                             className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
                           >
