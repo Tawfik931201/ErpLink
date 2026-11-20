@@ -7,7 +7,7 @@ type Sub = {
   last_scanned_at: string; last_receipt_id: string | null
 }
 type Receipt = {
-  id: string; created_at: string; event: string;
+  id: string; received_at: string; event: string;
   payload: Record<string, unknown> | null; store_id: string
 }
 
@@ -35,13 +35,13 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
       continue
     }
     const filter = sub.last_receipt_id
-      ? `created_at.gt.${sub.last_scanned_at},and(created_at.eq.${sub.last_scanned_at},id.gt.${sub.last_receipt_id})`
-      : `created_at.gt.${sub.last_scanned_at}`
+      ? `received_at.gt.${sub.last_scanned_at},and(received_at.eq.${sub.last_scanned_at},id.gt.${sub.last_receipt_id})`
+      : `received_at.gt.${sub.last_scanned_at}`
     const { data: events, error: eventError } = await supabase.from('webhook_inbox')
-      .select('id,created_at,event,payload,store_id')
+      .select('id,received_at,event,payload,store_id')
       .eq('workspace_id', sub.workspace_id).eq('platform', 'zid')
       .or(filter)
-      .order('created_at', { ascending: true })
+      .order('received_at', { ascending: true })
       .order('id', { ascending: true })
       .limit(15)
     if (eventError) {
@@ -64,7 +64,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
               ? (created ? 'طلب جديد من زد' : 'تحديث طلب من زد')
               : (created ? 'منتج جديد من زد' : 'تحديث منتج من زد'),
             body: identifier ? `المعرف: ${identifier}` : 'حدث جديد من زد',
-            event: item.event, createdAt: item.created_at,
+            event: item.event, createdAt: item.received_at,
             url: '/ar-sa/app/logs',
           })
           if (status === 'gone') {
@@ -83,7 +83,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
       }
       const { error: cursorError } = await supabase.from('browser_push_subscriptions')
         .update({
-          last_scanned_at: item.created_at, last_receipt_id: item.id,
+          last_scanned_at: item.received_at, last_receipt_id: item.id,
           updated_at: new Date().toISOString(),
         }).eq('id', sub.id)
       if (cursorError) { result.errors++; break }
