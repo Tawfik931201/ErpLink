@@ -1241,6 +1241,10 @@ async function maybeCleanup() {
     await archiveSyncLogsBatch().catch((err) => {
       console.error('[sync-queue] central Odoo archive batch failed:', err)
     })
+    const { archiveContactMessagesBatch } = await import('./central-contact-backfill')
+    await archiveContactMessagesBatch().catch((err) => {
+      console.error('[sync-queue] central contact message archive failed:', err)
+    })
     const { pruneProcessedInbox } = await import('./webhook-inbox')
     await pruneProcessedInbox(INBOX_RETENTION_DAYS).catch(() => {})
     // صندوق التليجرام: الصفوف المُرسلة بعد 7 أيام والفاشلة بعد 30 يوماً.
