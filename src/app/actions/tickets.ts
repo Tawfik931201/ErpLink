@@ -5,7 +5,8 @@ import crypto from 'crypto'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
-import { isAdmin } from '@/lib/auth'
+import { isAdmin, getActiveWorkspaceId } from '@/lib/auth'
+import { isOdooArchiveEnabled, upsertArchive } from '@/lib/central-odoo-archive'
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -213,6 +214,27 @@ export async function createTicket(formData: FormData) {
           checksum: sha1Checksum,
         }]
       )
+    }
+
+    // Mirror metadata to the central ERP Link Odoo database; the original
+    // helpdesk ticket and chatter remain the source of truth for replies/files.
+    if (isOdooArchiveEnabled()) {
+      try {
+        const workspaceId = await getActiveWorkspaceId()
+        await upsertArchive('support', `helpdesk:${ticketId}`, {
+          x_name: title.trim(),
+          x_subject: title.trim(),
+          x_description: description?.trim() || '',
+          x_email: customerEmail,
+          x_contact_name: partnerName,
+          x_user_id: userId,
+          x_workspace_uuid: workspaceId || '',
+          x_helpdesk_ticket_id: ticketId,
+          x_status: 'open',
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo mirror unavailable; helpdesk ticket retained:', mirrorError)
+      }
     }
 
     // 5. Force a revalidation of the tickets page so the UI updates with the new ticket
