@@ -387,12 +387,38 @@ export async function sendTicketMessage(formData: FormData) {
       kwargs.attachment_ids = attachmentIds
     }
 
-    await executeKw<number>(
+    const postedMessageId = await executeKw<number>(
       'helpdesk.ticket',
       'message_post',
       [ticketId],
       kwargs
     )
+
+    if (isOdooArchiveEnabled()) {
+      try {
+        const workspaceId = await getActiveWorkspaceId()
+        const centralTicketId = await upsertArchive('support', `helpdesk:${ticketId}`, {
+          x_name: `Support ticket ${ticketId}`,
+          x_helpdesk_ticket_id: ticketId,
+          x_email: email,
+          x_user_id: userId,
+          x_workspace_uuid: workspaceId || '',
+        })
+        await upsertArchive('supportMessage', `helpdesk-message:${postedMessageId}`, {
+          x_name: `Reply to ticket ${ticketId}`,
+          x_support_ticket_id: centralTicketId,
+          x_helpdesk_ticket_id: ticketId,
+          x_user_id: userId,
+          x_workspace_uuid: workspaceId || '',
+          x_author_email: email,
+          x_message: messageContent.trim(),
+          x_attachment_names: files.filter(file => file.size > 0).map(file => file.name).join(', '),
+          x_submitted_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo reply mirror failed; original helpdesk message retained:', mirrorError)
+      }
+    }
 
     // Revalidate the page path
     revalidatePath('/app/tickets')
