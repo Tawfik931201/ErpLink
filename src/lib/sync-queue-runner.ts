@@ -30,6 +30,8 @@ const g = global as unknown as {
   __syncQueueCronWarned?: boolean
   __workspaceArchiveInterval?: NodeJS.Timeout
   __workspaceArchiveProcessing?: boolean
+  __syncQueueWakeTimer?: NodeJS.Timeout
+  __syncQueueWakeAt?: number
 }
 
 /**
@@ -270,6 +272,25 @@ export function startSyncQueueRunner(): void {
 }
 
 /**
+ * Wake promptly after an admitted webhook is durably queued, without
+ * continuously polling Supabase while idle. One coalesced timer per process.
+ * Periodic idle polling remains the cross-process/restart safety net.
+ */
+export function wakeQueueRunnerAt(nextRetryAt: string): void {
+  if (!g.__syncQueueRunnerStarted) return
+  const dueAt = Math.max(Date.now(), Date.parse(nextRetryAt) || Date.now()) + 200
+  if (g.__syncQueueWakeTimer && (g.__syncQueueWakeAt ?? 0) <= dueAt) return
+  if (g.__syncQueueWakeTimer) clearTimeout(g.__syncQueueWakeTimer)
+  g.__syncQueueWakeAt = dueAt
+  g.__syncQueueWakeTimer = setTimeout(() => {
+    g.__syncQueueWakeTimer = undefined
+    g.__syncQueueWakeAt = undefined
+    void runDrainCycle()
+  }, Math.min(60_000, Math.max(0, dueAt - Date.now())))
+  unref(g.__syncQueueWakeTimer)
+}
+
+/**
  * دفعة واحدة بدون مؤقت — للاستدعاء من cron route أو سكربت.
  */
 export async function runSyncQueueOnce(batchSize = SYNC_QUEUE_DEFAULT_BATCH): Promise<number> {
@@ -278,6 +299,9 @@ export async function runSyncQueueOnce(batchSize = SYNC_QUEUE_DEFAULT_BATCH): Pr
 }
 
 export function stopSyncQueueRunner(): void {
+  if (g.__syncQueueWakeTimer) clearTimeout(g.__syncQueueWakeTimer)
+  g.__syncQueueWakeTimer = undefined
+  g.__syncQueueWakeAt = undefined
   if (g.__syncQueueRunnerInterval) {
     clearTimeout(g.__syncQueueRunnerInterval)
     g.__syncQueueRunnerInterval = undefined
