@@ -218,7 +218,8 @@ export async function createTicket(formData: FormData) {
       if (!workspaceId) {
         return { success: false, error: 'Select a workspace before creating a support ticket.' }
       }
-      const ticketId = await upsertArchive('support', 'app-ticket:' + crypto.randomUUID(), {
+      const ticketSource = 'app-ticket:' + crypto.randomUUID()
+      const ticketId = await upsertArchive('support', ticketSource, {
         x_name: title.trim(),
         x_subject: title.trim(),
         x_description: description?.trim() || '',
@@ -233,7 +234,7 @@ export async function createTicket(formData: FormData) {
       // Discuss is best-effort: a channel failure must not lose a saved ticket.
       try {
         await ensureSupportDiscussChannel({
-          id: ticketId, x_source_uuid: '', x_workspace_uuid: workspaceId,
+          id: ticketId, x_source_uuid: ticketSource, x_workspace_uuid: workspaceId,
           x_subject: title.trim(),
         })
       } catch (discussError) {
