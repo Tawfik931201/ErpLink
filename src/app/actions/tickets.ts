@@ -9,6 +9,7 @@ import { isAdmin, getActiveWorkspaceId } from '@/lib/auth'
 import { isOdooArchiveEnabled, readArchive, updateArchiveBySource, upsertArchive } from '@/lib/central-odoo-archive'
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
+import { ensureSupportDiscussChannel, getSupportDiscussMessages, postSupportDiscussMessage } from '@/lib/support-discuss'
 
 export interface Ticket {
   id: number;
@@ -229,6 +230,15 @@ export async function createTicket(formData: FormData) {
         x_priority: 'normal',
         x_helpdesk_ticket_id: 0,
       })
+      // Discuss is best-effort: a channel failure must not lose a saved ticket.
+      try {
+        await ensureSupportDiscussChannel({
+          id: ticketId, x_source_uuid: '', x_workspace_uuid: workspaceId,
+          x_subject: title.trim(),
+        })
+      } catch (discussError) {
+        console.warn('[tickets] Discuss channel setup deferred:', discussError)
+      }
       revalidatePath('/app/tickets')
       return { success: true, ticketId: -ticketId }
     } catch (error) {
@@ -372,6 +382,20 @@ export async function getTicketMessages(ticketId: number) {
       }>('supportMessage', [['x_support_ticket_id', '=', ticket.id]],
         ['id','x_message','x_submitted_at','x_author_email','create_date'],
         { limit: 100, order: 'create_date asc' })
+      // Include replies from Odoo Discuss as well as older central message records.
+      // A Discuss failure should not hide archived replies.
+      let discussMessages: OdooMessage[] = []
+      try {
+        discussMessages = (await getSupportDiscussMessages(ticket)).map(row => ({
+          id: -row.id,
+          body: row.body || '',
+          date: row.date,
+          author_id: row.author_id,
+          attachment_ids: [],
+        }))
+      } catch (discussError) {
+        console.warn('[tickets] Discuss read unavailable:', discussError)
+      }
       const messages: OdooMessage[] = rows.map(row => ({
         id: row.id,
         body: row.x_message || '',
@@ -379,7 +403,10 @@ export async function getTicketMessages(ticketId: number) {
         author_id: [0, row.x_author_email || 'Support'],
         attachment_ids: [],
       }))
-      return { success: true, messages, attachments: [] as OdooAttachment[] }
+      return { success: true,
+        messages: [...messages, ...discussMessages].sort((a, b) =>
+          Date.parse(a.date.replace(' ', 'T')) - Date.parse(b.date.replace(' ', 'T'))),
+        attachments: [] as OdooAttachment[] }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Central ticket read failed' }
     }
@@ -461,16 +488,7 @@ export async function sendTicketMessage(formData: FormData) {
       if (files.some(file => file.size > 0)) {
         return { success: false, error: 'Attachments to central-only tickets are not supported yet' }
       }
-      await upsertArchive('supportMessage', 'central-message:' + crypto.randomUUID(), {
-        x_name: 'Support reply',
-        x_support_ticket_id: ticket.id,
-        x_helpdesk_ticket_id: 0,
-        x_author_email: email,
-        x_user_id: userId,
-        x_workspace_uuid: ticket.x_workspace_uuid || '',
-        x_message: messageContent.trim(),
-        x_submitted_at: new Date().toISOString().replace('T',' ').slice(0,19),
-      })
+      await postSupportDiscussMessage(ticket, user.fullName || email, messageContent.trim())
       revalidatePath('/app/tickets')
       return { success: true }
     } catch (error) {
