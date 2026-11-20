@@ -28,6 +28,22 @@ type SyncRow = {
   odoo_model: string | null
   odoo_record_id: number | null
   platform: string | null
+  payload: Record<string, unknown> | null
+}
+
+function redactPayload(value: unknown, depth = 0): unknown {
+  if (depth > 8) return '[Depth limit]'
+  if (Array.isArray(value)) return value.slice(0, 150).map(item => redactPayload(item, depth + 1))
+  if (!value || typeof value !== 'object') return value
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value).slice(0, 150)) {
+    if (/password|secret|token|authorization|api[_-]?key|client[_-]?secret|cookie/i.test(key)) {
+      result[key] = '[REDACTED]'
+    } else {
+      result[key] = redactPayload(item, depth + 1)
+    }
+  }
+  return result
 }
 
 export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?: string }> {
@@ -41,7 +57,7 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
     const lastId = last?.x_last_archived_id
     let query = supabaseAdmin
       .from('sync_logs')
-      .select('id,workspace_id,erp_connection_id,store_id,event,status,error_message,created_at,odoo_model,odoo_record_id,platform')
+      .select('id,workspace_id,erp_connection_id,store_id,event,status,error_message,created_at,odoo_model,odoo_record_id,platform,payload')
       .order('created_at', { ascending: true })
       .order('id', { ascending: true })
       .limit(LIMIT)
@@ -67,7 +83,8 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
         error: row.error_message?.slice(0, 16000) ?? null,
         odoo_model: row.odoo_model,
         odoo_record_id: row.odoo_record_id,
-      })
+        payload: redactPayload(row.payload),
+      }).slice(0, 64000)
       // Replicate stable cross-database IDs, not merchant credentials.
       const workspaceId = row.workspace_id || ''
       const storeId = row.store_id || ''
