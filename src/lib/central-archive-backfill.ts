@@ -57,6 +57,9 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
     const { data, error } = await query
     if (error) throw new Error(error.message)
     let archived = 0
+    const contextCache = new Map<string, number>()
+    const workspaceOwners = new Map<string, string>()
+    const connectionDatabases = new Map<string, string>()
     for (const row of (data ?? []) as SyncRow[]) {
       const description = JSON.stringify({
         event: row.event,
@@ -65,8 +68,38 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
         odoo_model: row.odoo_model,
         odoo_record_id: row.odoo_record_id,
       })
-      // Each item carries tenant IDs; no cross-tenant reads exposed to clients.
+      // Replicate stable cross-database IDs, not merchant credentials.
+      const workspaceId = row.workspace_id || ''
+      const storeId = row.store_id || ''
+      const connectionId = row.erp_connection_id || ''
+      const contextKey = [workspaceId, storeId, connectionId].join(':')
+      let contextId = contextCache.get(contextKey)
+      if (!contextId) {
+        if (workspaceId && !workspaceOwners.has(workspaceId)) {
+          const { data: ws } = await supabaseAdmin.from('workspaces')
+            .select('user_id').eq('id', workspaceId).maybeSingle()
+          workspaceOwners.set(workspaceId, ws?.user_id || '')
+        }
+        if (connectionId && !connectionDatabases.has(connectionId)) {
+          const { data: connection } = await supabaseAdmin.from('erp_connections')
+            .select('db_name').eq('id', connectionId).eq('workspace_id', workspaceId).maybeSingle()
+          connectionDatabases.set(connectionId, connection?.db_name || '')
+        }
+        contextId = await upsertArchive('context', `scope:${contextKey}`, {
+          x_name: `Workspace ${workspaceId || 'unknown'}`,
+          x_integration_key: 'central-archive-scope',
+          x_workspace_uuid: workspaceId,
+          x_user_id: workspaceOwners.get(workspaceId) || '',
+          x_store_id: storeId,
+          x_odoo_connection_id: connectionId,
+          x_odoo_database: connectionDatabases.get(connectionId) || '',
+          x_provider: row.platform || '',
+        })
+        contextCache.set(contextKey, contextId)
+      }
+      // Each item carries its scope reference; never derive tenant ownership from the browser.
       await upsertArchive('event', row.id, {
+        x_context_id: contextId,
         x_name: row.event || 'Sync event',
         x_source_table: 'sync_logs',
         x_source_event_id: row.id,
