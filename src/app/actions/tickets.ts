@@ -6,7 +6,7 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
 import { isAdmin, getActiveWorkspaceId } from '@/lib/auth'
-import { isOdooArchiveEnabled, upsertArchive } from '@/lib/central-odoo-archive'
+import { isOdooArchiveEnabled, readArchive, updateArchiveBySource, upsertArchive } from '@/lib/central-odoo-archive'
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -397,13 +397,16 @@ export async function sendTicketMessage(formData: FormData) {
     if (isOdooArchiveEnabled()) {
       try {
         const workspaceId = await getActiveWorkspaceId()
-        const centralTicketId = await upsertArchive('support', `helpdesk:${ticketId}`, {
-          x_name: `Support ticket ${ticketId}`,
-          x_helpdesk_ticket_id: ticketId,
-          x_email: email,
-          x_user_id: userId,
-          x_workspace_uuid: workspaceId || '',
-        })
+        const existingCentral = await readArchive<{ id: number }>('support',
+          [['x_source_uuid', '=', `helpdesk:${ticketId}`]], ['id'], { limit: 1 })
+        const centralTicketId = existingCentral[0]?.id || await upsertArchive('support',
+          `helpdesk:${ticketId}`, {
+            x_name: `Support ticket ${ticketId}`,
+            x_helpdesk_ticket_id: ticketId,
+            x_email: email,
+            x_user_id: userId,
+            x_workspace_uuid: workspaceId || '',
+          })
         await upsertArchive('supportMessage', `helpdesk-message:${postedMessageId}`, {
           x_name: `Reply to ticket ${ticketId}`,
           x_support_ticket_id: centralTicketId,
@@ -481,6 +484,16 @@ export async function closeTicket(ticketId: number) {
       'write',
       [[ticketId], { stage_id: closedStageId }]
     )
+
+    if (isOdooArchiveEnabled()) {
+      try {
+        await updateArchiveBySource('support', `helpdesk:${ticketId}`, {
+          x_status: 'closed',
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo close mirror failed:', mirrorError)
+      }
+    }
 
     revalidatePath('/app/tickets')
     revalidateTag('pending-tickets')
