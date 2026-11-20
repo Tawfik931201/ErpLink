@@ -29,6 +29,7 @@ interface PollerGlobal {
 
 const POLL_INTERVAL_MS = 5_000
 const POLLER_REFRESH_MS = 30_000
+const POLLER_IDLE_REFRESH_MS = 120_000
 
 /**
  * Poller is opt-out via TELEGRAM_POLLER_ENABLED. Unset means enabled, so
@@ -78,6 +79,13 @@ async function refreshBotsFromDb(): Promise<void> {
           })
         }
       }
+    }
+
+    // No registered bot can process a link code; avoid a second REST read.
+    // forceRefreshTelegramPoller() is invoked when a bot is registered.
+    if (!botErr && (botRows?.length ?? 0) === 0) {
+      bots.clear()
+      return
     }
 
     // 2. Pending link codes (have a bot_id reference)
@@ -314,7 +322,8 @@ async function runPollCycle(): Promise<void> {
   if (g.__telegramPollerProcessing) return
   try {
     g.__telegramPollerProcessing = true
-    if (Date.now() - (g.__telegramPollerLastRefresh || 0) > POLLER_REFRESH_MS) {
+    if (Date.now() - (g.__telegramPollerLastRefresh || 0) >
+      (getBotsMap().size ? POLLER_REFRESH_MS : POLLER_IDLE_REFRESH_MS)) {
       await refreshBotsFromDb()
       g.__telegramPollerLastRefresh = Date.now()
     }
