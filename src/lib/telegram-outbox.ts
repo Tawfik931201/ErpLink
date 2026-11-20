@@ -428,6 +428,20 @@ interface OutboxGlobals {
 
 const g = globalThis as unknown as OutboxGlobals
 
+// Do not query telegram_outbox every few seconds when no linked bots exist.
+// Re-check infrequently so a newly linked bot starts sending without restart.
+let telegramBotPresenceUntil = 0
+let telegramHasLinkedBot = true
+async function hasLinkedTelegramBot(): Promise<boolean> {
+  if (Date.now() < telegramBotPresenceUntil) return telegramHasLinkedBot
+  const { data, error } = await supabase.from('telegram_bots')
+    .select('id').eq('status', 'linked').limit(1)
+  if (error) return true // Fail open: never suppress durable delivery on DB errors.
+  telegramHasLinkedBot = (data?.length ?? 0) > 0
+  telegramBotPresenceUntil = Date.now() + (telegramHasLinkedBot ? 60_000 : 5 * 60_000)
+  return telegramHasLinkedBot
+}
+
 // Keep Telegram durable delivery independent of the Odoo sync worker.
 // A 2-second idle poll produced ~43,200 Supabase REST reads per day per process.
 // Ten seconds retains prompt notifications while avoiding ~80% of idle reads.
@@ -449,6 +463,7 @@ export function startTelegramOutboxRunner(): void {
     if (g.__telegramOutboxProcessing) return
     g.__telegramOutboxProcessing = true
     try {
+      if (!await hasLinkedTelegramBot()) return
       const result = await runTelegramOutboxCycle()
       if (result.failed > 0) {
         console.warn(`[TelegramOutbox] ${result.failed} message(s) exhausted retries`)
