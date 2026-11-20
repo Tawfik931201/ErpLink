@@ -134,7 +134,7 @@ export async function getClientTickets() {
   let centralError = ''
 
   try {
-    const partnerIds = await executeKw<number[]>('res.partner', 'search', [[['email', '=', email]]])
+    const partnerIds = isAdmin(userId) ? [] : await executeKw<number[]>('res.partner', 'search', [[['email', '=', email]]])
     // Platform admins may review the shared Helpdesk. Merchants remain
     // restricted to their own email/partner records.
     const domain: unknown[] = isAdmin(userId) ? [] : partnerIds?.length
