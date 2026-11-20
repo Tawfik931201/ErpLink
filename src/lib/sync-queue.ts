@@ -1235,20 +1235,6 @@ async function maybeCleanup() {
     const cleaned = await cleanupSyncQueue(EXHAUSTED_RETENTION_DAYS)
     getMetricsStore().cleaned += cleaned
     await cleanupExpiredLogs().catch(() => {})
-    // Move a small durable, ordered page of historical logs to central Odoo.
-    // No-op without dedicated archive credentials; failures never delete source rows.
-    const { archiveSyncLogsBatch } = await import('./central-archive-backfill')
-    await archiveSyncLogsBatch().catch((err) => {
-      console.error('[sync-queue] central Odoo archive batch failed:', err)
-    })
-    const { archiveContactMessagesBatch } = await import('./central-contact-backfill')
-    await archiveContactMessagesBatch().catch((err) => {
-      console.error('[sync-queue] central contact message archive failed:', err)
-    })
-    const { archiveQueueSnapshotsBatch } = await import('./central-queue-backfill')
-    await archiveQueueSnapshotsBatch().catch((err) => {
-      console.error('[sync-queue] central queue snapshot archive failed:', err)
-    })
     const { pruneProcessedInbox } = await import('./webhook-inbox')
     await pruneProcessedInbox(INBOX_RETENTION_DAYS).catch(() => {})
     // صندوق التليجرام: الصفوف المُرسلة بعد 7 أيام والفاشلة بعد 30 يوماً.
