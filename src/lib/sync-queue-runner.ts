@@ -30,6 +30,8 @@ const g = global as unknown as {
   __syncQueueCronWarned?: boolean
   __workspaceArchiveInterval?: NodeJS.Timeout
   __workspaceArchiveProcessing?: boolean
+  __syncQueueWakeTimer?: NodeJS.Timeout
+  __syncQueueWakeAt?: number
 }
 
 /**
@@ -43,6 +45,7 @@ function envInterval(name: string, fallbackMs: number, minMs: number): number {
 
 /** تصريف الطابور كل 10 ثوانٍ افتراضياً (قابل للضبط من البيئة). */
 const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 10_000, 5_000)
+const IDLE_INTERVAL_MS = envInterval('SYNC_QUEUE_IDLE_INTERVAL_MS', 60_000, 15_000)
 
 /** تسوية زد كل 10 دقائق افتراضياً (نفس-periodic كـ cron التسوية). */
 const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000, 60_000)
@@ -82,8 +85,8 @@ function unref(timer: NodeJS.Timeout | undefined): void {
  * فإن فشل إدراجه في الطابور يبقى `pending` هناك. بلا هذه الخطوة تكون شبكة
  * الأمان معطّلة على استضافة بلا cron صالح.
  */
-async function runDrainCycle(): Promise<void> {
-  if (g.__syncQueueRunnerProcessing) return
+async function runDrainCycle(): Promise<boolean> {
+  if (g.__syncQueueRunnerProcessing) return false
   try {
     g.__syncQueueRunnerProcessing = true
     const { drainWebhookInbox } = await import('./webhook-inbox')
@@ -96,7 +99,7 @@ async function runDrainCycle(): Promise<void> {
         `[sync-queue] inbox drain had issues: failed=${drained.failed} inboxMissing=${drained.inboxMissing}`
       )
     }
-    await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
+    const processed = await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
 
     // ── نشر عمق الطابور لبوابة الاستقبال ───────────────────────────────────
     // السقف الديناميكي (120 ← 2000) يُشتق من فراغ الطابور: وهو المصدر
@@ -107,9 +110,11 @@ async function runDrainCycle(): Promise<void> {
     // الدالة نفسها تقيّد نفسها (مرة كل 5 دقائق + نفس السبب مرة كل ساعة).
     const { checkAdminAlerts } = await import('./admin-alerts')
     await checkAdminAlerts().catch(() => {})
+    return drained.scanned > 0 || processed > 0
   } catch {
     // Keep worker failures visible without serializing provider/customer data.
     console.error('[sync-queue] drain cycle failed; durable pending work will be retried on a later cycle')
+    return true // Retry sooner after a transient error.
   } finally {
     g.__syncQueueRunnerProcessing = false
   }
@@ -223,10 +228,18 @@ export function startSyncQueueRunner(): void {
   }
   g.__syncQueueRunnerStarted = true
 
-  g.__syncQueueRunnerInterval = setInterval(() => {
-    void runDrainCycle()
-  }, POLL_INTERVAL_MS)
-  unref(g.__syncQueueRunnerInterval)
+  // Adapt polling to activity: queue receives a prompt direct drain on webhook
+  // ingress, while an idle server avoids ~5 Supabase REST calls every 10 seconds.
+  // A timeout is re-armed only after completion so cycles never pile up.
+  const scheduleDrain = (delay: number) => {
+    g.__syncQueueRunnerInterval = setTimeout(async () => {
+      if (!g.__syncQueueRunnerStarted) return
+      const busy = await runDrainCycle()
+      if (g.__syncQueueRunnerStarted) scheduleDrain(busy ? POLL_INTERVAL_MS : IDLE_INTERVAL_MS)
+    }, delay)
+    unref(g.__syncQueueRunnerInterval)
+  }
+  scheduleDrain(POLL_INTERVAL_MS)
 
   g.__syncQueueReconcileInterval = setInterval(() => {
     void runReconcileCycle()
@@ -259,6 +272,25 @@ export function startSyncQueueRunner(): void {
 }
 
 /**
+ * Wake promptly after an admitted webhook is durably queued, without
+ * continuously polling Supabase while idle. One coalesced timer per process.
+ * Periodic idle polling remains the cross-process/restart safety net.
+ */
+export function wakeQueueRunnerAt(nextRetryAt: string): void {
+  if (!g.__syncQueueRunnerStarted) return
+  const dueAt = Math.max(Date.now(), Date.parse(nextRetryAt) || Date.now()) + 200
+  if (g.__syncQueueWakeTimer && (g.__syncQueueWakeAt ?? 0) <= dueAt) return
+  if (g.__syncQueueWakeTimer) clearTimeout(g.__syncQueueWakeTimer)
+  g.__syncQueueWakeAt = dueAt
+  g.__syncQueueWakeTimer = setTimeout(() => {
+    g.__syncQueueWakeTimer = undefined
+    g.__syncQueueWakeAt = undefined
+    void runDrainCycle()
+  }, Math.min(60_000, Math.max(0, dueAt - Date.now())))
+  unref(g.__syncQueueWakeTimer)
+}
+
+/**
  * دفعة واحدة بدون مؤقت — للاستدعاء من cron route أو سكربت.
  */
 export async function runSyncQueueOnce(batchSize = SYNC_QUEUE_DEFAULT_BATCH): Promise<number> {
@@ -267,8 +299,11 @@ export async function runSyncQueueOnce(batchSize = SYNC_QUEUE_DEFAULT_BATCH): Pr
 }
 
 export function stopSyncQueueRunner(): void {
+  if (g.__syncQueueWakeTimer) clearTimeout(g.__syncQueueWakeTimer)
+  g.__syncQueueWakeTimer = undefined
+  g.__syncQueueWakeAt = undefined
   if (g.__syncQueueRunnerInterval) {
-    clearInterval(g.__syncQueueRunnerInterval)
+    clearTimeout(g.__syncQueueRunnerInterval)
     g.__syncQueueRunnerInterval = undefined
   }
   if (g.__syncQueueReconcileInterval) {

@@ -455,12 +455,18 @@ export async function enqueueWebhookEvent(params: EnqueueParams): Promise<Enqueu
       return { deferred: true }
     }
   }
+  const nextRetryAt = params.nextRetryAt ?? new Date(Date.now() + coalesceWindowMs()).toISOString()
   const dispatched = await dispatchWebhookReceipt(receipt.id, {
     max_retries: SYNC_QUEUE_MAX_RETRIES,
-    next_retry_at: params.nextRetryAt ?? new Date(Date.now() + coalesceWindowMs()).toISOString(),
+    next_retry_at: nextRetryAt,
   }, acceptBeforeErp ? target : undefined)
   if (dispatched.error) return acceptBeforeErp ? { deferred: true } : { error: dispatched.error }
   metrics.enqueued += 1
+  // Wake the in-process runner when this row becomes due. The durable queue
+  // remains the source of truth across worker restarts/multiple instances.
+  void import('./sync-queue-runner')
+    .then(({ wakeQueueRunnerAt }) => wakeQueueRunnerAt(nextRetryAt))
+    .catch(() => {})
   return { id: dispatched.id }
 }
 

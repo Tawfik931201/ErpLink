@@ -33,6 +33,51 @@ export interface OdooAttachment {
   mimetype: string;
 }
 
+
+type CentralTicket = {
+  id: number
+  x_name: string | false
+  x_subject: string | false
+  x_description: string | false
+  x_status: string | false
+  x_email: string | false
+  x_user_id: string | false
+  x_workspace_uuid: string | false
+  x_helpdesk_ticket_id: number | false
+  x_source_uuid: string | false
+  create_date: string
+}
+const CENTRAL_TICKET_FIELDS = [
+  'id','x_name','x_subject','x_description','x_status','x_email',
+  'x_user_id','x_workspace_uuid','x_helpdesk_ticket_id','x_source_uuid','create_date',
+]
+async function centralTicketForUser(id: number): Promise<CentralTicket> {
+  const { userId } = await auth()
+  if (!userId || !Number.isSafeInteger(id) || id <= 0) throw new Error('Unauthorized')
+  const workspaceId = await getActiveWorkspaceId()
+  const user = await currentUser()
+  const email = user?.emailAddresses[0]?.emailAddress || ''
+  const domain: unknown[] = [['id', '=', id]]
+  if (!isAdmin(userId)) {
+    if (!workspaceId) throw new Error('No active workspace')
+    domain.push(['x_workspace_uuid', '=', workspaceId])
+    domain.push('|', ['x_user_id', '=', userId], ['x_email', '=', email])
+  }
+  const rows = await readArchive<CentralTicket>('support', domain, CENTRAL_TICKET_FIELDS, { limit: 1 })
+  if (!rows.length) throw new Error('Ticket not found or forbidden')
+  return rows[0]
+}
+function mapCentralTicket(ticket: CentralTicket): Ticket {
+  return {
+    id: -ticket.id,
+    name: ticket.x_subject || ticket.x_name || 'Support ticket',
+    ticket_ref: 'CENTRAL-' + ticket.id,
+    stage_id: [0, ticket.x_status || 'Open'],
+    create_date: ticket.create_date.replace(' ', 'T') + 'Z',
+    description: ticket.x_description || false,
+  }
+}
+
 /**
  * يتأكد أن التذكرة المطلوب الوصول إليها تخص صاحب الجلسة الحالي.
  *
@@ -75,33 +120,66 @@ async function assertOwnsTicket(ticketId: number): Promise<void> {
  * Fetches tickets from helpdesk.ticket for the logged-in Clerk user.
  * Filters by matching the user's email to the Odoo partner_email field.
  */
+
 export async function getClientTickets() {
   const { userId } = await auth()
   const user = await currentUser()
-
-  if (!userId || !user) {
-    throw new Error('Unauthorized access')
-  }
-
+  if (!userId || !user) throw new Error('Unauthorized access')
   const email = user.emailAddresses[0]?.emailAddress
-  if (!email) {
-    throw new Error('User has no primary email address registered in Clerk')
-  }
+  if (!email) throw new Error('User has no primary email address registered in Clerk')
+  const workspaceId = await getActiveWorkspaceId()
+  let legacy: Ticket[] = []
+  let central: CentralTicket[] = []
+  let legacyError = ''
+  let centralError = ''
 
   try {
-    const tickets = await executeKw<Ticket[]>(
-      'helpdesk.ticket',
-      'search_read',
-      [[['partner_email', '=', email]]],
-      {
-        fields: ['id', 'name', 'ticket_ref', 'stage_id', 'create_date', 'description'],
-        order: 'create_date desc',
+    const partnerIds = isAdmin(userId) ? [] : await executeKw<number[]>('res.partner', 'search', [[['email', '=', email]]])
+    // Platform admins may review the shared Helpdesk. Merchants remain
+    // restricted to their own email/partner records.
+    const domain: unknown[] = isAdmin(userId) ? [] : partnerIds?.length
+      ? ['|', ['partner_email', '=', email], ['partner_id', 'in', partnerIds]]
+      : [['partner_email', '=', email]]
+    try {
+      legacy = await executeKw<Ticket[]>('helpdesk.ticket', 'search_read', [domain],
+        { fields: ['id','name','ticket_ref','stage_id','create_date','description'], order:'create_date desc',limit:100 })
+    } catch {
+      const fallback = await executeKw<Array<Omit<Ticket, 'ticket_ref'>>>(
+        'helpdesk.ticket', 'search_read', [domain],
+        { fields: ['id','name','stage_id','create_date','description'], order:'create_date desc',limit:100 })
+      legacy = fallback.map(row => ({ ...row, ticket_ref: false }))
+    }
+  } catch (error) {
+    legacyError = error instanceof Error ? error.message : 'Helpdesk read failed'
+    console.warn('[tickets] legacy Helpdesk unavailable:', legacyError)
+  }
+
+  if (isOdooArchiveEnabled()) {
+    try {
+      const domain: unknown[] = []
+      if (!isAdmin(userId)) {
+        if (!workspaceId) throw new Error('No active workspace')
+        domain.push(['x_workspace_uuid', '=', workspaceId])
+        domain.push('|', ['x_user_id', '=', userId], ['x_email', '=', email])
       }
-    )
-    return { success: true, tickets }
-  } catch (error: any) {
-    console.error('Error fetching client tickets:', error)
-    return { success: false, error: error.message || 'Failed to retrieve tickets from Odoo Helpdesk' }
+      central = await readArchive<CentralTicket>('support', domain, CENTRAL_TICKET_FIELDS,
+        { limit: 100, order: 'create_date desc' })
+    } catch (error) {
+      centralError = error instanceof Error ? error.message : 'Central Odoo unavailable'
+      console.warn('[tickets] central Odoo unavailable:', centralError)
+    }
+  }
+
+  if (legacyError && (centralError || !isOdooArchiveEnabled())) {
+    return { success: false, error: legacyError + (centralError ? '; ' + centralError : '') }
+  }
+  const legacyIds = new Set(legacy.map(row => row.id))
+  const uniqueCentral = central.filter(row =>
+    !row.x_helpdesk_ticket_id || !legacyIds.has(row.x_helpdesk_ticket_id))
+  return {
+    success: true,
+    tickets: [...legacy, ...uniqueCentral.map(mapCentralTicket)]
+      .sort((a,b) => Date.parse(b.create_date) - Date.parse(a.create_date)),
   }
 }
 
@@ -252,6 +330,30 @@ export async function createTicket(formData: FormData) {
  * along with attachment details (name, mimetype).
  */
 export async function getTicketMessages(ticketId: number) {
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      const rows = await readArchive<{
+        id: number
+        x_message: string | false
+        x_submitted_at: string | false
+        x_author_email: string | false
+        create_date: string
+      }>('supportMessage', [['x_support_ticket_id', '=', ticket.id]],
+        ['id','x_message','x_submitted_at','x_author_email','create_date'],
+        { limit: 100, order: 'create_date asc' })
+      const messages: OdooMessage[] = rows.map(row => ({
+        id: row.id,
+        body: row.x_message || '',
+        date: row.x_submitted_at || row.create_date,
+        author_id: [0, row.x_author_email || 'Support'],
+        attachment_ids: [],
+      }))
+      return { success: true, messages, attachments: [] as OdooAttachment[] }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central ticket read failed' }
+    }
+  }
   const { userId } = await auth()
   if (!userId) {
     throw new Error('Unauthorized')
@@ -321,6 +423,30 @@ export async function sendTicketMessage(formData: FormData) {
   const files = formData.getAll('attachments') as File[]
 
   const ticketId = parseInt(ticketIdStr, 10)
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      if (ticket.x_status === 'closed') return { success: false, error: 'Ticket is closed' }
+      if (!messageContent?.trim()) return { success: false, error: 'Message cannot be empty' }
+      if (files.some(file => file.size > 0)) {
+        return { success: false, error: 'Attachments to central-only tickets are not supported yet' }
+      }
+      await upsertArchive('supportMessage', 'central-message:' + crypto.randomUUID(), {
+        x_name: 'Support reply',
+        x_support_ticket_id: ticket.id,
+        x_helpdesk_ticket_id: 0,
+        x_author_email: email,
+        x_user_id: userId,
+        x_workspace_uuid: ticket.x_workspace_uuid || '',
+        x_message: messageContent.trim(),
+        x_submitted_at: new Date().toISOString().replace('T',' ').slice(0,19),
+      })
+      revalidatePath('/app/tickets')
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central support reply failed' }
+    }
+  }
   if (isNaN(ticketId)) {
     return { success: false, error: 'Invalid ticket ID' }
   }
@@ -438,6 +564,17 @@ export async function sendTicketMessage(formData: FormData) {
  * Closes a support ticket by moving it to the "Closed" stage in Odoo.
  */
 export async function closeTicket(ticketId: number) {
+  if (ticketId < 0 && isOdooArchiveEnabled()) {
+    try {
+      const ticket = await centralTicketForUser(-ticketId)
+      const updated = await updateArchiveBySource('support', ticket.x_source_uuid || '', { x_status: 'closed' })
+      if (!updated) throw new Error('Central ticket not updated')
+      revalidatePath('/app/tickets')
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Central ticket close failed' }
+    }
+  }
   const { userId } = await auth()
   if (!userId) {
     return { success: false, error: 'Unauthorized' }
