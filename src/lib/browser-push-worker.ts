@@ -17,6 +17,7 @@ type Receipt = {
  */
 export async function runBrowserPushOnce(): Promise<{ checked: number; sent: number; errors: number }> {
   const result = { checked: 0, sent: 0, errors: 0 }
+  const deadline = Date.now() + 5_000
   if (!pushConfigured()) return result
   const { data: subscriptions, error } = await supabase.from('browser_push_subscriptions')
     .select('id,user_id,workspace_id,endpoint,p256dh,auth_secret,last_scanned_at,last_receipt_id')
@@ -27,6 +28,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
     return { ...result, errors: 1 }
   }
   for (const sub of (subscriptions || []) as Sub[]) {
+    if (Date.now() > deadline) break
     result.checked++
     // Revoked membership must stop delivery immediately, not only on browser logout.
     const { accessibleWorkspaceId } = await import('@/lib/workspace-access')
@@ -50,6 +52,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
       continue
     }
     for (const item of (events || []) as Receipt[]) {
+      if (Date.now() > deadline) break
       // Not every webhook generates a toast. Still advance cursor for non-notifiable events.
       const notify = /^(order|product)[._]/i.test(item.event || '')
       if (notify) {
