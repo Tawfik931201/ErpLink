@@ -207,6 +207,36 @@ export async function createTicket(formData: FormData) {
     return { success: false, error: 'Please provide a ticket title.' }
   }
 
+  // Central ERP Link support is the primary backend when configured. The legacy
+  // Helpdesk database may be absent (or use an Odoo edition without Helpdesk).
+  // Never attempt a legacy create after a central RPC error: the central write
+  // might have committed even if the HTTP response was lost.
+  if (isOdooArchiveEnabled() && !files.some(file => file.size > 0)) {
+    try {
+      const workspaceId = await getActiveWorkspaceId()
+      if (!workspaceId) {
+        return { success: false, error: 'Select a workspace before creating a support ticket.' }
+      }
+      const ticketId = await upsertArchive('support', 'app-ticket:' + crypto.randomUUID(), {
+        x_name: title.trim(),
+        x_subject: title.trim(),
+        x_description: description?.trim() || '',
+        x_email: email,
+        x_contact_name: user.fullName || email,
+        x_user_id: userId,
+        x_workspace_uuid: workspaceId,
+        x_status: 'open',
+        x_priority: 'normal',
+        x_helpdesk_ticket_id: 0,
+      })
+      revalidatePath('/app/tickets')
+      return { success: true, ticketId: -ticketId }
+    } catch (error) {
+      console.error('[tickets] central support create failed:', error)
+      return { success: false, error: 'Could not save the ticket in ERP Link support. Please retry; if the problem continues, contact support.' }
+    }
+  }
+
   try {
     // Fetch user profile details from Supabase
     const dbUser = await getOrCreateDbUser(userId)
