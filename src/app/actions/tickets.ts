@@ -135,7 +135,9 @@ export async function getClientTickets() {
 
   try {
     const partnerIds = await executeKw<number[]>('res.partner', 'search', [[['email', '=', email]]])
-    const domain: unknown[] = partnerIds?.length
+    // Platform admins may review the shared Helpdesk. Merchants remain
+    // restricted to their own email/partner records.
+    const domain: unknown[] = isAdmin(userId) ? [] : partnerIds?.length
       ? ['|', ['partner_email', '=', email], ['partner_id', 'in', partnerIds]]
       : [['partner_email', '=', email]]
     try {
