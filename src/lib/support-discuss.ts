@@ -55,7 +55,7 @@ export async function ensureSupportDiscussChannel(ticket: SupportDiscussTicket):
     name: channelName(ticket),
     description: channelTag(ticket),
     channel_type: 'group',
-    channel_partner_ids: [[6, 0, [supportPartnerId]]],
+    channel_partner_ids: [[4, supportPartnerId]],
   }])
 }
 
