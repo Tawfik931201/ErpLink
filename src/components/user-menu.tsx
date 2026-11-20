@@ -19,7 +19,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { updateUserSettings } from '@/app/actions/settings'
 import { getWorkspaces, setActiveWorkspace } from '@/app/actions/workspaces'
 import { useLanguage } from '@/components/language-provider'
-import { getClerkAppearance } from '@/lib/clerk-appearance'
+import { getClerkProfileAppearance } from '@/lib/clerk-appearance'
 import { cn } from '@/lib/utils'
 
 export default function UserMenu({ 
@@ -110,7 +110,7 @@ export default function UserMenu({
     e.stopPropagation()
     setIsOpen(false)
     if (user) {
-      openUserProfile({ appearance: getClerkAppearance(resolvedTheme === 'dark') })
+      openUserProfile({ appearance: getClerkProfileAppearance(resolvedTheme === 'dark') })
     }
   }
 
