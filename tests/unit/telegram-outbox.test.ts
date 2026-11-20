@@ -2,6 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 import {
+  OUTBOX_INTERVAL_MS,
   TELEGRAM_ARRIVAL_DELAY_MS,
   decideOutboxAction,
   nextAttemptDelayMs,
@@ -22,6 +23,21 @@ const SRC = join(__dirname, '..', '..', 'src')
 function read(...parts: string[]): string {
   return readFileSync(join(SRC, ...parts), 'utf8')
 }
+
+describe('the Telegram idle polling budget', () => {
+  it('defaults to a 10-second interval instead of hammering Supabase every 2 seconds', () => {
+    expect(OUTBOX_INTERVAL_MS).toBeGreaterThanOrEqual(2_000)
+    expect(OUTBOX_INTERVAL_MS).toBeLessThanOrEqual(60_000)
+    if (!process.env.TELEGRAM_OUTBOX_POLL_INTERVAL_MS) {
+      expect(OUTBOX_INTERVAL_MS).toBe(10_000)
+    }
+  })
+
+  it('does not alter the separate Odoo sync-queue polling cadence', () => {
+    const runner = read('lib', 'sync-queue-runner.ts')
+    expect(runner).toContain("envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 10_000, 5_000)")
+  })
+})
 
 describe('the outbox conflict decision', () => {
   it('inserts when nothing is pending for the event', () => {
