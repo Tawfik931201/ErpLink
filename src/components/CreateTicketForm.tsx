@@ -56,9 +56,13 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
       } else {
         setError(result.error || 'Failed to submit support ticket.')
       }
-    } catch (err: any) {
-      console.error(err)
-      setError('An unexpected connection error occurred.')
+    } catch (err: unknown) {
+      console.error('[tickets] submit action failed:', err)
+      setError(
+        err instanceof Error && /body|size|large|413/i.test(err.message)
+          ? 'The attachments may be too large. Please try smaller files or submit the ticket without attachments.'
+          : 'Could not contact the support service. Please check your connection and try again.'
+      )
     } finally {
       setLoading(false)
     }
