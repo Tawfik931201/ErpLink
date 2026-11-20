@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { archiveDatetime, isOdooArchiveEnabled, upsertArchive, updateArchiveBySource } from './central-odoo-archive'
+import { odooContactById, odooContactList, odooContactNewCount, odooSetContactStatus, useOdooContactInbox } from './central-contact-inbox'
 
 /**
  * Storage for the public contact form (`/contact`).
@@ -187,6 +188,12 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
   const offset = Math.max(params.offset ?? 0, 0)
 
   try {
+    // Activate only after the historical backfill is complete. Otherwise old
+    // Supabase-only messages would disappear from the admin inbox.
+    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
+      const result = await odooContactList(params)
+      return { ok: true, rows: result.rows, total: result.total }
+    }
     let query = supabase
       .from('contact_messages')
       .select(LIST_COLUMNS, { count: 'exact' })
@@ -233,6 +240,11 @@ export async function getContactMessageById(id: string): Promise<{
   if (!UUID_RE.test(id)) return { ok: false, row: null, error: 'not_found' }
 
   try {
+    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
+      const row = await odooContactById(id)
+      if (row) return { ok: true, row }
+      // Legacy source fallback until every historic row has been migrated.
+    }
     const { data, error } = await supabase
       .from('contact_messages')
       .select(RECORD_COLUMNS)
@@ -263,6 +275,7 @@ export async function getContactMessageById(id: string): Promise<{
 /** Unread count for the admin nav badge. Never throws — a badge is decoration. */
 export async function countNewContactMessages(): Promise<number> {
   try {
+    if (useOdooContactInbox() && isOdooArchiveEnabled()) return await odooContactNewCount()
     const { count, error } = await supabase
       .from('contact_messages')
       .select('id', { count: 'exact', head: true })
@@ -286,6 +299,16 @@ export async function setContactMessageStatus(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const stamp = status === 'new' ? null : new Date().toISOString()
+    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
+      const updated = await odooSetContactStatus(id, status, actorId)
+      if (updated) {
+        // Keep the legacy copy consistent when one exists.
+        await supabase.from('contact_messages')
+          .update({ status, read_at: stamp, read_by: status === 'new' ? null : actorId })
+          .eq('id', id)
+        return { ok: true }
+      }
+    }
     const { error } = await supabase
       .from('contact_messages')
       .update({
