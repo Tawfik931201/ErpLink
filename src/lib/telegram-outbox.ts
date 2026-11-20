@@ -438,7 +438,7 @@ async function hasLinkedTelegramBot(): Promise<boolean> {
     .select('id').eq('status', 'linked').limit(1)
   if (error) return true // Fail open: never suppress durable delivery on DB errors.
   telegramHasLinkedBot = (data?.length ?? 0) > 0
-  telegramBotPresenceUntil = Date.now() + (telegramHasLinkedBot ? 60_000 : 5 * 60_000)
+  telegramBotPresenceUntil = Date.now() + 60_000
   return telegramHasLinkedBot
 }
 
