@@ -40,11 +40,18 @@ export async function POST(request: NextRequest) {
   }
   // A subscription endpoint identifies one browser device. Rebind to the authenticated
   // workspace on re-login; do not allow old tenant to continue receiving its alerts.
+  const { data: current, error: lookupError } = await supabase.from('browser_push_subscriptions')
+    .select('user_id,workspace_id').eq('endpoint', endpoint).maybeSingle()
+  if (lookupError) return NextResponse.json({ error: 'Subscription lookup unavailable' }, { status: 503 })
+  const sameOwner = current?.user_id === userId && current?.workspace_id === workspaceId
   const { error } = await supabase.from('browser_push_subscriptions').upsert({
     endpoint, p256dh: keys.p256dh, auth_secret: keys.auth,
     user_id: userId, workspace_id: workspaceId,
     updated_at: new Date().toISOString(),
-    last_scanned_at: new Date().toISOString(),
+    // Cursor is reset ONLY on ownership change. Otherwise re-login would skip events.
+    ...(!sameOwner ? {
+      last_scanned_at: new Date().toISOString(), last_receipt_id: null,
+    } : {}),
   }, { onConflict: 'endpoint' })
   if (error) {
     console.error('[push] subscription upsert failed', error.code)
