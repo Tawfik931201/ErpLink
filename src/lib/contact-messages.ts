@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { archiveDatetime, isOdooArchiveEnabled, upsertArchive, updateArchiveBySource } from './central-odoo-archive'
 
 /**
  * Storage for the public contact form (`/contact`).
@@ -106,6 +107,24 @@ export async function insertContactMessage(
       return { ok: false, error: error.message }
     }
 
+    // Best-effort mirror; never lose a public submission if central Odoo is down.
+    if (isOdooArchiveEnabled()) {
+      try {
+        await upsertArchive('contact', String(data.id), {
+          x_name: input.name,
+          x_contact_name: input.name,
+          x_email: input.email,
+          x_phone: input.phone,
+          x_company: input.company,
+          x_subject: 'Public contact form',
+          x_message: input.message,
+          x_status: 'new',
+          x_submitted_at: archiveDatetime(new Date().toISOString()),
+        })
+      } catch (archiveError) {
+        console.error('[contact] Odoo archive mirror failed; Supabase copy retained:', archiveError)
+      }
+    }
     return { ok: true, id: String(data.id) }
   } catch (err) {
     console.error('[contact] failed to save message:', err)
@@ -134,6 +153,17 @@ export async function finalizeContactMessage(
 
     if (error) {
       console.error('[contact] failed to record delivery outcome:', error.message)
+    }
+    if (!error && isOdooArchiveEnabled()) {
+      try {
+        await updateArchiveBySource('contact', id, {
+          x_odoo_ticket_id: data.odooTicketId || 0,
+          x_is_new_customer: Boolean(data.isNewCustomer),
+          x_email_delivered: data.emailDelivered,
+        })
+      } catch (archiveError) {
+        console.error('[contact] Odoo delivery mirror failed:', archiveError)
+      }
     }
   } catch (err) {
     console.error('[contact] failed to record delivery outcome:', err)
