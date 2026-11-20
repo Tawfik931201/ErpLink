@@ -30,6 +30,23 @@ export async function register() {
       // مهلة كان يحتجز عامل المزامنة إلى الأبد.
       const { startTelegramOutboxRunner } = await import('@/lib/telegram-outbox')
       startTelegramOutboxRunner()
+
+      // Browser push is opt-in and separate from the Odoo sync worker.
+      // Keep the sender disabled until VAPID keys are configured on the host.
+      const { drainBrowserPush } = await import('@/lib/app-notifications')
+      const { pushConfigured } = await import('@/lib/browser-push')
+      if (pushConfigured()) {
+        const timers = globalThis as typeof globalThis & { __erpBrowserPushTimer?: NodeJS.Timeout }
+        if (!timers.__erpBrowserPushTimer) {
+          timers.__erpBrowserPushTimer = setInterval(() => {
+            void drainBrowserPush().catch(() => console.warn('[Notifications] Push drain failed'))
+          }, 30_000)
+          timers.__erpBrowserPushTimer.unref?.()
+          setTimeout(() => {
+            void drainBrowserPush().catch(() => {})
+          }, 5_000).unref?.()
+        }
+      }
     }
   }
 }
