@@ -15,7 +15,7 @@ import {
 const SOURCE = 'erp-link:sync-logs:v1'
 const LIMIT = 30
 
-type Cursor = { x_last_archived_created_at: string | false; x_last_archived_id: string | false }
+type Cursor = { x_last_archived_iso: string | false; x_last_archived_id: string | false }
 type SyncRow = {
   id: string
   workspace_id: string | null
@@ -35,9 +35,9 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
   try {
     const checkpoints = await readArchive<Cursor>('context',
       [['x_integration_key', '=', SOURCE]],
-      ['x_last_archived_created_at', 'x_last_archived_id'], { limit: 1 })
+      ['x_last_archived_iso', 'x_last_archived_id'], { limit: 1 })
     const last = checkpoints[0]
-    const timestamp = last?.x_last_archived_created_at
+    const timestamp = last?.x_last_archived_iso
     const lastId = last?.x_last_archived_id
     let query = supabaseAdmin
       .from('sync_logs')
@@ -47,7 +47,7 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
       .limit(LIMIT)
     if (timestamp) {
       // Supabase/PostgREST uses ISO datetime; Odoo stores naive UTC datetime.
-      const iso = new Date(timestamp.replace(' ', 'T') + 'Z').toISOString()
+      const iso = timestamp
       if (lastId) {
         query = query.or(`created_at.gt.${iso},and(created_at.eq.${iso},id.gt.${lastId})`)
       } else {
@@ -83,7 +83,7 @@ export async function archiveSyncLogsBatch(): Promise<{ archived: number; error?
       const checkpointFields = {
         x_name: 'Sync log archive checkpoint',
         x_integration_key: SOURCE,
-        x_last_archived_created_at: archiveDatetime(row.created_at),
+        x_last_archived_iso: row.created_at,
         x_last_archived_id: row.id,
       }
       if (!last && archived === 0) {
