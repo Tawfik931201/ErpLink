@@ -33,7 +33,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
     // Revoked membership must stop delivery immediately, not only on browser logout.
     const { accessibleWorkspaceId } = await import('@/lib/workspace-access')
     if (!(await accessibleWorkspaceId(sub.user_id, sub.workspace_id))) {
-      await supabase.from('browser_push_subscriptions').delete().eq('id', sub.id)
+      // Do not send without confirmed membership. Avoid deleting on a transient DB error.
       continue
     }
     const filter = sub.last_receipt_id
@@ -56,8 +56,6 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
       // Not every webhook generates a toast. Still advance cursor for non-notifiable events.
       const notify = /^(order|product)[._]/i.test(item.event || '')
       if (notify) {
-        const payload = item.payload && typeof item.payload === 'object' ? item.payload : {}
-        const identifier = String(payload.order_number ?? payload.code ?? payload.id ?? '').slice(0, 64)
         const order = /^order/i.test(item.event)
         const created = /(?:create|created)$/i.test(item.event)
         try {
@@ -66,7 +64,7 @@ export async function runBrowserPushOnce(): Promise<{ checked: number; sent: num
             title: order
               ? (created ? 'طلب جديد من زد' : 'تحديث طلب من زد')
               : (created ? 'منتج جديد من زد' : 'تحديث منتج من زد'),
-            body: identifier ? `المعرف: ${identifier}` : 'حدث جديد من زد',
+            body: 'حدث جديد من زد — افتح ERP Link للاطلاع على التفاصيل',
             event: item.event, createdAt: item.received_at,
             url: '/ar-sa/app/logs',
           })
