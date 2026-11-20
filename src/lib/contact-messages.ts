@@ -215,8 +215,12 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
     // Activate only after the historical backfill is complete. Otherwise old
     // Supabase-only messages would disappear from the admin inbox.
     if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      const result = await odooContactList(params)
-      return { ok: true, rows: result.rows, total: result.total }
+      try {
+        const result = await odooContactList(params)
+        return { ok: true, rows: result.rows, total: result.total }
+      } catch (archiveError) {
+        console.warn('[contact] Odoo inbox unavailable, falling back to Supabase:', archiveError)
+      }
     }
     let query = supabase
       .from('contact_messages')
@@ -265,8 +269,12 @@ export async function getContactMessageById(id: string): Promise<{
 
   try {
     if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      const row = await odooContactById(id)
-      if (row) return { ok: true, row }
+      try {
+        const row = await odooContactById(id)
+        if (row) return { ok: true, row }
+      } catch (archiveError) {
+        console.warn('[contact] central Odoo record lookup unavailable:', archiveError)
+      }
       // Legacy source fallback until every historic row has been migrated.
     }
     const { data, error } = await supabase
@@ -299,7 +307,13 @@ export async function getContactMessageById(id: string): Promise<{
 /** Unread count for the admin nav badge. Never throws — a badge is decoration. */
 export async function countNewContactMessages(): Promise<number> {
   try {
-    if (useOdooContactInbox() && isOdooArchiveEnabled()) return await odooContactNewCount()
+    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
+      try {
+        return await odooContactNewCount()
+      } catch (archiveError) {
+        console.warn('[contact] central Odoo unread count unavailable:', archiveError)
+      }
+    }
     const { count, error } = await supabase
       .from('contact_messages')
       .select('id', { count: 'exact', head: true })
