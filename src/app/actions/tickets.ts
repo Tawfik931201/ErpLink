@@ -5,7 +5,8 @@ import crypto from 'crypto'
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache'
 
-import { isAdmin } from '@/lib/auth'
+import { isAdmin, getActiveWorkspaceId } from '@/lib/auth'
+import { isOdooArchiveEnabled, readArchive, updateArchiveBySource, upsertArchive } from '@/lib/central-odoo-archive'
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
 
@@ -215,6 +216,27 @@ export async function createTicket(formData: FormData) {
       )
     }
 
+    // Mirror metadata to the central ERP Link Odoo database; the original
+    // helpdesk ticket and chatter remain the source of truth for replies/files.
+    if (isOdooArchiveEnabled()) {
+      try {
+        const workspaceId = await getActiveWorkspaceId()
+        await upsertArchive('support', `helpdesk:${ticketId}`, {
+          x_name: title.trim(),
+          x_subject: title.trim(),
+          x_description: description?.trim() || '',
+          x_email: customerEmail,
+          x_contact_name: partnerName,
+          x_user_id: userId,
+          x_workspace_uuid: workspaceId || '',
+          x_helpdesk_ticket_id: ticketId,
+          x_status: 'open',
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo mirror unavailable; helpdesk ticket retained:', mirrorError)
+      }
+    }
+
     // 5. Force a revalidation of the tickets page so the UI updates with the new ticket
     revalidatePath('/app/tickets')
 
@@ -365,12 +387,41 @@ export async function sendTicketMessage(formData: FormData) {
       kwargs.attachment_ids = attachmentIds
     }
 
-    await executeKw<number>(
+    const postedMessageId = await executeKw<number>(
       'helpdesk.ticket',
       'message_post',
       [ticketId],
       kwargs
     )
+
+    if (isOdooArchiveEnabled()) {
+      try {
+        const workspaceId = await getActiveWorkspaceId()
+        const existingCentral = await readArchive<{ id: number }>('support',
+          [['x_source_uuid', '=', `helpdesk:${ticketId}`]], ['id'], { limit: 1 })
+        const centralTicketId = existingCentral[0]?.id || await upsertArchive('support',
+          `helpdesk:${ticketId}`, {
+            x_name: `Support ticket ${ticketId}`,
+            x_helpdesk_ticket_id: ticketId,
+            x_email: email,
+            x_user_id: userId,
+            x_workspace_uuid: workspaceId || '',
+          })
+        await upsertArchive('supportMessage', `helpdesk-message:${postedMessageId}`, {
+          x_name: `Reply to ticket ${ticketId}`,
+          x_support_ticket_id: centralTicketId,
+          x_helpdesk_ticket_id: ticketId,
+          x_user_id: userId,
+          x_workspace_uuid: workspaceId || '',
+          x_author_email: email,
+          x_message: messageContent.trim(),
+          x_attachment_names: files.filter(file => file.size > 0).map(file => file.name).join(', '),
+          x_submitted_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo reply mirror failed; original helpdesk message retained:', mirrorError)
+      }
+    }
 
     // Revalidate the page path
     revalidatePath('/app/tickets')
@@ -433,6 +484,16 @@ export async function closeTicket(ticketId: number) {
       'write',
       [[ticketId], { stage_id: closedStageId }]
     )
+
+    if (isOdooArchiveEnabled()) {
+      try {
+        await updateArchiveBySource('support', `helpdesk:${ticketId}`, {
+          x_status: 'closed',
+        })
+      } catch (mirrorError) {
+        console.error('[tickets] central Odoo close mirror failed:', mirrorError)
+      }
+    }
 
     revalidatePath('/app/tickets')
     revalidateTag('pending-tickets')

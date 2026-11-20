@@ -4,6 +4,7 @@ import { auth } from '@clerk/nextjs/server'
 import { revalidatePath } from 'next/cache'
 
 import { validateExecutionTarget, withErpTarget } from '@/lib/erp-execution-target'
+import { isOdooArchiveEnabled, readArchive } from '@/lib/central-odoo-archive'
 import { SHOPIFY_TOPIC_CATALOG } from '@/lib/shopify-topics'
 import { supabase } from '@/lib/supabase'
 import { processSingleMapping, processWebhookEvent } from '@/lib/sync-engine'
@@ -363,6 +364,55 @@ export async function getSyncLogById(logId: string) {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
       throw new Error('No active workspace selected')
+    }
+
+    // Historical detail reads prefer the copied administrative Odoo archive.
+    // The workspace is always derived from the authenticated session, never
+    // from the caller, preventing cross-tenant access to centralized records.
+    if (isOdooArchiveEnabled()) {
+      try {
+        const archived = await readArchive<{
+          x_source_uuid: string
+          x_event_type: string | false
+          x_status: string | false
+          x_store_id: string | false
+          x_platform: string | false
+          x_details: string | false
+          x_source_created_at: string | false
+        }>('event', [
+          ['x_source_uuid', '=', logId],
+          ['x_source_table', '=', 'sync_logs'],
+          ['x_workspace_uuid', '=', user.active_workspace_id],
+        ], ['x_source_uuid','x_event_type','x_status','x_store_id','x_platform',
+            'x_details','x_source_created_at'], { limit: 1 })
+        if (archived.length) {
+          const entry = archived[0]
+          let details: Record<string, unknown> = {}
+          try { details = JSON.parse(entry.x_details || '{}') } catch {}
+          const archiveLog: SyncLogRow = {
+            id: entry.x_source_uuid,
+            event: entry.x_event_type || null,
+            status: entry.x_status || null,
+            store_id: entry.x_store_id || null,
+            platform: (entry.x_platform || null) as StorePlatform | null,
+            error_message: typeof details.error === 'string' ? details.error : null,
+            payload: details.payload ?? null,
+            zid_entity_id: null,
+            odoo_model: typeof details.odoo_model === 'string' ? details.odoo_model : null,
+            odoo_record_id: typeof details.odoo_record_id === 'number' ? details.odoo_record_id : null,
+            field_mapping_id: null,
+            trigger_type: null,
+            resolved_manually: null,
+            created_at: entry.x_source_created_at
+              ? new Date(entry.x_source_created_at.replace(' ', 'T') + 'Z').toISOString()
+              : null,
+            field_mappings: null,
+          }
+          return { success: true, log: archiveLog }
+        }
+      } catch (archiveError) {
+        console.warn('[logs] central Odoo detail read failed; using Supabase fallback:', archiveError)
+      }
     }
 
     const { data: log, error } = await supabase

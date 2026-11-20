@@ -251,10 +251,11 @@ describe('restore returns the item to the queue', () => {
 
 })
 
-describe('the seven-day promise is actually enforced', () => {
-  it('purges on the expiry column, not on the archive timestamp', () => {
+describe('manual archive is preserved without age-based purging', () => {
+  it('does not delete archive rows based on age', () => {
     const prune = flat(readSource(PRUNE_PATH))
-    expect(prune).toContain(`from(QUEUE_ARCHIVES_TABLE) .delete() .lt('expires_at'`)
+    expect(prune).not.toContain('.delete()')
+    expect(prune).toContain('return 0')
   })
 
   it('keeps the database calls out of the module a client component imports', () => {
@@ -264,7 +265,7 @@ describe('the seven-day promise is actually enforced', () => {
     expect(pure).not.toContain('@/lib/supabase')
     expect(pure).not.toContain('from(')
     const prune = readSource(PRUNE_PATH)
-    expect(prune).toContain("@/lib/supabase")
+    expect(prune).not.toContain("@/lib/supabase")
     expect(prune).toMatch(/export async function pruneExpiredQueueArchives/)
   })
 
@@ -347,7 +348,7 @@ describe('self-check: the pins detect a reverted rule', () => {
   it('detects the supabase import creeping back into the client-imported module', () => {
     const guard = (src: string) => !src.includes('@/lib/supabase')
     expect(guard(readSource(LIB_PATH))).toBe(true)
-    expect(guard(readSource(PRUNE_PATH))).toBe(false)
+    expect(guard(readSource(PRUNE_PATH))).toBe(true)
   })
 })
 
