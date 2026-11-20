@@ -62,7 +62,7 @@ export function useOdooContactInbox(): boolean {
 export async function odooContactList(params: {
   status?: ContactMessageStatus | 'all'; limit?: number; offset?: number
 }): Promise<{ rows: ContactMessageListRow[]; total: number }> {
-  const domain: unknown[] = [['x_source_uuid', '!=', false]]
+  const domain: unknown[] = [['x_source_uuid', '!=', false], ['x_status', '!=', 'test']]
   if (params.status && params.status !== 'all') domain.push(['x_status', '=', params.status])
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 200)
   const offset = Math.max(params.offset ?? 0, 0)
