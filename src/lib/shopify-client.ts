@@ -386,75 +386,107 @@ export async function createShopifyProduct(shopDomain: string, data: any) {
 }
 
 /**
- * Register a webhook in Shopify (toggle ON يسجّل اشتراكاً حقيقياً).
- * 429 تُعالَج بانتظار Retry-After ثم محاولة واحدة.
+ * Convert Shopify REST-style webhook slugs (orders/create) to the GraphQL
+ * WebhookSubscriptionTopic enum (ORDERS_CREATE), and back.
  */
-export async function registerShopifyWebhook(shopDomain: string, topic: string, accessToken: string) {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
-  if (!appUrl) return null
-  const address = `${appUrl}/api/webhooks/shopify`
-  const url = shopifyApiUrl(shopDomain, '/webhooks.json')
+function shopifyTopicEnum(topic: string): string {
+  return String(topic || '').trim().replace('/', '_').toUpperCase()
+}
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await axios({
-        method: 'POST',
-        url,
-        headers: {
-          'X-Shopify-Access-Token': accessToken,
-          'Content-Type': 'application/json',
-        },
-        data: {
-          webhook: {
-            topic,
-            address,
-            format: 'json',
-          },
-        },
-      })
-      return response.data
-    } catch (err: any) {
-      if (err?.response?.status === 429 && attempt === 0) {
-        await sleep(getShopifyRetryDelayMs(err))
-        continue
-      }
-      return null
-    }
-  }
-  return null
+function shopifyTopicSlug(topic: string): string {
+  const lower = String(topic || '').trim().toLowerCase()
+  const split = lower.indexOf('_')
+  return split < 0 ? lower : `${lower.slice(0, split)}/${lower.slice(split + 1)}`
 }
 
 /**
- * Lists webhooks registered in a Shopify shop, as plain JSON (no pagination needed
- * for typical app webhook counts).
+ * Register a shop-scoped webhook through GraphQL Admin API.
+ * App-scoped subscriptions are also declared in shopify.app.toml; this dynamic
+ * path exists so per-store Mapping Center toggles can be reconciled safely.
  */
+export async function registerShopifyWebhook(shopDomain: string, topic: string, _accessToken?: string) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
+  if (!appUrl) return null
+  const address = `${appUrl}/api/webhooks/shopify`
+  const mutation = `
+    mutation ErpLinkWebhookCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+      webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+        webhookSubscription { id topic uri }
+        userErrors { field message }
+      }
+    }
+  `
+  try {
+    const data = await callShopifyGraphQL(shopDomain, mutation, {
+      topic: shopifyTopicEnum(topic),
+      webhookSubscription: { uri: address },
+    })
+    const result = data?.webhookSubscriptionCreate
+    if (result?.userErrors?.length) {
+      const duplicateOnly = result.userErrors.every((e: any) =>
+        String(e?.message || '').toLowerCase().includes('already')
+      )
+      if (!duplicateOnly) {
+        console.warn('[Shopify] webhookSubscriptionCreate:', result.userErrors)
+        return null
+      }
+    }
+    return result?.webhookSubscription || { topic, uri: address }
+  } catch (err: any) {
+    console.warn('[Shopify] GraphQL webhook registration failed:', err?.message || err)
+    return null
+  }
+}
+
+/** Lists shop-scoped webhook subscriptions created through the Admin API. */
 export async function listShopifyWebhooks(shopDomain: string): Promise<any[]> {
   try {
-    const res = await callShopifyREST(shopDomain, 'GET', '/webhooks.json?limit=250')
-    return res?.webhooks || []
+    const data = await callShopifyGraphQL(
+      shopDomain,
+      `query ErpLinkWebhooks {
+        webhookSubscriptions(first: 250) {
+          nodes { id topic uri }
+        }
+      }`
+    )
+    return (data?.webhookSubscriptions?.nodes || []).map((wh: any) => ({
+      id: wh.id,
+      topic: shopifyTopicSlug(wh.topic),
+      address: wh.uri,
+      uri: wh.uri,
+    }))
   } catch {
     return []
   }
 }
 
-/**
- * Deletes all webhooks pointing to our /api/webhooks/shopify endpoint.
- * Called on store disconnect to avoid orphaned webhook deliveries.
- */
+async function deleteShopifyWebhookSubscription(shopDomain: string, id: string): Promise<boolean> {
+  try {
+    const data = await callShopifyGraphQL(
+      shopDomain,
+      `mutation ErpLinkWebhookDelete($id: ID!) {
+        webhookSubscriptionDelete(id: $id) {
+          deletedWebhookSubscriptionId
+          userErrors { field message }
+        }
+      }`,
+      { id }
+    )
+    const result = data?.webhookSubscriptionDelete
+    return !!result?.deletedWebhookSubscriptionId && !(result?.userErrors?.length)
+  } catch {
+    return false
+  }
+}
+
+/** Deletes all shop-scoped webhooks pointing to the ErpLink endpoint. */
 export async function unregisterShopifyWebhooks(shopDomain: string): Promise<void> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
   if (!appUrl) return
   const ourAddress = `${appUrl}/api/webhooks/shopify`
-
   const webhooks = await listShopifyWebhooks(shopDomain)
-  const toDelete = webhooks.filter((wh: any) => wh.address === ourAddress)
-
-  for (const wh of toDelete) {
-    try {
-      await callShopifyREST(shopDomain, 'DELETE', `/webhooks/${wh.id}.json`)
-    } catch {
-      // best-effort تنظيف — الفشل غير قاتل
-    }
+  for (const wh of webhooks.filter((w: any) => w.address === ourAddress)) {
+    await deleteShopifyWebhookSubscription(shopDomain, String(wh.id))
   }
 }
 
@@ -518,104 +550,100 @@ export async function listShopifyProducts(
 }
 
 /**
- * Lists customers from Shopify with cursor-based pagination.
- * تبقى REST: customers تتطلب read_customers (بيانات محمية) ولا توجد حاجة
- * لـ bulk GraphQL هنا — الحقول مُقلَّصة عمداً (بدون select(*)).
+ * Lists customers through GraphQL Admin API. This requires read_customers and
+ * Shopify protected-customer-data approval for public apps.
  */
 export async function listShopifyCustomers(
   shopDomain: string,
   limit: number = 250,
   pageInfo?: string
 ): Promise<{ customers: any[]; nextPageInfo: string | null }> {
-  const safeLimit = Math.min(Math.max(limit || 50, 1), 250)
-  let endpoint = `/customers.json?limit=${safeLimit}&fields=id,first_name,last_name,email,phone,orders_count,total_spent,created_at`
-  if (pageInfo) endpoint += `&page_info=${encodeURIComponent(pageInfo)}`
-
-  const { data: body, headers } = await shopifyRestGetWithHeaders(shopDomain, endpoint)
-  const nextPageInfo = extractNextPageInfo(headers?.link || '')
-
-  const customers = ((body as any)?.customers || []).map((c: any) => ({
-    id: c.id,
-    first_name: c.first_name || '',
-    last_name: c.last_name || '',
-    name: `${c.first_name || ''} ${c.last_name || ''}`.trim(),
-    email: c.email || '',
-    phone: c.phone || '',
-    orders_count: c.orders_count ?? 0,
-    total_spent: c.total_spent || '0.00',
-    created_at: c.created_at || '',
+  const first = Math.min(Math.max(limit || 50, 1), 250)
+  const data = await callShopifyGraphQL(
+    shopDomain,
+    `query ErpLinkCustomers($first: Int!, $after: String) {
+      customers(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id legacyResourceId firstName lastName displayName
+          defaultEmailAddress { emailAddress }
+          defaultPhoneNumber { phoneNumber }
+          numberOfOrders
+          amountSpent { amount currencyCode }
+          createdAt
+        }
+      }
+    }`,
+    { first, after: pageInfo || null }
+  )
+  const conn = data?.customers
+  const customers = (conn?.nodes || []).map((c: any) => ({
+    id: String(c.legacyResourceId || c.id).split('/').pop(),
+    first_name: c.firstName || '',
+    last_name: c.lastName || '',
+    name: c.displayName || [c.firstName, c.lastName].filter(Boolean).join(' '),
+    email: c.defaultEmailAddress?.emailAddress || '',
+    phone: c.defaultPhoneNumber?.phoneNumber || '',
+    orders_count: Number(c.numberOfOrders ?? 0),
+    total_spent: c.amountSpent?.amount || '0.00',
+    created_at: c.createdAt || '',
   }))
-  return { customers, nextPageInfo }
+  return {
+    customers,
+    nextPageInfo: conn?.pageInfo?.hasNextPage ? (conn.pageInfo.endCursor as string) : null,
+  }
 }
 
 /**
- * Lists collections (categories) from Shopify.
- *
- * Shopify has NO unified collections listing endpoint — only
- * `custom_collections.json` and `smart_collections.json` (same pattern as
- * category-mappings.ts). The previous single-endpoint call 404'd, which broke
- * Data Transfer category pulls from Shopify.
- *
- * Both endpoints are drained internally and merged, so the full list is
- * returned in one shot with `nextPageInfo: null`. `limit` bounds the
- * per-endpoint page size; `pageInfo` is accepted for signature compatibility
- * but unused — callers always start with `undefined` and stop on `null`.
+ * Lists Shopify collections through the unified GraphQL Collection connection.
  */
 export async function listShopifyCollections(
   shopDomain: string,
   limit: number = 250,
-  _pageInfo?: string
+  pageInfo?: string
 ): Promise<{ collections: any[]; nextPageInfo: string | null }> {
-  const safeLimit = Math.min(Math.max(limit || 50, 1), 250)
-  const toRow = (c: any) => ({
-    id: c.id,
+  const first = Math.min(Math.max(limit || 50, 1), 250)
+  const data = await callShopifyGraphQL(
+    shopDomain,
+    `query ErpLinkCollections($first: Int!, $after: String) {
+      collections(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id legacyResourceId title handle descriptionHtml updatedAt sortOrder
+        }
+      }
+    }`,
+    { first, after: pageInfo || null }
+  )
+  const conn = data?.collections
+  const collections = (conn?.nodes || []).map((c: any) => ({
+    id: String(c.legacyResourceId || c.id).split('/').pop(),
     title: c.title || '',
     handle: c.handle || '',
-    body_html: c.body_html || '',
-    published_at: c.published_at || '',
-  })
-
-  async function drain(endpoint: string, key: string): Promise<any[]> {
-    const rows: any[] = []
-    let pageInfo: string | null = null
-    do {
-      let url = `/${endpoint}.json?limit=${safeLimit}&fields=id,title,handle,body_html,published_at`
-      if (pageInfo) url += `&page_info=${encodeURIComponent(pageInfo)}`
-      const { data: body, headers } = await shopifyRestGetWithHeaders(shopDomain, url)
-      for (const c of ((body as any)?.[key] || [])) rows.push(toRow(c))
-      pageInfo = extractNextPageInfo(headers?.link || '')
-    } while (pageInfo)
-    return rows
+    body_html: c.descriptionHtml || '',
+    updated_at: c.updatedAt || '',
+    sort_order: c.sortOrder || '',
+  }))
+  return {
+    collections,
+    nextPageInfo: conn?.pageInfo?.hasNextPage ? (conn.pageInfo.endCursor as string) : null,
   }
-
-  const [custom, smart] = await Promise.all([
-    drain('custom_collections', 'custom_collections'),
-    drain('smart_collections', 'smart_collections'),
-  ])
-  return { collections: [...custom, ...smart], nextPageInfo: null }
 }
 
 /**
- * Deletes webhooks for a single topic pointing at our endpoint.
- * Used when a sync toggle is switched OFF (ON path uses registerShopifyWebhook).
- * Returns the number of deleted webhooks.
+ * Deletes shop-scoped webhooks for a single topic pointing at our endpoint.
  */
 export async function unregisterShopifyWebhookTopic(shopDomain: string, topic: string): Promise<number> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? ''
   if (!appUrl) return 0
   const ourAddress = `${appUrl}/api/webhooks/shopify`
-
   const webhooks = await listShopifyWebhooks(shopDomain)
   const toDelete = webhooks.filter((wh: any) => wh.topic === topic && wh.address === ourAddress)
-
+  let removed = 0
   for (const wh of toDelete) {
-    try {
-      await callShopifyREST(shopDomain, 'DELETE', `/webhooks/${wh.id}.json`)
-    } catch {
-      // best-effort — تجاهل فشل الحذف المفرد
-    }
+    if (await deleteShopifyWebhookSubscription(shopDomain, String(wh.id))) removed++
   }
-  return toDelete.length
+  return removed
 }
 
 /**
