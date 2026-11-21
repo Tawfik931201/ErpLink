@@ -330,20 +330,88 @@ export async function findShopifyProductByMatchField(
   }
 }
 
-/**
- * Updates a product in Shopify (REST — تُبقي REST لأن productSet في GraphQL
- * معقدة للمتغيرات الجزئية؛ 429 تُعالَج في callShopifyREST).
- */
-export async function updateShopifyProduct(shopDomain: string, shopifyProductId: string, data: any) {
-  return callShopifyREST(shopDomain, 'PUT', `/products/${shopifyProductId}.json`, { product: data })
+function shopifyProductSetInput(data: any): Record<string, any> {
+  const input: Record<string, any> = {}
+  if (data?.title ?? data?.name) input.title = String(data.title ?? data.name)
+  if (data?.body_html ?? data?.descriptionHtml ?? data?.description) {
+    input.descriptionHtml = String(data.body_html ?? data.descriptionHtml ?? data.description)
+  }
+  if (data?.vendor != null) input.vendor = String(data.vendor)
+  if (data?.product_type ?? data?.productType) input.productType = String(data.product_type ?? data.productType)
+  if (data?.handle) input.handle = String(data.handle)
+  if (data?.status) input.status = String(data.status).toUpperCase()
+  if (data?.tags) {
+    input.tags = Array.isArray(data.tags)
+      ? data.tags.map(String)
+      : String(data.tags).split(',').map((v) => v.trim()).filter(Boolean)
+  }
+
+  const rawVariants = Array.isArray(data?.variants) ? data.variants : []
+  const rawOptions = Array.isArray(data?.options) ? data.options : []
+  if (rawVariants.length > 0) {
+    const options = rawOptions.length > 0
+      ? rawOptions.slice(0, 3).map((option: any, index: number) => ({
+          name: String(option?.name || `Option ${index + 1}`),
+          position: index + 1,
+          values: (Array.isArray(option?.values) ? option.values : [])
+            .map((value: any) => ({ name: String(value) })),
+        }))
+      : [{ name: 'Title', position: 1, values: [{ name: 'Default Title' }] }]
+
+    input.productOptions = options
+    input.variants = rawVariants.map((variant: any) => {
+      const optionValues = rawOptions.length > 0
+        ? options.map((option: any, index: number) => ({
+            optionName: option.name,
+            name: String(variant?.[`option${index + 1}`] || option.values?.[0]?.name || 'Default'),
+          }))
+        : [{ optionName: 'Title', name: 'Default Title' }]
+      const row: Record<string, any> = { optionValues }
+      if (variant?.id && String(variant.id).startsWith('gid://')) row.id = String(variant.id)
+      if (variant?.price != null) row.price = String(variant.price)
+      if (variant?.compare_at_price != null) row.compareAtPrice = String(variant.compare_at_price)
+      if (variant?.sku != null) row.sku = String(variant.sku)
+      if (variant?.barcode != null) row.barcode = String(variant.barcode)
+      return row
+    })
+  }
+  return input
 }
 
-/**
- * Creates a product in Shopify from an Odoo-derived payload.
- * Accepts a minimal product payload (title, body_html) and optionally variants.
- */
+async function productSet(
+  shopDomain: string,
+  data: any,
+  identifier?: { id?: string; handle?: string }
+) {
+  const mutation = `
+    mutation ErpLinkProductSet($input: ProductSetInput!, $identifier: ProductSetIdentifiers) {
+      productSet(input: $input, identifier: $identifier, synchronous: true) {
+        product { id title handle }
+        userErrors { field message code }
+      }
+    }
+  `
+  const response = await callShopifyGraphQL(shopDomain, mutation, {
+    input: shopifyProductSetInput(data),
+    identifier: identifier || null,
+  })
+  const result = response?.productSet
+  if (result?.userErrors?.length) {
+    throw new Error(result.userErrors.map((e: any) => e.message).join('; '))
+  }
+  return result?.product
+}
+
+/** Updates a Shopify product through the current GraphQL productSet API. */
+export async function updateShopifyProduct(shopDomain: string, shopifyProductId: string, data: any) {
+  const raw = String(shopifyProductId || '')
+  const id = raw.startsWith('gid://') ? raw : `gid://shopify/Product/${raw}`
+  return productSet(shopDomain, data, { id })
+}
+
+/** Creates a Shopify product through the current GraphQL productSet API. */
 export async function createShopifyProduct(shopDomain: string, data: any) {
-  return callShopifyREST(shopDomain, 'POST', '/products.json', { product: data })
+  return productSet(shopDomain, data)
 }
 
 /**
