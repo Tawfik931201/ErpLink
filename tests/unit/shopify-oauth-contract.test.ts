@@ -28,6 +28,8 @@ describe('Shopify OAuth contract and workspace isolation', () => {
     expect(callback).toContain(".eq('workspace_id', workspaceId)")
     expect(callback).toContain('revalidateTag(')
     expect(callback).toContain('failedSubscriptions > 0')
+    expect(callback).toContain('hasRequiredShopifyScopes(')
+    expect(callback).toContain("expiring: '1'")
   })
 
   it('does not unregister Shopify webhooks for a store in another workspace', () => {
