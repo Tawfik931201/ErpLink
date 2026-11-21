@@ -42,7 +42,7 @@ uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
 #   installs stay minimal and review-friendly.
 scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_customers,write_customers"
 optional_scopes = ["write_orders", "read_all_orders"]
-use_legacy_install_flow = false
+use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [
