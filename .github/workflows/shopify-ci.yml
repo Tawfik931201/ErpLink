@@ -33,6 +33,8 @@ jobs:
       SHOPIFY_CLIENT_SECRET: offline-secret-only
       SHOPIFY_REDIRECT_URI: https://erplink.bizsahla.com/api/shopify/callback
       NODE_OPTIONS: --max-old-space-size=3072
+      SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
+      APP_AUTOMATION_TOKEN: ${{ secrets.SHOPIFY_APP_AUTOMATION_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,13 +43,22 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Validate Shopify app configuration (CLI 5.0.2)
+      - name: Validate Shopify app configuration with authenticated CLI (if configured)
+        if: env.SERVICE_ACCOUNT_TOKEN != '' || env.APP_AUTOMATION_TOKEN != ''
         run: |
+          if [ -n "$SERVICE_ACCOUNT_TOKEN" ]; then
+            export SHOPIFY_SERVICE_ACCOUNT_TOKEN="$SERVICE_ACCOUNT_TOKEN"
+          else
+            export SHOPIFY_APP_AUTOMATION_TOKEN="$APP_AUTOMATION_TOKEN"
+          fi
           npm install --global @shopify/cli@5.0.2
           shopify app config validate --no-input
+      - name: Shopify CLI validation unavailable without Shopify credentials
+        if: env.SERVICE_ACCOUNT_TOKEN == '' && env.APP_AUTOMATION_TOKEN == ''
+        run: echo "CLI schema validation skipped; requires an authenticated Shopify account."
       - name: TypeScript
         run: npm run type-check
       - name: Shopify OAuth and webhook regression tests
-        run: npm test -- --runInBand tests/unit/shopify-oauth-state.test.ts tests/unit/shopify-oauth-contract.test.ts tests/unit/shopify-platform-integration.test.ts tests/unit/shopify-webhook-gate.test.ts
+        run: npm test -- --runInBand --testPathPattern=tests/unit/shopify-
       - name: Next.js production build
         run: npm run build
