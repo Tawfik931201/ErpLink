@@ -5,7 +5,6 @@ import { headers } from 'next/headers'
 import { insertContactMessage, finalizeContactMessage } from '@/lib/contact-messages'
 import { sendEmail } from '@/lib/email'
 import { contactMessageEmail } from '@/lib/email-templates'
-import { executeKw } from '@/lib/odoo'
 import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 
 /**
@@ -84,90 +83,10 @@ export async function submitContact(formData: FormData) {
   })
   const savedId = saved.ok ? saved.id : null
 
-  // ── 2. Odoo helpdesk ticket (best effort) ─────────────────────────────────
-  let ticketId: number | null = null
-  let isNewCustomer: boolean | null = null
-
-  try {
-    const existingPartnerIds = await executeKw<number[]>('res.partner', 'search', [
-      ['|', ['email', '=', customerEmail], ['phone', '=', customerPhone]],
-    ])
-    const existingPartnerId = existingPartnerIds[0]
-    isNewCustomer = !existingPartnerId
-
-    let partnerId: number
-
-    if (isNewCustomer) {
-      let parentId: number | false = false
-      if (customerCompany) {
-        const companyIds = await executeKw<number[]>('res.partner', 'search', [
-          [['name', '=', customerCompany], ['is_company', '=', true]],
-        ])
-        parentId = (companyIds[0] as number | undefined) || false
-        if (!parentId) {
-          parentId = await executeKw<number>('res.partner', 'create', [
-            {
-              name: customerCompany,
-              is_company: true,
-            },
-          ])
-        }
-      }
-
-      partnerId = await executeKw<number>('res.partner', 'create', [
-        {
-          name: customerName,
-          email: customerEmail,
-          phone: customerPhone,
-          is_company: false,
-          ...(parentId ? { parent_id: parentId } : {}),
-        },
-      ])
-    } else {
-      partnerId = existingPartnerId
-    }
-
-    const tagName = isNewCustomer ? 'عميل جديد' : 'مسجل بالفعل على السيستم'
-    const existingTags = await executeKw<number[]>('helpdesk.tag', 'search', [
-      [['name', '=', tagName]],
-    ])
-    let tagId = existingTags[0]
-
-    if (!tagId) {
-      tagId = await executeKw<number>('helpdesk.tag', 'create', [{ name: tagName }])
-    }
-
-    ticketId = await executeKw<number>('helpdesk.ticket', 'create', [
-      {
-        name: `[Contact Form] ${customerName}${isNewCustomer ? ' (عميل جديد)' : ''}`,
-        description: customerMessage,
-        partner_id: partnerId,
-        team_id: 1,
-        tag_ids: [tagId],
-      },
-    ])
-
-    const chatterBody = [
-      `📩 رسالة جديدة من نموذج الاتصال:`,
-      ``,
-      `👤 الاسم: ${customerName}`,
-      `🏢 الشركة: ${customerCompany}`,
-      `📧 البريد الإلكتروني: ${customerEmail}`,
-      `📱 رقم الجوال: ${customerPhone}`,
-      ``,
-      `— — — — — — — — — — — — — —`,
-      ``,
-      `${customerMessage}`,
-    ].join('\n')
-
-    await executeKw<number>('helpdesk.ticket', 'message_post', [ticketId], {
-      body: chatterBody,
-      message_type: 'comment',
-      subtype_xmlid: 'mail.mt_note',
-    })
-  } catch (err) {
-    console.error('[contact] helpdesk ticket failed:', err)
-  }
+  // Platform contact submissions stay in Supabase. Merchant Odoo connections
+  // must never be used as the ERP Link public support inbox.
+  const ticketId: number | null = null
+  const isNewCustomer: boolean | null = null
 
   // ── 3. Email (opt-in via CONTACT_INBOX_EMAIL; off by default) ─────────────
   let emailed = false
