@@ -39,10 +39,9 @@ export async function GET(request: NextRequest) {
     const authUrl = new URL(`https://${cleanShop}/admin/oauth/authorize`)
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('redirect_uri', redirectUri)
-    // Minimal install scopes (read-only core = catalog + orders + inventory).
-    // Must stay in sync with shopify.app.toml [access_scopes]. write_* and
-    // customers scopes are requested later as optional scopes when needed.
-    authUrl.searchParams.set('scope', 'read_products,read_orders,read_inventory,read_locations')
+    // Core scopes required by the features exposed at install time: inbound catalog/orders/customers,
+    // plus Data Transfer writes for products/collections/customers. Keep this in sync with shopify.app.toml.
+    authUrl.searchParams.set('scope', 'read_products,write_products,read_orders,read_inventory,read_locations,read_customers,write_customers')
     authUrl.searchParams.set('state', state)
 
     const response = NextResponse.redirect(authUrl.toString())
