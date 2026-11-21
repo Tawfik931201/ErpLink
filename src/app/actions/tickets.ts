@@ -10,6 +10,7 @@ import { isOdooArchiveEnabled, readArchive, updateArchiveBySource, upsertArchive
 import { executeKw } from '@/lib/odoo'
 import { getOrCreateDbUser } from '@/lib/users'
 import { ensureSupportDiscussChannel, getSupportDiscussMessages, postSupportDiscussMessage } from '@/lib/support-discuss'
+import { listSupabaseTickets, createSupabaseTicket, readSupabaseMessages, sendSupabaseMessage, closeSupabaseTicket, pendingSupabaseTickets } from '@/lib/supabase-support'
 
 export interface Ticket {
   id: number;
@@ -123,6 +124,8 @@ async function assertOwnsTicket(ticketId: number): Promise<void> {
  */
 
 export async function getClientTickets() {
+  try { return { success: true, tickets: await listSupabaseTickets() } }
+  catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Ticket list failed' } }
   const { userId } = await auth()
   const user = await currentUser()
   if (!userId || !user) throw new Error('Unauthorized access')
@@ -206,6 +209,15 @@ export async function createTicket(formData: FormData) {
 
   if (!title || !title.trim()) {
     return { success: false, error: 'Please provide a ticket title.' }
+  }
+
+  // Platform support tickets are exclusively persisted in Supabase.
+  try {
+    const result = await createSupabaseTicket(title, description, files)
+    if (result.success) revalidatePath('/app/tickets')
+    return result
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Ticket creation failed' }
   }
 
   // Central ERP Link support is the primary backend when configured. The legacy
@@ -371,6 +383,10 @@ export async function createTicket(formData: FormData) {
  * along with attachment details (name, mimetype).
  */
 export async function getTicketMessages(ticketId: number) {
+  if (ticketId < 0) {
+    try { return await readSupabaseMessages(ticketId) }
+    catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Ticket messages unavailable' } }
+  }
   if (ticketId < 0 && isOdooArchiveEnabled()) {
     try {
       const ticket = await centralTicketForUser(-ticketId)
@@ -481,6 +497,15 @@ export async function sendTicketMessage(formData: FormData) {
   const files = formData.getAll('attachments') as File[]
 
   const ticketId = parseInt(ticketIdStr, 10)
+  if (ticketId < 0) {
+    try {
+      const result = await sendSupabaseMessage(ticketId, messageContent || '', files)
+      if (result.success) revalidatePath('/app/tickets')
+      return result
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Ticket reply failed' }
+    }
+  }
   if (ticketId < 0 && isOdooArchiveEnabled()) {
     try {
       const ticket = await centralTicketForUser(-ticketId)
@@ -613,6 +638,13 @@ export async function sendTicketMessage(formData: FormData) {
  * Closes a support ticket by moving it to the "Closed" stage in Odoo.
  */
 export async function closeTicket(ticketId: number) {
+  if (ticketId < 0) {
+    try {
+      const result = await closeSupabaseTicket(ticketId)
+      if (result.success) revalidatePath('/app/tickets')
+      return result
+    } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Ticket close failed' } }
+  }
   if (ticketId < 0 && isOdooArchiveEnabled()) {
     try {
       const ticket = await centralTicketForUser(-ticketId)
@@ -795,6 +827,8 @@ const getCachedPendingTickets = unstable_cache(
  * Uses a 60-second in-memory cache to avoid 3 Odoo XML-RPC calls on every navigation.
  */
 export async function checkPendingTickets() {
+  try { return await pendingSupabaseTickets() }
+  catch { return { success: false, hasPending: false } }
   const { userId } = await auth()
   const user = await currentUser()
   if (!userId || !user) {
