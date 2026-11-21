@@ -215,6 +215,11 @@ export default function StoreSelector({
   const [copiedId, setCopiedId] = useState(false)
 
   const getSuccessMessage = (s: string) => {
+    if (s === 'shopify_existing') {
+      return ar
+        ? 'تم فتح اتصال متجر Shopify الموجود والتحقق من صلاحية الوصول.'
+        : 'Existing Shopify connection verified and opened successfully.'
+    }
     const platformName =
       s === 'salla_connected'
         ? ar
@@ -240,6 +245,18 @@ export default function StoreSelector({
         return ar
           ? 'انتهت جلسة الربط أو لم تتطابق بيانات الحماية. أعد المحاولة من جديد.'
           : 'The connection session expired or failed its security check. Start again.'
+      case 'shopify_workspace_conflict':
+        return ar
+          ? 'هذا المتجر متصل بمساحة عمل أخرى. افصل الاتصال من المساحة الأصلية أولاً؛ لا يمكن نقل التوكن تلقائياً.'
+          : 'This store belongs to another workspace. Disconnect it from the original workspace first.'
+      case 'shopify_storage_failed':
+        return ar
+          ? 'تعذر التحقق من ملكية المتجر في قاعدة البيانات. لم يتم نقل الاتصال.'
+          : 'Could not verify Shopify store ownership in the database. No connection was transferred.'
+      case 'shopify_missing_config':
+        return ar ? 'إعدادات Shopify غير مكتملة على الخادم.' : 'Shopify server configuration is incomplete.'
+      case 'shopify_shop_lookup_failed':
+        return ar ? 'تعذر التحقق من بيانات المتجر لدى Shopify.' : 'Could not fetch the Shopify store profile.'
       case 'shopify_token_exchange_failed':
         return ar
           ? 'تعذر إكمال تفويض Shopify أو حفظ الاتصال. تحقق من إعدادات التطبيق والصلاحيات ثم أعد المحاولة.'
@@ -380,7 +397,7 @@ export default function StoreSelector({
       platform === 'salla'
         ? '/api/salla/connect'
         : platform === 'shopify'
-          ? '/app/connect-store'
+          ? '/api/shopify/connect'
           : '/api/zid/connect'
     router.push(url)
   }

@@ -16,15 +16,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      SHOPIFY_SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
+      APP_AUTOMATION_TOKEN: ${{ secrets.SHOPIFY_APP_AUTOMATION_TOKEN }}
+      SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
       SHOPIFY_CLI_NO_ANALYTICS: '1'
       CI: 'true'
     steps:
       - name: Verify Shopify deployment credential
         shell: bash
         run: |
-          if [ -z "$SHOPIFY_SERVICE_ACCOUNT_TOKEN" ]; then
-            echo "::error::Missing GitHub Actions secret SHOPIFY_SERVICE_ACCOUNT_TOKEN. Create a Shopify service account with App development permission and add its token to the repository secret."
+          if [ -n "$APP_AUTOMATION_TOKEN" ]; then
+            echo "Using app-scoped Shopify App Automation Token"
+            echo "SHOPIFY_APP_AUTOMATION_TOKEN=$APP_AUTOMATION_TOKEN" >> "$GITHUB_ENV"
+          elif [ -n "$SERVICE_ACCOUNT_TOKEN" ]; then
+            echo "Using Shopify Service Account Token"
+            echo "SHOPIFY_SERVICE_ACCOUNT_TOKEN=$SERVICE_ACCOUNT_TOKEN" >> "$GITHUB_ENV"
+          else
+            echo "::error::Missing Shopify deployment credential. Add SHOPIFY_APP_AUTOMATION_TOKEN (preferred) or SHOPIFY_SERVICE_ACCOUNT_TOKEN to GitHub Actions secrets."
             exit 1
           fi
 
@@ -39,7 +46,7 @@ jobs:
           node-version: '22'
 
       - name: Install Shopify CLI
-        run: npm install --global @shopify/cli@5.0.1
+        run: npm install --global @shopify/cli@5.0.2
 
       - name: Publish Shopify app version
         run: |
@@ -47,3 +54,6 @@ jobs:
             --allow-updates \
             --no-input \
             --source-control-url "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+
+      - name: Inspect deployed Shopify app versions
+        run: shopify app versions list --no-input --json

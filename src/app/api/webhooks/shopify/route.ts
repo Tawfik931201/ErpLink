@@ -80,7 +80,11 @@ async function handlePost(req: NextRequest) {
 
   // App uninstalled → تنظيف التوكن + أوامر الطابور اليتيمة ثم 200 فوري
   if (topic === 'app/uninstalled') {
-    await supabase.from('shopify_tokens').delete().eq('shop_domain', shopDomain)
+    const { error: unlinkError } = await supabase.from('shopify_tokens').delete().eq('shop_domain', shopDomain)
+    if (unlinkError) {
+      // Shopify retries 5xx. Never acknowledge an uninstall when token cleanup failed.
+      return NextResponse.json({ received: false, error: 'uninstall_cleanup_failed' }, { status: 503 })
+    }
     // best-effort: لا تُعالَج أحداث معلقة لمتجر محذوف
     try {
       await supabase.from('sync_queue').delete().eq('store_id', shopDomain).eq('platform', 'shopify')

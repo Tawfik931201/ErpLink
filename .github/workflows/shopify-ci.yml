@@ -1,0 +1,64 @@
+name: Shopify integration safety checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/app/api/shopify/**'
+      - 'src/app/api/webhooks/shopify/**'
+      - 'src/lib/shopify/**'
+      - 'src/lib/shopify-client.ts'
+      - 'src/app/actions/workspaces.ts'
+      - 'src/app/(app)/app/connect-store/**'
+      - 'shopify.app.toml'
+      - '.github/workflows/deploy-shopify.yml'
+      - '.github/workflows/shopify-ci.yml'
+      - 'tests/unit/shopify-*.test.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shopify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+      SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+      ENCRYPTION_KEY: offline-ci-encryption-key-never-used-for-real-data
+      NEXT_PUBLIC_APP_URL: https://erplink.bizsahla.com
+      SHOPIFY_CLIENT_ID: d06554dc4b298108a0cfdd6c4336ae08
+      SHOPIFY_CLIENT_SECRET: offline-secret-only
+      SHOPIFY_REDIRECT_URI: https://erplink.bizsahla.com/api/shopify/callback
+      NODE_OPTIONS: --max-old-space-size=3072
+      SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
+      APP_AUTOMATION_TOKEN: ${{ secrets.SHOPIFY_APP_AUTOMATION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Validate Shopify app configuration with authenticated CLI (if configured)
+        if: env.SERVICE_ACCOUNT_TOKEN != '' || env.APP_AUTOMATION_TOKEN != ''
+        run: |
+          if [ -n "$SERVICE_ACCOUNT_TOKEN" ]; then
+            export SHOPIFY_SERVICE_ACCOUNT_TOKEN="$SERVICE_ACCOUNT_TOKEN"
+          else
+            export SHOPIFY_APP_AUTOMATION_TOKEN="$APP_AUTOMATION_TOKEN"
+          fi
+          npm install --global @shopify/cli@5.0.2
+          shopify app config validate --no-input
+      - name: Shopify CLI validation unavailable without Shopify credentials
+        if: env.SERVICE_ACCOUNT_TOKEN == '' && env.APP_AUTOMATION_TOKEN == ''
+        run: echo "CLI schema validation skipped; requires an authenticated Shopify account."
+      - name: TypeScript
+        run: npm run type-check
+      - name: Shopify OAuth and webhook regression tests
+        run: npm test -- --runInBand --testPathPattern=tests/unit/shopify-
+      - name: Next.js production build
+        run: npm run build

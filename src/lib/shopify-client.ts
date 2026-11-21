@@ -111,18 +111,128 @@ export interface ShopifyTokenRow {
 /**
  * Gets a valid access token for the given Shopify shop.
  */
-export async function getShopifyAccessToken(shopDomain: string): Promise<string> {
-  const { data: token, error } = await supabase
-    .from('shopify_tokens')
-    .select('access_token')
-    .eq('shop_domain', shopDomain)
-    .maybeSingle()
+type StoredShopifyCredentials = {
+  access_token: string
+  refresh_token: string | null
+  expires_at: string | null
+  refresh_token_expires_at: string | null
+}
 
-  if (error || !token) {
-    throw new Error(`Shopify token not found for shop domain: ${shopDomain}`)
+/** Coalesce token refreshes in this process; database CAS handles other instances. */
+const pendingShopifyRefresh = new Map<string, Promise<string>>()
+
+function mustRefreshShopifyToken(credentials: StoredShopifyCredentials): boolean {
+  const expiresAt = credentials.expires_at ? Date.parse(credentials.expires_at) : NaN
+  if (!Number.isFinite(expiresAt)) return false // Existing legacy non-expiring tokens.
+  return Date.now() + 5 * 60 * 1000 >= expiresAt
+}
+
+/**
+ * Refresh rotating offline tokens before they expire. Each refresh returns
+ * a NEW access/refresh pair, so both must be committed together. Optimistic
+ * compare-and-swap prevents one worker overwriting a more recent pair.
+ */
+async function renewShopifyAccessToken(shopDomain: string, current: StoredShopifyCredentials): Promise<string> {
+  if (!current.refresh_token) {
+    throw new Error('Shopify store must reconnect to renew its offline token')
+  }
+  if (current.refresh_token_expires_at &&
+      Date.parse(current.refresh_token_expires_at) <= Date.now()) {
+    throw new Error('Shopify refresh token expired. Reconnect the store')
+  }
+  const clientId = process.env.SHOPIFY_CLIENT_ID
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+  if (!clientId || !clientSecret) throw new Error('Shopify credentials are not configured')
+
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'refresh_token',
+    refresh_token: current.refresh_token,
+  })
+  let response: any
+  try {
+    response = await axios.post(
+      'https://' + shopDomain + '/admin/oauth/access_token',
+      body.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        timeout: 15_000,
+      }
+    )
+  } catch (error: any) {
+    // Shopify's refresh token stays retryable for transient failures. Do not
+    // log Axios error objects: they may include request bodies with secrets.
+    if (error?.response?.status === 401) {
+      throw new Error('Shopify refresh token rejected. Reconnect the store')
+    }
+    throw new Error('Shopify token refresh temporarily failed')
   }
 
-  return token.access_token
+  const payload = response?.data
+  if (!payload?.access_token || !payload?.refresh_token ||
+      !Number.isFinite(Number(payload.expires_in)) ||
+      !Number.isFinite(Number(payload.refresh_token_expires_in))) {
+    throw new Error('Shopify returned an invalid token refresh response')
+  }
+  const now = Date.now()
+  const changes = {
+    access_token: String(payload.access_token),
+    refresh_token: String(payload.refresh_token),
+    expires_at: new Date(now + Number(payload.expires_in) * 1000).toISOString(),
+    refresh_token_expires_at: new Date(now + Number(payload.refresh_token_expires_in) * 1000).toISOString(),
+    scopes: payload.scope ?? null,
+    updated_at: new Date(now).toISOString(),
+  }
+
+  const { data: saved, error: saveError } = await supabase
+    .from('shopify_tokens')
+    .update(changes)
+    .eq('shop_domain', shopDomain)
+    .eq('refresh_token', current.refresh_token)
+    .select('access_token')
+    .maybeSingle()
+
+  if (saveError) throw new Error('Could not persist the rotated Shopify token pair')
+  if (saved?.access_token) return saved.access_token
+
+  // Another server instance completed rotation first. Use its newer token,
+  // but never assume a vanished/uninstalled store is still connected.
+  const { data: latest, error: latestError } = await supabase
+    .from('shopify_tokens')
+    .select('access_token,expires_at')
+    .eq('shop_domain', shopDomain)
+    .maybeSingle()
+  if (latestError || !latest?.access_token ||
+      !latest.expires_at || Date.parse(latest.expires_at) <= Date.now()) {
+    throw new Error('Shopify token changed concurrently or store was uninstalled')
+  }
+  return latest.access_token
+}
+
+/** Get a current offline access token for Shopify background/API work. */
+export async function getShopifyAccessToken(shopDomain: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('shopify_tokens')
+    .select('access_token,refresh_token,expires_at,refresh_token_expires_at')
+    .eq('shop_domain', shopDomain)
+    .maybeSingle()
+  if (error || !data) throw new Error('Shopify store not connected')
+
+  const credentials = data as StoredShopifyCredentials
+  if (!mustRefreshShopifyToken(credentials)) return credentials.access_token
+  const existing = pendingShopifyRefresh.get(shopDomain)
+  if (existing) return existing
+  const refresh = renewShopifyAccessToken(shopDomain, credentials)
+  pendingShopifyRefresh.set(shopDomain, refresh)
+  try {
+    return await refresh
+  } finally {
+    if (pendingShopifyRefresh.get(shopDomain) === refresh) pendingShopifyRefresh.delete(shopDomain)
+  }
 }
 
 /**
@@ -456,11 +566,15 @@ export async function registerShopifyWebhook(shopDomain: string, topic: string, 
         String(e?.message || '').toLowerCase().includes('already')
       )
       if (!duplicateOnly) {
-        console.warn('[Shopify] webhookSubscriptionCreate:', result.userErrors)
+        console.warn('[Shopify] webhookSubscriptionCreate rejected subscription', { topic })
         return null
       }
+      // A duplicate error does not prove that our callback URL is installed.
+      // Verify the exact topic+URI instead of reporting false success.
+      const existing = await listShopifyWebhooks(shopDomain)
+      return existing.find((item) => item.topic === topic && item.address === address) ?? null
     }
-    return result?.webhookSubscription || { topic, uri: address }
+    return result?.webhookSubscription ?? null
   } catch (err: any) {
     console.warn('[Shopify] GraphQL webhook registration failed:', err?.message || err)
     return null

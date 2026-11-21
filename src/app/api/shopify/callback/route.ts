@@ -1,5 +1,6 @@
 import { auth } from '@clerk/nextjs/server'
 import axios from 'axios'
+import { revalidateTag } from 'next/cache'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import {
@@ -9,188 +10,195 @@ import {
   registerShopifyWebhook,
   verifyShopifyCallbackHmac,
 } from '@/lib/shopify-client'
+import { readShopifyOAuthContext, SHOPIFY_OAUTH_COOKIE } from '@/lib/shopify/oauth-state'
+import { hasRequiredShopifyScopes } from '@/lib/shopify/scopes'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
 function redirectToConnectStore(request: NextRequest, params: Record<string, string>) {
-  const appUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ??
-    request.nextUrl.origin
-  const url = new URL('/app/connect-store', appUrl)
-
-  Object.entries(params).forEach(([key, value]) => {
-    url.searchParams.set(key, value)
-  })
-
-  return NextResponse.redirect(url)
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? request.nextUrl.origin
+  const url = new URL('/app/connect-store', baseUrl)
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+  const response = NextResponse.redirect(url)
+  response.cookies.delete(SHOPIFY_OAUTH_COOKIE)
+  return response
 }
 
 export async function GET(request: NextRequest) {
   const { checkRateLimit, rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
-  const cbRl = checkRateLimit(
-    rateLimitKeyFromHeaders((n) => request.headers.get(n), 'oauth-shopify-callback'),
-    30,
-    60_000
+  const rate = checkRateLimit(
+    rateLimitKeyFromHeaders((name) => request.headers.get(name), 'oauth-shopify-callback'),
+    30, 60_000
   )
-  if (!cbRl.allowed) {
-    return redirectToConnectStore(request, { error: 'rate_limited' })
+  if (!rate.allowed) return redirectToConnectStore(request, { error: 'rate_limited' })
+
+  const clientId = process.env.SHOPIFY_CLIENT_ID
+  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+  if (!clientId || !clientSecret) {
+    return redirectToConnectStore(request, { error: 'shopify_missing_config' })
   }
+
+  const shop = normalizeShopDomain(request.nextUrl.searchParams.get('shop') ?? '')
+  if (!shop) return redirectToConnectStore(request, { error: 'invalid_shop' })
+
+  // Shopify callback must be signed, and the original browser cookie must
+  // match this exact shop + nonce + signed-in ERP Link user + workspace.
+  if (!verifyShopifyCallbackHmac(request.url, clientSecret)) {
+    return redirectToConnectStore(request, { error: 'shopify_invalid_signature' })
+  }
+  const state = request.nextUrl.searchParams.get('state') ?? ''
+  const context = readShopifyOAuthContext(
+    request.cookies.get(SHOPIFY_OAUTH_COOKIE)?.value,
+    clientSecret,
+    { shop, state }
+  )
+  if (!context) return redirectToConnectStore(request, { error: 'invalid_state' })
 
   const code = request.nextUrl.searchParams.get('code')
-  const shopParam = request.nextUrl.searchParams.get('shop')
-  const state = request.nextUrl.searchParams.get('state')
-  const storedState = request.cookies.get('shopify_oauth_state')?.value
-
-  // تحقق النطاق أولاً (early-return يخفف السيرفر ويمنع الحقن).
-  const shop = shopParam ? normalizeShopDomain(shopParam) : ''
-  if (!shop) {
-    return redirectToConnectStore(request, { error: 'invalid_shop' })
-  }
-
-  if (!state || !storedState || state !== storedState) {
-    return redirectToConnectStore(request, { error: 'invalid_state' })
-  }
-
   if (!code) {
-    return redirectToConnectStore(request, { error: 'shopify_missing_code' })
+    const denied = request.nextUrl.searchParams.get('error') === 'access_denied'
+    return redirectToConnectStore(request, { error: denied ? 'access_denied' : 'shopify_missing_code' })
   }
 
-  // Resolve the session before spending the single-use authorization code. The
-  // workspace was already required further down, but only *after* the exchange,
-  // so a signed-out visitor could burn a code for nothing.
   const { userId } = await auth()
-  if (!userId) {
+  if (!userId || userId !== context.userId) {
     return redirectToConnectStore(request, { error: 'unauthorized' })
   }
-
-  const { data: userDb, error: userDbErr } = await supabase
-    .from('users')
-    .select('active_workspace_id')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (userDbErr) {
-    console.error('[Shopify OAuth] Could not load the user profile:', userDbErr.message)
+  const workspaceId = await accessibleWorkspaceId(userId, context.workspaceId)
+  if (!workspaceId) {
     return redirectToConnectStore(request, { error: 'no_active_workspace' })
   }
 
-  const activeWorkspaceId = await accessibleWorkspaceId(userId, userDb?.active_workspace_id)
-  if (!activeWorkspaceId) {
-    return redirectToConnectStore(request, { error: 'no_active_workspace' })
+  // Reject an existing foreign workspace before consuming the single-use code.
+  // Never move the store or modify its sync settings implicitly.
+  const { data: prior, error: lookupError } = await supabase
+    .from('shopify_tokens')
+    .select('workspace_id')
+    .eq('shop_domain', shop)
+    .maybeSingle()
+  if (lookupError) return redirectToConnectStore(request, { error: 'shopify_storage_failed' })
+  if (prior && prior.workspace_id !== workspaceId) {
+    return redirectToConnectStore(request, { error: 'shopify_workspace_conflict' })
   }
 
   try {
-    const clientId = process.env.SHOPIFY_CLIENT_ID!
-    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET!
-    if (!clientId || !clientSecret) {
+    const tokenResult = await axios.post(
+      'https://' + shop + '/admin/oauth/access_token',
+      new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        expiring: '1',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        timeout: 15_000,
+      }
+    )
+    if (!hasRequiredShopifyScopes(tokenResult.data?.scope)) {
+      return redirectToConnectStore(request, { error: 'invalid_scope' })
+    }
+    const accessToken: string | undefined = tokenResult.data?.access_token
+    const refreshToken: string | undefined = tokenResult.data?.refresh_token
+    const accessExpiresIn = Number(tokenResult.data?.expires_in)
+    const refreshExpiresIn = Number(tokenResult.data?.refresh_token_expires_in)
+    if (!accessToken || !refreshToken ||
+        !Number.isFinite(accessExpiresIn) || accessExpiresIn <= 0 ||
+        !Number.isFinite(refreshExpiresIn) || refreshExpiresIn <= 0) {
       return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
     }
 
-    // تحقق HMAC على query (مقارنة ثابتة الزمن في shopify-client).
-    if (!verifyShopifyCallbackHmac(request.url, clientSecret)) {
-      return redirectToConnectStore(request, { error: 'shopify_invalid_signature' })
+    const detailsResult = await axios.post(
+      'https://' + shop + '/admin/api/' + SHOPIFY_API_VERSION + '/graphql.json',
+      { query: 'query ErpLinkShop { shop { name email } }' },
+      {
+        headers: { 'X-Shopify-Access-Token': accessToken },
+        timeout: 15_000,
+      }
+    )
+    const shopData = detailsResult.data?.data?.shop
+    if (detailsResult.data?.errors || !shopData) {
+      return redirectToConnectStore(request, { error: 'shopify_shop_lookup_failed' })
     }
 
-    // 1. Request access token
-    const tokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-    })
-
-    const { access_token, scope } = tokenResponse.data
-
-    if (!access_token) {
-      return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
-    }
-
-    // 2. Fetch Shopify store details (النسخة من الثابت الموحد — لا تكتبها يدوياً)
-    const shopDetailsResponse = await axios.get(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
-      headers: {
-        'X-Shopify-Access-Token': access_token,
-      },
-    })
-
-    const shopData = shopDetailsResponse.data.shop
-    const shopName = shopData?.name ?? null
-    const email = shopData?.email ?? null
-
-    // 3. The active workspace was resolved (and required) before the code was
-    //    exchanged, so `activeWorkspaceId` is guaranteed non-null from here on.
-    const workspaceId = activeWorkspaceId
-
-    // 4. Save Shopify token details in DB
-    // New connections start with the full core preset syncing store→ERP
-    // (products + collections + all order topics + customers), built from
-    // SHOPIFY_CORE_TOPICS so the saved toggles can never drift from what the
-    // auto-registration loop below subscribes.
-    const tokenData = {
+    const baseData = {
       shop_domain: shop,
-      access_token,
-      scopes: scope ?? null,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: new Date(Date.now() + accessExpiresIn * 1000).toISOString(),
+      refresh_token_expires_at: new Date(Date.now() + refreshExpiresIn * 1000).toISOString(),
+      scopes: tokenResult.data?.scope ?? null,
       updated_at: new Date().toISOString(),
       workspace_id: workspaceId,
-      name: shopName,
-      email,
-      sync_settings: Object.fromEntries(
-        SHOPIFY_CORE_TOPICS.map((topic) => [topic, { shopify2odoo: true }])
-      ),
+      name: shopData.name ?? null,
+      email: shopData.email ?? null,
     }
 
-    const { data: existingToken } = await supabase
-      .from('shopify_tokens')
-      .select('shop_domain')
-      .eq('shop_domain', shop)
-      .maybeSingle()
-
-    if (existingToken) {
-      // Preserve the merchant's existing sync toggles on reconnect.
-      const { sync_settings: _ignore, ...updateData } = tokenData
-      void _ignore
-      const { error: updateError } = await supabase
+    const updateWithinWorkspace = async () => {
+      const { data, error } = await supabase
         .from('shopify_tokens')
-        .update(updateData)
+        .update(baseData)
         .eq('shop_domain', shop)
+        .eq('workspace_id', workspaceId)
+        .select('shop_domain')
+        .maybeSingle()
+      if (error || !data) throw new Error('Shopify token update was not scoped to a workspace')
+    }
 
-      if (updateError) throw updateError
+    if (prior) {
+      // Keep existing sync_settings on reauthorization.
+      await updateWithinWorkspace()
     } else {
-      // Multi-store: a workspace may link several Shopify shops, so a new
-      // shop is always INSERTED and sibling rows are never touched here.
+      const syncSettings = Object.fromEntries(
+        SHOPIFY_CORE_TOPICS.map((topic) => [topic, { shopify2odoo: true }])
+      )
       const { error: insertError } = await supabase
         .from('shopify_tokens')
-        .insert([tokenData])
-
-      if (insertError) throw insertError
+        .insert([{ ...baseData, sync_settings: syncSettings }])
+      if (insertError?.code === '23505') {
+        // A concurrent callback inserted first: only update if it belongs
+        // to this workspace, preserving its settings and rejecting a transfer.
+        await updateWithinWorkspace()
+      } else if (insertError) {
+        throw new Error('Shopify token insert failed')
+      }
     }
 
-    // 5. Automatically register webhooks (non-blocking, best-effort).
-    // الأساسية + app/uninstalled (تنظيف التوكن) + GDPR الثلاثة + scopes_update
-    // (امتثال App Store — يجب أن تبقى مشتركة دائماً).
-    // Store-sync topics are shop-scoped so per-store toggles can remove them.
-    // app/uninstalled + GDPR + scopes_update are app-scoped in shopify.app.toml.
-    const webhookTopics = [...SHOPIFY_CORE_TOPICS]
+    // Invalidate Next.js cached store lists before returning a success signal.
+    revalidateTag('shopify-token')
 
-    for (const topic of webhookTopics) {
-      // Async webhook registration. We do not block the OAuth flow on this.
-      registerShopifyWebhook(shop, topic, access_token).catch(() => {})
+    // A successful OAuth exchange does not guarantee successful webhooks.
+    // Await registration and surface a separate partial-success error.
+    let failedSubscriptions = 0
+    for (let i = 0; i < SHOPIFY_CORE_TOPICS.length; i += 3) {
+      const batch = SHOPIFY_CORE_TOPICS.slice(i, i + 3)
+      const results = await Promise.all(
+        batch.map((topic) => registerShopifyWebhook(shop, topic, accessToken))
+      )
+      failedSubscriptions += results.filter((value) => !value).length
     }
 
-    // Auto-bootstrap workspace defaults in background (zero-configuration)
-    if (workspaceId) {
-      import('@/lib/auto-bootstrap').then(({ autoBootstrapWorkspace }) => {
-        autoBootstrapWorkspace(workspaceId).catch(() => {})
-      }).catch(() => {})
+    if (failedSubscriptions > 0) {
+      console.warn('[Shopify OAuth] Store saved, but webhook subscriptions are incomplete', {
+        shopDomain: shop,
+        failedSubscriptions,
+      })
+      return redirectToConnectStore(request, { error: 'webhook_registration_failed' })
     }
 
-    const response = redirectToConnectStore(request, {
+    import('@/lib/auto-bootstrap')
+      .then(({ autoBootstrapWorkspace }) => autoBootstrapWorkspace(workspaceId))
+      .catch(() => {})
+
+    return redirectToConnectStore(request, {
       success: 'shopify_connected',
-      store: shopName ? encodeURIComponent(shopName) : shop,
+      store: shopData.name || shop,
     })
-
-    response.cookies.delete('shopify_oauth_state')
-    return response
-
   } catch {
+    // Do not leak Shopify authorization codes or tokens in logs/responses.
     return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
   }
 }
