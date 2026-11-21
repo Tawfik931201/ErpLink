@@ -1,8 +1,4 @@
-import { randomUUID } from 'crypto'
-
 import { supabase } from './supabase'
-import { archiveDatetime, isOdooArchiveEnabled, upsertArchive, updateArchiveBySource } from './central-odoo-archive'
-import { odooContactById, odooContactList, odooContactNewCount, odooSetContactStatus, useOdooContactInbox } from './central-contact-inbox'
 
 /**
  * Storage for the public contact form (`/contact`).
@@ -84,28 +80,6 @@ export async function insertContactMessage(
   input: ContactMessageInput,
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   try {
-    // The verified migration makes central Odoo the primary home of contact
-    // submissions. Preserve a Supabase fallback if the administrative ERP is
-    // temporarily unavailable; the independent contact backfill reconciles it.
-    if (isOdooArchiveEnabled()) {
-      const sourceId = randomUUID()
-      try {
-        await upsertArchive('contact', sourceId, {
-          x_name: input.name,
-          x_contact_name: input.name,
-          x_email: input.email,
-          x_phone: input.phone,
-          x_company: input.company,
-          x_subject: 'Public contact form',
-          x_message: input.message,
-          x_status: 'new',
-          x_submitted_at: archiveDatetime(new Date().toISOString()),
-        })
-        return { ok: true, id: sourceId }
-      } catch (archiveError) {
-        console.error('[contact] primary Odoo save failed, using durable Supabase fallback:', archiveError)
-      }
-    }
     const { data, error } = await supabase
       .from('contact_messages')
       .insert([
@@ -132,24 +106,6 @@ export async function insertContactMessage(
       return { ok: false, error: error.message }
     }
 
-    // Best-effort mirror; never lose a public submission if central Odoo is down.
-    if (isOdooArchiveEnabled()) {
-      try {
-        await upsertArchive('contact', String(data.id), {
-          x_name: input.name,
-          x_contact_name: input.name,
-          x_email: input.email,
-          x_phone: input.phone,
-          x_company: input.company,
-          x_subject: 'Public contact form',
-          x_message: input.message,
-          x_status: 'new',
-          x_submitted_at: archiveDatetime(new Date().toISOString()),
-        })
-      } catch (archiveError) {
-        console.error('[contact] Odoo archive mirror failed; Supabase copy retained:', archiveError)
-      }
-    }
     return { ok: true, id: String(data.id) }
   } catch (err) {
     console.error('[contact] failed to save message:', err)
@@ -179,17 +135,6 @@ export async function finalizeContactMessage(
     if (error) {
       console.error('[contact] failed to record delivery outcome:', error.message)
     }
-    if (!error && isOdooArchiveEnabled()) {
-      try {
-        await updateArchiveBySource('contact', id, {
-          x_odoo_ticket_id: data.odooTicketId || 0,
-          x_is_new_customer: Boolean(data.isNewCustomer),
-          x_email_delivered: data.emailDelivered,
-        })
-      } catch (archiveError) {
-        console.error('[contact] Odoo delivery mirror failed:', archiveError)
-      }
-    }
   } catch (err) {
     console.error('[contact] failed to record delivery outcome:', err)
   }
@@ -212,16 +157,6 @@ export async function listContactMessages(params: ListContactMessagesParams = {}
   const offset = Math.max(params.offset ?? 0, 0)
 
   try {
-    // Activate only after the historical backfill is complete. Otherwise old
-    // Supabase-only messages would disappear from the admin inbox.
-    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      try {
-        const result = await odooContactList(params)
-        return { ok: true, rows: result.rows, total: result.total }
-      } catch (archiveError) {
-        console.warn('[contact] Odoo inbox unavailable, falling back to Supabase:', archiveError)
-      }
-    }
     let query = supabase
       .from('contact_messages')
       .select(LIST_COLUMNS, { count: 'exact' })
@@ -268,15 +203,6 @@ export async function getContactMessageById(id: string): Promise<{
   if (!UUID_RE.test(id)) return { ok: false, row: null, error: 'not_found' }
 
   try {
-    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      try {
-        const row = await odooContactById(id)
-        if (row) return { ok: true, row }
-      } catch (archiveError) {
-        console.warn('[contact] central Odoo record lookup unavailable:', archiveError)
-      }
-      // Legacy source fallback until every historic row has been migrated.
-    }
     const { data, error } = await supabase
       .from('contact_messages')
       .select(RECORD_COLUMNS)
@@ -307,13 +233,6 @@ export async function getContactMessageById(id: string): Promise<{
 /** Unread count for the admin nav badge. Never throws — a badge is decoration. */
 export async function countNewContactMessages(): Promise<number> {
   try {
-    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      try {
-        return await odooContactNewCount()
-      } catch (archiveError) {
-        console.warn('[contact] central Odoo unread count unavailable:', archiveError)
-      }
-    }
     const { count, error } = await supabase
       .from('contact_messages')
       .select('id', { count: 'exact', head: true })
@@ -337,16 +256,6 @@ export async function setContactMessageStatus(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const stamp = status === 'new' ? null : new Date().toISOString()
-    if (useOdooContactInbox() && isOdooArchiveEnabled()) {
-      const updated = await odooSetContactStatus(id, status, actorId)
-      if (updated) {
-        // Keep the legacy copy consistent when one exists.
-        await supabase.from('contact_messages')
-          .update({ status, read_at: stamp, read_by: status === 'new' ? null : actorId })
-          .eq('id', id)
-        return { ok: true }
-      }
-    }
     const { error } = await supabase
       .from('contact_messages')
       .update({
