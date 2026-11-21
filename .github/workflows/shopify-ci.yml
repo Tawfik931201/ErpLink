@@ -41,6 +41,10 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Validate Shopify app configuration (CLI 5.0.2)
+        run: |
+          npm install --global @shopify/cli@5.0.2
+          shopify app config validate --no-input
       - name: TypeScript
         run: npm run type-check
       - name: Shopify OAuth and webhook regression tests
