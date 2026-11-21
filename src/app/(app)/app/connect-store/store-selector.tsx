@@ -215,6 +215,11 @@ export default function StoreSelector({
   const [copiedId, setCopiedId] = useState(false)
 
   const getSuccessMessage = (s: string) => {
+    if (s === 'shopify_existing') {
+      return ar
+        ? 'تم فتح اتصال متجر Shopify الموجود والتحقق من صلاحية الوصول.'
+        : 'Existing Shopify connection verified and opened successfully.'
+    }
     const platformName =
       s === 'salla_connected'
         ? ar
