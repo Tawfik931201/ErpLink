@@ -7,6 +7,7 @@ import {
   SHOPIFY_OAUTH_COOKIE,
   SHOPIFY_OAUTH_MAX_AGE_SECONDS,
 } from '@/lib/shopify/oauth-state'
+import { SHOPIFY_REQUIRED_SCOPE_STRING } from '@/lib/shopify/scopes'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
@@ -90,8 +91,7 @@ export async function GET(request: NextRequest) {
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('redirect_uri', redirectUri)
     // Keep required scopes aligned with shopify.app.toml.
-    authUrl.searchParams.set('scope',
-      'read_products,write_products,read_orders,read_inventory,read_locations,read_customers,write_customers')
+    authUrl.searchParams.set('scope', SHOPIFY_REQUIRED_SCOPE_STRING)
     authUrl.searchParams.set('state', state)
 
     const response = NextResponse.redirect(authUrl)
