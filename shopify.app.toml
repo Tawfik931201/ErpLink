@@ -5,7 +5,7 @@ client_id = "d06554dc4b298108a0cfdd6c4336ae08"
 # after install/launch. Apply config changes with `shopify app deploy`.
 # Keep api_version + topics in sync with
 # src/lib/shopify-topics.ts (SHOPIFY_TOPIC_CATALOG) and the Advanced-settings UI.
-# Webhook URI must be https + reachable; HMAC is verified in
+# Webhook URIs must be absolute HTTPS URLs registered in Shopify; HMAC is verified in
 # src/app/api/webhooks/shopify/route.ts via SHOPIFY_WEBHOOK_SECRET.
 application_url = "https://erplink.bizsahla.com/api/shopify/connect"
 embedded = false
@@ -15,16 +15,16 @@ name = "ErpLink"
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
 api_version = "2026-10"
 
-# Store-sync topics are shop-scoped and registered through GraphQL after OAuth,
+# Store-sync topics (orders/products/customers/collections) must NOT be copied into\n# app-specific webhook settings in Shopify Dev Dashboard. They are shop-scoped\n# and registered through GraphQL after OAuth,
 # so each merchant's saved toggles can actually enable/disable deliveries.
 # Only lifecycle/compliance topics stay app-scoped here.
 [[webhooks.subscriptions]]
 topics = ["app/uninstalled"]
-uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
+uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [[webhooks.subscriptions]]
 topics = ["customers/data_request", "customers/redact", "shop/redact", "app/scopes_update"]
-uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
+uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [access_scopes]
 # Install scopes match features exposed immediately after connection:
@@ -46,6 +46,6 @@ use_legacy_install_flow = true
 
 [auth]
 redirect_urls = [
-  # Same ${NEXT_PUBLIC_APP_URL} source — must match SHOPIFY_REDIRECT_URI in .env
+  # Must exactly match SHOPIFY_REDIRECT_URI configured in Hostinger
   "https://erplink.bizsahla.com/api/shopify/callback"
 ]
