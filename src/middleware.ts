@@ -64,6 +64,18 @@ export default clerkMiddleware(async (auth, req) => {
     req.method === 'POST' &&
     (req.headers.has('next-action') || req.headers.has('x-action-forwarded') || req.headers.has('rsc'))
 
+  // Shopify returns to the configured application_url with a signed shop
+  // launch after installation. Forward its untouched query to the OAuth
+  // start route; that route verifies Shopify's HMAC before trusting the shop.
+  // Skip ordinary page visits, callbacks and other integrations.
+  if (!isApiRoute(req) && !isPostOrMutation &&
+      (pathname === '/' || SUPPORTED_URL_LOCALES.some(locale => pathname === `/${locale}`)) &&
+      req.nextUrl.searchParams.has('shop') && req.nextUrl.searchParams.has('hmac')) {
+    const target = new URL('/api/shopify/connect', req.url)
+    target.search = req.nextUrl.search
+    return NextResponse.redirect(target)
+  }
+
   // --- ZID EMBEDDED LAUNCH ---
   // Zid appends ?token=<uuid> to the configured Application URL. If that URL
   // is not /embedded, the merchant lands on the public site / normal Clerk
