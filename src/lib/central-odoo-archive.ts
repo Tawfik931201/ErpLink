@@ -28,8 +28,11 @@ function config() {
   return { url, db, username, password }
 }
 
+/** Administrative data is stored in Supabase again.  Keep the old archive
+ * helpers available only for historical migration; never activate Odoo writes
+ * automatically merely because old Hostinger credentials are present. */
 export function isOdooArchiveEnabled(): boolean {
-  return Boolean(config())
+  return false
 }
 
 async function rpc<T>(
