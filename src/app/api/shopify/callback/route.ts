@@ -79,6 +79,19 @@ export async function GET(request: NextRequest) {
     return redirectToConnectStore(request, { error: 'no_active_workspace' })
   }
 
+  // Reject cross-workspace reconnects before exchanging the single-use OAuth code.
+  const { data: existingToken, error: existingTokenError } = await supabase
+    .from('shopify_tokens')
+    .select('shop_domain, workspace_id')
+    .eq('shop_domain', shop)
+    .maybeSingle()
+  if (existingTokenError) {
+    return redirectToConnectStore(request, { error: 'shopify_connection_lookup_failed' })
+  }
+  if (existingToken && existingToken.workspace_id !== activeWorkspaceId) {
+    return redirectToConnectStore(request, { error: 'shopify_store_already_linked' })
+  }
+
   try {
     const clientId = process.env.SHOPIFY_CLIENT_ID!
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET!
@@ -135,20 +148,6 @@ export async function GET(request: NextRequest) {
       sync_settings: Object.fromEntries(
         SHOPIFY_CORE_TOPICS.map((topic) => [topic, { shopify2odoo: true }])
       ),
-    }
-
-    const { data: existingToken, error: existingTokenError } = await supabase
-      .from('shopify_tokens')
-      .select('shop_domain, workspace_id')
-      .eq('shop_domain', shop)
-      .maybeSingle()
-
-    // A shop is owned by exactly one workspace. Reinstalling it from another
-    // workspace must not silently move its token or redirect its Odoo writes.
-    // A legitimate transfer requires an explicit unlink in the owning workspace.
-    if (existingTokenError) throw existingTokenError
-    if (existingToken && existingToken.workspace_id !== workspaceId) {
-      return redirectToConnectStore(request, { error: 'shopify_store_already_linked' })
     }
 
     if (existingToken) {
