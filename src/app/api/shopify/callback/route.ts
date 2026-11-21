@@ -137,11 +137,19 @@ export async function GET(request: NextRequest) {
       ),
     }
 
-    const { data: existingToken } = await supabase
+    const { data: existingToken, error: existingTokenError } = await supabase
       .from('shopify_tokens')
-      .select('shop_domain')
+      .select('shop_domain, workspace_id')
       .eq('shop_domain', shop)
       .maybeSingle()
+
+    // A shop is owned by exactly one workspace. Reinstalling it from another
+    // workspace must not silently move its token or redirect its Odoo writes.
+    // A legitimate transfer requires an explicit unlink in the owning workspace.
+    if (existingTokenError) throw existingTokenError
+    if (existingToken && existingToken.workspace_id !== workspaceId) {
+      return redirectToConnectStore(request, { error: 'shopify_store_already_linked' })
+    }
 
     if (existingToken) {
       // Preserve the merchant's existing sync toggles on reconnect.
