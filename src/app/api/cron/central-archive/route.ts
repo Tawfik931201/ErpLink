@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!isOdooArchiveEnabled()) {
-    return NextResponse.json({ error: 'Central Odoo archive not configured' }, { status: 503 })
+    return NextResponse.json({ success: true, disabled: true, storage: 'supabase' }, { status: 200 })
   }
   const kind = req.nextUrl.searchParams.get('kind') || 'logs'
   if (!['logs', 'contacts', 'queue'].includes(kind)) {
