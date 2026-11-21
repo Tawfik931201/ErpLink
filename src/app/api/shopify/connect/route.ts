@@ -1,7 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-client'
+import { callShopifyGraphQL, normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-client'
 import {
   createShopifyOAuthContext,
   SHOPIFY_OAUTH_COOKIE,
@@ -11,6 +11,8 @@ import { SHOPIFY_REQUIRED_SCOPE_STRING } from '@/lib/shopify/scopes'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
+
+const REAUTH_INTENT_COOKIE = 'shopify_reauth_intent'
 
 function errorRedirect(request: NextRequest, error: string): NextResponse {
   const url = new URL('/app/connect-store', request.nextUrl.origin)
@@ -71,7 +73,17 @@ export async function GET(request: NextRequest) {
       // is received in the signed app launch after the merchant selects it.
       const installUrl = new URL('https://admin.shopify.com/oauth/install')
       installUrl.searchParams.set('client_id', clientId)
-      return NextResponse.redirect(installUrl)
+      const response = NextResponse.redirect(installUrl)
+      // A deliberate ERP Link "Connect / Reconnect" click must always run
+      // consent, even when Shopify has already installed this app.
+      response.cookies.set(REAUTH_INTENT_COOKIE, '1', {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: SHOPIFY_OAUTH_MAX_AGE_SECONDS,
+        path: '/',
+      })
+      return response
     }
 
     const { data: owner, error: ownerError } = await supabase
@@ -80,12 +92,49 @@ export async function GET(request: NextRequest) {
       .eq('shop_domain', shop)
       .maybeSingle()
     if (ownerError) return errorRedirect(request, 'shopify_storage_failed')
+    const forceReauthorize = request.cookies.get(REAUTH_INTENT_COOKIE)?.value === '1'
+    let linkedWorkspaceId = workspaceId
     if (owner && owner.workspace_id !== workspaceId) {
-      return errorRedirect(request, 'shopify_workspace_conflict')
+      // Shopify opens the existing app for merchants who might currently
+      // have another ERP Link workspace active. Only switch into a workspace
+      // the Clerk user already owns or belongs to. Never silently migrate the
+      // shop or its credentials across workspaces.
+      const accessibleOwnerWorkspace = !forceReauthorize
+        ? await accessibleWorkspaceId(userId, owner.workspace_id)
+        : null
+      if (!accessibleOwnerWorkspace) {
+        return errorRedirect(request, 'shopify_workspace_conflict')
+      }
+      const { error: activateError } = await supabase
+        .from('users')
+        .update({ active_workspace_id: accessibleOwnerWorkspace })
+        .eq('id', userId)
+      if (activateError) return errorRedirect(request, 'no_active_workspace')
+      linkedWorkspaceId = accessibleOwnerWorkspace
+    }
+
+    if (owner && !forceReauthorize) {
+      // Normal Shopify launch: validate an existing live token and go straight
+      // to the connected-store UI. Explicit reconnect clicks still run OAuth.
+      try {
+        const details = await callShopifyGraphQL(
+          shop, 'query ErpLinkLaunch { shop { name } }'
+        )
+        if (details?.shop) {
+          const target = new URL('/app/connect-store', request.nextUrl.origin)
+          target.searchParams.set('success', 'shopify_existing')
+          const response = NextResponse.redirect(target)
+          response.cookies.delete(REAUTH_INTENT_COOKIE)
+          return response
+        }
+      } catch {
+        // Expired/revoked token: obtain new authorization rather than
+        // claiming an unverified existing connection is healthy.
+      }
     }
 
     const { state, cookie } = createShopifyOAuthContext({
-      shop, userId, workspaceId,
+      shop, userId, workspaceId: linkedWorkspaceId,
     }, clientSecret)
     const authUrl = new URL('https://' + shop + '/admin/oauth/authorize')
     authUrl.searchParams.set('client_id', clientId)
@@ -95,6 +144,7 @@ export async function GET(request: NextRequest) {
     authUrl.searchParams.set('state', state)
 
     const response = NextResponse.redirect(authUrl)
+    response.cookies.delete(REAUTH_INTENT_COOKIE)
     response.cookies.set(SHOPIFY_OAUTH_COOKIE, cookie, {
       httpOnly: true,
       sameSite: 'lax',
