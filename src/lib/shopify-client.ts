@@ -566,11 +566,15 @@ export async function registerShopifyWebhook(shopDomain: string, topic: string, 
         String(e?.message || '').toLowerCase().includes('already')
       )
       if (!duplicateOnly) {
-        console.warn('[Shopify] webhookSubscriptionCreate:', result.userErrors)
+        console.warn('[Shopify] webhookSubscriptionCreate rejected subscription', { topic })
         return null
       }
+      // A duplicate error does not prove that our callback URL is installed.
+      // Verify the exact topic+URI instead of reporting false success.
+      const existing = await listShopifyWebhooks(shopDomain)
+      return existing.find((item) => item.topic === topic && item.address === address) ?? null
     }
-    return result?.webhookSubscription || { topic, uri: address }
+    return result?.webhookSubscription ?? null
   } catch (err: any) {
     console.warn('[Shopify] GraphQL webhook registration failed:', err?.message || err)
     return null
