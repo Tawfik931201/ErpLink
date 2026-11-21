@@ -2,7 +2,7 @@ import crypto from 'crypto'
 
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { normalizeShopDomain } from '@/lib/shopify-client'
+import { normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-client'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,6 +20,13 @@ export async function GET(request: NextRequest) {
       const installUrl = new URL('https://admin.shopify.com/oauth/install')
       installUrl.searchParams.set('client_id', clientId)
       return NextResponse.redirect(installUrl)
+    }
+
+    // A shop value provided on Shopify's app launch must be signed by Shopify.
+    // Never trust a shop query from another origin to initiate authorization.
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
+    if (!clientSecret || !verifyShopifyCallbackHmac(request.url, clientSecret)) {
+      return NextResponse.redirect(new URL('/app/connect-store?error=shopify_invalid_signature', request.url))
     }
 
     // طبّع وتحقق: xxx.myshopify.com فقط (يرفض المسارات والاستعلامات والحقن).
