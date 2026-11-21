@@ -54,3 +54,6 @@ jobs:
             --allow-updates \
             --no-input \
             --source-control-url "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+
+      - name: Inspect deployed Shopify app versions
+        run: shopify app versions list --no-input --json
