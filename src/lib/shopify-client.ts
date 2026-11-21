@@ -13,7 +13,7 @@ import { supabase } from '@/lib/supabase'
  * - customers/* يحتاج read_customers (بيانات محمية — موافقة + مبرر استخدام).
  *   https://shopify.dev/docs/apps/launch/protected-customer-data
  */
-export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2025-07'
+export const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-10'
 
 // ─── Topic catalog (single source of truth) ──────────────────────────────
 // Full list lives in ./shopify-topics.ts — TOML / UI / mapping-constants must
