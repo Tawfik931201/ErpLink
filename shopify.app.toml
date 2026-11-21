@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "99837c2c1a973e3b8ad905bc4dbf931f"
+client_id = "d06554dc4b298108a0cfdd6c4336ae08"
 # Production URL — SINGLE SOURCE: ${NEXT_PUBLIC_APP_URL} (same value as .env).
 # Shopify CLI expands ${VAR} from the shell at deploy time (`shopify app deploy`).
 # Never commit ngrok URLs here. Keep api_version + topics in sync with
