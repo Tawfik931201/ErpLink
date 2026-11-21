@@ -1,14 +1,14 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "d06554dc4b298108a0cfdd6c4336ae08"
-# Production URL — SINGLE SOURCE: ${NEXT_PUBLIC_APP_URL} (same value as .env).
-# Shopify CLI expands ${VAR} from the shell at deploy time (`shopify app deploy`).
-# Never commit ngrok URLs here. Keep api_version + topics in sync with
+# Standalone Shopify app entrypoint: Shopify opens the signed connect endpoint
+# after install/launch. Apply config changes with `shopify app deploy`.
+# Keep api_version + topics in sync with
 # src/lib/shopify-topics.ts (SHOPIFY_TOPIC_CATALOG) and the Advanced-settings UI.
 # Webhook URI must be https + reachable; HMAC is verified in
 # src/app/api/webhooks/shopify/route.ts via SHOPIFY_WEBHOOK_SECRET.
-application_url = "${NEXT_PUBLIC_APP_URL}"
-embedded = true
+application_url = "https://erplink.bizsahla.com/api/shopify/connect"
+embedded = false
 name = "ErpLink"
 
 [webhooks]
@@ -47,5 +47,5 @@ use_legacy_install_flow = true
 [auth]
 redirect_urls = [
   # Same ${NEXT_PUBLIC_APP_URL} source — must match SHOPIFY_REDIRECT_URI in .env
-  "${NEXT_PUBLIC_APP_URL}/api/shopify/callback"
+  "https://erplink.bizsahla.com/api/shopify/callback"
 ]
