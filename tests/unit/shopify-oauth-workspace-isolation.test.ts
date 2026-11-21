@@ -15,6 +15,13 @@ describe('Shopify OAuth workspace ownership guard', () => {
       .toBeLessThan(source.indexOf('axios.post('))
   })
 
+  it('awaits webhook registration in bounded batches and reports missing subscriptions', () => {
+    expect(source).toContain('offset += 4')
+    expect(source).toContain('await Promise.all(')
+    expect(source).toContain("warning: 'shopify_webhooks_partial'")
+    expect(source).not.toContain('registerShopifyWebhook(shop, topic, access_token).catch(() => {})')
+  })
+
   it('preserves sync settings when reconnecting the same shop', () => {
     expect(source).toContain('const { sync_settings: _ignore, ...updateData } = tokenData')
   })
