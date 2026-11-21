@@ -478,7 +478,7 @@ const getCachedShopifyTokens = unstable_cache(
     // Multi-store — see getCachedZidTokens (all rows, newest first).
     const { data: tokens, error } = await supabase
       .from('shopify_tokens')
-      .select('*')
+      .select('shop_domain,scopes,updated_at,name,email,workspace_id,sync_settings')
       .eq('workspace_id', workspaceId)
       .order('updated_at', { ascending: false, nullsFirst: false })
     if (error) throw new Error('Failed to query Shopify tokens: ' + error.message)
@@ -510,7 +510,16 @@ export async function disconnectShopifyStore(shopDomain: string) {
       throw new Error('No active workspace selected')
     }
 
-    // Unregister webhooks from Shopify before deleting the tokens (needs auth token)
+    // Verify workspace ownership BEFORE calling the Shopify API. Previously
+    // a user could unregister another workspace's hooks by guessing its domain.
+    const { data: ownedStore, error: ownershipError } = await supabase
+      .from('shopify_tokens')
+      .select('shop_domain')
+      .eq('shop_domain', shopDomain)
+      .eq('workspace_id', user.active_workspace_id)
+      .maybeSingle()
+    if (ownershipError || !ownedStore) throw new Error('Shopify store not connected to this workspace')
+
     await unregisterShopifyWebhooks(shopDomain)
 
     const { error } = await supabase

@@ -15,15 +15,15 @@ name = "ErpLink"
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
 api_version = "2026-10"
 
-# Store-sync topics (orders/products/customers/collections) must NOT be copied into\n# app-specific webhook settings in Shopify Dev Dashboard. They are shop-scoped\n# and registered through GraphQL after OAuth,
+# Store-sync topics are shop-scoped and registered through GraphQL after OAuth,
 # so each merchant's saved toggles can actually enable/disable deliveries.
 # Only lifecycle/compliance topics stay app-scoped here.
 [[webhooks.subscriptions]]
-topics = ["app/uninstalled"]
+topics = ["app/uninstalled", "app/scopes_update"]
 uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [[webhooks.subscriptions]]
-topics = ["customers/data_request", "customers/redact", "shop/redact", "app/scopes_update"]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [access_scopes]
