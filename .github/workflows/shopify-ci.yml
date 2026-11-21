@@ -27,6 +27,7 @@ jobs:
       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
       SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+      ENCRYPTION_KEY: offline-ci-encryption-key-never-used-for-real-data
       NEXT_PUBLIC_APP_URL: https://erplink.bizsahla.com
       SHOPIFY_CLIENT_ID: d06554dc4b298108a0cfdd6c4336ae08
       SHOPIFY_CLIENT_SECRET: offline-secret-only
