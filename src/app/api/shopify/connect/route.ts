@@ -1,5 +1,7 @@
 import crypto from 'crypto'
 
+import { auth } from '@clerk/nextjs/server'
+
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-client'
@@ -36,6 +38,18 @@ export async function GET(request: NextRequest) {
         { error: 'invalid_shop', message: 'Invalid Shopify shop domain. Must end with .myshopify.com' },
         { status: 400 }
       )
+    }
+
+    // The app may be launched from Shopify Admin before the merchant has an
+    // ErpLink session. Complete sign-in first, then resume this signed launch.
+    // This prevents spending a one-time Shopify OAuth code while signed out.
+    const { userId } = await auth()
+    if (!userId) {
+      const signInUrl = new URL('/sign-in', request.url)
+      const returnUrl = new URL('/api/shopify/connect', request.url)
+      returnUrl.search = request.nextUrl.search
+      signInUrl.searchParams.set('redirect_url', returnUrl.toString())
+      return NextResponse.redirect(signInUrl)
     }
 
     const clientId = process.env.SHOPIFY_CLIENT_ID
