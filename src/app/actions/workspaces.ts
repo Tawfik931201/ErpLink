@@ -13,6 +13,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { isWorkspaceClosed } from '@/lib/workspace-archive'
+import { accessibleWorkspaceId } from '@/lib/workspace-access'
 import { publicZidStore, ZID_STORE_PUBLIC_COLUMNS } from '@/lib/zid/credentials'
 import { syncWebhooksWithSettings, unregisterAllZidWebhooks } from '@/lib/zid/webhooks'
 
@@ -495,6 +496,10 @@ export async function getActiveWorkspaceShopifyTokens(): Promise<{ success: true
       return { success: true, tokens: [] }
     }
 
+    if (!await accessibleWorkspaceId(user.id, user.active_workspace_id)) {
+      return { success: false, error: 'Active workspace access denied' }
+    }
+
     const tokens = await getCachedShopifyTokens(user.active_workspace_id)
     return { success: true, tokens }
   } catch (error: any) {
@@ -509,6 +514,8 @@ export async function disconnectShopifyStore(shopDomain: string) {
     if (!user.active_workspace_id) {
       throw new Error('No active workspace selected')
     }
+
+    if (!await accessibleWorkspaceId(user.id, user.active_workspace_id)) throw new Error('Workspace access denied')
 
     // Verify workspace ownership BEFORE calling the Shopify API. Previously
     // a user could unregister another workspace's hooks by guessing its domain.
@@ -547,6 +554,8 @@ export async function updateShopifySyncSettings(shopDomain: string, settings: an
     if (!user.active_workspace_id) {
       throw new Error('No active workspace selected')
     }
+
+    if (!await accessibleWorkspaceId(user.id, user.active_workspace_id)) throw new Error('Workspace access denied')
 
     // Save new settings to DB first (source of truth for the UI toggles).
     // Topic catalog: src/lib/shopify-topics.ts (SHOPIFY_TOPIC_CATALOG) — must
@@ -602,6 +611,8 @@ export async function syncShopifyWebhooks(shopDomain: string) {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) throw new Error('No active workspace selected')
+
+    if (!await accessibleWorkspaceId(user.id, user.active_workspace_id)) throw new Error('Workspace access denied')
 
     const { data: tok, error } = await supabase
       .from('shopify_tokens')
