@@ -207,45 +207,6 @@ export async function callShopifyREST(
   }
 }
 
-/**
- * REST GET مع إرجاع الترويسات (لترقيم Link: page_info) + معالجة 429 موحدة.
- * يُستخدم لقوائم bulk القديمة (customers/collections) التي ما زالت REST.
- */
-async function shopifyRestGetWithHeaders(
-  shopDomain: string,
-  endpoint: string,
-  _retried = false
-): Promise<{ data: any; headers: any }> {
-  const token = await getShopifyAccessToken(shopDomain)
-  const url = shopifyApiUrl(shopDomain, endpoint)
-  try {
-    const response = await axios({
-      method: 'GET',
-      url,
-      timeout: SHOPIFY_REQUEST_TIMEOUT_MS,
-      headers: {
-        'X-Shopify-Access-Token': token,
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-    })
-    return { data: response.data, headers: response.headers }
-  } catch (err: any) {
-    if (err?.response?.status === 429 && !_retried) {
-      await sleep(getShopifyRetryDelayMs(err))
-      return shopifyRestGetWithHeaders(shopDomain, endpoint, true)
-    }
-    throw err
-  }
-}
-
-/** استخرج cursor التالي من ترويسة Link (rel="next"). */
-function extractNextPageInfo(linkHeader: string): string | null {
-  if (!linkHeader) return null
-  const match = linkHeader.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/)
-  return match ? decodeURIComponent(match[1]) : null
-}
-
 /** معرّف الكيان من payload الويبهوك (id الرقمي أو GID) — للدمج وكشف التكرار. */
 export function extractShopifyEntityId(payload: any): string {
   const raw = payload?.id ?? payload?.admin_graphql_api_id ?? ''
