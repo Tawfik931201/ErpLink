@@ -11,6 +11,7 @@ import {
   verifyShopifyCallbackHmac,
 } from '@/lib/shopify-client'
 import { readShopifyOAuthContext, SHOPIFY_OAUTH_COOKIE } from '@/lib/shopify/oauth-state'
+import { hasRequiredShopifyScopes } from '@/lib/shopify/scopes'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
@@ -97,6 +98,9 @@ export async function GET(request: NextRequest) {
         timeout: 15_000,
       }
     )
+    if (!hasRequiredShopifyScopes(tokenResult.data?.scope)) {
+      return redirectToConnectStore(request, { error: 'invalid_scope' })
+    }
     const accessToken: string | undefined = tokenResult.data?.access_token
     const refreshToken: string | undefined = tokenResult.data?.refresh_token
     const accessExpiresIn = Number(tokenResult.data?.expires_in)
