@@ -9,6 +9,7 @@ import {
 } from '@/lib/shopify/oauth-state'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
+import { ensureDefaultWorkspace } from '@/lib/workspace-defaults'
 
 function errorRedirect(request: NextRequest, error: string): NextResponse {
   const url = new URL('/app/connect-store', request.nextUrl.origin)
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
       .maybeSingle()
     if (userError) return errorRedirect(request, 'no_active_workspace')
     const workspaceId = await accessibleWorkspaceId(userId, user?.active_workspace_id)
+      ?? await ensureDefaultWorkspace(userId)
     if (!workspaceId) return errorRedirect(request, 'no_active_workspace')
 
     if (!shop) {
