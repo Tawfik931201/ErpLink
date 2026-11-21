@@ -36,6 +36,37 @@ async function getOrCreateDbUser() {
   return ensureDbUser(userId)
 }
 
+
+function setShopifyTransferField(target: Record<string, any>, path: string, value: any) {
+  const parts = path.split('.').filter(Boolean)
+  if (parts.length <= 1) {
+    target[path] = value
+    return
+  }
+
+  let cursor: any = target
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    const last = i === parts.length - 1
+    const nextIsIndex = !last && /^\d+$/.test(parts[i + 1])
+
+    if (last) {
+      if (Array.isArray(cursor) && /^\d+$/.test(part)) cursor[Number(part)] = value
+      else cursor[part] = value
+      return
+    }
+
+    if (Array.isArray(cursor) && /^\d+$/.test(part)) {
+      const index = Number(part)
+      if (cursor[index] == null) cursor[index] = nextIsIndex ? [] : {}
+      cursor = cursor[index]
+    } else {
+      if (cursor[part] == null) cursor[part] = nextIsIndex ? [] : {}
+      cursor = cursor[part]
+    }
+  }
+}
+
 export async function getTransfers() {
   try {
     const user = await getOrCreateDbUser()
@@ -431,7 +462,10 @@ async function runTransferInBackground(
               ? line.staticValue
               : entity[line.erpField]
             if (rawVal === undefined || rawVal === null) continue
-            if (line.zidField) zidPayload[line.zidField] = rawVal
+            if (line.zidField) {
+              if (data.platform === 'shopify') setShopifyTransferField(zidPayload, line.zidField, rawVal)
+              else zidPayload[line.zidField] = rawVal
+            }
           }
 
           if (Object.keys(zidPayload).length === 0) {
