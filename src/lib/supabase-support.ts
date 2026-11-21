@@ -29,17 +29,17 @@ type MessageRow = {
 async function session() {
   const { userId } = await auth()
   if (!userId) throw new Error('Unauthorized')
+  const admin = isAdmin(userId)
   const workspaceId = await getActiveWorkspaceId()
-  if (!workspaceId) throw new Error('No active workspace')
-  return { userId, workspaceId, admin: isAdmin(userId) }
+  if (!workspaceId && !admin) throw new Error('No active workspace')
+  return { userId, workspaceId, admin }
 }
 
 async function ownedTicket(ticketId: number): Promise<TicketRow> {
   const { userId, workspaceId, admin } = await session()
   if (!Number.isSafeInteger(ticketId) || ticketId <= 0) throw new Error('Invalid ticket')
-  let query = supabase.from('support_tickets').select('*')
-    .eq('id', ticketId).eq('workspace_id', workspaceId)
-  if (!admin) query = query.eq('user_id', userId)
+  let query = supabase.from('support_tickets').select('*').eq('id', ticketId)
+  if (!admin) query = query.eq('workspace_id', workspaceId!).eq('user_id', userId)
   const { data, error } = await query.maybeSingle()
   if (error) throw new Error(error.message)
   if (!data) throw new Error('Ticket not found or forbidden')
@@ -50,10 +50,9 @@ export async function listSupabaseTickets() {
   const { userId, workspaceId, admin } = await session()
   let query = supabase.from('support_tickets')
     .select('id,subject,description,status,created_at')
-    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(100)
-  if (!admin) query = query.eq('user_id', userId)
+  if (!admin) query = query.eq('workspace_id', workspaceId!).eq('user_id', userId)
   const { data, error } = await query
   if (error) throw new Error(error.message)
   return (data || []).map(row => ({
