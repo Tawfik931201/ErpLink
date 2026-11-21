@@ -8,6 +8,8 @@ import { normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-cl
 
 export async function GET(request: NextRequest) {
   try {
+    // Use the public origin when the proxy forwards to a private Node listener.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.SHOPIFY_REDIRECT_URI || request.url
     const shop = request.nextUrl.searchParams.get('shop')
     if (!shop) {
       // Shopify's managed install flow lets the merchant select a store in
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
     // Never trust a shop query from another origin to initiate authorization.
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET
     if (!clientSecret || !verifyShopifyCallbackHmac(request.url, clientSecret)) {
-      return NextResponse.redirect(new URL('/app/connect-store?error=shopify_invalid_signature', request.url))
+      return NextResponse.redirect(new URL('/app/connect-store?error=shopify_invalid_signature', appUrl))
     }
 
     // طبّع وتحقق: xxx.myshopify.com فقط (يرفض المسارات والاستعلامات والحقن).
@@ -45,8 +47,8 @@ export async function GET(request: NextRequest) {
     // This prevents spending a one-time Shopify OAuth code while signed out.
     const { userId } = await auth()
     if (!userId) {
-      const signInUrl = new URL('/sign-in', request.url)
-      const returnUrl = new URL('/api/shopify/connect', request.url)
+      const signInUrl = new URL('/sign-in', appUrl)
+      const returnUrl = new URL('/api/shopify/connect', appUrl)
       returnUrl.search = request.nextUrl.search
       signInUrl.searchParams.set('redirect_url', returnUrl.toString())
       return NextResponse.redirect(signInUrl)

@@ -41,9 +41,13 @@ jobs:
       - name: Install Shopify CLI
         run: npm install --global @shopify/cli@5.0.1
 
+      - name: Validate Shopify configuration
+        run: shopify app config validate --config shopify.app.toml --no-input
+
       - name: Publish Shopify app version
         run: |
           shopify app deploy \
+            --config shopify.app.toml \
             --allow-updates \
             --no-input \
             --source-control-url "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"

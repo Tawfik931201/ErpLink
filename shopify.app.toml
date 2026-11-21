@@ -15,7 +15,9 @@ name = "ErpLink"
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
 api_version = "2026-10"
 
-# Store-sync topics (orders/products/customers/collections) must NOT be copied into\n# app-specific webhook settings in Shopify Dev Dashboard. They are shop-scoped\n# and registered through GraphQL after OAuth,
+# Store-sync topics (orders/products/customers/collections) must NOT be copied into
+# app-specific webhook settings in Shopify Dev Dashboard. They are shop-scoped
+# and registered through GraphQL after OAuth,
 # so each merchant's saved toggles can actually enable/disable deliveries.
 # Only lifecycle/compliance topics stay app-scoped here.
 [[webhooks.subscriptions]]
@@ -23,13 +25,14 @@ topics = ["app/uninstalled"]
 uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [[webhooks.subscriptions]]
-topics = ["customers/data_request", "customers/redact", "shop/redact", "app/scopes_update"]
+topics = ["app/scopes_update"]
+compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
 uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 
 [access_scopes]
 # Install scopes match features exposed immediately after connection:
 # store→ERP catalog/orders/customers plus ERP→Shopify product/category/customer
-# Data Transfer. read_all_orders and write_orders remain optional.
+# Data Transfer. Inventory and order writes remain optional.
 #
 # Protected customer data + order history (App Store review notes):
 # - customers/* topics need read_customers (protected): requires Shopify
@@ -38,11 +41,10 @@ uri = "https://erplink.bizsahla.com/api/webhooks/shopify"
 #   See https://shopify.dev/docs/apps/launch/protected-customer-data
 # - orders/* with read_orders only returns the last 60 days. Reading older
 #   orders needs read_all_orders (also approval-gated; request it in
-#   Partner Dashboard → API access, then add it here). Kept optional so fresh
-#   installs stay minimal and review-friendly.
+#   Partner Dashboard → API access, then add it here).
 scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_customers,write_customers"
-optional_scopes = ["write_orders", "read_all_orders"]
-use_legacy_install_flow = true
+optional_scopes = ["write_orders", "write_inventory"]
+use_legacy_install_flow = false
 
 [auth]
 redirect_urls = [
