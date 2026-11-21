@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { auth, currentUser } from '@clerk/nextjs/server'
+import { unstable_cache } from 'next/cache'
 import { isAdmin, getActiveWorkspaceId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 
@@ -126,23 +127,33 @@ export async function closeSupabaseTicket(negativeId: number) {
   return error ? { success: false, error: error.message } : { success: true }
 }
 
+// Cache each (Clerk user, workspace) separately to prevent repeated DB polls
+// on every route navigation. Ticket reply/close actions invalidate this tag.
+const cachedPending = unstable_cache(
+  async (userId: string, workspaceId: string) => {
+    const { data: tickets, error } = await supabase.from('support_tickets')
+      .select('id').eq('workspace_id', workspaceId).eq('user_id', userId)
+      .eq('status', 'open').order('created_at', { ascending: false }).limit(50)
+    if (error) throw new Error(error.message)
+    const ids = (tickets || []).map(t => t.id)
+    if (!ids.length) return { success: true, hasPending: false }
+    const { data: messages, error: msgError } = await supabase.from('support_messages')
+      .select('ticket_id,author_id').in('ticket_id', ids)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(200)
+    if (msgError) throw new Error(msgError.message)
+    const seen = new Set<number>()
+    for (const message of messages || []) {
+      if (seen.has(message.ticket_id)) continue
+      seen.add(message.ticket_id)
+      if (!message.author_id || message.author_id !== userId) return { success: true, hasPending: true }
+    }
+    return { success: true, hasPending: false }
+  },
+  ['supabase-support-pending-v1'], { revalidate: 60, tags: ['pending-tickets'] },
+)
+
 export async function pendingSupabaseTickets(): Promise<{ success: boolean; hasPending: boolean }> {
   const { userId, workspaceId } = await session()
-  const { data: tickets, error } = await supabase.from('support_tickets')
-    .select('id').eq('workspace_id', workspaceId).eq('user_id', userId)
-    .eq('status', 'open').order('created_at', { ascending: false }).limit(50)
-  if (error) throw new Error(error.message)
-  const ids = (tickets || []).map(t => t.id)
-  if (!ids.length) return { success: true, hasPending: false }
-  const { data: messages, error: msgError } = await supabase.from('support_messages')
-    .select('ticket_id,author_id').in('ticket_id', ids)
-    .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(200)
-  if (msgError) throw new Error(msgError.message)
-  const seen = new Set<number>()
-  for (const message of messages || []) {
-    if (seen.has(message.ticket_id)) continue
-    seen.add(message.ticket_id)
-    if (!message.author_id || message.author_id !== userId) return { success: true, hasPending: true }
-  }
-  return { success: true, hasPending: false }
+  if (!workspaceId) throw new Error('No active workspace')
+  return cachedPending(userId, workspaceId)
 }
