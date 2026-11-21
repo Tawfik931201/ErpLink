@@ -22,6 +22,10 @@ export const SHOPIFY_EVENTS = [
   { id: 'orders/updated', name: 'Order Updated (تحديث طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
   { id: 'orders/cancelled', name: 'Order Cancelled (إلغاء طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
   { id: 'orders/fulfilled', name: 'Order Fulfilled (تنفيذ طلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'orders/paid', name: 'Order Paid (دفع الطلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'orders/partially_fulfilled', name: 'Order Partially Fulfilled (تنفيذ جزئي)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'orders/edited', name: 'Order Edited (تعديل الطلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
+  { id: 'orders/delete', name: 'Order Deleted / Cancelled (حذف / إلغاء الطلب)', targetModel: 'sale.order', group: 'Orders (الطلبات)' },
   // Customers
   { id: 'customers/create', name: 'Customer Registered (تسجيل عميل جديد)', targetModel: 'res.partner', group: 'Customers (العملاء)' },
   { id: 'customers/update', name: 'Customer Profile Updated (تحديث بيانات عميل)', targetModel: 'res.partner', group: 'Customers (العملاء)' },
@@ -189,5 +193,32 @@ export const SHOPIFY_FIELDS: Record<string, { value: string; label: string; type
     { value: 'grams', label: 'Weight Grams (grams)', type: 'number' },
     { value: 'fulfillment_status', label: 'Fulfillment Status (fulfillment_status)', type: 'string' },
   ],
+}
+
+/**
+ * Shopify custom-data fields are populated by shopify/enrichment.ts.
+ * They are intentionally generic: merchants can map a whole JSON snapshot or
+ * address a nested path such as metafields.custom.external_code in custom
+ * mappings without teaching the generic engine any Shopify-specific schema.
+ */
+const SHOPIFY_CUSTOM_DATA_FIELDS = [
+  { value: 'metafields_json', label: 'Metafields JSON (metafields_json)', type: 'string' },
+  { value: 'metafield_rows', label: 'Metafields Rows (metafield_rows)', type: 'array' },
+  { value: 'metafields', label: 'Metafields Object (metafields.<namespace>.<key>)', type: 'object' },
+]
+
+for (const [topic, fields] of Object.entries(SHOPIFY_FIELDS)) {
+  if (topic === 'sale.order.line' || topic.endsWith('/delete')) continue
+  const existing = new Set(fields.map((field) => field.value))
+  for (const field of SHOPIFY_CUSTOM_DATA_FIELDS) {
+    if (!existing.has(field.value)) fields.push(field)
+  }
+}
+
+// All subscribed order lifecycle topics use the same Shopify order payload
+// shape. Reuse the update catalogue so Mapping Center can customize every
+// topic that shopify.app.toml actually subscribes to.
+for (const topic of ['orders/paid', 'orders/partially_fulfilled', 'orders/edited', 'orders/delete']) {
+  if (!SHOPIFY_FIELDS[topic]) SHOPIFY_FIELDS[topic] = [...(SHOPIFY_FIELDS['orders/updated'] || [])]
 }
 
