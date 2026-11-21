@@ -13,7 +13,7 @@ name = "ErpLink"
 
 [webhooks]
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
-api_version = "2025-07"
+api_version = "2026-10"
 
 # Core topics auto-registered on install (full catalog + all orders + customers).
 # The rest are registered on demand from Advanced settings (toggle ON = real
