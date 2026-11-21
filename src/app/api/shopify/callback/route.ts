@@ -83,11 +83,29 @@ export async function GET(request: NextRequest) {
   try {
     const tokenResult = await axios.post(
       'https://' + shop + '/admin/oauth/access_token',
-      { client_id: clientId, client_secret: clientSecret, code },
-      { timeout: 15_000 }
+      new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        expiring: '1',
+      }).toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
+        },
+        timeout: 15_000,
+      }
     )
     const accessToken: string | undefined = tokenResult.data?.access_token
-    if (!accessToken) return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
+    const refreshToken: string | undefined = tokenResult.data?.refresh_token
+    const accessExpiresIn = Number(tokenResult.data?.expires_in)
+    const refreshExpiresIn = Number(tokenResult.data?.refresh_token_expires_in)
+    if (!accessToken || !refreshToken ||
+        !Number.isFinite(accessExpiresIn) || accessExpiresIn <= 0 ||
+        !Number.isFinite(refreshExpiresIn) || refreshExpiresIn <= 0) {
+      return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
+    }
 
     const detailsResult = await axios.post(
       'https://' + shop + '/admin/api/' + SHOPIFY_API_VERSION + '/graphql.json',
@@ -105,6 +123,9 @@ export async function GET(request: NextRequest) {
     const baseData = {
       shop_domain: shop,
       access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: new Date(Date.now() + accessExpiresIn * 1000).toISOString(),
+      refresh_token_expires_at: new Date(Date.now() + refreshExpiresIn * 1000).toISOString(),
       scopes: tokenResult.data?.scope ?? null,
       updated_at: new Date().toISOString(),
       workspace_id: workspaceId,
