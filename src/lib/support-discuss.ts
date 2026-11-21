@@ -46,7 +46,8 @@ export async function ensureSupportDiscussChannel(ticket: SupportDiscussTicket):
   const users = await centralDiscussCall<Array<{ partner_id: [number, string] | false }>>(
     'res.users', 'search_read', [[['login', '=', supportLogin]]],
     { fields: ['partner_id'], limit: 1 })
-  const supportPartnerId = users[0]?.partner_id?.[0]
+  const partnerField = users[0]?.partner_id
+  const supportPartnerId = Array.isArray(partnerField) ? partnerField[0] : undefined
   if (!supportPartnerId) throw new Error('Central Odoo support partner is unavailable')
   return centralDiscussCall<number>('discuss.channel', 'create', [{
     name: channelName(ticket),
