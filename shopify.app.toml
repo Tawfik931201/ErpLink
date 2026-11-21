@@ -13,20 +13,11 @@ name = "ErpLink"
 
 [webhooks]
 # Must match SHOPIFY_API_VERSION in src/lib/shopify-client.ts (env SHOPIFY_API_VERSION).
-api_version = "2025-07"
+api_version = "2026-10"
 
-# Core topics auto-registered on install (full catalog + all orders + customers).
-# The rest are registered on demand from Advanced settings (toggle ON = real
-# webhook registration, OFF = delete — see updateShopifySyncSettings).
-# NOTE: customers/* needs read_customers (protected scope, approval-gated) —
-# without it those three subscriptions fail silently (403).
-# GDPR webhooks (customers/data_request, customers/redact, shop/redact) +
-# app/scopes_update are handled in src/app/api/webhooks/shopify/route.ts
-# and must stay subscribed for App Store compliance (200 within 5s, audit only).
-[[webhooks.subscriptions]]
-topics = ["products/create", "products/update", "products/delete", "collections/create", "collections/update", "collections/delete", "orders/create", "orders/updated", "orders/cancelled", "orders/fulfilled", "orders/paid", "orders/partially_fulfilled", "orders/edited", "orders/delete", "customers/create", "customers/update", "customers/delete"]
-uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
-
+# Store-sync topics are shop-scoped and registered through GraphQL after OAuth,
+# so each merchant's saved toggles can actually enable/disable deliveries.
+# Only lifecycle/compliance topics stay app-scoped here.
 [[webhooks.subscriptions]]
 topics = ["app/uninstalled"]
 uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
@@ -36,8 +27,9 @@ topics = ["customers/data_request", "customers/redact", "shop/redact", "app/scop
 uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
 
 [access_scopes]
-# Minimal install scopes (read-only core). write_* and customers scopes are
-# requested as optional_scopes only when reverse sync is enabled.
+# Install scopes match features exposed immediately after connection:
+# store→ERP catalog/orders/customers plus ERP→Shopify product/category/customer
+# Data Transfer. read_all_orders and write_orders remain optional.
 #
 # Protected customer data + order history (App Store review notes):
 # - customers/* topics need read_customers (protected): requires Shopify
@@ -48,8 +40,8 @@ uri = "${NEXT_PUBLIC_APP_URL}/api/webhooks/shopify"
 #   orders needs read_all_orders (also approval-gated; request it in
 #   Partner Dashboard → API access, then add it here). Kept optional so fresh
 #   installs stay minimal and review-friendly.
-scopes = "read_products,read_orders,read_inventory,read_locations"
-optional_scopes = ["write_products", "write_orders", "read_customers", "write_customers", "read_all_orders"]
+scopes = "read_products,write_products,read_orders,read_inventory,read_locations,read_customers,write_customers"
+optional_scopes = ["write_orders", "read_all_orders"]
 use_legacy_install_flow = false
 
 [auth]

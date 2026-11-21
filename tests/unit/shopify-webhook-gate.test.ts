@@ -123,18 +123,17 @@ describe('shopify explicit table does not leak into other platforms', () => {
   })
 })
 
-describe('listShopifyCollections endpoints (source pins)', () => {
+describe('Shopify GraphQL collection listing (source pins)', () => {
   const client = read('src/lib/shopify-client.ts')
 
-  it('never calls a unified collections listing endpoint', () => {
-    // Checked to fail on the old code, which built `/collections.json?...`.
-    // The doc comment above names no such path, and 'custom_collections.json'
-    // cannot false-positive (underscore, not slash, precedes 'collections').
-    expect(client).not.toContain('/collections.json')
+  it('uses the unified GraphQL collection connection', () => {
+    expect(client).toContain('collections(first: $first, after: $after)')
+    expect(client).toContain('legacyResourceId title handle descriptionHtml')
   })
 
-  it('reads both custom and smart collections', () => {
-    expect(client).toContain('custom_collections.json')
-    expect(client).toContain('smart_collections.json')
+  it('does not call legacy REST collection endpoints', () => {
+    expect(client).not.toContain('/collections.json')
+    expect(client).not.toContain('custom_collections.json')
+    expect(client).not.toContain('smart_collections.json')
   })
 })

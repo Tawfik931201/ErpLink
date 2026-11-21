@@ -5,8 +5,6 @@ import { type NextRequest, NextResponse } from 'next/server'
 import {
   SHOPIFY_API_VERSION,
   SHOPIFY_CORE_TOPICS,
-  SHOPIFY_GDPR_TOPICS,
-  SHOPIFY_SCOPES_UPDATE_TOPIC,
   normalizeShopDomain,
   registerShopifyWebhook,
   verifyShopifyCallbackHmac,
@@ -168,12 +166,9 @@ export async function GET(request: NextRequest) {
     // 5. Automatically register webhooks (non-blocking, best-effort).
     // الأساسية + app/uninstalled (تنظيف التوكن) + GDPR الثلاثة + scopes_update
     // (امتثال App Store — يجب أن تبقى مشتركة دائماً).
-    const webhookTopics = [
-      ...SHOPIFY_CORE_TOPICS,
-      'app/uninstalled',
-      ...SHOPIFY_GDPR_TOPICS,
-      SHOPIFY_SCOPES_UPDATE_TOPIC,
-    ]
+    // Store-sync topics are shop-scoped so per-store toggles can remove them.
+    // app/uninstalled + GDPR + scopes_update are app-scoped in shopify.app.toml.
+    const webhookTopics = [...SHOPIFY_CORE_TOPICS]
 
     for (const topic of webhookTopics) {
       // Async webhook registration. We do not block the OAuth flow on this.

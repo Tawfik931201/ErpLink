@@ -1,5 +1,6 @@
 import { resolveExecutionTarget, validateExecutionTarget, withErpTarget, type ExecutionTarget } from '@/lib/erp-execution-target'
 import { prepareSallaWebhookData } from '@/lib/salla/webhook-data'
+import { prepareShopifyWebhookData } from '@/lib/shopify/enrichment'
 import { derivePresetKey, normalizeEvent } from '@/lib/sync/events'
 import { processFixedMappingFallback, processSingleMapping } from '@/lib/sync/mappings'
 import { notifySyncForRecord } from '@/lib/sync/notifications'
@@ -153,6 +154,8 @@ async function processWebhookEventInternal(
     }
   } else if (syncPlatform === 'salla') {
     data = await prepareSallaWebhookData(data, storeIdStr, normalizedEvent, isLegacyDelivery)
+  } else if (syncPlatform === 'shopify') {
+    data = await prepareShopifyWebhookData(data, storeIdStr, event)
   }
 
   // 1. Find all field_mappings matching this store + event

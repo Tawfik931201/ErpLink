@@ -58,7 +58,7 @@ async function handlePost(req: NextRequest) {
   const shopDomain = (headersList.get('x-shopify-shop-domain') ?? '').trim().toLowerCase()
   const topic = (headersList.get('x-shopify-topic') ?? '').trim()
   const webhookId = (headersList.get('x-shopify-webhook-id') ?? '').trim()
-  const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET ?? ''
+  const webhookSecret = process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_CLIENT_SECRET || ''
 
   // ── تحقق HMAC (header) قبل أي عمل ثقيل — 401 عند الفشل ───────────────
   if (webhookSecret) {
@@ -66,7 +66,7 @@ async function handlePost(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
-    console.error('[Shopify Webhook] Security Alert: SHOPIFY_WEBHOOK_SECRET is not configured in production.')
+    console.error('[Shopify Webhook] Security Alert: SHOPIFY_WEBHOOK_SECRET / SHOPIFY_CLIENT_SECRET is not configured in production.')
     return NextResponse.json({ error: 'Webhook secret not configured on server' }, { status: 500 })
   }
 
