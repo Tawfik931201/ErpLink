@@ -9,7 +9,14 @@ import { connectionGeneration, withErpTarget } from '@/lib/erp-execution-target'
 import { getEffectiveStandardMappingSettings } from '@/lib/mapping-settings'
 import { OdooClient } from '@/lib/odoo-client'
 import { listSallaProducts, listSallaCustomers, listSallaCategories } from '@/lib/salla-client'
-import { listShopifyProducts, listShopifyCustomers, listShopifyCollections } from '@/lib/shopify-client'
+import {
+  createShopifyCollection,
+  createShopifyCustomer,
+  createShopifyProduct,
+  listShopifyCollections,
+  listShopifyCustomers,
+  listShopifyProducts,
+} from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
 import {
   buildOdooValues,
@@ -413,7 +420,7 @@ async function runTransferInBackground(
 
     // 6. Process entities concurrently (concurrency limit = 5)
     if (data.direction === 'odoo_to_store') {
-      // ── Odoo → Zid: read Odoo record, map to Zid payload, create/update in Zid ──
+      // ── Odoo → Store: route through the selected platform adapter ──
       await runWithConcurrencyLimit(5, entities, async (entity) => {
         const nameForLog = String(entity.name || entity.code || entity.id || '')
 
@@ -430,6 +437,29 @@ async function runTransferInBackground(
           if (Object.keys(zidPayload).length === 0) {
             logError(`تخطي السجل [${nameForLog}]: جميع الحقول المربوطة فارغة`)
             records_failed++
+            await updateDbProgress()
+            return
+          }
+
+          // Shopify has its own GraphQL writer. Never route a Shopify transfer
+          // through ZidAPI: platform-specific adapters stay isolated.
+          if (data.platform === 'shopify') {
+            if (data.dataType === 'products') {
+              const payload = { ...zidPayload }
+              if (!payload.title) payload.title = nameForLog
+              await createShopifyProduct(data.storeIdentifier, payload)
+            } else if (data.dataType === 'categories') {
+              const payload = { ...zidPayload }
+              if (!payload.title) payload.title = nameForLog
+              await createShopifyCollection(data.storeIdentifier, payload)
+            } else if (data.dataType === 'customers') {
+              const payload = { ...zidPayload }
+              if (!payload.first_name && !payload.firstName && !payload.email) {
+                payload.first_name = nameForLog
+              }
+              await createShopifyCustomer(data.storeIdentifier, payload)
+            }
+            records_created++
             await updateDbProgress()
             return
           }
