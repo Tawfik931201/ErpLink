@@ -170,16 +170,28 @@ export async function GET(request: NextRequest) {
       if (insertError) throw insertError
     }
 
-    // 5. Automatically register webhooks (non-blocking, best-effort).
-    // الأساسية + app/uninstalled (تنظيف التوكن) + GDPR الثلاثة + scopes_update
-    // (امتثال App Store — يجب أن تبقى مشتركة دائماً).
-    // Store-sync topics are shop-scoped so per-store toggles can remove them.
-    // app/uninstalled + GDPR + scopes_update are app-scoped in shopify.app.toml.
-    const webhookTopics = [...SHOPIFY_CORE_TOPICS]
-
-    for (const topic of webhookTopics) {
-      // Async webhook registration. We do not block the OAuth flow on this.
-      registerShopifyWebhook(shop, topic, access_token).catch(() => {})
+    // 5. Register shop-scoped webhooks before reporting a fully connected shop.
+    // Fire-and-forget promises are terminated on serverless request teardown,
+    // silently leaving a connected shop without any event subscriptions.
+    // Bound concurrency to avoid exhausting Shopify GraphQL rate limits.
+    const failedWebhookTopics: string[] = []
+    const webhookTopics: string[] = [...SHOPIFY_CORE_TOPICS]
+    for (let offset = 0; offset < webhookTopics.length; offset += 4) {
+      const batch = webhookTopics.slice(offset, offset + 4)
+      const results = await Promise.all(
+        batch.map((topic) => registerShopifyWebhook(shop, topic, access_token))
+      )
+      results.forEach((subscription, index) => {
+        if (!subscription) failedWebhookTopics.push(batch[index])
+      })
+    }
+    if (failedWebhookTopics.length) {
+      // The credentials are already stored. The merchant can retry safely
+      // using "Sync subscriptions" without reauthorizing the app.
+      console.warn('[Shopify OAuth] webhook subscriptions need retry', {
+        shopDomain: shop,
+        failedTopics: failedWebhookTopics,
+      })
     }
 
     // Auto-bootstrap workspace defaults in background (zero-configuration)
@@ -191,6 +203,7 @@ export async function GET(request: NextRequest) {
 
     const response = redirectToConnectStore(request, {
       success: 'shopify_connected',
+      ...(failedWebhookTopics.length ? { warning: 'shopify_webhooks_partial' } : {}),
       store: shopName ? encodeURIComponent(shopName) : shop,
     })
 
