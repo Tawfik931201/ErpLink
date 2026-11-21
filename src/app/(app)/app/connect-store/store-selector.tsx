@@ -578,27 +578,19 @@ export default function StoreSelector({
               <div className="space-y-3 pt-2">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   {ar
-                    ? 'أدخل نطاق متجرك على شوبيفاي ثم اضغط اتصال للموافقة على الصلاحيات.'
-                    : 'Enter your Shopify shop domain, then click Connect to approve permissions.'}
+                    ? 'اضغط اتصال الحساب، ثم اختر متجرك من شوبيفاي ووافق على الصلاحيات.'
+                    : 'Click Connect Account, select your store in Shopify, and approve the permissions.'}
                 </p>
-                <form action="/api/shopify/connect" method="GET" className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    name="shop"
-                    placeholder="store-name.myshopify.com"
-                    required
-                    className="flex h-8 w-full border border-border bg-background px-3 text-[11px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 gap-1 rounded-none px-3 text-[10px] font-bold shrink-0"
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span>{ar ? 'اتصال' : 'Connect'}</span>
-                  </Button>
-                </form>
+                <a
+                  href="/api/shopify/connect"
+                  className={cn(
+                    buttonVariants({ variant: 'outline' }),
+                    'h-8 gap-1.5 rounded-none px-3 text-[10px] font-bold inline-flex'
+                  )}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>{ar ? 'اتصال الحساب' : 'Connect Account'}</span>
+                </a>
               </div>
             ) : (
               <div className="space-y-3 pt-2">
