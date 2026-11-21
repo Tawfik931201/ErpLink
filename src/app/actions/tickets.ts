@@ -47,7 +47,7 @@ export async function createTicket(formData: FormData) {
   const title = String(formData.get('title') || '').trim()
   if (!title) return { success: false, error: 'Please provide a ticket title.' }
   const description = String(formData.get('description') || '')
-  const files = formData.getAll('attachments').filter((value): value is File => value instanceof File)
+  const files = formData.getAll('attachments').filter((value): value is File => typeof value !== 'string')
   try {
     const result = await createSupabaseTicket(title, description, files)
     if (result.success) revalidatePath('/app/tickets')
@@ -71,7 +71,7 @@ export async function getTicketMessages(ticketId: number) {
 export async function sendTicketMessage(formData: FormData) {
   const ticketId = Number(formData.get('ticketId'))
   const message = String(formData.get('message') || '')
-  const files = formData.getAll('attachments').filter((value): value is File => value instanceof File)
+  const files = formData.getAll('attachments').filter((value): value is File => typeof value !== 'string')
   try {
     if (!Number.isSafeInteger(ticketId) || ticketId >= 0) throw new Error('Invalid ticket ID')
     const result = await sendSupabaseMessage(ticketId, message, files)
