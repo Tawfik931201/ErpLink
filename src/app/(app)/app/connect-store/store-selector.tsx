@@ -207,6 +207,7 @@ export default function StoreSelector({
   const error = searchParams.get('error')
   const errorDescription = searchParams.get('description')
   const success = searchParams.get('success')
+  const shopifyWarning = searchParams.get('warning') === 'shopify_webhooks_partial'
 
   const isDetailRoute = Boolean(initialPlatform && initialSlug)
   const [view, setView] = useState<'list' | 'connect' | 'details'>(isDetailRoute ? 'details' : 'list')
@@ -388,6 +389,17 @@ export default function StoreSelector({
             <p className="font-bold text-primary">{ar ? 'تم ربط المتجر بنجاح' : 'Store Connected'}</p>
             <p className="text-[11px] text-primary/80 mt-0.5">{getSuccessMessage(success)}</p>
           </div>
+        </div>
+      )}
+
+      {shopifyWarning && (
+        <div role="alert" className="flex items-start gap-3 border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            {ar
+              ? 'تم حفظ اتصال Shopify لكن بعض اشتراكات Webhooks لم تُفعّل. افتح إعدادات مزامنة هذا المتجر واضغط «مزامنة الاشتراكات» قبل الاعتماد على استقبال الطلبات.'
+              : 'Shopify is connected, but some webhook subscriptions failed. Open this store’s sync settings and select “Sync subscriptions” before relying on incoming orders.'}
+          </p>
         </div>
       )}
 
