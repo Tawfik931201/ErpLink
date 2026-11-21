@@ -659,6 +659,57 @@ export async function listShopifyCollections(
   }
 }
 
+/** Creates a customer via GraphQL Admin API. Requires write_customers. */
+export async function createShopifyCustomer(shopDomain: string, data: Record<string, any>) {
+  const input: Record<string, any> = {}
+  if (data.first_name ?? data.firstName) input.firstName = String(data.first_name ?? data.firstName)
+  if (data.last_name ?? data.lastName) input.lastName = String(data.last_name ?? data.lastName)
+  if (data.email) input.email = String(data.email)
+  if (data.phone) input.phone = String(data.phone)
+  if (data.note) input.note = String(data.note)
+  if (data.tags) input.tags = Array.isArray(data.tags) ? data.tags.map(String) : String(data.tags).split(',').map((v) => v.trim()).filter(Boolean)
+
+  const result = await callShopifyGraphQL(
+    shopDomain,
+    `mutation ErpLinkCustomerCreate($input: CustomerInput!) {
+      customerCreate(input: $input) {
+        customer { id displayName }
+        userErrors { field message }
+      }
+    }`,
+    { input }
+  )
+  const payload = result?.customerCreate
+  if (payload?.userErrors?.length) throw new Error(payload.userErrors.map((e: any) => e.message).join('; '))
+  return payload?.customer
+}
+
+/** Creates a collection/category via GraphQL Admin API. Requires write_products. */
+export async function createShopifyCollection(shopDomain: string, data: Record<string, any>) {
+  const input: Record<string, any> = {
+    title: String(data.title ?? data.name ?? '').trim(),
+  }
+  if (!input.title) throw new Error('Shopify collection title is required')
+  if (data.body_html ?? data.descriptionHtml ?? data.description) {
+    input.descriptionHtml = String(data.body_html ?? data.descriptionHtml ?? data.description)
+  }
+  if (data.handle) input.handle = String(data.handle)
+
+  const result = await callShopifyGraphQL(
+    shopDomain,
+    `mutation ErpLinkCollectionCreate($input: CollectionInput!) {
+      collectionCreate(input: $input) {
+        collection { id title handle }
+        userErrors { field message }
+      }
+    }`,
+    { input }
+  )
+  const payload = result?.collectionCreate
+  if (payload?.userErrors?.length) throw new Error(payload.userErrors.map((e: any) => e.message).join('; '))
+  return payload?.collection
+}
+
 /**
  * Deletes shop-scoped webhooks for a single topic pointing at our endpoint.
  */
