@@ -44,7 +44,6 @@ jobs:
       - name: Publish Shopify app version
         run: |
           shopify app deploy \
-            --config shopify.app.toml \
             --allow-updates \
             --no-input \
             --source-control-url "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
