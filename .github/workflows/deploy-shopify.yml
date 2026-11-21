@@ -1,0 +1,50 @@
+name: Deploy Shopify app configuration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopify-production-app-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-shopify:
+    name: Release Shopify app configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SHOPIFY_SERVICE_ACCOUNT_TOKEN: ${{ secrets.SHOPIFY_SERVICE_ACCOUNT_TOKEN }}
+      SHOPIFY_CLI_NO_ANALYTICS: '1'
+      CI: 'true'
+    steps:
+      - name: Verify Shopify deployment credential
+        shell: bash
+        run: |
+          if [ -z "$SHOPIFY_SERVICE_ACCOUNT_TOKEN" ]; then
+            echo "::error::Missing GitHub Actions secret SHOPIFY_SERVICE_ACCOUNT_TOKEN. Create a Shopify service account with App development permission and add its token to the repository secret."
+            exit 1
+          fi
+
+      - name: Checkout the exact version to release
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Shopify CLI
+        run: npm install --global @shopify/cli@5.0.1
+
+      - name: Publish Shopify app version
+        run: |
+          shopify app deploy \
+            --config shopify.app.toml \
+            --allow-updates \
+            --no-input \
+            --source-control-url "https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
