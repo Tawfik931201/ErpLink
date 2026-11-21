@@ -8,10 +8,18 @@ export async function GET(request: NextRequest) {
   try {
     const shop = request.nextUrl.searchParams.get('shop')
     if (!shop) {
-      return NextResponse.json(
-        { error: 'missing_shop', message: 'Shop parameter is required.' },
-        { status: 400 }
-      )
+      // Shopify's managed install flow lets the merchant select a store in
+      // Shopify Admin; no manual myshopify.com entry is needed in ErpLink.
+      const clientId = process.env.SHOPIFY_CLIENT_ID
+      if (!clientId) {
+        return NextResponse.json(
+          { error: 'missing_config', message: 'Shopify app credentials are not configured on the server.' },
+          { status: 500 }
+        )
+      }
+      const installUrl = new URL('https://admin.shopify.com/oauth/install')
+      installUrl.searchParams.set('client_id', clientId)
+      return NextResponse.redirect(installUrl)
     }
 
     // طبّع وتحقق: xxx.myshopify.com فقط (يرفض المسارات والاستعلامات والحقن).
