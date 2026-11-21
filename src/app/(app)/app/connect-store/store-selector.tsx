@@ -232,6 +232,26 @@ export default function StoreSelector({
 
   const getErrorMessage = (err: string) => {
     switch (err) {
+      case 'shopify_invalid_signature':
+        return ar
+          ? 'تعذر التحقق من طلب Shopify. افتح التطبيق من لوحة Shopify وأعد المحاولة.'
+          : 'Could not verify the Shopify request. Open the app from Shopify Admin and try again.'
+      case 'invalid_state':
+        return ar
+          ? 'انتهت جلسة الربط أو لم تتطابق بيانات الحماية. أعد المحاولة من جديد.'
+          : 'The connection session expired or failed its security check. Start again.'
+      case 'shopify_token_exchange_failed':
+        return ar
+          ? 'تعذر إكمال تفويض Shopify أو حفظ الاتصال. تحقق من إعدادات التطبيق والصلاحيات ثم أعد المحاولة.'
+          : 'Could not complete Shopify authorization or save the connection. Check app configuration and scopes.'
+      case 'no_active_workspace':
+        return ar
+          ? 'يجب اختيار مساحة عمل نشطة داخل ERP Link قبل ربط متجر Shopify.'
+          : 'Select an active ERP Link workspace before connecting Shopify.'
+      case 'unauthorized':
+        return ar
+          ? 'سجّل الدخول إلى ERP Link أولاً، ثم أعد فتح تطبيق Shopify لإكمال الربط.'
+          : 'Sign in to ERP Link, then open the Shopify app again to complete the connection.'
       case 'salla_webhook_registration_failed':
         return ar
           ? 'تم حفظ اتصال سلة. تعذر تفعيل كل اشتراكات التحديثات. أعد الربط أو تواصل مع الدعم.'
