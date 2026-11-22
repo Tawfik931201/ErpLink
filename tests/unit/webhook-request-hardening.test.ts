@@ -16,7 +16,7 @@ function requestWithChunks(chunks: Uint8Array[], declaredLength?: string): Pick<
         if (queue.length) controller.enqueue(queue.shift()!)
         else controller.close()
       },
-    }),
+    }) as unknown as Request['body'],
   }
 }
 
