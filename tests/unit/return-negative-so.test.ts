@@ -10,6 +10,7 @@ describe('Negative Sale Order Replication and Standard Mapping', () => {
     const createdPayloads: any[] = []
     const mockClient: any = {
       getMajorVersion: jest.fn().mockResolvedValue(19),
+      execute: jest.fn().mockResolvedValue({ tax_ids: { type: 'many2many' } }),
       create: jest.fn().mockImplementation(async (model: string, vals: any) => {
         createdPayloads.push({ model, vals })
         return 999
@@ -106,6 +107,7 @@ describe('Negative Sale Order Replication and Standard Mapping', () => {
     const createdPayloads: any[] = []
     const mockClient: any = {
       getMajorVersion: jest.fn().mockResolvedValue(17),
+      execute: jest.fn().mockResolvedValue({ tax_id: { type: 'many2many' } }),
       create: jest.fn().mockImplementation(async (model: string, vals: any) => {
         createdPayloads.push({ model, vals })
         return 888
@@ -175,6 +177,7 @@ describe('Negative Sale Order Replication and Standard Mapping', () => {
   it('readSaleOrder handles older Odoo (tax_id, analytic_account_id) resiliently', async () => {
     const mockClient: any = {
       getMajorVersion: jest.fn().mockResolvedValue(15),
+      execute: jest.fn().mockResolvedValue({ tax_id: { type: 'many2many' } }),
       searchRead: jest.fn().mockImplementation(async (model: string, _domain: any, _fields: string[]) => {
         if (model === 'sale.order') {
           return [
