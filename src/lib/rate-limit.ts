@@ -1,3 +1,5 @@
+import { isIP } from 'node:net'
+
 /**
  * Minimal in-process rate limiter (per key + window).
  *
@@ -49,13 +51,31 @@ export function checkRateLimit(key: string, limit: number, windowMs: number): Ra
   return { allowed: true, remaining: limit - b.count, resetMs: b.resetAt - now }
 }
 
-/** Client identity for rate limiting: forwarded IP, else `x-forwarded-for`, else `anonymous`. */
+/**
+ * Rate-limit identity derived ONLY from a reverse proxy that the operator
+ * explicitly trusts. In particular, x-forwarded-for is client-controlled if
+ * the origin is reachable directly or the proxy does not strip input values.
+ *
+ * Defaults to a SHARED anonymous bucket instead of trusting spoofable headers.
+ * On an isolated Hostinger/proxy ingress, set WEBHOOK_TRUSTED_PROXY_IP_HEADER
+ * only after proving the edge overwrites the named header on every request.
+ */
 export function rateLimitKeyFromHeaders(getHeader: (name: string) => string | null, prefix: string): string {
-  const ip =
-    (getHeader('x-forwarded-for') ?? '').split(',')[0]?.trim() ||
-    (getHeader('x-real-ip') ?? '').trim() ||
-    'anonymous'
-  return `${prefix}:${ip}`
+  const configured = (process.env.WEBHOOK_TRUSTED_PROXY_IP_HEADER ?? '').trim().toLowerCase()
+  const allowedHeaders = new Set(['x-forwarded-for', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip'])
+  if (!allowedHeaders.has(configured)) return `${prefix}:unidentified`
+
+  const raw = getHeader(configured) ?? ''
+  if (raw.length > 256) return `${prefix}:unidentified`
+  // A trusted edge MUST append/overwrite X-Forwarded-For. The rightmost entry
+  // is the edge-visible peer; the first entry is attacker-injectable.
+  const candidate = configured === 'x-forwarded-for'
+    ? raw.split(',').at(-1)?.trim() ?? ''
+    : raw.trim()
+  const address = candidate.startsWith('[') && candidate.endsWith(']')
+    ? candidate.slice(1, -1)
+    : candidate
+  return isIP(address) ? `${prefix}:${address.toLowerCase()}` : `${prefix}:unidentified`
 }
 
 /** Test seam: clear all buckets. */
