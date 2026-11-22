@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
 import { pushConfigured, sendBrowserPush } from '@/lib/browser-push'
+import { publishAppNotification } from '@/lib/app-notification-events'
 
 export type NotificationStatus = 'received' | 'success' | 'failed' | 'skipped'
 export function notificationCategory(event: string): string {
@@ -41,11 +42,18 @@ export async function recordAppNotification(input: {
     title: titles[input.status],
     body: names[cat] + (input.reference ? ' #' + safeText(input.reference, 50) : '') + ' · ' + safeText(input.event, 80),
     href: input.status === 'received' ? '/app/queue' : '/app/logs',
-  }).select('id').maybeSingle()
+  }).select('id,title,body,href,status,event,created_at').maybeSingle()
   if (error || !data?.id) {
     if (error?.code !== '23505') console.warn('[Notifications] Event persistence unavailable:', error?.code ?? 'no_id')
     return
   }
+  // Broadcast immediately to active in-app tabs on this Node process. This is
+  // in-memory SSE, not Supabase Realtime and not another database operation.
+  publishAppNotification(input.workspaceId, data as {
+    id: string; title: string; body: string; href: string;
+    status: string; event: string; created_at: string
+  })
+
   // Durable fanout; every delivery has unique notification/subscription identity.
   const { data: devices, error: devicesError } = await supabase.from('browser_push_subscriptions')
     .select('id').eq('workspace_id', input.workspaceId).eq('enabled', true).limit(100)
