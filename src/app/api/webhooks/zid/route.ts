@@ -21,13 +21,13 @@ import { type NextRequest, NextResponse } from 'next/server'
 
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
-import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
-import { isStrictWebhookAuth, isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
+import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 import { normalizeZidStoreId } from '@/lib/zid/store-identity'
 import {
   verifyZidWebhookAuthorization,
