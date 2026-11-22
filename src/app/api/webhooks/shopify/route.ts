@@ -5,7 +5,6 @@ import { recordAudit } from '@/lib/audit-logs'
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { resolveEventOperation } from '@/lib/event-operation'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
-import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
   SHOPIFY_GDPR_TOPICS,
@@ -19,6 +18,7 @@ import {
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { ttlCache } from '@/lib/ttl-cache'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
 
