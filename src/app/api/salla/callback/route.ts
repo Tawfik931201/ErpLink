@@ -3,6 +3,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { getAppBaseUrl } from '@/lib/app-url'
+import { encrypt } from '@/lib/crypto'
 import { extractSallaMerchantIdFromProfile } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
@@ -204,8 +205,8 @@ export async function GET(request: NextRequest) {
     // serialization of BigInt throws inside the Supabase client).
     const tokenData: any = {
       merchant_id: merchantId,
-      access_token: access_token,
-      refresh_token: refresh_token,
+      access_token: encrypt(access_token),
+      refresh_token: encrypt(refresh_token),
       expires_in: expires_in ? Number(expires_in) : null,
       updated_at: new Date().toISOString(),
       workspace_id: workspaceId,
