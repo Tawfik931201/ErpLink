@@ -4,6 +4,7 @@ import path from 'path'
 
 import { POST as clerkWebhook } from '@/app/api/webhooks/clerk/route'
 import { POST as impersonate } from '@/app/api/admin/impersonate/route'
+import { getAppBaseUrl } from '@/lib/app-url'
 import { GET as releaseHealth } from '@/app/api/health/live/route'
 
 // These only exercise safe early-rejection branches; never call Clerk or DB.
@@ -77,6 +78,39 @@ describe('privileged impersonation and deployment probes', () => {
     expect(await response.json()).toEqual({
       ok: true, release: 'erplink-security-prelaunch-20261123-r1',
     })
+  })
+
+  it('never trusts Host or X-Forwarded-Host for a production OAuth origin', () => {
+    const previous = {
+      NODE_ENV: process.env.NODE_ENV,
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+      NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+    }
+    try {
+      delete process.env.NEXT_PUBLIC_APP_URL
+      delete process.env.NEXTAUTH_URL
+      Object.assign(process.env, { NODE_ENV: 'production' })
+      const poisoned = {
+        headers: new Headers({
+          host: 'attacker.invalid',
+          'x-forwarded-host': 'attacker.invalid',
+          'x-forwarded-proto': 'http',
+        }),
+        nextUrl: { origin: 'http://attacker.invalid' },
+      }
+      expect(getAppBaseUrl(poisoned as never)).toBe('https://erplink.bizsahla.com')
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
+  })
+
+  it('uses constant-time matching for the privileged central archive cron', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'src/app/api/cron/central-archive/route.ts'), 'utf8')
+    expect(source).toContain("secretMatches(bearer ?? '', secret)")
+    expect(source).not.toContain('bearer !== secret')
   })
 
   it('pins the auth change for both Odoo webhook receivers', () => {
