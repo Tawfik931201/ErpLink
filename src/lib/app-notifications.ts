@@ -270,13 +270,64 @@ export async function recordAppNotification(input: RecordAppNotificationInput): 
   const rows = devices.map(device => ({ notification_id: data.id, subscription_id: device.id }))
   const { error: fanoutError } = await supabase.from('browser_push_deliveries').upsert(rows, { onConflict: 'notification_id,subscription_id', ignoreDuplicates: true })
   if (fanoutError) console.warn('[Notifications] Push fanout unavailable:', fanoutError.code)
-  else if (pushConfigured()) void drainBrowserPush().catch(() => {})
+  else if (pushConfigured()) scheduleBrowserPushDrain(0)
 }
 
+// One timer per Node process; no interval while there are no pending deliveries.
+// A new webhook/notification pre-empts a scheduled retry for immediate delivery.
+const pushState = globalThis as typeof globalThis & {
+  __erpBrowserPushWakeTimer?: NodeJS.Timeout
+  __erpBrowserPushWakeAt?: number
+  __erpBrowserPushRecoveryStarted?: boolean
+}
 let busy = false
+
+function scheduleBrowserPushDrain(delayMs: number): void {
+  if (!pushConfigured()) return
+  const delay = Math.max(0, Math.min(2_147_000_000, Math.ceil(delayMs)))
+  const wakeAt = Date.now() + delay
+  if (pushState.__erpBrowserPushWakeTimer &&
+      (pushState.__erpBrowserPushWakeAt ?? Infinity) <= wakeAt) return
+  if (pushState.__erpBrowserPushWakeTimer) clearTimeout(pushState.__erpBrowserPushWakeTimer)
+  pushState.__erpBrowserPushWakeAt = wakeAt
+  pushState.__erpBrowserPushWakeTimer = setTimeout(() => {
+    pushState.__erpBrowserPushWakeTimer = undefined
+    pushState.__erpBrowserPushWakeAt = undefined
+    void drainBrowserPush().catch(() => {
+      console.warn('[Notifications] Push delivery cycle failed')
+      scheduleBrowserPushDrain(60_000)
+    })
+  }, delay)
+  pushState.__erpBrowserPushWakeTimer.unref?.()
+}
+
+/** Exactly one startup recovery pass per process; durable pending rows survive deploys. */
+export function startBrowserPushRecovery(): void {
+  if (!pushConfigured() || pushState.__erpBrowserPushRecoveryStarted) return
+  pushState.__erpBrowserPushRecoveryStarted = true
+  scheduleBrowserPushDrain(5_000)
+}
+
+async function armNextPendingPush(): Promise<void> {
+  // Only check after a delivery cycle, never on an idle repeating timer.
+  const { data, error } = await supabase.from('browser_push_deliveries')
+    .select('next_attempt_at').eq('status', 'pending')
+    .order('next_attempt_at', { ascending: true }).limit(1)
+  if (error) {
+    console.warn('[Notifications] Push retry schedule unavailable:', error.code)
+    scheduleBrowserPushDrain(60_000)
+    return
+  }
+  const nextAttempt = data?.[0]?.next_attempt_at
+  if (!nextAttempt) return // Nothing pending: stop all database reads.
+  const dueAt = new Date(nextAttempt).getTime()
+  scheduleBrowserPushDrain(Number.isFinite(dueAt) ? Math.max(1000, dueAt - Date.now()) : 60_000)
+}
+
 /** Bounded, non-overlapping sender. Never invoked from Odoo processing. */
 export async function drainBrowserPush(limit = 20): Promise<number> {
-  if (busy || !pushConfigured()) return 0
+  if (!pushConfigured()) return 0
+  if (busy) { scheduleBrowserPushDrain(1_000); return 0 }
   busy = true
   try {
     const { data, error } = await supabase.from('browser_push_deliveries')
@@ -307,5 +358,12 @@ export async function drainBrowserPush(limit = 20): Promise<number> {
       done++
     }
     return done
-  } finally { busy = false }
+  } finally {
+    busy = false
+    try { await armNextPendingPush() }
+    catch {
+      // Recover from transient database/network failure without a busy poll.
+      scheduleBrowserPushDrain(60_000)
+    }
+  }
 }
