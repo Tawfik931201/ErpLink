@@ -40,8 +40,10 @@ describe('durable browser notification independence', () => {
   it('runs push independently of the Odoo worker only when configured', () => {
     const boot = source('src', 'instrumentation.ts')
     expect(boot).toContain('startSyncQueueRunner()')
-    expect(boot).toContain('if (pushConfigured())')
-    expect(boot).toContain('drainBrowserPush()')
+    // Push switched to event-driven recovery before this security change.
+    // Startup must recover durable outbox messages without periodic polling.
+    expect(boot).toContain('startBrowserPushRecovery()')
+    expect(boot).not.toContain('setInterval(() => {\n            void drainBrowserPush()')
   })
   it('does not give public clients direct access to notification tables', () => {
     const migration = source('supabase', 'migrations', '20261120_browser_push_notifications.sql')
