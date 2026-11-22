@@ -62,10 +62,41 @@ export async function resolvePublicDestination(rawUrl: string): Promise<{
 }
 
 /**
+ * Called by the Node Agent before each new socket. The validated DNS address
+ * is exactly the address the socket dialer receives (prevents DNS rebinding).
+ * Agents using this lookup must set autoSelectFamily=false.
+ */
+export function publicErpDnsLookup(
+  hostname: string,
+  _options: unknown,
+  callback: (error: NodeJS.ErrnoException | null, address: string, family: number) => void
+): void {
+  const host = hostname.replace(/^\\[|\\]$/g, '')
+  resolvePublicDestination(`https://${host}`)
+    .then(({ address, family }) => callback(null, address, family))
+    .catch((error: unknown) => callback(
+      error instanceof Error ? error as NodeJS.ErrnoException : new Error('ERP DNS validation failed'),
+      '',
+      4
+    ))
+}
+
+export function assertSecureErpTransport(rawUrl: string): void {
+  const url = new URL(rawUrl)
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('Invalid ERP URL or embedded credentials')
+  }
+  if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+    throw new Error('ERP connections must use HTTPS in production')
+  }
+}
+
+/**
  * Fetch with DNS-pinned connection, no redirects, response size and timeout
  * bounds. Returns a standard Response so existing ERPNext JSON handlers work.
  */
 export async function safeExternalFetch(rawUrl: string | URL, init: RequestInit = {}): Promise<Response> {
+  assertSecureErpTransport(String(rawUrl))
   const { url, address, family } = await resolvePublicDestination(String(rawUrl))
   const headers = Object.fromEntries(new Headers(init.headers).entries())
   const MAX_BYTES = 10 * 1024 * 1024
