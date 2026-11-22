@@ -43,12 +43,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // In Odoo 18 (saas-19.3), 'datas' is removed. We read 'raw' instead.
+    // Metadata first: do not load the binary until ownership + declared size
+    // have been checked. Odoo 20 removed 'datas'; asking for it here used to
+    // fail before we could check the requesting user's ticket ownership.
     const attachment = await executeKw<any[]>(
       'ir.attachment',
       'read',
       [[attachmentId]],
-      { fields: ['name', 'raw', 'datas', 'mimetype', 'res_model', 'res_id'] }
+      { fields: ['name', 'mimetype', 'res_model', 'res_id', 'file_size'] }
     )
 
     if (!attachment || attachment.length === 0) {
@@ -94,15 +96,40 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const base64Data = file.raw || file.datas
-    if (!base64Data) {
-      return new NextResponse('Attachment content is empty', { status: 404 })
+    // A size check AFTER Base64 decode still lets a user ask Odoo for an
+    // arbitrarily huge file and exhaust the Node heap. Limit it first using
+    // the stored metadata, then check the encoded length before decoding.
+    const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+    const MAX_BASE64_CHARS = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4
+    const declaredSize = Number(file.file_size ?? 0)
+    if (Number.isFinite(declaredSize) && declaredSize > MAX_ATTACHMENT_BYTES) {
+      return new NextResponse('Attachment too large', { status: 413 })
     }
 
+    // Modern Odoo uses 'raw'. Legacy versions may only expose 'datas'.
+    // Attempt the legacy field ONLY when Odoo explicitly reports that 'raw'
+    // does not exist, not after authentication/network failures.
+    let binaryRows: any[]
+    try {
+      binaryRows = await executeKw<any[]>(
+        'ir.attachment', 'read', [[attachmentId]], { fields: ['raw'] }
+      )
+    } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error)
+      if (!/invalid field ['"]raw['"]|keyerror:\\s*['"]raw['"]/i.test(reason)) throw error
+      binaryRows = await executeKw<any[]>(
+        'ir.attachment', 'read', [[attachmentId]], { fields: ['datas'] }
+      )
+    }
+    const binaryRecord = binaryRows?.[0]
+    const base64Data = binaryRecord?.raw || binaryRecord?.datas
+    if (typeof base64Data !== 'string' || !base64Data) {
+      return new NextResponse('Attachment content is empty', { status: 404 })
+    }
+    if (base64Data.length > MAX_BASE64_CHARS) {
+      return new NextResponse('Attachment too large', { status: 413 })
+    }
     const buffer = Buffer.from(base64Data, 'base64')
-
-    // DoS guard: refuse to pipe huge files through the Node process.
-    const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
     if (buffer.length > MAX_ATTACHMENT_BYTES) {
       return new NextResponse('Attachment too large', { status: 413 })
     }
