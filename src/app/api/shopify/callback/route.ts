@@ -8,6 +8,7 @@ import {
   registerShopifyWebhook,
   verifyShopifyCallbackHmac,
 } from '@/lib/shopify-client'
+import { shopifyTokenFields } from '@/lib/shopify/offline-token'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest) {
     const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, expiring: 1 }),
       cache: 'no-store',
       redirect: 'error',
       signal: AbortSignal.timeout(15_000),
@@ -109,7 +110,9 @@ export async function GET(request: NextRequest) {
       console.error('[Shopify OAuth] Token exchange rejected', tokenResponse.status, category)
       return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
     }
-    const { access_token, scope } = await tokenResponse.json()
+    const grant = await tokenResponse.json()
+    const credentials = shopifyTokenFields(grant)
+    const { access_token, scope } = grant
     if (!access_token) {
       return redirectToConnectStore(request, { error: 'shopify_token_exchange_failed' })
     }
@@ -146,7 +149,7 @@ export async function GET(request: NextRequest) {
     // auto-registration loop below subscribes.
     const tokenData = {
       shop_domain: shop,
-      access_token,
+      ...credentials,
       scopes: scope ?? null,
       updated_at: new Date().toISOString(),
       workspace_id: workspaceId,

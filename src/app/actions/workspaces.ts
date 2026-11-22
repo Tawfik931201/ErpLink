@@ -478,7 +478,7 @@ const getCachedShopifyTokens = unstable_cache(
     // Multi-store — see getCachedZidTokens (all rows, newest first).
     const { data: tokens, error } = await supabase
       .from('shopify_tokens')
-      .select('*')
+      .select('shop_domain, scopes, name, email, workspace_id, sync_settings, updated_at')
       .eq('workspace_id', workspaceId)
       .order('updated_at', { ascending: false, nullsFirst: false })
     if (error) throw new Error('Failed to query Shopify tokens: ' + error.message)

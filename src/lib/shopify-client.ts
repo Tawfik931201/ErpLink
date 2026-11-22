@@ -2,7 +2,7 @@ import crypto from 'crypto'
 
 import axios from 'axios'
 
-import { supabase } from '@/lib/supabase'
+import { getShopifyAccessToken } from './shopify/offline-token'
 
 /** Shopify Admin API version — keep in sync with shopify.app.toml.
  * المصدر: env SHOPIFY_API_VERSION (موثّق في .env.example). لا تكتب نسخة يدوياً.
@@ -108,22 +108,7 @@ export interface ShopifyTokenRow {
   sync_settings: any
 }
 
-/**
- * Gets a valid access token for the given Shopify shop.
- */
-export async function getShopifyAccessToken(shopDomain: string): Promise<string> {
-  const { data: token, error } = await supabase
-    .from('shopify_tokens')
-    .select('access_token')
-    .eq('shop_domain', shopDomain)
-    .maybeSingle()
-
-  if (error || !token) {
-    throw new Error(`Shopify token not found for shop domain: ${shopDomain}`)
-  }
-
-  return token.access_token
-}
+export { getShopifyAccessToken } from './shopify/offline-token'
 
 /**
  * Per-request timeout for every Shopify Admin API call (GraphQL and REST).
