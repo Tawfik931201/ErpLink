@@ -1,0 +1,29 @@
+name: Verify live Hostinger release and security gates
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/app/api/health/**'
+      - 'src/app/api/webhooks/**'
+      - 'src/lib/odoo/webhook-secret.ts'
+      - 'src/app/api/admin/impersonate/**'
+      - 'scripts/security-release-smoke.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-security-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify new release marker and unauthenticated ingress policy
+        env:
+          HOST_BASE_URL: https://erplink.bizsahla.com
+        run: node scripts/security-release-smoke.mjs

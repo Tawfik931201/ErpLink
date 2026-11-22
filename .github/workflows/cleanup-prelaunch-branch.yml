@@ -1,0 +1,26 @@
+name: Remove temporary security prelaunch branch after squash merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'security/prelaunch-hardening-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only this merged temporary branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/security/prelaunch-hardening-20261123" ||
+            echo 'Temporary branch was already deleted'

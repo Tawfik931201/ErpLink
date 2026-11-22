@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
+import { getAppBaseUrl } from '@/lib/app-url'
 import { recordAudit } from '@/lib/audit-logs'
 import { isAdmin } from '@/lib/auth'
 
@@ -102,6 +103,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // A cross-site form POST can carry an existing admin cookie in some embedded
+  // contexts. Requiring the canonical same-origin header prevents attackers
+  // from silently switching the admin into another tenant's impersonation.
+  const origin = request.headers.get('origin')
+  if (!origin || origin !== new URL(getAppBaseUrl(request)).origin) {
+    return new NextResponse('Forbidden - Invalid origin', { status: 403 })
+  }
   const { userId: realUserId } = await auth()
 
   if (!realUserId || !isAdmin(realUserId)) {

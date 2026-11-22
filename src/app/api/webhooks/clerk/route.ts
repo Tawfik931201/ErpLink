@@ -14,7 +14,10 @@ import crypto from 'crypto'
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
+import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 
 function base64UrlToBuffer(part: string): Buffer {
   const base64 = part.replace(/-/g, '+').replace(/_/g, '/')
@@ -96,32 +99,52 @@ async function syncUserForUserCreated(data: any) {
 }
 
 export async function POST(req: NextRequest) {
-  const rawBody = await req.text()
   const secret = process.env.CLERK_WEBHOOK_SECRET ?? ''
+  // No secret: fail closed in production *before* an upload is read.
+  if (!secret && process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'CLERK_WEBHOOK_SECRET not configured' }, { status: 500 })
+  }
 
   const svixId = req.headers.get('svix-id') ?? ''
   const svixTimestamp = req.headers.get('svix-timestamp') ?? ''
   const svixSignature = req.headers.get('svix-signature') ?? ''
+  const bucketKey = rateLimitKeyFromHeaders(n => req.headers.get(n), 'clerk-webhook')
+  const limitInvalid = () => checkUnauthenticatedIngressLimit({
+    scope: 'clerk', credentialVerified: false, bucketKey,
+  }).allowed
 
   if (secret) {
-    if (!svixId || !svixTimestamp || !svixSignature) {
-      return NextResponse.json({ error: 'Missing signature headers' }, { status: 401 })
+    // Reject obviously unauthenticated requests without allocating body bytes.
+    if (!svixId || !svixTimestamp || !svixSignature ||
+        svixId.length > 200 || svixTimestamp.length > 30 || svixSignature.length > 2048) {
+      if (!limitInvalid()) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+      return NextResponse.json({ error: 'Missing or invalid signature headers' }, { status: 401 })
     }
-    // Replay protection: reject timestamps older than 5 minutes or in the future
-    const timestampMs = parseInt(svixTimestamp, 10) * 1000
-    const now = Date.now()
-    if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > 5 * 60 * 1000) {
+    // A valid signature cannot make an expired/future message fresh.
+    const timestampMs = /^\d{1,15}$/.test(svixTimestamp) ? Number(svixTimestamp) * 1000 : NaN
+    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
+      if (!limitInvalid()) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
       return NextResponse.json({ error: 'Timestamp outside acceptable window' }, { status: 401 })
     }
-    const valid = verifyClerkSignature(secret, svixId, svixTimestamp, rawBody, svixSignature)
-    if (!valid) {
+  }
+
+  let rawBody: string
+  try {
+    rawBody = await readWebhookBodyWithinLimit(req)
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 })
+    }
+    return NextResponse.json({ error: 'Unable to read webhook body' }, { status: 400 })
+  }
+
+  if (secret) {
+    if (!verifyClerkSignature(secret, svixId, svixTimestamp, rawBody, svixSignature)) {
+      if (!limitInvalid()) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
   } else {
-    if (process.env.NODE_ENV === 'production') {
-      return NextResponse.json({ error: 'CLERK_WEBHOOK_SECRET not configured' }, { status: 500 })
-    }
-    console.warn('[clerk-webhook] ⚠️ CLERK_WEBHOOK_SECRET is not set — accepting unverified (dev)')
+    console.warn('[clerk-webhook] CLERK_WEBHOOK_SECRET is not set — accepting unverified (dev only)')
   }
 
   let evt: any

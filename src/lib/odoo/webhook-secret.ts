@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 
 import { hkdfHex } from '@/lib/crypto'
+import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 import { secretMatches } from '@/lib/webhook-secret'
 
 /**
@@ -198,8 +199,9 @@ export type OdooWebhookAuthDecision =
  * - `unconfigured` → 500 in production (nothing can ever authenticate), allowed
  *                    in development, which is the one case where skipping
  *                    verification is harmless.
- * - `legacy`       → allowed and counted. The action was registered before the
- *                    secret existed; see the migration note at the top.
+ * - `legacy`       → rejected by default in production. Development and explicit
+ *                    temporary migration overrides count and accept legacy
+ *                    triggers; re-register actions to close the window.
  */
 export function decideOdooWebhookAuth(
   result: OdooWebhookAuthResult,
@@ -213,14 +215,12 @@ export function decideOdooWebhookAuth(
     }
   }
 
-  // STRICT_WEBHOOK_AUTH=true closes the migration window: a `legacy`
-  // delivery (Automated Action registered before the secret existed) is
-  // rejected instead of accepted+counted. Flip it only after re-registering
-  // every action (POST /api/admin/odoo-webhooks/refresh) and seeing the
-  // unauthenticated-delivery counter reach zero.
+  // Match Zid/Salla: no unsigned legacy webhooks in production by default.
+  // Only an EXPLICIT temporary STRICT_WEBHOOK_AUTH=false can authorize
+  // backwards compatibility while re-registering old Odoo Automated Actions.
+  // This check must precede ALL untrusted record/stock processing.
   if (result.status === 'legacy') {
-    const strict = (process.env.STRICT_WEBHOOK_AUTH ?? '').trim().toLowerCase()
-    if (strict === 'true' || strict === '1' || strict === 'yes') {
+    if (isStrictWebhookAuth()) {
       return {
         action: 'reject',
         status: 401,
