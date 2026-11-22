@@ -23,6 +23,7 @@ describe('live-return financial integrity regressions', () => {
   it.each([14, 17, 19, 20])('never lets default Odoo VAT reattach to negative SO lines (Odoo %i)', async (version) => {
     const client: any = {
       getMajorVersion: jest.fn().mockResolvedValue(version),
+      execute: jest.fn().mockResolvedValue({ [version >= 18 ? 'tax_ids' : 'tax_id']: { type: 'many2many' } }),
       create: jest.fn().mockResolvedValue(501),
     }
     await createNegativeSaleOrder(client, original, untaxed, 'QA return')
