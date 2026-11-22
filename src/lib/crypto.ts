@@ -107,7 +107,13 @@ export function decrypt(text: string): string {
   if (text.startsWith('v2:') && !gcm) throw new Error('[Crypto] Invalid v2 ciphertext')
   if (!gcm && !CIPHERTEXT_RE.test(text)) return text
 
-  const candidates = [process.env.ENCRYPTION_KEY, ...getLegacyKeys()].filter(Boolean) as string[]
+  // The process-local dev key must also decrypt values produced in the same
+  // test/development process. Never use it in production.
+  const candidates = [
+    process.env.ENCRYPTION_KEY,
+    ...getLegacyKeys(),
+    process.env.NODE_ENV !== 'production' ? ephemeralDevKey : null,
+  ].filter(Boolean) as string[]
 
   for (const k of candidates) {
     try {
