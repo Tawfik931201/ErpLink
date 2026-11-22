@@ -58,6 +58,16 @@ describe('ERP connections cannot bypass the DNS check or send credentials over H
     expect(error).toBeInstanceOf(Error)
   })
 
+  it('resolves a public IPv6 literal without a second unvalidated DNS lookup', async () => {
+    const resolved = await new Promise<{ error: Error | null; address: string; family: number }>(resolve => {
+      publicErpDnsLookup('2606:4700:4700::1111', {}, (error, address, family) =>
+        resolve({ error, address, family }))
+    })
+    expect(resolved.error).toBeNull()
+    expect(resolved.address).toBe('2606:4700:4700::1111')
+    expect(resolved.family).toBe(6)
+  })
+
   it('requires the Odoo XML-RPC agent to pin every new DNS connection', () => {
     const client = fs.readFileSync(path.join(process.cwd(), 'src/lib/odoo-client.ts'), 'utf8')
     expect(client).toContain('lookup: publicErpDnsLookup')
