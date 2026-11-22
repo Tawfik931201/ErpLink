@@ -218,7 +218,7 @@ for (const [topic, fields] of Object.entries(SHOPIFY_FIELDS)) {
 // All subscribed order lifecycle topics use the same Shopify order payload
 // shape. Reuse the update catalogue so Mapping Center can customize every
 // topic that shopify.app.toml actually subscribes to.
-for (const topic of ['orders/paid', 'orders/partially_fulfilled', 'orders/edited', 'orders/delete']) {
+for (const topic of ['orders/cancelled', 'orders/fulfilled', 'orders/paid', 'orders/partially_fulfilled', 'orders/edited', 'orders/delete']) {
   if (!SHOPIFY_FIELDS[topic]) SHOPIFY_FIELDS[topic] = [...(SHOPIFY_FIELDS['orders/updated'] || [])]
 }
 
