@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { getSyncQueueMetrics, SYNC_QUEUE_DEFAULT_BATCH } from '@/lib/sync-queue'
+import { secretMatches } from '@/lib/webhook-secret'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
 import { countOrphanReceipts, drainWebhookInbox } from '@/lib/webhook-inbox'
 
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
   if (cronSecret) {
     const bearer = authHeader?.replace(/^Bearer\s+/i, '')
     const secretHeader = req.headers.get('x-cron-secret')
-    if (bearer !== cronSecret && secretHeader !== cronSecret) {
+    if (!secretMatches(bearer ?? '', cronSecret) && !secretMatches(secretHeader ?? '', cronSecret)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
