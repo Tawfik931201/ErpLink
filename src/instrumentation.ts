@@ -14,6 +14,23 @@ export async function register() {
       const { startSyncQueueRunner } = await import('@/lib/sync-queue-runner')
       startSyncQueueRunner()
 
+      // One-time (database-claimed) migration of legacy Zid manager webhook
+      // subscriptions to merchant-specific Basic credentials. App-market hooks
+      // are untouched. Runs after boot, not during production build.
+      if (process.env.NODE_ENV === 'production' &&
+          process.env.ZID_AUTO_REKEY_WEBHOOKS !== 'false') {
+        setTimeout(() => {
+          void import('@/lib/zid/webhook-auth-migration')
+            .then(({ migrateLinkedZidWebhookCredentials }) =>
+              migrateLinkedZidWebhookCredentials()
+            )
+            .catch((error) =>
+              console.error('[Zid Auth Migration] Startup task failed:',
+                error instanceof Error ? error.message : String(error))
+            )
+        }, 15_000).unref?.()
+      }
+
       // The Telegram poller used to be started only as a side effect of the
       // server actions that add a bot token or generate a link code. That made
       // it survive exactly as long as the process that ran the action: after
