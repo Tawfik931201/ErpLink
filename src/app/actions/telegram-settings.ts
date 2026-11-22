@@ -15,7 +15,7 @@ import {
   parseMappingsFilter,
 } from '@/lib/telegram-notifier'
 
-function authError() {
+function authError(): { success: false; error: string } {
   return { success: false, error: 'Unauthorized' }
 }
 
@@ -319,7 +319,18 @@ export async function deleteSubscription(id: string) {
 
 // ─── Poll link status (UI helper) ─────────────────────────────────────────────
 
-export async function pollChatLinkStatus(botId: string) {
+export type ChatLinkPollResult =
+  | {
+      success: true
+      linked: boolean
+      subscription: { id: string; chat_id: string; chat_label: string | null; linked_at: string | null } | null
+    }
+  | {
+      success: false
+      error: string
+    }
+
+export async function pollChatLinkStatus(botId: string): Promise<ChatLinkPollResult> {
   try {
     const workspaceId = await getActiveWorkspaceId()
     if (!workspaceId) return authError()
@@ -342,6 +353,24 @@ export async function pollChatLinkStatus(botId: string) {
     }
   } catch (err: any) {
     return { success: false, error: err?.message || 'Failed to poll' }
+  }
+}
+
+/**
+ * Triggers an immediate verification of incoming link messages from Telegram
+ * for this bot and returns the updated link status.
+ */
+export async function verifyChatLinkNow(botId: string): Promise<ChatLinkPollResult> {
+  try {
+    const workspaceId = await getActiveWorkspaceId()
+    if (!workspaceId) return authError()
+
+    const { pollBotByIdNow } = await import('@/lib/telegram-long-poller')
+    await pollBotByIdNow(botId)
+
+    return await pollChatLinkStatus(botId)
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Failed to verify link' }
   }
 }
 

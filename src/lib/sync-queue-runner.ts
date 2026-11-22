@@ -32,6 +32,8 @@ const g = global as unknown as {
   __workspaceArchiveProcessing?: boolean
   __syncQueueWakeTimer?: NodeJS.Timeout
   __syncQueueWakeAt?: number
+  __lastDepthPublishAt?: number
+  __lastAlertCheckAt?: number
 }
 
 /**
@@ -101,15 +103,27 @@ async function runDrainCycle(): Promise<boolean> {
     }
     const processed = await processSyncQueue(SYNC_QUEUE_DEFAULT_BATCH)
 
+    const nowTs = Date.now()
+
     // ── نشر عمق الطابور لبوابة الاستقبال ───────────────────────────────────
     // السقف الديناميكي (120 ← 2000) يُشتق من فراغ الطابور: وهو المصدر
     // الوحيد الصادق لـ«كم ضغط النظام الآن». بدونه يبقى السقف على أساسه.
-    await publishIngressPendingDepth()
+    // publishIngressPendingDepth مرة كل دقيقة كافية للحد من PostgREST calls غير الضرورية.
+    const DEPTH_PUBLISH_INTERVAL_MS = 60_000
+    if (!g.__lastDepthPublishAt || nowTs - g.__lastDepthPublishAt >= DEPTH_PUBLISH_INTERVAL_MS) {
+      g.__lastDepthPublishAt = nowTs
+      await publishIngressPendingDepth()
+    }
 
     // ── تنبيهات الأدمن ─────────────────────────────────────────────────────
     // الدالة نفسها تقيّد نفسها (مرة كل 5 دقائق + نفس السبب مرة كل ساعة).
-    const { checkAdminAlerts } = await import('./admin-alerts')
-    await checkAdminAlerts().catch(() => {})
+    // حارس خارجي يخفف استدعاء الدالة وقراءة المؤشرات من كل دورة (10 ثوانٍ).
+    const ALERT_OUTER_THROTTLE_MS = 5 * 60_000
+    if (!g.__lastAlertCheckAt || nowTs - g.__lastAlertCheckAt >= ALERT_OUTER_THROTTLE_MS) {
+      g.__lastAlertCheckAt = nowTs
+      const { checkAdminAlerts } = await import('./admin-alerts')
+      await checkAdminAlerts().catch(() => {})
+    }
     return drained.scanned > 0 || processed > 0
   } catch {
     // Keep worker failures visible without serializing provider/customer data.

@@ -28,6 +28,7 @@ import {
   getBotTokens,
   getSubscriptions,
   pollChatLinkStatus,
+  verifyChatLinkNow,
   sendTestTelegramMessage,
   updateSubscription,
   deleteSubscription,
@@ -318,6 +319,8 @@ export default function NotificationsSettingsPage() {
 
   const [copyHint, setCopyHint] = useState('')
   const [activePolling, setActivePolling] = useState(false)
+  const [verifyingLink, setVerifyingLink] = useState(false)
+  const [verifyMsg, setVerifyMsg] = useState('')
 
   async function refresh() {
     setLoading(true)
@@ -382,10 +385,29 @@ export default function NotificationsSettingsPage() {
     if (!linkLabel.trim()) return
     setLinking(true)
     setLinkResult(null)
+    setVerifyMsg('')
     const res = await generateChatLinkCode(botId, linkLabel)
     setLinking(false)
     if (res.success) {
       setLinkResult({ code: res.code!, botUsername: res.botUsername ?? null, botLink: res.botLink ?? null })
+    }
+  }
+
+  async function handleVerifyNow(botId: string) {
+    setVerifyingLink(true)
+    setVerifyMsg('')
+    const res = await verifyChatLinkNow(botId)
+    setVerifyingLink(false)
+    if (res.success && res.linked) {
+      setLinkResult(null)
+      setLinkingBotId(null)
+      refresh()
+    } else {
+      setVerifyMsg(
+        lang === 'ar'
+          ? 'لم يتم العثور على الرسالة في تيليجرام بعد. تأكد من إرسال الكود للبوت ثم اضغط مجدداً.'
+          : 'Message not found in Telegram yet. Ensure you sent the code to the bot and try again.'
+      )
     }
   }
 
@@ -895,6 +917,27 @@ export default function NotificationsSettingsPage() {
                           {lang === 'ar' ? 'في انتظار التأكيد في تيليجرام...' : 'Waiting for Telegram confirmation...'}
                         </div>
                       )}
+
+                      <div className="pt-2 flex flex-col gap-1.5 border-t border-border/40">
+                        <Button
+                          size="sm"
+                          onClick={() => handleVerifyNow(bot.id)}
+                          disabled={verifyingLink}
+                          className="w-full bg-foreground text-background font-bold text-xs h-8"
+                        >
+                          {verifyingLink ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin me-1.5 inline" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5 me-1.5 inline" />
+                          )}
+                          {lang === 'ar' ? 'أرسلت الرسالة، تحقق الآن' : 'I sent the message, verify now'}
+                        </Button>
+                        {verifyMsg && (
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium text-center">
+                            {verifyMsg}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

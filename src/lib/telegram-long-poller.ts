@@ -25,10 +25,26 @@ interface PollerGlobal {
   __telegramPollerBots?: Map<string, BotPollerState>
   __telegramPollerLastRefresh?: number
   __telegramPollerProcessing?: boolean
+  __telegramPollerActiveUntil?: number
+}
+
+export function activateTelegramPoller(durationMs = 5 * 60_000): void {
+  const until = Date.now() + durationMs
+  if ((g.__telegramPollerActiveUntil || 0) < until) {
+    g.__telegramPollerActiveUntil = until
+  }
+}
+
+export function deactivateTelegramPoller(): void {
+  g.__telegramPollerActiveUntil = 0
+}
+
+export function isTelegramPollerActive(): boolean {
+  return (g.__telegramPollerActiveUntil || 0) > Date.now()
 }
 
 const POLL_INTERVAL_MS = 5_000
-const POLLER_REFRESH_MS = 30_000
+const POLLER_REFRESH_MS = 120_000
 const POLLER_IDLE_REFRESH_MS = 120_000
 
 /**
@@ -215,6 +231,7 @@ async function handleStartCommand(
 
   // Delete the used code
   await supabase.from('telegram_bot_codes').delete().eq('code', code)
+  deactivateTelegramPoller()
 
   console.info(
     `[TelegramPoller] Bot ${botId}: chat ${chatId} linked to workspace ${codeRow.workspace_id} via ${code}`
@@ -320,6 +337,9 @@ async function pollAllOnce(): Promise<void> {
  */
 async function runPollCycle(): Promise<void> {
   if (g.__telegramPollerProcessing) return
+  // On-demand: do not poll DB or Telegram when there is no active linking request
+  if (!isTelegramPollerActive()) return
+
   try {
     g.__telegramPollerProcessing = true
     if (Date.now() - (g.__telegramPollerLastRefresh || 0) >
@@ -341,7 +361,7 @@ export function startTelegramPoller(): void {
   if (g.__telegramPollerStarted) return
   g.__telegramPollerStarted = true
 
-  console.info('[TelegramPoller] Started Telegram long-poller')
+  console.info('[TelegramPoller] Started Telegram long-poller (on-demand mode)')
 
   // Report what is actually being polled. "0 bots" is the single most useful
   // line when a chat refuses to link: it separates "no poller" from
@@ -349,7 +369,20 @@ export function startTelegramPoller(): void {
   void refreshBotsFromDb()
     .then(() => {
       console.info(`[TelegramPoller] Polling ${getBotsMap().size} bot(s) every ${POLL_INTERVAL_MS / 1000}s`)
-      return pollAllOnce()
+      // Check if there are active pending link codes from before restart
+      return supabase
+        .from('telegram_bot_codes')
+        .select('expires_at')
+        .gt('expires_at', new Date().toISOString())
+        .limit(1)
+    })
+    .then((res: any) => {
+      const codeRow = res?.data?.[0]
+      if (codeRow?.expires_at) {
+        const remainingMs = Math.max(60_000, new Date(codeRow.expires_at).getTime() - Date.now())
+        activateTelegramPoller(remainingMs)
+        return pollAllOnce()
+      }
     })
     .catch((err: any) => {
       console.warn('[TelegramPoller] initial refresh failed:', err?.message ?? err)
@@ -366,12 +399,50 @@ export function startTelegramPoller(): void {
  * Forces an immediate re-read of bots/codes from the DB. Useful right after
  * a new bot is added or a new link code is generated, so the poller
  * starts polling the new token without waiting for the 30-second refresh.
+ * Activates on-demand polling for 5 minutes.
  */
-export async function forceRefreshTelegramPoller(): Promise<void> {
+export async function forceRefreshTelegramPoller(durationMinutes = 5): Promise<void> {
+  activateTelegramPoller(durationMinutes * 60_000)
   startTelegramPoller()
   if (!POLLER_ENABLED) return
   await refreshBotsFromDb()
   g.__telegramPollerLastRefresh = Date.now()
+  await pollAllOnce()
+}
+
+/**
+ * Triggers an immediate Telegram API update check for a specific bot.
+ * Used when the user clicks "I sent the message / verify now".
+ */
+export async function pollBotByIdNow(botId: string): Promise<boolean> {
+  activateTelegramPoller(2 * 60_000)
+  let state = getBotsMap().get(botId)
+  if (!state) {
+    await refreshBotsFromDb()
+    state = getBotsMap().get(botId)
+  }
+  if (!state) {
+    const { data: bot } = await supabase
+      .from('telegram_bots')
+      .select('id, workspace_id, bot_token')
+      .eq('id', botId)
+      .maybeSingle()
+    if (bot) {
+      state = {
+        botId: bot.id,
+        workspaceId: bot.workspace_id,
+        botTokenEncrypted: bot.bot_token,
+        lastOffset: 0,
+        failureCount: 0,
+      }
+      getBotsMap().set(botId, state)
+    }
+  }
+  if (state) {
+    await pollOneBot(state)
+    return true
+  }
+  return false
 }
 
 export function stopTelegramPoller(): void {
