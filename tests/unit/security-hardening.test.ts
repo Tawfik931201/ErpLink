@@ -45,25 +45,25 @@ describe('production defaults for webhooks', () => {
   const originalStrict = process.env.STRICT_WEBHOOK_AUTH
 
   afterEach(() => {
-    process.env.NODE_ENV = originalNodeEnv
+    Object.assign(process.env, { NODE_ENV: originalNodeEnv })
     if (originalStrict === undefined) delete process.env.STRICT_WEBHOOK_AUTH
     else process.env.STRICT_WEBHOOK_AUTH = originalStrict
   })
 
   it('rejects unsigned legacy webhooks by default in production', () => {
-    process.env.NODE_ENV = 'production'
+    Object.assign(process.env, { NODE_ENV: 'production' })
     delete process.env.STRICT_WEBHOOK_AUTH
     expect(isStrictWebhookAuth()).toBe(true)
   })
 
   it('allows a deliberate temporary migration override', () => {
-    process.env.NODE_ENV = 'production'
+    Object.assign(process.env, { NODE_ENV: 'production' })
     process.env.STRICT_WEBHOOK_AUTH = 'false'
     expect(isStrictWebhookAuth()).toBe(false)
   })
 
   it('keeps development behavior for test integrations', () => {
-    process.env.NODE_ENV = 'test'
+    Object.assign(process.env, { NODE_ENV: 'test' })
     delete process.env.STRICT_WEBHOOK_AUTH
     expect(isStrictWebhookAuth()).toBe(false)
   })
