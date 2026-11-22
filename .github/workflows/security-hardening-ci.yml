@@ -21,6 +21,11 @@ on:
       - 'src/lib/zid/products.ts'
       - 'src/lib/sync/webhook.ts'
       - 'src/lib/webhook-strict.ts'
+      - 'src/lib/webhook-body-reader.ts'
+      - 'src/lib/rate-limit.ts'
+      - 'src/lib/ingress-admission.ts'
+      - 'tests/unit/ingress-admission.test.ts'
+      - 'tests/unit/webhook-request-hardening.test.ts'
       - 'src/app/actions/odoo.ts'
       - 'src/app/actions/workspaces.ts'
       - 'src/app/api/salla/**'
@@ -67,7 +72,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
           SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
-        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts
+        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts tests/unit/ingress-admission.test.ts tests/unit/webhook-request-hardening.test.ts
       - name: Full Jest regression baseline (diagnostic)
         continue-on-error: true
         env:
