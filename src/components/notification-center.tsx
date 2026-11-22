@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Bell, BellOff, X } from 'lucide-react'
 
 type Entry = { id: string; title: string; body: string; href: string; status: string; created_at: string }
-type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; subscriptionCount: number }
+type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; pushConfigIssue: string | null; subscriptionCount: number }
 const endpoint = '/api/notifications'
 const publicKeyBytes = (text: string): Uint8Array => {
   const base64 = text.replace(/-/g, '+').replace(/_/g, '/')
@@ -19,6 +19,7 @@ export default function NotificationCenter() {
   const [items, setItems] = useState<Entry[]>([])
   const [enabled, setEnabled] = useState(false)
   const [configured, setConfigured] = useState(false)
+  const [configIssue, setConfigIssue] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [lastSeen, setLastSeen] = useState('')
@@ -29,6 +30,7 @@ export default function NotificationCenter() {
       const data: ResponseData = await res.json()
       setItems(data.notifications)
       setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
+      setConfigIssue(data.pushConfigIssue || null)
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration('/notification-sw.js')
         const current = await reg?.pushManager.getSubscription()
@@ -56,8 +58,11 @@ export default function NotificationCenter() {
     if (!configured || busy || !('serviceWorker' in navigator) || !('PushManager' in window)) return
     setBusy(true); setError('')
     try {
-      const registration = await navigator.serviceWorker.register('/notification-sw.js', { scope: '/' })
-      const existing = await registration.pushManager.getSubscription()
+      await navigator.serviceWorker.register('/notification-sw.js', { scope: '/' })
+      // subscribe() requires an activated worker, not merely a registration promise.
+      const registration = await navigator.serviceWorker.ready
+      if (!registration.active) throw new Error('Service Worker لم يصل إلى حالة التشغيل بعد. حدّث الصفحة ثم أعد المحاولة.')
+      let existing = await registration.pushManager.getSubscription()
       if (enabled) {
         if (existing) {
           const response = await fetch(endpoint, {
@@ -74,9 +79,32 @@ export default function NotificationCenter() {
         const configResponse = await fetch(endpoint, { cache: 'no-store' })
         if (!configResponse.ok) throw new Error('تعذر قراءة إعدادات الإشعارات')
         const config: ResponseData = await configResponse.json()
+        if (!config.pushReady || !config.vapidPublicKey) {
+          throw new Error(config.pushConfigIssue || 'إعداد مفاتيح VAPID غير صالح على الخادم.')
+        }
+        const applicationServerKey = publicKeyBytes(config.vapidPublicKey)
+        if (applicationServerKey.length !== 65 || applicationServerKey[0] !== 4) {
+          throw new Error('المفتاح العام VAPID غير صالح: يجب أن يكون P-256 بطول 65 بايت.')
+        }
+        // A subscription is bound to its original VAPID key. Replace stale
+        // subscriptions instead of reusing an endpoint the server cannot sign for.
+        if (existing) {
+          const currentKey = existing.options.applicationServerKey
+          const currentBytes = currentKey ? new Uint8Array(currentKey) : null
+          const sameKey = !!currentBytes && currentBytes.length === applicationServerKey.length
+            && currentBytes.every((byte, index) => byte === applicationServerKey[index])
+          if (!sameKey) {
+            await fetch(endpoint, {
+              method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ endpoint: existing.endpoint }),
+            }).catch(() => null)
+            await existing.unsubscribe()
+            existing = null
+          }
+        }
         const subscription = existing || await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: publicKeyBytes(config.vapidPublicKey) as BufferSource,
+          applicationServerKey: applicationServerKey as BufferSource,
         })
         const result = await fetch(endpoint, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -90,8 +118,20 @@ export default function NotificationCenter() {
         }
         setEnabled(true)
       }
-    } catch (e) { setError(e instanceof Error ? e.message : 'حدث خطأ') }
-    finally { setBusy(false) }
+    } catch (e) {
+      const failure = e instanceof Error ? e : new Error('حدث خطأ غير معروف')
+      console.error('[notifications] browser push registration failed', {
+        name: failure.name,
+        message: failure.message,
+      })
+      if (failure.name === 'AbortError' && /push service error/i.test(failure.message)) {
+        setError('Chrome لم يتمكن من إنشاء اشتراك لدى خدمة Push التابعة لـ Google. تأكد أنك تستخدم Google Chrome الرسمي، وأوقف VPN/Proxy أو مانع الشبكة مؤقتًا، ثم أعد المحاولة من شبكة أخرى. هذا الخطأ يحدث قبل وصول الاشتراك إلى ERP Link.')
+      } else if (failure.name === 'InvalidAccessError') {
+        setError('Chrome رفض المفتاح العام VAPID. تحقق من المفتاح العام في Hostinger وأنه مطابق للمفتاح الخاص.')
+      } else {
+        setError(failure.message)
+      }
+    } finally { setBusy(false) }
   }
   const showPanel = () => {
     if (open) { setOpen(false); return }
@@ -155,7 +195,7 @@ export default function NotificationCenter() {
           {enabled ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
           {enabled ? 'إيقاف إشعارات سطح المكتب' : 'تفعيل إشعارات Chrome'}
         </button>
-        {!configured && <p className="mb-2 text-xs text-muted-foreground">خدمة إرسال الإشعارات غير جاهزة على الخادم: تحقق من WEB_PUSH_VAPID_PUBLIC_KEY وWEB_PUSH_VAPID_PRIVATE_KEY وWEB_PUSH_CONTACT (أو WEB_PUSH_SUBJECT)، ثم أعد تشغيل التطبيق.</p>}
+        {!configured && <p className="mb-2 text-xs text-muted-foreground">خدمة الإشعارات غير جاهزة: {configIssue || 'تحقق من مفاتيح VAPID وجهة التواصل على Hostinger ثم أعد تشغيل التطبيق.'}</p>}
         {configured && !enabled && <p className="mb-2 text-xs text-amber-600">Chrome قد يسمح بالإشعارات، لكن هذا الجهاز غير مسجل حاليًا للاستقبال. اضغط «تفعيل إشعارات Chrome» لإكمال الاشتراك.</p>}
         {error && <p role="alert" className="mb-2 text-xs text-red-600">{error}</p>}
         {items.length === 0 && <p className="p-3 text-xs text-muted-foreground">لا توجد إشعارات حتى الآن.</p>}
