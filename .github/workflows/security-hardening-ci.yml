@@ -7,6 +7,12 @@ on:
       - 'src/lib/crypto.ts'
       - 'src/lib/security/**'
       - 'src/lib/salla-client.ts'
+      - 'src/lib/odoo-client.ts'
+      - 'src/lib/zid/webhooks.ts'
+      - 'src/lib/zid/webhook-auth.ts'
+      - 'src/app/api/admin/zid-webhooks/refresh/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'src/lib/zid/credentials.ts'
       - 'src/lib/zid/customers.ts'
       - 'src/lib/zid/products.ts'
@@ -19,6 +25,7 @@ on:
       - 'src/app/api/cron/**'
       - 'src/app/(app)/app/tickets/**'
       - 'tests/unit/crypto.test.ts'
+      - 'tests/unit/zid-webhook-auth.test.ts'
       - 'tests/unit/zid-token-storage.test.ts'
       - 'tests/unit/shopify-offline-token.test.ts'
       - 'tests/unit/security-hardening.test.ts'
@@ -39,6 +46,11 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Supply-chain advisory inventory
+        shell: bash
+        run: |
+          npm audit --json > npm-audit.json || true
+          node -e "const a=require('./npm-audit.json');console.log(JSON.stringify(Object.entries(a.vulnerabilities||{}).map(([name,v])=>({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,via:v.via?.map(x=>typeof x==='string'?x:{name:x.name,title:x.title,url:x.url})})),null,2))"
       - name: Type-check application
         run: npm run type-check
       - name: Run security-focused regression tests
