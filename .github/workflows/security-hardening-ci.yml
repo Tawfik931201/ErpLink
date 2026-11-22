@@ -45,20 +45,12 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - name: Regenerate lockfile for patched dependencies (temporary)
-        shell: bash
-        run: |
-          npm install --package-lock-only --ignore-scripts --no-audit
-          node - <<'NODE'
-          const fs = require('fs')
-          const compact = JSON.stringify(JSON.parse(fs.readFileSync('package-lock.json', 'utf8')))
-          console.log('ERPLINK_LOCK_BEGIN')
-          for (let i = 0; i < compact.length; i += 3000) {
-            console.log('ERPLINK_LOCKCHUNK:' + compact.slice(i, i + 3000))
-          }
-          console.log('ERPLINK_LOCK_END')
-          NODE
       - run: npm ci
+      - name: Enforce patched dependency graph
+        run: npm audit --audit-level=moderate
+      - name: Lint compatibility check (diagnostic)
+        continue-on-error: true
+        run: npm run lint
       - name: Supply-chain advisory inventory
         shell: bash
         run: |
