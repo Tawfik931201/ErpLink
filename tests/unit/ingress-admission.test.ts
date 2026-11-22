@@ -132,13 +132,13 @@ describe('the unauthenticated IP limit', () => {
     resetRateLimits()
   })
 
-  it('does not touch a request that carries a credential', () => {
+  it('does not throttle cryptographically verified credentials', () => {
     // 5000 certified requests from one IP: the old code answered 429 to the
     // 121st and every platform treats 4xx as "never send again".
     for (let i = 0; i < 5000; i++) {
       const result = checkUnauthenticatedIngressLimit({
         scope: 'zid',
-        credentialPresented: true,
+        credentialVerified: true,
         bucketKey: 'zid-webhook:1.2.3.4',
       })
       expect(result.allowed).toBe(true)
@@ -150,7 +150,7 @@ describe('the unauthenticated IP limit', () => {
     for (let i = 0; i < UNAUTHENTICATED_IP_LIMIT_PER_MIN + 50; i++) {
       if (checkUnauthenticatedIngressLimit({
         scope: 'zid',
-        credentialPresented: false,
+        credentialVerified: false,
         bucketKey: 'zid-webhook:9.9.9.9',
       }).allowed) allowed++
     }
@@ -161,7 +161,7 @@ describe('the unauthenticated IP limit', () => {
     for (let i = 0; i < UNAUTHENTICATED_IP_LIMIT_PER_MIN + 10; i++) {
       checkUnauthenticatedIngressLimit({
         scope: 'zid',
-        credentialPresented: false,
+        credentialVerified: false,
         bucketKey: 'zid-webhook:8.8.8.8',
       })
     }
@@ -184,10 +184,13 @@ describe('the webhook routes never refuse certified deliveries', () => {
     ['odoo/stock', join(__dirname, '..', '..', 'src', 'app', 'api', 'webhooks', 'odoo', 'stock', 'route.ts')],
   ]
 
-  it.each(ROUTES)('%s gates its IP limit on the presence of a credential', (_name, path) => {
+  it.each(ROUTES)('%s limits unauthenticated requests and exempts verified credentials', (_name, path) => {
     const src = readFileSync(path, 'utf8')
     expect(src).toContain('checkUnauthenticatedIngressLimit')
     expect(src).toContain('credentialPresented')
+    expect(src).toContain('credentialVerified: false')
+    expect(src).toContain('readWebhookBodyWithinLimit(req)')
+    expect(src).not.toContain('await req.text()')
     // The old blanket limit must be gone from the route.
     expect(src).not.toMatch(/checkRateLimit\s*\(/)
   })

@@ -24,9 +24,10 @@ import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
-import { isStrictWebhookAuth, isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
+import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 import { normalizeZidStoreId } from '@/lib/zid/store-identity'
 import {
   verifyZidWebhookAuthorization,
@@ -70,29 +71,31 @@ async function handlePost(req: NextRequest) {
     }).catch(() => {})
   }
 
-  const rawBody = await req.text()
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
-
-  // ── حد الاستقبال: للمجهولين فقط ───────────────────────────────────────────
-  // الطلب الموثّق (Basic) لا يخضع لحد الـIP إطلاقاً: الاعتماد نفسه هو
-  // الحماية، والحد كان يحوّل عملاء الموسم إلى **ضياع صامت** (429 ⇒ المنصات
-  // لا تعيد الإرسال بعد 4xx). الطلب الموثّق يمرّ ببوابة الاستقبال
-  // (`ingress-admission.ts`) التي لا ترفض بل تأجّل.
   const credentialPresented = !!headersList.get('authorization')
-  const unauthLimit = checkUnauthenticatedIngressLimit({
+  const unauthenticatedBucketKey = rateLimitKeyFromHeaders(getHeader, 'zid-webhook')
+
+  // Reject credential-less floods before reading anything. A supplied header
+  // is NOT trusted: failed signatures are rate-limited after verification.
+  if (!credentialPresented && !checkUnauthenticatedIngressLimit({
     scope: 'zid',
-    credentialPresented,
-    bucketKey: rateLimitKeyFromHeaders(getHeader, 'zid-webhook'),
-  })
-  if (!unauthLimit.allowed) {
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
-  if (isWebhookBodyTooLarge(rawBody)) {
-    return NextResponse.json(
-      { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
-      { status: 413 }
-    )
+
+  // Bound streaming uploads before they reach a JS string, JSON parser or
+  // signature validator (Content-Length may be absent or forged).
+  let rawBody: string
+  try {
+    rawBody = await readWebhookBodyWithinLimit(req)
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 })
+    }
+    return NextResponse.json({ error: 'Unable to read webhook body' }, { status: 400 })
   }
 
   // ── Ingress auth ─────────────────────────────────────────────
@@ -125,6 +128,16 @@ async function handlePost(req: NextRequest) {
     ? verifyZidWebhookAuthorization(headersList.get('authorization'))
     : verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)
   const isUnauthenticated = authResult.status === 'legacy' || authResult.status === 'unconfigured'
+
+  // An attacker can invent Authorization: Basic garbage. Count failed Basic
+  // headers against the *same* unauthenticated bucket as unsigned requests.
+  if (credentialPresented && authResult.status !== 'ok' && !checkUnauthenticatedIngressLimit({
+    scope: 'zid',
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
 
   if (authResult.status === 'unconfigured' && process.env.NODE_ENV === 'production') {
     // Unreachable in production: crypto.ts throws at boot without ENCRYPTION_KEY.

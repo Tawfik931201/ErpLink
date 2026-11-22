@@ -103,12 +103,21 @@ describe('durable queue claims and fencing (offline execution)', () => {
     expect(jobs[0].lease_token).toBe('another-worker')
   })
 
-  it('parks an expired worker lease instead of repeating an unknown remote outcome', async () => {
-    jobs = [fixture(0)]
-    Object.assign(jobs[0], { lease_token: 'dead-worker', processing_started_at: '2020-01-01T00:00:00.000Z', lease_expires_at: '2020-01-01T00:00:00.000Z' })
-    await processSyncQueue(1)
-    expect(worker).not.toHaveBeenCalled()
-    expect(jobs[0].outcome_unknown).toBe(true)
+  it('parks an expired worker lease once the scheduled recovery interval arrives', async () => {
+    // processSyncQueue coalesces successful expiry RPCs across calls for 60s.
+    // Advance the wall clock beyond that window instead of assuming a new RPC
+    // on every batch; unknown outcomes must still be quarantined on recovery.
+    const now = Date.now()
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 61_000)
+    try {
+      jobs = [fixture(0)]
+      Object.assign(jobs[0], { lease_token: 'dead-worker', processing_started_at: '2020-01-01T00:00:00.000Z', lease_expires_at: '2020-01-01T00:00:00.000Z' })
+      await processSyncQueue(1)
+      expect(worker).not.toHaveBeenCalled()
+      expect(jobs[0].outcome_unknown).toBe(true)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('fences late success from a worker whose lease token was superseded', async () => {

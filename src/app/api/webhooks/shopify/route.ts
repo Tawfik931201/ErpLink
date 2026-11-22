@@ -18,9 +18,9 @@ import {
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { ttlCache } from '@/lib/ttl-cache'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
-import { isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
 
 const GDPR_TOPICS: readonly string[] = SHOPIFY_GDPR_TOPICS
 const KNOWN_TOPICS: ReadonlySet<string> = new Set([
@@ -31,27 +31,29 @@ const KNOWN_TOPICS: ReadonlySet<string> = new Set([
 ])
 
 async function handlePost(req: NextRequest) {
-  const rawBody = await req.text()
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
-
-  // حد الاستقبال: للمجهولين فقط. Shopify توقّع دائماً (x-shopify-hmac-sha256)،
-  // فكل طلب حقيقي موثّق ولا يخضع لحد الـIP — حد 120/دقيقة كان يحوّل عملاء
-  // الموسم إلى ضياع صامت (429 ⇒ Shopify لا يعيد الإرسال بعد 4xx).
   const credentialPresented = !!headersList.get('x-shopify-hmac-sha256')
-  const unauthLimit = checkUnauthenticatedIngressLimit({
+  const unauthenticatedBucketKey = rateLimitKeyFromHeaders(getHeader, 'shopify-webhook')
+
+  // Credential-less floods are refused before reading. A header alone does
+  // not earn an exemption; failed signatures are counted after verification.
+  if (!credentialPresented && !checkUnauthenticatedIngressLimit({
     scope: 'shopify',
-    credentialPresented,
-    bucketKey: rateLimitKeyFromHeaders(getHeader, 'shopify-webhook'),
-  })
-  if (!unauthLimit.allowed) {
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
-  if (isWebhookBodyTooLarge(rawBody)) {
-    return NextResponse.json(
-      { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
-      { status: 413 }
-    )
+
+  let rawBody: string
+  try {
+    rawBody = await readWebhookBodyWithinLimit(req)
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 })
+    }
+    return NextResponse.json({ error: 'Unable to read webhook body' }, { status: 400 })
   }
 
   const signature = (headersList.get('x-shopify-hmac-sha256') ?? '').trim()
@@ -63,6 +65,13 @@ async function handlePost(req: NextRequest) {
   // ── تحقق HMAC (header) قبل أي عمل ثقيل — 401 عند الفشل ───────────────
   if (webhookSecret) {
     if (!signature || !verifyShopifySignature(rawBody, signature, webhookSecret)) {
+      if (credentialPresented && !checkUnauthenticatedIngressLimit({
+        scope: 'shopify',
+        credentialVerified: false,
+        bucketKey: unauthenticatedBucketKey,
+      }).allowed) {
+        return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+      }
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {

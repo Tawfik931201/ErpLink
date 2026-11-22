@@ -9,6 +9,7 @@ import { OdooClient } from '@/lib/odoo-client'
 import { createSallaProduct, findSallaProductByMatchField, updateSallaProduct } from '@/lib/salla-client'
 import { createShopifyProduct, findShopifyProductByMatchField, isValidShopDomain, updateShopifyProduct } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 // استيراد النوع فقط — يُمحى عند البناء، فلا يتحمّل المسار الساخن أي استيراد.
 import type { WebhookSkipReason } from '@/lib/webhook-skip-log'
 import { getAccessToken } from '@/lib/zid/token'
@@ -84,31 +85,26 @@ async function handlePost(req: NextRequest) {
     !!req.nextUrl.searchParams.get('token')
   const { checkUnauthenticatedIngressLimit } = await import('@/lib/ingress-admission')
   const { rateLimitKeyFromHeaders } = await import('@/lib/rate-limit')
-  const unauthLimit = checkUnauthenticatedIngressLimit({
+  const unauthenticatedBucketKey = rateLimitKeyFromHeaders(getHeader, 'odoo-webhook')
+  if (!credentialPresented && !checkUnauthenticatedIngressLimit({
     scope: 'odoo',
-    credentialPresented,
-    bucketKey: rateLimitKeyFromHeaders(getHeader, 'odoo-webhook'),
-  })
-  if (!unauthLimit.allowed) {
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
 
   let rawText = ''
   let payload: any = {}
   try {
-    rawText = await req.text()
-    const { isWebhookBodyTooLarge: tooLarge, MAX_WEBHOOK_BODY_BYTES: maxBytes } = await import('@/lib/webhook-strict')
-    if (rawText && tooLarge(rawText)) {
-      return NextResponse.json(
-        { error: `Payload too large (max ${maxBytes} bytes)` },
-        { status: 413 }
-      )
+    rawText = await readWebhookBodyWithinLimit(req)
+    if (rawText) payload = JSON.parse(rawText)
+  } catch (err: unknown) {
+    if (err instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: err.message }, { status: 413 })
     }
-    if (rawText) {
-      payload = JSON.parse(rawText)
-    }
-  } catch (err: any) {
-    console.warn('[Odoo Webhook] Raw body read/parse failed:', err.message)
+    // Preserve existing malformed-JSON semantics, without swallowing 413.
+    console.warn('[Odoo Webhook] Raw body read/parse failed')
   }
 
   // Support both array payloads (Odoo native webhook read()) and object payloads
@@ -118,6 +114,13 @@ async function handlePost(req: NextRequest) {
   const field_mapping_id = req.nextUrl.searchParams.get('field_mapping_id') || payload.field_mapping_id || actualPayload.field_mapping_id
 
   if (!field_mapping_id) {
+    if (credentialPresented && !checkUnauthenticatedIngressLimit({
+      scope: 'odoo',
+      credentialVerified: false,
+      bucketKey: unauthenticatedBucketKey,
+    }).allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     console.warn('[Odoo Webhook] Missing field_mapping_id query parameter or body key')
     return NextResponse.json({ error: 'Missing field_mapping_id' }, { status: 400 })
   }
@@ -133,6 +136,15 @@ async function handlePost(req: NextRequest) {
     querySecret: req.nextUrl.searchParams.get('secret'),
     token: req.nextUrl.searchParams.get('token'),
   })
+  // A forged query secret/header is NOT proof of authentication.
+  if (credentialPresented && !(auth.action === 'allow' && auth.status === 'ok') &&
+      !checkUnauthenticatedIngressLimit({
+        scope: 'odoo',
+        credentialVerified: false,
+        bucketKey: unauthenticatedBucketKey,
+      }).allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
   if (auth.action === 'reject') {
     console.warn(`[Odoo Webhook] Rejected delivery: ${auth.error}`)
     return NextResponse.json({ error: auth.error }, { status: auth.status })

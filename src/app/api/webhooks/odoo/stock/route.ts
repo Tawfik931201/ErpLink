@@ -12,7 +12,7 @@ import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
-import { isWebhookBodyTooLarge, MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -44,27 +44,30 @@ async function handlePost(req: NextRequest) {
     !!req.headers.get('authorization') ||
     !!req.nextUrl.searchParams.get('secret') ||
     !!req.nextUrl.searchParams.get('token')
-  const unauthLimit = checkUnauthenticatedIngressLimit({
+  const unauthenticatedBucketKey = rateLimitKeyFromHeaders(getHeader, 'odoo-stock-webhook')
+  if (!credentialPresented && !checkUnauthenticatedIngressLimit({
     scope: 'odoo-stock',
-    credentialPresented,
-    bucketKey: rateLimitKeyFromHeaders(getHeader, 'odoo-stock-webhook'),
-  })
-  if (!unauthLimit.allowed) {
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
+
+  let raw = ''
+  try {
+    raw = await readWebhookBodyWithinLimit(req)
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 })
+    }
+    return NextResponse.json({ error: 'Unable to read webhook body' }, { status: 400 })
   }
 
   let payload: any = {}
   try {
-    const raw = await req.text()
-    if (raw && isWebhookBodyTooLarge(raw)) {
-      return NextResponse.json(
-        { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
-        { status: 413 }
-      )
-    }
     if (raw) payload = JSON.parse(raw)
   } catch {
-    // ignore malformed body
+    // Preserve Odoo's legacy permissive parse for signed minimal triggers.
   }
 
   const actual = Array.isArray(payload) ? (payload[0] || {}) : payload
@@ -76,6 +79,13 @@ async function handlePost(req: NextRequest) {
     ''
 
   if (!workspaceId) {
+    if (credentialPresented && !checkUnauthenticatedIngressLimit({
+      scope: 'odoo-stock',
+      credentialVerified: false,
+      bucketKey: unauthenticatedBucketKey,
+    }).allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     return NextResponse.json({ error: 'Missing workspace_id' }, { status: 400 })
   }
 
@@ -84,6 +94,13 @@ async function handlePost(req: NextRequest) {
   // ids before they reach the queue; it does NOT stop a caller with the shared
   // secret from naming a real tenant (see the trust-boundary note above).
   if (!UUID_RE.test(workspaceId)) {
+    if (credentialPresented && !checkUnauthenticatedIngressLimit({
+      scope: 'odoo-stock',
+      credentialVerified: false,
+      bucketKey: unauthenticatedBucketKey,
+    }).allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     return NextResponse.json({ error: 'Invalid workspace_id' }, { status: 400 })
   }
 
@@ -93,6 +110,13 @@ async function handlePost(req: NextRequest) {
   // src/lib/odoo/webhook-secret.ts for the migration window on `legacy`.
   const resource = req.nextUrl.searchParams.get('resource')
   if (resource !== null && !/^[0-9a-f]{64}$/.test(resource)) {
+    if (credentialPresented && !checkUnauthenticatedIngressLimit({
+      scope: 'odoo-stock',
+      credentialVerified: false,
+      bucketKey: unauthenticatedBucketKey,
+    }).allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+    }
     return NextResponse.json({ error: 'Invalid ERP resource' }, { status: 400 })
   }
   const auth = authorizeOdooWebhook({
@@ -102,6 +126,14 @@ async function handlePost(req: NextRequest) {
     querySecret: req.nextUrl.searchParams.get('secret'),
     token: req.nextUrl.searchParams.get('token'),
   })
+  if (credentialPresented && !(auth.action === 'allow' && auth.status === 'ok') &&
+      !checkUnauthenticatedIngressLimit({
+        scope: 'odoo-stock',
+        credentialVerified: false,
+        bucketKey: unauthenticatedBucketKey,
+      }).allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
   if (auth.action === 'reject') {
     console.warn(`[Odoo Stock Webhook] Rejected delivery: ${auth.error}`)
     return NextResponse.json({ error: auth.error }, { status: auth.status })
