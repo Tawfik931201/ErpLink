@@ -73,17 +73,25 @@ export default function NotificationCenter() {
   const [position, setPosition] = useState({ top: 12, left: 12, width: 350, maxHeight: 400 })
   const [items, setItems] = useState<Entry[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
+  const lastWorkspaceRef = useRef('')
+  const refreshRequestRef = useRef(0)
   const [enabled, setEnabled] = useState(false)
   const [configured, setConfigured] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [lastSeen, setLastSeen] = useState('')
   const refresh = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current
     try {
       const res = await fetch(endpoint, { cache: 'no-store' })
       if (!res.ok) { setError('تعذر التحقق من إعدادات الإشعارات على الخادم.'); return }
       const data: ResponseData = await res.json()
+      if (requestId !== refreshRequestRef.current) return
+      const nextWorkspace = data.workspaceId || ''
+      const workspaceChanged = !!lastWorkspaceRef.current && lastWorkspaceRef.current !== nextWorkspace
+      lastWorkspaceRef.current = nextWorkspace
       setItems(current => {
+        if (workspaceChanged) return data.notifications ?? []
         const merged = new Map<string, Entry>()
         for (const item of data.notifications ?? []) merged.set(item.id, item)
         // Keep events received over SSE while this HTTP refresh was in flight.
@@ -92,7 +100,7 @@ export default function NotificationCenter() {
           .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
           .slice(0, 30)
       })
-      setWorkspaceId(data.workspaceId || '')
+      setWorkspaceId(nextWorkspace)
       setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration('/notification-sw.js')
