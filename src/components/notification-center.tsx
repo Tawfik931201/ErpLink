@@ -1,5 +1,6 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, BellOff, X } from 'lucide-react'
 
 type Entry = { id: string; title: string; body: string; href: string; status: string; created_at: string }
@@ -12,6 +13,9 @@ const publicKeyBytes = (text: string): Uint8Array => {
 }
 export default function NotificationCenter() {
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState({ top: 12, left: 12, width: 350, maxHeight: 400 })
   const [items, setItems] = useState<Entry[]>([])
   const [enabled, setEnabled] = useState(false)
   const [configured, setConfigured] = useState(false)
@@ -84,15 +88,59 @@ export default function NotificationCenter() {
     } catch (e) { setError(e instanceof Error ? e.message : 'حدث خطأ') }
     finally { setBusy(false) }
   }
+  const showPanel = () => {
+    if (open) { setOpen(false); return }
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (rect) {
+      const margin = 12
+      const width = Math.min(350, window.innerWidth - margin * 2)
+      const rtl = getComputedStyle(triggerRef.current!).direction === 'rtl'
+      // RTL sidebar sits on the right, so the menu grows toward the page.
+      const desiredLeft = rtl ? rect.right - width : rect.left
+      const left = Math.max(margin, Math.min(desiredLeft, window.innerWidth - width - margin))
+      const roomBelow = window.innerHeight - rect.bottom - margin * 2
+      const roomAbove = rect.top - margin * 2
+      const below = roomBelow >= Math.min(300, window.innerHeight * .5) || roomBelow >= roomAbove
+      const top = below ? rect.bottom + 8 : Math.max(margin, rect.top - Math.min(460, roomAbove) - 8)
+      setPosition({
+        top, left, width,
+        maxHeight: Math.max(140, Math.min(460, below ? window.innerHeight - top - margin : rect.top - top - 8)),
+      })
+    }
+    setOpen(true)
+  }
+  useEffect(() => {
+    if (!open) return
+    const dismiss = (event: MouseEvent) => {
+      if (!panelRef.current?.contains(event.target as Node)
+        && !triggerRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    const onViewportChange = () => setOpen(false)
+    document.addEventListener('mousedown', dismiss)
+    document.addEventListener('keydown', escape)
+    window.addEventListener('resize', onViewportChange)
+    window.addEventListener('scroll', onViewportChange, true)
+    return () => {
+      document.removeEventListener('mousedown', dismiss)
+      document.removeEventListener('keydown', escape)
+      window.removeEventListener('resize', onViewportChange)
+      window.removeEventListener('scroll', onViewportChange, true)
+    }
+  }, [open])
   const unread = items.filter(item => !lastSeen || item.created_at > lastSeen).length
   return (
     <div className="relative">
-      <button type="button" aria-label="الإشعارات" aria-expanded={open} onClick={() => setOpen(!open)}
+      <button ref={triggerRef} type="button" aria-label="الإشعارات" aria-expanded={open} aria-haspopup="dialog" onClick={showPanel}
         className="relative rounded-lg p-2 hover:bg-secondary" title="الإشعارات">
         <Bell className="h-5 w-5" />
         {unread > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1 text-[10px] text-white">{Math.min(unread, 30)}</span>}
       </button>
-      {open && <div className="absolute top-full left-0 z-[100] mt-2 md:bottom-full md:top-auto md:mb-3 md:mt-0 max-h-[65vh] w-[min(350px,90vw)] overflow-y-auto rounded-xl border border-border bg-background p-3 shadow-xl" dir="rtl">
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={panelRef} role="dialog" aria-label="مركز الإشعارات"
+          className="fixed z-[1000] overflow-y-auto overscroll-contain rounded-xl border border-border bg-background p-3 shadow-2xl"
+          style={{ top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight }}
+          dir="rtl">
         <div className="mb-3 flex items-center justify-between">
           <strong className="text-sm">الإشعارات</strong>
           <button aria-label="إغلاق" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>
@@ -109,7 +157,7 @@ export default function NotificationCenter() {
           <strong>{item.title}</strong><p className="mt-1 text-muted-foreground">{item.body}</p>
           <time className="mt-1 block text-[10px] text-muted-foreground">{new Date(item.created_at).toLocaleString('ar-EG')}</time>
         </a>)}
-      </div>}
+      </div>, document.body)}
     </div>
   )
 }

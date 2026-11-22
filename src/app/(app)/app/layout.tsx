@@ -230,16 +230,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <SubscriptionBanner />
       <div className="flex flex-1 min-h-0 relative">
         <aside className={`w-[200px] shrink-0 ${dir === 'rtl' ? 'border-l' : 'border-r'} border-border bg-sidebar hidden md:flex flex-col select-none h-full overflow-visible z-40`}>
-          <div className="p-4 pb-2 pt-5 flex items-center">
-            <Link href="/app/dashboard" className="flex items-center" aria-label="ErpLink Dashboard">
-              <Logo variant="horizontal" size="md" priority />
+          <div className="flex items-center justify-between gap-1 px-3 pb-2 pt-5">
+            <Link href="/app/dashboard" className="flex min-w-0 flex-1 items-center overflow-hidden" aria-label="ErpLink Dashboard">
+              <Logo variant="horizontal" size="sm" priority />
             </Link>
+            <div className="shrink-0"><NotificationCenter /></div>
           </div>
           <div className="flex-1 overflow-y-auto">
             <SidebarNav sections={navSections} />
           </div>
           <div className="p-4 mt-auto border-t border-border bg-secondary/10 flex flex-col overflow-visible">
-            <div className="flex items-center gap-2"><NotificationCenter /><UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} /></div>
+            <div className="flex items-center gap-2"><UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} /></div>
           </div>
         </aside>
         <main className="min-w-0 flex-1 overflow-auto">
