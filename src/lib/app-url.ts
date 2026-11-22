@@ -19,6 +19,14 @@ export function getAppBaseUrl(request?: NextRequest): string {
     return envUrl.replace(/\/$/, '')
   }
 
+  // The canonical production hostname is NOT derived from Forwarded/Host
+  // headers. Without this guard, an attacker who controls a proxy header
+  // could poison OAuth redirect URLs and Origin comparisons on a host that
+  // accidentally omitted NEXT_PUBLIC_APP_URL/NEXTAUTH_URL.
+  if (process.env.NODE_ENV === 'production') {
+    return 'https://erplink.bizsahla.com'
+  }
+
   if (request) {
     const forwardedHost = request.headers.get('x-forwarded-host')?.trim()
     const host = forwardedHost || request.headers.get('host')?.trim()
