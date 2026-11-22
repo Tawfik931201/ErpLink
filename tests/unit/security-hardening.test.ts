@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 
-import { isPublicIpAddress, resolvePublicDestination } from '@/lib/security/safe-external-fetch'
+import { assertSecureErpTransport, isPublicIpAddress, publicErpDnsLookup, resolvePublicDestination } from '@/lib/security/safe-external-fetch'
 import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 
 describe('server-side ERP URL hardening', () => {
@@ -37,6 +37,51 @@ describe('server-side ERP URL hardening', () => {
     'https://admin:pass@example.com/',
   ])('rejects SSRF destination before opening a socket: %s', async url => {
     await expect(resolvePublicDestination(url)).rejects.toThrow()
+  })
+})
+
+describe('ERP connections cannot bypass the DNS check or send credentials over HTTP', () => {
+  const originalNodeEnv = process.env.NODE_ENV
+  afterEach(() => Object.assign(process.env, { NODE_ENV: originalNodeEnv }))
+
+  it('rejects HTTP in production but allows HTTPS', () => {
+    Object.assign(process.env, { NODE_ENV: 'production' })
+    expect(() => assertSecureErpTransport('http://odoo.example.com')).toThrow(/HTTPS/)
+    expect(() => assertSecureErpTransport('https://odoo.example.com')).not.toThrow()
+    expect(() => assertSecureErpTransport('https://admin:password@odoo.example.com')).toThrow()
+  })
+
+  it('refuses a private IP at the XML-RPC socket lookup step', async () => {
+    const error = await new Promise<Error | null>((resolve) => {
+      publicErpDnsLookup('169.254.169.254', {}, (err) => resolve(err))
+    })
+    expect(error).toBeInstanceOf(Error)
+  })
+
+  it('requires the Odoo XML-RPC agent to pin every new DNS connection', () => {
+    const client = fs.readFileSync(path.join(process.cwd(), 'src/lib/odoo-client.ts'), 'utf8')
+    expect(client).toContain('lookup: publicErpDnsLookup')
+    expect(client).toContain('autoSelectFamily: false')
+    expect(client).toContain('assertSecureErpTransport(config.url)')
+  })
+})
+
+describe('Server Actions do not expose encrypted ERP credentials', () => {
+  it('projects the public connection fields for reads AND saves', () => {
+    const action = fs.readFileSync(path.join(process.cwd(), 'src/app/actions/odoo.ts'), 'utf8')
+    const projection = action.split('function toPublicErpConnection(')[1]?.split('export async function getActiveWorkspaceErpConnection()')[0] || ''
+    expect(projection).not.toMatch(/password\s*:/)
+    expect(action).toContain('connection: toPublicErpConnection(result.connection)')
+    expect(action).toContain('...toPublicErpConnection(result), odoo_version: storedVersion')
+  })
+})
+
+describe('cron authentication never accepts secrets in URLs', () => {
+  it('requires the Authorization Bearer token for reconciliation', () => {
+    const route = fs.readFileSync(path.join(process.cwd(), 'src/app/api/cron/reconcile/route.ts'), 'utf8')
+    expect(route).not.toContain("searchParams.get('key')")
+    expect(route).toContain("req.headers.get('authorization')")
+    expect(route).toContain("secretMatches(bearer ?? '', cronSecret)")
   })
 })
 
