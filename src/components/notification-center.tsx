@@ -104,8 +104,10 @@ export default function NotificationCenter() {
       setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration('/notification-sw.js')
+          || await navigator.serviceWorker.getRegistration('/')
+          || await navigator.serviceWorker.getRegistration()
         const current = await reg?.pushManager.getSubscription()
-        setEnabled(!!current && data.endpoints.includes(current.endpoint))
+        setEnabled(!!current && (data.endpoints ?? []).includes(current.endpoint))
       }
     } catch { /* notification UI must not disrupt ERP */ }
   }, [])
@@ -157,10 +159,27 @@ export default function NotificationCenter() {
         const configResponse = await fetch(endpoint, { cache: 'no-store' })
         if (!configResponse.ok) throw new Error('تعذر قراءة إعدادات الإشعارات')
         const config: ResponseData = await configResponse.json()
-        const subscription = existing || await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: publicKeyBytes(config.vapidPublicKey) as BufferSource,
-        })
+        let subscription = existing
+        if (existing) {
+          try {
+            const currentKey = new Uint8Array(existing.options?.applicationServerKey || new ArrayBuffer(0))
+            const expectedKey = publicKeyBytes(config.vapidPublicKey)
+            const matches = currentKey.length === expectedKey.length && currentKey.every((v, i) => v === expectedKey[i])
+            if (!matches) {
+              await existing.unsubscribe()
+              subscription = null
+            }
+          } catch {
+            await existing.unsubscribe().catch(() => {})
+            subscription = null
+          }
+        }
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: publicKeyBytes(config.vapidPublicKey) as BufferSource,
+          })
+        }
         const result = await fetch(endpoint, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(subscription.toJSON()),

@@ -16,7 +16,9 @@ function hkdf(salt: Buffer, ikm: Buffer, info: Buffer, size: number): Buffer {
  * The public VAPID key must still match the private key; never expose the private key.
  */
 export function pushContact(): string {
-  return process.env.WEB_PUSH_CONTACT || process.env.WEB_PUSH_SUBJECT || ''
+  const contact = (process.env.WEB_PUSH_CONTACT || process.env.WEB_PUSH_SUBJECT || '').trim()
+  if (!contact) return ''
+  return contact.startsWith('mailto:') || contact.startsWith('https:') ? contact : `mailto:${contact}`
 }
 export function pushConfigured(): boolean {
   return !!(process.env.WEB_PUSH_VAPID_PUBLIC_KEY && process.env.WEB_PUSH_VAPID_PRIVATE_KEY && pushContact())
@@ -44,8 +46,10 @@ export async function sendBrowserPush(subscription: Subscription, payload: { tit
   if (!pushConfigured()) throw new Error('Browser push VAPID is not configured')
   const url = new URL(subscription.endpoint)
   if (url.protocol !== 'https:' || !['443', ''].includes(url.port) || subscription.endpoint.length > 2048) throw new Error('Invalid push endpoint')
-  const publicKey = Buffer.from(process.env.WEB_PUSH_VAPID_PUBLIC_KEY!, 'base64url')
-  const privateKey = Buffer.from(process.env.WEB_PUSH_VAPID_PRIVATE_KEY!, 'base64url')
+  const rawPublic = (process.env.WEB_PUSH_VAPID_PUBLIC_KEY || '').trim()
+  const rawPrivate = (process.env.WEB_PUSH_VAPID_PRIVATE_KEY || '').trim()
+  const publicKey = Buffer.from(rawPublic, 'base64url')
+  const privateKey = Buffer.from(rawPrivate, 'base64url')
   if (publicKey.length !== 65 || privateKey.length !== 32) throw new Error('Invalid VAPID key length')
   const key = createPrivateKey({ key: { kty: 'EC', crv: 'P-256', x: b64(publicKey.subarray(1, 33)), y: b64(publicKey.subarray(33)), d: b64(privateKey) }, format: 'jwk' })
   const header = b64(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))
@@ -56,9 +60,9 @@ export async function sendBrowserPush(subscription: Subscription, payload: { tit
   const response = await fetch(subscription.endpoint, {
     method: 'POST',
     headers: {
-      Authorization: 'vapid t=' + signingInput + '.' + b64(signature) + ', k=' + process.env.WEB_PUSH_VAPID_PUBLIC_KEY,
-      TTL: '3600',
-      Urgency: 'normal',
+      Authorization: 'vapid t=' + signingInput + '.' + b64(signature) + ', k=' + rawPublic,
+      TTL: '86400',
+      Urgency: 'high',
       'Content-Encoding': 'aes128gcm',
       'Content-Type': 'application/octet-stream',
       'Content-Length': String(body.length),

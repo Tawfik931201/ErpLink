@@ -2,6 +2,8 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { pushConfigured } from '@/lib/browser-push'
+import { getAppBaseUrl } from '@/lib/app-url'
+import { drainBrowserPush } from '@/lib/app-notifications'
 
 export const dynamic = 'force-dynamic'
 const noStore = { 'Cache-Control': 'private, no-store' }
@@ -11,7 +13,13 @@ async function principal() {
 }
 function originAllowed(req: NextRequest): boolean {
   const origin = req.headers.get('origin')
-  return !!origin && origin === req.nextUrl.origin
+  if (!origin) return false
+  try {
+    const expected = new URL(getAppBaseUrl(req)).origin
+    return origin === expected || origin === req.nextUrl.origin
+  } catch {
+    return origin === req.nextUrl.origin
+  }
 }
 function validEndpoint(raw: unknown): raw is string {
   if (typeof raw !== 'string' || raw.length > 2048) return false
@@ -58,7 +66,9 @@ export async function POST(req: NextRequest) {
     workspace_id: p.workspaceId, user_id: p.userId, endpoint: body.endpoint,
     p256dh: body.keys.p256dh, auth: body.keys.auth, enabled: true,
   }, { onConflict: 'workspace_id,user_id,endpoint' })
-  return error ? NextResponse.json({ error: 'Unable to save subscription' }, { status: 503 }) : NextResponse.json({ ok: true })
+  if (error) return NextResponse.json({ error: 'Unable to save subscription' }, { status: 503 })
+  void drainBrowserPush().catch(() => {})
+  return NextResponse.json({ ok: true })
 }
 export async function DELETE(req: NextRequest) {
   if (!originAllowed(req)) return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })

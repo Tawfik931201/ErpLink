@@ -61,6 +61,7 @@ export async function recordAppNotification(input: {
   const rows = devices.map(device => ({ notification_id: data.id, subscription_id: device.id }))
   const { error: fanoutError } = await supabase.from('browser_push_deliveries').upsert(rows, { onConflict: 'notification_id,subscription_id', ignoreDuplicates: true })
   if (fanoutError) console.warn('[Notifications] Push fanout unavailable:', fanoutError.code)
+  else if (pushConfigured()) void drainBrowserPush().catch(() => {})
 }
 
 let busy = false
