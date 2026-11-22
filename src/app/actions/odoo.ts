@@ -72,7 +72,7 @@ const getCachedErpConnection = unstable_cache(
   { revalidate: 30, tags: ['erp-connection'] }
 )
 
-export async function getActiveWorkspaceErpConnection() {
+async function getActiveWorkspaceErpConnectionInternal() {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
@@ -84,6 +84,32 @@ export async function getActiveWorkspaceErpConnection() {
   } catch (error: any) {
     console.error('[Odoo Action] getActiveWorkspaceOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to fetch Odoo connection' }
+  }
+}
+
+/**
+ * Client callable action: return ONLY display columns. The encrypted password
+ * and every unknown future field must remain on the server.
+ */
+export async function getActiveWorkspaceErpConnection() {
+  const result = await getActiveWorkspaceErpConnectionInternal()
+  if (!result.success || !result.connection) return result
+  const c = result.connection
+  return {
+    success: true,
+    connection: {
+      id: c.id,
+      workspace_id: c.workspace_id,
+      connection_name: c.connection_name,
+      erp_type: c.erp_type,
+      url: c.url,
+      db_name: c.db_name,
+      username: c.username,
+      status: c.status,
+      odoo_version: c.odoo_version,
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+    },
   }
 }
 
@@ -146,6 +172,9 @@ function validateSafeExternalUrl(rawUrl: string): { valid: boolean; error?: stri
   try {
     const parsed = new URL(rawUrl)
     const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+      return { valid: false, error: 'اتصالات ERP يجب أن تستخدم HTTPS في بيئة الإنتاج' }
+    }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { valid: false, error: 'بروتوكول الرابط غير مدعوم، يجب أن يكون http أو https' }
     }
@@ -362,7 +391,7 @@ export async function saveErpConnection(data: {
     const encryptedKey = encrypt(data.apiKey.trim())
 
     // Check if connection already exists for this workspace
-    const existingRes = await getActiveWorkspaceErpConnection()
+    const existingRes = await getActiveWorkspaceErpConnectionInternal()
     const existing = existingRes.success ? existingRes.connection : null
 
     let result
@@ -579,7 +608,7 @@ const getCachedModels = unstable_cache(
  */
 export async function getOdooModels() {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive. Please connect to your ERP first.' }
     }
@@ -776,7 +805,7 @@ export async function getOdooModelFields(modelName: string, forceRefresh = false
       return { success: false, error: 'Model name is required' }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.' }
     }
@@ -818,7 +847,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
       return { success: false, error: 'Model and field are required', options: [] }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1057,7 +1086,7 @@ export async function getOdooWarehouses(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1103,7 +1132,7 @@ export async function getOdooTaxes(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', taxes: [] }
     }
@@ -1177,7 +1206,7 @@ export async function getOdooLocations(usage?: string, force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1234,7 +1263,7 @@ export async function dryRunMatch(args: {
       return { success: false, error: 'No active workspace', phase: 'error' }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', phase: 'error' }
     }
@@ -1291,7 +1320,7 @@ export async function dryRunMatch(args: {
 
 export async function getOdooAccountsByType(type: 'receivable' | 'payable', companyId?: number, force = false) {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1359,7 +1388,7 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
  */
 export async function getOdooAnalyticAccounts(force = false, companyId?: number) {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', accounts: [] }
     }
@@ -1420,7 +1449,7 @@ export async function getOdooAnalyticAccounts(force = false, companyId?: number)
 
 export async function searchOdooCategories(searchTerm: string = '') {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1453,7 +1482,7 @@ export async function searchOdooCategories(searchTerm: string = '') {
 
 export async function searchOdooProducts(searchTerm: string = '') {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1490,7 +1519,7 @@ export async function getOdooCustomers(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1576,7 +1605,7 @@ export async function getOdooProducts(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1669,7 +1698,7 @@ export async function getOdooJournals(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1719,7 +1748,7 @@ export async function getOdooCurrencies(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', options: [] }
     }
