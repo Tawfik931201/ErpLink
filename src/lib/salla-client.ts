@@ -1,5 +1,7 @@
 import axios from 'axios'
 
+import { decrypt, encrypt } from '@/lib/crypto'
+
 import { getSallaWebhookCredential } from '@/lib/salla/webhook-auth'
 import { supabase } from '@/lib/supabase'
 
@@ -67,7 +69,7 @@ export async function refreshSallaToken(merchantId: string, refreshToken: string
         client_id: clientId,
         client_secret: clientSecret,
         grant_type: 'refresh_token',
-        refresh_token: refreshToken,
+        refresh_token: decrypt(refreshToken),
       }).toString(),
       {
         headers: {
@@ -83,8 +85,8 @@ export async function refreshSallaToken(merchantId: string, refreshToken: string
     const { error } = await supabase
       .from('salla_tokens')
       .update({
-        access_token,
-        refresh_token,
+        access_token: encrypt(access_token),
+        refresh_token: encrypt(refresh_token),
         expires_in: expires_in ? Number(expires_in) : null,
         updated_at: new Date().toISOString(),
       })
@@ -120,9 +122,21 @@ export async function getSallaAccessToken(merchantId: string): Promise<string> {
   }
 
   const { access_token, refresh_token, expires_in, updated_at } = sallaToken as unknown as SallaTokenRow
+  // Legacy plaintext/CBC records remain readable and are migrated on use.
+  const accessToken = decrypt(access_token)
+  const refreshToken = decrypt(refresh_token)
+  if (!access_token.startsWith('v2:') || !refresh_token.startsWith('v2:')) {
+    // Compare both old fields to avoid clobbering a concurrent token refresh.
+    const { error: migrationError } = await supabase.from('salla_tokens')
+      .update({ access_token: encrypt(accessToken), refresh_token: encrypt(refreshToken) })
+      .eq('merchant_id', merchantId)
+      .eq('access_token', access_token)
+      .eq('refresh_token', refresh_token)
+    if (migrationError) console.error('[SallaClient] Token encryption migration failed:', migrationError.message)
+  }
 
   if (!expires_in) {
-    return access_token
+    return accessToken
   }
 
   // Calculate if token is expired or close to expiry (within 5 minutes)
@@ -137,14 +151,14 @@ export async function getSallaAccessToken(merchantId: string): Promise<string> {
     if (ongoing) {
       return ongoing
     }
-    const task = refreshSallaToken(merchantId, refresh_token).finally(() => {
+    const task = refreshSallaToken(merchantId, refreshToken).finally(() => {
       sallaRefreshLocks.delete(merchantId)
     })
     sallaRefreshLocks.set(merchantId, task)
     return task
   }
 
-  return access_token
+  return accessToken
 }
 
 /**
