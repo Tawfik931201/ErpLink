@@ -210,6 +210,30 @@ describe('inbound Authorization header classification', () => {
   })
 })
 
+describe('Zid Partner app-market webhook isolation', () => {
+  const route = fs.readFileSync(ROUTE_PATH, 'utf8')
+
+  it('keeps the app-wide Basic credential for exact Partner Portal market topics', () => {
+    expect(route).toContain("'app.market.subscription.active'")
+    expect(route).toContain("'app.market.subscription.renew'")
+    expect(route).toContain("'app.market.application.uninstall'")
+    expect(route).toContain("!authenticatedMerchantId && partnerAppEventNames.has(registeredEvent)")
+    expect(route).toContain("? verifyZidWebhookAuthorization(headersList.get('authorization'))")
+  })
+
+  it('keeps every store-scoped callback under its merchant-specific secret', () => {
+    expect(route).toContain(": verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)")
+    expect(route).toContain("Webhook store identity does not match Basic credential")
+  })
+
+  it('does not make app-wide partner authentication an all-event fallback', () => {
+    const partnerSection = route.split('const partnerAppEventNames = new Set([')[1]?.split('])')[0] || ''
+    expect(partnerSection).not.toContain("'order.created'")
+    expect(partnerSection).not.toContain("'product.created'")
+    expect(partnerSection).not.toContain("'customer.created'")
+  })
+})
+
 describe('the endpoint keeps the documented mechanism only', () => {
   const route = fs.readFileSync(ROUTE_PATH, 'utf8')
   const webhooks = fs.readFileSync(WEBHOOKS_PATH, 'utf8')
