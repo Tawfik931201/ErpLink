@@ -72,8 +72,8 @@ export function publicErpDnsLookup(
   callback: (error: NodeJS.ErrnoException | null, address: string, family: number) => void
 ): void {
   const host = hostname.replace(/^\[|\]$/g, '')
-  const urlHost = isIP(host) === 6 ? \`[\${host}]\` : host
-  resolvePublicDestination(\`https://\${urlHost}\`)
+  const urlHost = isIP(host) === 6 ? `[${host}]` : host
+  resolvePublicDestination(`https://${urlHost}`)
     .then(({ address, family }) => callback(null, address, family))
     .catch((error: unknown) => callback(
       error instanceof Error ? error as NodeJS.ErrnoException : new Error('ERP DNS validation failed'),
