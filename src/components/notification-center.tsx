@@ -9,20 +9,33 @@ const endpoint = '/api/notifications'
 
 // Share one live connection between the desktop and mobile bell components.
 const liveListeners = new Map<string, Set<(entry: Entry) => void>>()
+const liveReadyListeners = new Map<string, Set<() => void>>()
 let liveSource: EventSource | null = null
 let liveWorkspace: string | null = null
+let liveReady = false
 
-function subscribeToLiveNotifications(workspaceId: string, listener: (entry: Entry) => void) {
+function subscribeToLiveNotifications(workspaceId: string, listener: (entry: Entry) => void, onReady: () => void) {
   let subscribers = liveListeners.get(workspaceId)
   if (!subscribers) {
     subscribers = new Set()
     liveListeners.set(workspaceId, subscribers)
   }
   subscribers.add(listener)
+  let readySubscribers = liveReadyListeners.get(workspaceId)
+  if (!readySubscribers) {
+    readySubscribers = new Set()
+    liveReadyListeners.set(workspaceId, readySubscribers)
+  }
+  readySubscribers.add(onReady)
   if (liveWorkspace !== workspaceId || !liveSource) {
     liveSource?.close()
     liveWorkspace = workspaceId
+    liveReady = false
     liveSource = new EventSource('/api/notifications/stream?workspaceId=' + encodeURIComponent(workspaceId))
+    liveSource.addEventListener('ready', () => {
+      liveReady = true
+      for (const callback of liveReadyListeners.get(workspaceId) ?? []) callback()
+    })
     liveSource.addEventListener('notification', event => {
       try {
         const entry = JSON.parse((event as MessageEvent).data) as Entry
@@ -32,14 +45,19 @@ function subscribeToLiveNotifications(workspaceId: string, listener: (entry: Ent
         console.warn('[notifications] invalid live event', error)
       }
     })
+  } else if (liveReady) {
+    onReady()
   }
   return () => {
     subscribers?.delete(listener)
+    readySubscribers?.delete(onReady)
+    if (readySubscribers?.size === 0) liveReadyListeners.delete(workspaceId)
     if (subscribers?.size === 0) liveListeners.delete(workspaceId)
     if (liveWorkspace === workspaceId && !liveListeners.has(workspaceId)) {
       liveSource?.close()
       liveSource = null
       liveWorkspace = null
+      liveReady = false
     }
   }
 }
