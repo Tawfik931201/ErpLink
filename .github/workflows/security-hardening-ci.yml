@@ -41,3 +41,10 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
           SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
         run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts
+      - name: Full Jest regression baseline (diagnostic)
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand
