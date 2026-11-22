@@ -126,12 +126,12 @@ export async function getSallaAccessToken(merchantId: string): Promise<string> {
   const accessToken = decrypt(access_token)
   const refreshToken = decrypt(refresh_token)
   if (!access_token.startsWith('v2:') || !refresh_token.startsWith('v2:')) {
-    // Compare both old fields to avoid clobbering a concurrent token refresh.
+    // Compare the last refresh timestamp (not secrets): PostgREST equality filters
+    // become URL query parameters and must never contain OAuth credentials.
     const { error: migrationError } = await supabase.from('salla_tokens')
       .update({ access_token: encrypt(accessToken), refresh_token: encrypt(refreshToken) })
       .eq('merchant_id', merchantId)
-      .eq('access_token', access_token)
-      .eq('refresh_token', refresh_token)
+      .eq('updated_at', updated_at)
     if (migrationError) console.error('[SallaClient] Token encryption migration failed:', migrationError.message)
   }
 
