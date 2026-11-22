@@ -262,7 +262,7 @@ describe('the endpoint keeps the documented mechanism only', () => {
   })
 
   it('logs the credential fingerprint rather than the credential', () => {
-    expect(route).toMatch(/credential: zidWebhookCredentialFingerprint\(\)/)
+    expect(route).toContain('credential: zidWebhookCredentialFingerprint(isAuthenticatedPartnerWebhook ? undefined : authenticatedMerchantId)')
     expect(route).not.toMatch(/console\.(log|warn|error|info)\([^)]*getZidWebhookCredential\(/)
   })
 
