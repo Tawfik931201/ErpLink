@@ -104,7 +104,26 @@ async function handlePost(req: NextRequest) {
   // HKDF-derived Basic credential. An attacker's chosen store_id in the JSON
   // body cannot select another tenant's credential.
   const authenticatedMerchantId = (req.nextUrl.searchParams.get('store_id') ?? '').trim()
-  const authResult = verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)
+  const registeredEvent = (req.nextUrl.searchParams.get('event') ?? '').trim().toLowerCase()
+  // Zid Partner Portal app-market notifications are registered at an app-wide
+  // callback URL with NO merchant store_id and the historical app-level Basic
+  // credential. They are distinct from manager/merchant sync webhooks. Only
+  // exactly registered app-market topics may use this app-level credential.
+  // Never let an absent store_id downgrade an order/product/customer webhook.
+  const partnerAppEventNames = new Set([
+    'app.market.subscription.active',
+    'app.market.subscription.renew',
+    'app.market.subscription.upgrade',
+    'app.market.subscription.suspended',
+    'app.market.subscription.expired',
+    'app.market.subscription.refunded',
+    'app.market.subscription.warning',
+    'app.market.application.uninstall',
+  ])
+  const isAuthenticatedPartnerWebhook = !authenticatedMerchantId && partnerAppEventNames.has(registeredEvent)
+  const authResult = isAuthenticatedPartnerWebhook
+    ? verifyZidWebhookAuthorization(headersList.get('authorization'))
+    : verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)
   const isUnauthenticated = authResult.status === 'legacy' || authResult.status === 'unconfigured'
 
   if (authResult.status === 'unconfigured' && process.env.NODE_ENV === 'production') {
@@ -122,7 +141,7 @@ async function handlePost(req: NextRequest) {
 
   if (authResult.status === 'invalid') {
     console.warn('[Zid Webhook] Authorization verification failed', {
-      credential: zidWebhookCredentialFingerprint(),
+      credential: zidWebhookCredentialFingerprint(isAuthenticatedPartnerWebhook ? undefined : authenticatedMerchantId),
       hasHeader: true,
     })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
