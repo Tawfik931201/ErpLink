@@ -275,7 +275,26 @@ describe('the ingress policy both routes share', () => {
     }
   })
 
-  it('allows `legacy` and counts it, so the window is observable', () => {
+  it('rejects unsigned legacy Odoo webhooks by default in production', () => {
+    const previousStrict = process.env.STRICT_WEBHOOK_AUTH
+    setEnv('STRICT_WEBHOOK_AUTH', undefined)
+    const { mod, restore } = loadModule({ ENCRYPTION_KEY: KEY, NODE_ENV: 'production' })
+    try {
+      for (const scope of [mod.odooStockSecretScope(WORKSPACE), mod.odooRecordSecretScope(MAPPING)]) {
+        const decision = mod.decideOdooWebhookAuth({ status: 'legacy' }, scope)
+        expect(decision.action).toBe('reject')
+        expect(decision.action === 'reject' && decision.status).toBe(401)
+        expect(mod.legacyOdooDeliveryCounts()[scope]).toBeUndefined()
+      }
+    } finally {
+      restore()
+      setEnv('STRICT_WEBHOOK_AUTH', previousStrict)
+    }
+  })
+
+  it('allows and records legacy traffic ONLY during an explicit migration override', () => {
+    const previousStrict = process.env.STRICT_WEBHOOK_AUTH
+    setEnv('STRICT_WEBHOOK_AUTH', 'false')
     const { mod, restore } = loadModule({ ENCRYPTION_KEY: KEY, NODE_ENV: 'production' })
     try {
       const scope = mod.odooStockSecretScope('44444444-4444-4444-4444-444444444444')
@@ -284,8 +303,10 @@ describe('the ingress policy both routes share', () => {
         status: 'legacy',
       })
       expect(mod.legacyOdooDeliveryCounts()[scope]).toBeGreaterThanOrEqual(1)
+      expect(mod.decideOdooWebhookAuth({ status: 'invalid' }, scope).action).toBe('reject')
     } finally {
       restore()
+      setEnv('STRICT_WEBHOOK_AUTH', previousStrict)
     }
   })
 })
