@@ -149,7 +149,7 @@ export async function registerZidWebhook(
   // `Authorization: Basic base64(username:password)` with every delivery.
   // The `secret` field this used to send is not in Zid's webhook schema, so it
   // was silently ignored and every delivery arrived unsigned.
-  const credential = getZidWebhookCredential()
+  const credential = getZidWebhookCredential(merchantId)
   if (credential) {
     body.username = credential.username
     body.password = credential.password
