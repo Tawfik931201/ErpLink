@@ -106,7 +106,7 @@ export async function migrateLinkedZidWebhookCredentials(): Promise<{
       const registered = await syncWebhooksWithSettings(merchantId, settings)
 
       if (cleanup.listFailed || registered.failed > 0 ||
-        (desired > 0 && registered.registered === 0)) {
+        (desired > 0 && registered.registered < desired)) {
         failure = `cleanup_list_failed=${cleanup.listFailed}, registered=${registered.registered}, failed=${registered.failed}`
       }
     } catch (error: unknown) {
