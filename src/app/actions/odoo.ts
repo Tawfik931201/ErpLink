@@ -7,6 +7,8 @@ import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
 import { encrypt, decrypt } from '@/lib/crypto'
 import { formatOdooVersion } from '@/lib/odoo/version'
 import { OdooClient } from '@/lib/odoo-client'
+import { isIP } from 'node:net'
+import { isPublicIpAddress, resolvePublicDestination, safeExternalFetch } from '@/lib/security/safe-external-fetch'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
@@ -143,29 +145,20 @@ export async function detectOdooVersion(): Promise<{
 function validateSafeExternalUrl(rawUrl: string): { valid: boolean; error?: string } {
   try {
     const parsed = new URL(rawUrl)
-    const hostname = parsed.hostname.toLowerCase()
-
+    const hostname = parsed.hostname.replace(/^\\[|\\]$/g, '').toLowerCase()
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { valid: false, error: 'بروتوكول الرابط غير مدعوم، يجب أن يكون http أو https' }
     }
-
-    // Block localhost, internal IPs and cloud metadata addresses
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname === '::1' ||
-      hostname === '169.254.169.254' ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('192.168.') ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
-    ) {
-      if (process.env.NODE_ENV === 'production') {
-        return { valid: false, error: 'غير مسموح بربط عناوين الشبكات الداخلية أو المحلية (SSRF Protection)' }
-      }
+    if (parsed.username || parsed.password) {
+      return { valid: false, error: 'لا تضف بيانات اعتماد داخل رابط الخادم' }
     }
-
+    if (process.env.NODE_ENV === 'production' && (
+      hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') || hostname.endsWith('.internal') ||
+      (isIP(hostname) !== 0 && !isPublicIpAddress(hostname))
+    )) {
+      return { valid: false, error: 'غير مسموح بعناوين الشبكات الداخلية أو المحلية (SSRF Protection)' }
+    }
     return { valid: true }
   } catch {
     return { valid: false, error: 'صيغة الرابط غير صحيحة (Invalid URL format)' }
@@ -196,6 +189,14 @@ export async function testErpConnection(url: string, db: string, username: strin
       const urlCheck = validateSafeExternalUrl(formattedUrl)
       if (!urlCheck.valid) {
         return { success: false, error: urlCheck.error }
+      }
+
+      if (process.env.NODE_ENV === 'production') {
+        try {
+          await resolvePublicDestination(formattedUrl)
+        } catch {
+          return { success: false, error: 'رابط أودو يشير إلى عنوان داخلي أو غير مسموح' }
+        }
       }
 
       const client = new OdooClient({
@@ -243,7 +244,7 @@ export async function testErpConnection(url: string, db: string, username: strin
 
       const authHeader = `token ${username.trim()}:${apiKey.trim()}`
       try {
-        const response = await fetch(`${formattedUrl}/api/method/frappe.auth.get_logged_user`, {
+        const response = await safeExternalFetch(`${formattedUrl}/api/method/frappe.auth.get_logged_user`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -522,7 +523,7 @@ async function fetchModelsRaw(connection: any) {
 
   if (erp_type === 'erpnext') {
     const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
-    const response = await fetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
+    const response = await safeExternalFetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
@@ -601,7 +602,7 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
 
   if (erp_type === 'erpnext') {
     const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
-    const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
+    const response = await safeExternalFetch(`${url}/api/resource/DocType/${modelName}`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
@@ -621,7 +622,7 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
       try {
         const cfFilters = JSON.stringify([["dt", "=", modelName]])
         const cfUrl = `${url}/api/resource/Custom Field?fields=["fieldname","label","fieldtype","options","reqd","read_only","description"]&filters=${encodeURIComponent(cfFilters)}&limit_page_length=9999`
-        const cfResponse = await fetch(cfUrl, {
+        const cfResponse = await safeExternalFetch(cfUrl, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -831,7 +832,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
         const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
         try {
           // First get the DocType layout to read Select field options or Link relations
-          const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
+          const response = await safeExternalFetch(`${url}/api/resource/DocType/${modelName}`, {
             method: 'GET',
             headers: {
               'Authorization': authHeader,
@@ -877,7 +878,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
 
           if (ftype === 'link' && fieldMeta.options) {
             const relation = fieldMeta.options
-            const relRes = await fetch(`${url}/api/resource/${relation}?limit_page_length=100`, {
+            const relRes = await safeExternalFetch(`${url}/api/resource/${relation}?limit_page_length=100`, {
               method: 'GET',
               headers: {
                 'Authorization': authHeader,
@@ -1499,7 +1500,7 @@ export async function getOdooCustomers(force = false): Promise<{
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
       try {
-        const response = await fetch(`${url}/api/resource/Customer?limit_page_length=100`, {
+        const response = await safeExternalFetch(`${url}/api/resource/Customer?limit_page_length=100`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -1585,7 +1586,7 @@ export async function getOdooProducts(force = false): Promise<{
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
       try {
-        const response = await fetch(`${url}/api/resource/Item?limit_page_length=100`, {
+        const response = await safeExternalFetch(`${url}/api/resource/Item?limit_page_length=100`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
