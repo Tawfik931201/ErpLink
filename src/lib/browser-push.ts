@@ -18,8 +18,44 @@ function hkdf(salt: Buffer, ikm: Buffer, info: Buffer, size: number): Buffer {
 export function pushContact(): string {
   return process.env.WEB_PUSH_CONTACT || process.env.WEB_PUSH_SUBJECT || ''
 }
+/**
+ * Validate the complete VAPID identity before exposing the public key to browsers.
+ * A merely-present but malformed/mismatched key pair can cause opaque Push API errors.
+ */
+export function pushConfigurationIssue(): string | null {
+  const publicText = process.env.WEB_PUSH_VAPID_PUBLIC_KEY || ''
+  const privateText = process.env.WEB_PUSH_VAPID_PRIVATE_KEY || ''
+  const contact = pushContact()
+  if (!publicText || !privateText || !contact) {
+    return 'Missing WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_VAPID_PRIVATE_KEY, or WEB_PUSH_CONTACT/WEB_PUSH_SUBJECT.'
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(publicText) || !/^[A-Za-z0-9_-]+$/.test(privateText)) {
+    return 'VAPID keys must be unpadded base64url strings.'
+  }
+  const publicKey = Buffer.from(publicText, 'base64url')
+  const privateKey = Buffer.from(privateText, 'base64url')
+  if (publicKey.length !== 65 || publicKey[0] !== 4) {
+    return 'WEB_PUSH_VAPID_PUBLIC_KEY must decode to a 65-byte uncompressed P-256 public key.'
+  }
+  if (privateKey.length !== 32) {
+    return 'WEB_PUSH_VAPID_PRIVATE_KEY must decode to a 32-byte P-256 private key.'
+  }
+  if (!contact.startsWith('mailto:') && !contact.startsWith('https://')) {
+    return 'WEB_PUSH_CONTACT/WEB_PUSH_SUBJECT must be a mailto: or https:// contact URI.'
+  }
+  try {
+    const ecdh = createECDH('prime256v1')
+    ecdh.setPrivateKey(privateKey)
+    if (!ecdh.getPublicKey(undefined, 'uncompressed').equals(publicKey)) {
+      return 'WEB_PUSH_VAPID_PUBLIC_KEY does not match WEB_PUSH_VAPID_PRIVATE_KEY.'
+    }
+  } catch {
+    return 'VAPID key pair is not a valid P-256 key pair.'
+  }
+  return null
+}
 export function pushConfigured(): boolean {
-  return !!(process.env.WEB_PUSH_VAPID_PUBLIC_KEY && process.env.WEB_PUSH_VAPID_PRIVATE_KEY && pushContact())
+  return pushConfigurationIssue() === null
 }
 function encryption(subscription: Subscription, message: string): Buffer {
   const ua = Buffer.from(subscription.p256dh, 'base64url')

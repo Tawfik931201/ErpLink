@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
-import { pushConfigured } from '@/lib/browser-push'
+import { pushConfigurationIssue, pushConfigured } from '@/lib/browser-push'
 
 export const dynamic = 'force-dynamic'
 const noStore = { 'Cache-Control': 'private, no-store' }
@@ -37,8 +37,9 @@ export async function GET() {
   return NextResponse.json({
     notifications: notifications.data ?? [],
     endpoints: (devices.data ?? []).map(d => d.endpoint),
-    vapidPublicKey: process.env.WEB_PUSH_VAPID_PUBLIC_KEY ?? '',
+    vapidPublicKey: pushConfigured() ? process.env.WEB_PUSH_VAPID_PUBLIC_KEY! : '',
     pushReady: pushConfigured(),
+    pushConfigIssue: pushConfigurationIssue(),
     subscriptionCount: (devices.data ?? []).length,
   }, { headers: noStore })
 }
@@ -46,8 +47,9 @@ export async function POST(req: NextRequest) {
   if (!originAllowed(req)) return NextResponse.json({ error: 'Invalid origin' }, { status: 403 })
   const p = await principal()
   if (!p) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (!pushConfigured())
-    return NextResponse.json({ error: 'Web Push is not configured' }, { status: 503 })
+  const configIssue = pushConfigurationIssue()
+  if (configIssue)
+    return NextResponse.json({ error: 'Web Push configuration is invalid', configurationIssue: configIssue }, { status: 503 })
   let body: any
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
   if (!validEndpoint(body?.endpoint) || typeof body?.keys?.p256dh !== 'string' || typeof body?.keys?.auth !== 'string' ||
