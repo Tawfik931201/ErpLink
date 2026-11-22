@@ -41,7 +41,9 @@ import { cn } from '@/lib/utils'
  * No dependency — allowlist based, runs in the browser.
  */
 function sanitizeOdooHtml(dirty: string): string {
-  if (!dirty || typeof window === 'undefined') return dirty || ''
+  if (!dirty) return ''
+  // Prevent server prerender from ever emitting an untrusted HTML string.
+  if (typeof window === 'undefined') return ''
   try {
     const doc = new DOMParser().parseFromString(dirty, 'text/html')
     const ALLOWED = new Set(['p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'ul', 'ol', 'li', 'a', 'span', 'div', 'blockquote', 'code', 'pre'])
