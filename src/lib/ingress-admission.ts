@@ -329,20 +329,21 @@ export function getActiveWorkspaceIds(): string[] {
  * عشوائي. ما تغيّر أن الطلب **الموثّق** لم يعد يخضع له — الاعتماد نفسه
  * (توقيع HMAC أو سر مشتق) هو ما يحمي المتجر، لا عنوان IP.
  *
- * ملاحظة: الحد يقع **قبل** التحقق من الاعتماد، فهو يحدّ عمل المهاجم على
- * مسار التحقق. التحقق نفسه رخيص (HMAC بلا استعلام قاعدة بيانات)، فلا داعي
- * لتطبيق حد على كل طلب موثّق.
+ * Apply before parsing only when no credential is supplied; if a credential
+ * is supplied, verify it first and apply the limit to INVALID credentials.
+ * Only a genuinely verified request bypasses this limit. A bare Authorization
+ * or HMAC header must not serve as an unlimited-request bypass.
  */
 export const UNAUTHENTICATED_IP_LIMIT_PER_MIN = 120
 
 export function checkUnauthenticatedIngressLimit(opts: {
   scope: string
-  /** هل يحمل الطلب أي اعتماد (توقيع/سر/.basic)؟ */
-  credentialPresented: boolean
-  /** مفتاح الدلو (يُبنى من عناوين IP) */
+  /** Verified cryptographically or by constant-time secret comparison. A header's presence is NEVER proof. */
+  credentialVerified: boolean
+  /** Key from a trusted proxy IP or a shared unidentified bucket. */
   bucketKey: string
 }): { allowed: boolean } {
-  if (opts.credentialPresented) return { allowed: true }
+  if (opts.credentialVerified) return { allowed: true }
   const rl = checkRateLimit(opts.bucketKey, UNAUTHENTICATED_IP_LIMIT_PER_MIN, 60_000)
   if (!rl.allowed) {
     noteIngressReject(opts.scope, 'ip_rate_limit')
