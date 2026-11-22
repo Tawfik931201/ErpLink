@@ -10,6 +10,12 @@ const IV_LENGTH = 16 // For AES, this is always 16
  * that was never encrypted is passed through instead of being mangled.
  */
 const CIPHERTEXT_RE = /^[0-9a-f]{32}:[0-9a-f]+$/i
+const GCM_CIPHERTEXT_RE = /^v2:([0-9a-f]{24}):([0-9a-f]{32}):([0-9a-f]+)$/i
+
+/** Recognizes legacy CBC and authenticated GCM encrypted values. */
+export function isEncryptedValue(value: string): boolean {
+  return CIPHERTEXT_RE.test(value) || GCM_CIPHERTEXT_RE.test(value)
+}
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY
 if (!ENCRYPTION_KEY) {
@@ -78,15 +84,15 @@ export function hkdfHex(purpose: string, parts: string[] = [], lengthBytes = 32)
   ).toString('hex')
 }
 
+/** Encrypt all new credentials with authenticated AES-256-GCM. */
 export function encrypt(text: string): string {
   if (!text) return ''
   try {
     const key = crypto.createHash('sha256').update(getActiveKey()).digest()
-    const iv = crypto.randomBytes(IV_LENGTH)
-    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
-    let encrypted = cipher.update(text)
-    encrypted = Buffer.concat([encrypted, cipher.final()])
-    return iv.toString('hex') + ':' + encrypted.toString('hex')
+    const iv = crypto.randomBytes(12)
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+    const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()])
+    return `v2:${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${encrypted.toString('hex')}`
   } catch (error) {
     console.error('Encryption failed:', error)
     throw new Error('Failed to encrypt sensitive value')
@@ -96,14 +102,23 @@ export function encrypt(text: string): string {
 export function decrypt(text: string): string {
   if (!text) return ''
 
-  // Not our ciphertext shape — the value was never encrypted by this module
-  // (legacy plaintext row). Pass it through untouched.
-  if (!CIPHERTEXT_RE.test(text)) return text
+  const gcm = GCM_CIPHERTEXT_RE.exec(text)
+  // Do not return a damaged authenticated ciphertext as if it were plaintext.
+  if (text.startsWith('v2:') && !gcm) throw new Error('[Crypto] Invalid v2 ciphertext')
+  if (!gcm && !CIPHERTEXT_RE.test(text)) return text
 
   const candidates = [process.env.ENCRYPTION_KEY, ...getLegacyKeys()].filter(Boolean) as string[]
 
   for (const k of candidates) {
     try {
+      if (gcm) {
+        const key = crypto.createHash('sha256').update(k).digest()
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(gcm[1], 'hex'))
+        decipher.setAuthTag(Buffer.from(gcm[2], 'hex'))
+        const decrypted = Buffer.concat([decipher.update(Buffer.from(gcm[3], 'hex')), decipher.final()])
+        return new TextDecoder('utf-8', { fatal: true }).decode(decrypted)
+      }
+      // CBC-only fallback for credentials written by older deployments.
       const textParts = text.split(':')
       const ivHex = textParts.shift()
       if (!ivHex) break
