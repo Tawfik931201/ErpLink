@@ -169,18 +169,18 @@ export async function registerZidWebhook(
     )
     const payload = await response.json().catch(() => null)
 
+    // Provider may echo the registration Basic password. Never log its body.
     console.info('[Zid Webhook] Register', {
       event: zidEventName,
       merchantId,
       status: response.status,
-      payload,
     })
 
     if (!response.ok) {
       return {
         success: false,
         event: zidEventName,
-        message: `Zid API error ${response.status}: ${JSON.stringify(payload)}`,
+        message: `Zid API error ${response.status}`,
       }
     }
     return { success: true, event: zidEventName }
@@ -241,7 +241,7 @@ export async function unregisterZidWebhook(
       return {
         success: false,
         event: zidEventName,
-        message: `Zid API error ${response.status}: ${JSON.stringify(payload)}`,
+        message: `Zid API error ${response.status}`,
       }
     }
     return { success: true, event: zidEventName }
