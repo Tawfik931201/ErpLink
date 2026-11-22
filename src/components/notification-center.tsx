@@ -108,8 +108,8 @@ export default function NotificationCenter() {
         entry,
         ...current.filter(item => item.id !== entry.id),
       ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 30))
-    })
-  }, [workspaceId])
+    }, () => { void refresh() })
+  }, [workspaceId, refresh])
 
   useEffect(() => {
     void refresh()
