@@ -36,6 +36,7 @@ export async function GET() {
   if (notifications.error || devices.error) return NextResponse.json({ error: 'Notification storage unavailable' }, { status: 503, headers: noStore })
   return NextResponse.json({
     notifications: notifications.data ?? [],
+    workspaceId: p.workspaceId,
     endpoints: (devices.data ?? []).map(d => d.endpoint),
     vapidPublicKey: process.env.WEB_PUSH_VAPID_PUBLIC_KEY ?? '',
     pushReady: pushConfigured(),
