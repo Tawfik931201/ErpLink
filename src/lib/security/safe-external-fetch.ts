@@ -100,7 +100,7 @@ export async function safeExternalFetch(rawUrl: string | URL, init: RequestInit 
       })
       res.on('error', reject)
       res.on('end', () => {
-        const body = status === 204 || status === 205 || status === 304 ? null : Buffer.concat(buffers)
+        const body = status === 204 || status === 205 || status === 304 ? null : new Uint8Array(Buffer.concat(buffers))
         resolve(new Response(body, { status, statusText: res.statusMessage || '' }))
       })
     })
