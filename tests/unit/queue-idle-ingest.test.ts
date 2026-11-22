@@ -27,6 +27,15 @@ describe('idle Supabase API ingest budget', () => {
     expect(code).not.toContain('g.__syncQueueRunnerInterval = setInterval(')
   })
 
+  it('coalesces and throttles lease recovery without skipping errors', () => {
+    const code = read('sync-queue.ts')
+    expect(code).toContain('const LEASE_RECOVERY_INTERVAL_MS = 60_000')
+    expect(code).toContain('if (leaseRecoveryInFlight) return leaseRecoveryInFlight')
+    expect(code).toContain('lastLeaseRecoveryAt = Date.now()')
+    expect(code).toContain('if (!(await recoverExpiredLeases()))')
+    expect(code).not.toContain("const expired = await supabase.rpc('expire_sync_job_leases')")
+  })
+
   it('wakes after a durable enqueue, never before the receipt is stored', () => {
     const code = read('sync-queue.ts')
     const scope = code.slice(code.indexOf('export async function enqueueWebhookEvent'),

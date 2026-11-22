@@ -493,6 +493,37 @@ interface QueueItem {
 }
 
 /**
+ * Expired-lease recovery is a safety net, not a per-batch operation.
+ * Coalesce overlapping recoveries and run at most once per minute after success.
+ * Fail closed: a failed recovery never permits claiming with stale lease state,
+ * and the next cycle immediately retries the RPC.
+ */
+const LEASE_RECOVERY_INTERVAL_MS = 60_000
+let lastLeaseRecoveryAt = 0
+let leaseRecoveryInFlight: Promise<boolean> | null = null
+
+async function recoverExpiredLeases(): Promise<boolean> {
+  if (leaseRecoveryInFlight) return leaseRecoveryInFlight
+  if (lastLeaseRecoveryAt > 0 && Date.now() - lastLeaseRecoveryAt < LEASE_RECOVERY_INTERVAL_MS) return true
+  const task = (async () => {
+    try {
+      const { error } = await supabase.rpc('expire_sync_job_leases')
+      if (error) return false
+      lastLeaseRecoveryAt = Date.now()
+      return true
+    } catch {
+      return false
+    }
+  })()
+  leaseRecoveryInFlight = task
+  try {
+    return await task
+  } finally {
+    if (leaseRecoveryInFlight === task) leaseRecoveryInFlight = null
+  }
+}
+
+/**
  * Process due queue items with fair-share scheduling and multi-tenant parallelism.
  * Returns the number of items successfully claimed and processed.
  */
@@ -501,8 +532,7 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   metrics.lastRunAt = new Date().toISOString()
 
   const nowIso = new Date().toISOString()
-  const expired = await supabase.rpc('expire_sync_job_leases')
-  if (expired.error) { metrics.lastError = 'lease recovery unavailable'; return 0 }
+  if (!(await recoverExpiredLeases())) { metrics.lastError = 'lease recovery unavailable'; return 0 }
   let items: QueueItem[] = []
   try {
     const { data, error } = await supabase
