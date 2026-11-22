@@ -125,9 +125,9 @@ export default function NotificationCenter() {
         message: failure.message,
       })
       if (failure.name === 'AbortError' && /push service error/i.test(failure.message)) {
-        setError('Chrome لم يتمكن من إنشاء اشتراك لدى خدمة Push التابعة لـ Google. تأكد أنك تستخدم Google Chrome الرسمي، وأوقف VPN/Proxy أو مانع الشبكة مؤقتًا، ثم أعد المحاولة من شبكة أخرى. هذا الخطأ يحدث قبل وصول الاشتراك إلى ERP Link.')
+        setError('تعذّر اتصال المتصفح بخدمة Web Push. في Brave: افتح brave://settings/privacy وفعّل Use Google services for push messaging إن كان متاحًا، ثم أعد تشغيل Brave. في المتصفحات الأخرى راجع سماح إشعارات الموقع واتصال الشبكة أو VPN. هذه المشكلة تحدث قبل إرسال الاشتراك إلى ERP Link.')
       } else if (failure.name === 'InvalidAccessError') {
-        setError('Chrome رفض المفتاح العام VAPID. تحقق من المفتاح العام في Hostinger وأنه مطابق للمفتاح الخاص.')
+        setError('المتصفح رفض المفتاح العام VAPID. تحقق من صحة مفتاح Hostinger وأنه مطابق للمفتاح الخاص.')
       } else {
         setError(failure.message)
       }
