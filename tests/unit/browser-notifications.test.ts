@@ -23,6 +23,14 @@ describe('durable browser notification independence', () => {
     expect(route).toContain(".eq('user_id', p.userId)")
     expect(route).toContain('originAllowed(req)')
   })
+  it('accepts both WEB_PUSH_CONTACT and the documented WEB_PUSH_SUBJECT alias', () => {
+    const sender = source('src', 'lib', 'browser-push.ts')
+    const route = source('src', 'app', 'api', 'notifications', 'route.ts')
+    expect(sender).toContain('process.env.WEB_PUSH_SUBJECT')
+    expect(sender).toContain('pushContact()')
+    expect(route).toContain('pushConfigured()')
+    expect(route).toContain('pushReady:')
+  })
   it('never intercepts or caches Odoo traffic in the browser worker', () => {
     const worker = source('public', 'notification-sw.js')
     expect(worker).toContain("addEventListener('push'")

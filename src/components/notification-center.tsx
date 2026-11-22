@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import { Bell, BellOff, X } from 'lucide-react'
 
 type Entry = { id: string; title: string; body: string; href: string; status: string; created_at: string }
-type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string }
+type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; subscriptionCount: number }
 const endpoint = '/api/notifications'
 const publicKeyBytes = (text: string): Uint8Array => {
   const base64 = text.replace(/-/g, '+').replace(/_/g, '/')
@@ -25,10 +25,10 @@ export default function NotificationCenter() {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch(endpoint, { cache: 'no-store' })
-      if (!res.ok) return
+      if (!res.ok) { setError('تعذر التحقق من إعدادات الإشعارات على الخادم.'); return }
       const data: ResponseData = await res.json()
       setItems(data.notifications)
-      setConfigured(!!data.vapidPublicKey)
+      setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration('/notification-sw.js')
         const current = await reg?.pushManager.getSubscription()
@@ -82,7 +82,12 @@ export default function NotificationCenter() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(subscription.toJSON()),
         })
-        if (!result.ok) throw new Error('تعذر تسجيل هذا الجهاز')
+        if (!result.ok) {
+          const details = await result.json().catch(() => null)
+          throw new Error(result.status === 503
+            ? 'الخادم غير جاهز لتسجيل الجهاز. راجع مفاتيح VAPID وإعدادات Hostinger.'
+            : `تعذر تسجيل هذا الجهاز (HTTP ${result.status}): ${details?.error || 'خطأ غير معروف'}`)
+        }
         setEnabled(true)
       }
     } catch (e) { setError(e instanceof Error ? e.message : 'حدث خطأ') }
@@ -150,7 +155,8 @@ export default function NotificationCenter() {
           {enabled ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
           {enabled ? 'إيقاف إشعارات سطح المكتب' : 'تفعيل إشعارات Chrome'}
         </button>
-        {!configured && <p className="mb-2 text-xs text-muted-foreground">إشعارات المتصفح تحتاج إعداد مفاتيح Web Push على الخادم.</p>}
+        {!configured && <p className="mb-2 text-xs text-muted-foreground">خدمة إرسال الإشعارات غير جاهزة على الخادم: تحقق من WEB_PUSH_VAPID_PUBLIC_KEY وWEB_PUSH_VAPID_PRIVATE_KEY وWEB_PUSH_CONTACT (أو WEB_PUSH_SUBJECT)، ثم أعد تشغيل التطبيق.</p>}
+        {configured && !enabled && <p className="mb-2 text-xs text-amber-600">Chrome قد يسمح بالإشعارات، لكن هذا الجهاز غير مسجل حاليًا للاستقبال. اضغط «تفعيل إشعارات Chrome» لإكمال الاشتراك.</p>}
         {error && <p role="alert" className="mb-2 text-xs text-red-600">{error}</p>}
         {items.length === 0 && <p className="p-3 text-xs text-muted-foreground">لا توجد إشعارات حتى الآن.</p>}
         {items.map(item => <a key={item.id} href={item.href} className="block border-b border-border py-2 text-xs hover:bg-secondary/40">

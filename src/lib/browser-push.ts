@@ -12,8 +12,14 @@ function hkdf(salt: Buffer, ikm: Buffer, info: Buffer, size: number): Buffer {
   }
   return result.subarray(0, size)
 }
+/** Accept either the original production variable or the documented alias.
+ * The public VAPID key must still match the private key; never expose the private key.
+ */
+export function pushContact(): string {
+  return process.env.WEB_PUSH_CONTACT || process.env.WEB_PUSH_SUBJECT || ''
+}
 export function pushConfigured(): boolean {
-  return !!(process.env.WEB_PUSH_VAPID_PUBLIC_KEY && process.env.WEB_PUSH_VAPID_PRIVATE_KEY && process.env.WEB_PUSH_CONTACT)
+  return !!(process.env.WEB_PUSH_VAPID_PUBLIC_KEY && process.env.WEB_PUSH_VAPID_PRIVATE_KEY && pushContact())
 }
 function encryption(subscription: Subscription, message: string): Buffer {
   const ua = Buffer.from(subscription.p256dh, 'base64url')
@@ -43,7 +49,7 @@ export async function sendBrowserPush(subscription: Subscription, payload: { tit
   if (publicKey.length !== 65 || privateKey.length !== 32) throw new Error('Invalid VAPID key length')
   const key = createPrivateKey({ key: { kty: 'EC', crv: 'P-256', x: b64(publicKey.subarray(1, 33)), y: b64(publicKey.subarray(33)), d: b64(privateKey) }, format: 'jwk' })
   const header = b64(JSON.stringify({ typ: 'JWT', alg: 'ES256' }))
-  const data = b64(JSON.stringify({ aud: url.origin, exp: Math.floor(Date.now()/1000) + 3600, sub: process.env.WEB_PUSH_CONTACT }))
+  const data = b64(JSON.stringify({ aud: url.origin, exp: Math.floor(Date.now()/1000) + 3600, sub: pushContact() }))
   const signingInput = header + '.' + data
   const signature = sign('sha256', Buffer.from(signingInput), { key, dsaEncoding: 'ieee-p1363' })
   const body = encryption(subscription, JSON.stringify(payload))
