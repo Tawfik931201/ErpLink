@@ -4,8 +4,45 @@ import { createPortal } from 'react-dom'
 import { Bell, BellOff, X } from 'lucide-react'
 
 type Entry = { id: string; title: string; body: string; href: string; status: string; created_at: string }
-type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; subscriptionCount: number }
+type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; subscriptionCount: number; workspaceId: string }
 const endpoint = '/api/notifications'
+
+// Share one live connection between the desktop and mobile bell components.
+const liveListeners = new Map<string, Set<(entry: Entry) => void>>()
+let liveSource: EventSource | null = null
+let liveWorkspace: string | null = null
+
+function subscribeToLiveNotifications(workspaceId: string, listener: (entry: Entry) => void) {
+  let subscribers = liveListeners.get(workspaceId)
+  if (!subscribers) {
+    subscribers = new Set()
+    liveListeners.set(workspaceId, subscribers)
+  }
+  subscribers.add(listener)
+  if (liveWorkspace !== workspaceId || !liveSource) {
+    liveSource?.close()
+    liveWorkspace = workspaceId
+    liveSource = new EventSource('/api/notifications/stream?workspaceId=' + encodeURIComponent(workspaceId))
+    liveSource.addEventListener('notification', event => {
+      try {
+        const entry = JSON.parse((event as MessageEvent).data) as Entry
+        if (!entry?.id) return
+        for (const callback of liveListeners.get(workspaceId) ?? []) callback(entry)
+      } catch (error) {
+        console.warn('[notifications] invalid live event', error)
+      }
+    })
+  }
+  return () => {
+    subscribers?.delete(listener)
+    if (subscribers?.size === 0) liveListeners.delete(workspaceId)
+    if (liveWorkspace === workspaceId && !liveListeners.has(workspaceId)) {
+      liveSource?.close()
+      liveSource = null
+      liveWorkspace = null
+    }
+  }
+}
 const publicKeyBytes = (text: string): Uint8Array => {
   const base64 = text.replace(/-/g, '+').replace(/_/g, '/')
   const raw = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='))
@@ -17,6 +54,7 @@ export default function NotificationCenter() {
   const panelRef = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ top: 12, left: 12, width: 350, maxHeight: 400 })
   const [items, setItems] = useState<Entry[]>([])
+  const [workspaceId, setWorkspaceId] = useState('')
   const [enabled, setEnabled] = useState(false)
   const [configured, setConfigured] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -28,6 +66,7 @@ export default function NotificationCenter() {
       if (!res.ok) { setError('تعذر التحقق من إعدادات الإشعارات على الخادم.'); return }
       const data: ResponseData = await res.json()
       setItems(data.notifications)
+      setWorkspaceId(data.workspaceId || '')
       setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
       if ('serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.getRegistration('/notification-sw.js')
@@ -36,6 +75,16 @@ export default function NotificationCenter() {
       }
     } catch { /* notification UI must not disrupt ERP */ }
   }, [])
+  useEffect(() => {
+    if (!workspaceId || typeof window === 'undefined' || !('EventSource' in window)) return
+    return subscribeToLiveNotifications(workspaceId, entry => {
+      setItems(current => [
+        entry,
+        ...current.filter(item => item.id !== entry.id),
+      ].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)).slice(0, 30))
+    })
+  }, [workspaceId])
+
   useEffect(() => {
     void refresh()
     const timer = window.setInterval(() => {
@@ -153,7 +202,7 @@ export default function NotificationCenter() {
         <button type="button" disabled={busy || !configured} onClick={toggle}
           className="mb-2 flex w-full items-center justify-center gap-2 rounded-lg border border-border p-2 text-xs disabled:opacity-50">
           {enabled ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
-          {enabled ? 'إيقاف إشعارات سطح المكتب' : 'تفعيل إشعارات Chrome'}
+          {enabled ? 'إيقاف إشعارات سطح المكتب' : 'تفعيل إشعارات سطح المكتب'}
         </button>
         {!configured && <p className="mb-2 text-xs text-muted-foreground">خدمة إرسال الإشعارات غير جاهزة على الخادم: تحقق من WEB_PUSH_VAPID_PUBLIC_KEY وWEB_PUSH_VAPID_PRIVATE_KEY وWEB_PUSH_CONTACT (أو WEB_PUSH_SUBJECT)، ثم أعد تشغيل التطبيق.</p>}
         {configured && !enabled && <p className="mb-2 text-xs text-amber-600">Chrome قد يسمح بالإشعارات، لكن هذا الجهاز غير مسجل حاليًا للاستقبال. اضغط «تفعيل إشعارات Chrome» لإكمال الاشتراك.</p>}
