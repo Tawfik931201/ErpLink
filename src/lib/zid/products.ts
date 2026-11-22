@@ -29,7 +29,7 @@ export async function enrichZidProduct(
         const { getAccessToken } = await import('./token')
         const { ZidAPI } = await import('@/lib/zid-client')
 
-        const storedTokens = await getAccessToken(tokenRow.merchant_id)
+        const storedTokens = await getAccessToken(tokenRow.merchant_id, workspaceId)
         const creds = {
           authorization: storedTokens.authorization || '',
           managerToken: storedTokens.accessToken,
