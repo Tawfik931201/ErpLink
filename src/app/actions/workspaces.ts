@@ -390,7 +390,7 @@ const getCachedSallaTokens = unstable_cache(
     if (error) throw new Error('Failed to query Salla tokens: ' + error.message)
     return tokens ?? []
   },
-  ['salla-token'],
+  ['salla-token-public-v2'], // Do not reuse cached rows containing historical secrets.
   { revalidate: 30, tags: ['salla-token'] }
 )
 
