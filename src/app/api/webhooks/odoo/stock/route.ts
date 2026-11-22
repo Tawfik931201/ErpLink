@@ -1,7 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
-import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { connectionGeneration } from '@/lib/erp-execution-target'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
 import {
@@ -13,6 +12,7 @@ import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { supabase } from '@/lib/supabase'
 import { enqueueWebhookEvent, fingerprintPayload } from '@/lib/sync-queue'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
