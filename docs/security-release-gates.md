@@ -18,39 +18,47 @@ temporary branch after a successful production smoke test.
    scheduler accepts `Authorization: Bearer` (or `x-cron-secret`).
 4. Ensure `CRON_SECRET` and `ENCRYPTION_KEY` are configured in production.
    Neither belongs in a `NEXT_PUBLIC_` variable.
-5. Zid subscriptions created with the shared Basic credential **cannot**
-   authenticate under the new per-merchant v2 derivation until re-registered.
-   There were 3 linked Zid stores and historical unsigned deliveries. A short,
-   controlled migration may use BOTH temporary environment switches:
-   `STRICT_WEBHOOK_AUTH=false` and
-   `ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH=true`. Restrict this to the deployment
-   window, because it weakens inbound webhook authentication. Do NOT enable the
-   second switch as a permanent workaround.
+5. The three linked **test** Zid stores were marked version 1 in Supabase
+   by migration `zid_webhook_auth_rekey_versioning` on 2026-11-23. The new
+   Node.js startup task (15 seconds after boot) claims each legacy merchant
+   atomically, deletes its old manager webhooks, and registers merchant-specific
+   Basic auth subscriptions. It marks version 2 **only after** a successful
+   refresh. The App Market / Partner Portal subscription webhooks use the
+   separate authenticated app-wide callback and must NOT be deleted.
+   `ZID_AUTO_REKEY_WEBHOOKS=false` is an emergency opt-out.
+6. The migration is **destructive to old manager subscriptions** and must be
+   observed until completion. Do not enable
+   `ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH=true` in normal operation. The
+   `STRICT_WEBHOOK_AUTH=true` production default rejects old unsigned
+   events until subscriptions are recreated. The stores are test-only and the
+   owner approved a brief transition.
 
 ## Immediately after the new code is running
 
-1. From a signed-in system **admin** session invoke:
-   `POST /api/admin/zid-webhooks/refresh`.
-   It removes and recreates subscriptions sequentially; inspect the
-   `stores[]` result, including every `registered`, `failed` and `listFailed`.
-   A provider API error must be resolved before proceeding.
-2. Verify authenticated deliveries for each of the three stores, including
-   order/product/customer events, and that each is routed only to its own
-   workspace and ERP connection. Inspect runtime logs, queue and application
-   sync logs. Keep the transition as short as practical.
-3. Set `STRICT_WEBHOOK_AUTH=true`, **unset**
-   `ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH`, and restart the app. Test a missing
-   Basic header (401) and wrong-store Basic credential (401); a legitimate
-   delivery from each store should still succeed.
-4. Confirm both cron endpoints work with a Bearer header; confirm
-   `?key=` is rejected by the reconcile endpoint.
-5. Verify Salla OAuth and Shopify operations if those integrations are active,
-   and ERP credential save/read outputs contain no `password`, `access_token`
-   or `refresh_token`.
-6. Inspect the GitHub security workflow: TypeScript, focused security tests,
-   full Jest suite, and `npm audit --omit=dev` must pass before merge;
-   investigate any newly introduced failures instead of relying only on
-   successful diagnostic steps.
+1. The migration runs automatically from `src/instrumentation.ts` on the
+   Hostinger Node.js server. Check Supabase:
+   `SELECT merchant_id, zid_webhook_auth_version,
+   zid_webhook_auth_claimed_at, zid_webhook_auth_last_error
+   FROM public.merchant_tokens ORDER BY merchant_id;`
+   All three rows should eventually have `zid_webhook_auth_version = 2`
+   and `zid_webhook_auth_last_error IS NULL`. Startup refresh may require
+   several minutes because it is paced to avoid Zid's request-rate limits.
+2. If any row remains version 1 or has an error, investigate Hostinger and
+   Zid logs. The existing authenticated admin fallback is
+   `POST /api/admin/zid-webhooks/refresh`. Be aware that the manual route
+   deletes and re-creates the store subscriptions too.
+3. Verify authenticated delivery for each store (order/product/customer), correct
+   workspace and ERP target, inbox/sync queue, and audit logs.
+4. Confirm missing Basic headers and cross-store Basic credentials return 401.
+   Exactly the registered Zid Partner Portal app-market topics with **no**
+   `store_id` must continue to verify using the separate app-wide Basic
+   credential. They must not authorize an order/product/customer event.
+5. Verify the internal queue runner and reconciliation loop are enabled on
+   Hostinger (`SYNC_QUEUE_SELF_RUNNER=true`). The Hostinger cron may be a
+   backup; if used, update it to the Bearer header and confirm the obsolete
+   `?key=` path returns 401.
+6. Test the active Salla/Shopify integrations, credential read/save responses,
+   and the GitHub security workflow (audit, TypeScript, focused Jest, full Jest).
 
 ## Rollback
 
