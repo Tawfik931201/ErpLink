@@ -84,7 +84,7 @@ export async function POST() {
 
   // Checked before any deletion: re-creating webhooks without a credential
   // would replace working subscriptions with ones that can never authenticate.
-  if (!getZidWebhookCredential()) {
+  if (!getZidWebhookCredential('credential-check')) {
     return NextResponse.json(
       { error: 'No webhook credential is derivable — ENCRYPTION_KEY is not set. Refusing to touch existing webhooks.' },
       { status: 400 }

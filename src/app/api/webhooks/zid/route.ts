@@ -100,7 +100,30 @@ async function handlePost(req: NextRequest) {
   // credential attached to each webhook at creation time. Compared with
   // `secretMatches` (constant time) against a credential derived from
   // ENCRYPTION_KEY — see src/lib/zid/webhook-auth.ts.
-  const authResult = verifyZidWebhookAuthorization(headersList.get('authorization'))
+  // The merchant id in the registered callback URL selects a distinct
+  // HKDF-derived Basic credential. An attacker's chosen store_id in the JSON
+  // body cannot select another tenant's credential.
+  const authenticatedMerchantId = (req.nextUrl.searchParams.get('store_id') ?? '').trim()
+  const registeredEvent = (req.nextUrl.searchParams.get('event') ?? '').trim().toLowerCase()
+  // Zid Partner Portal app-market notifications are registered at an app-wide
+  // callback URL with NO merchant store_id and the historical app-level Basic
+  // credential. They are distinct from manager/merchant sync webhooks. Only
+  // exactly registered app-market topics may use this app-level credential.
+  // Never let an absent store_id downgrade an order/product/customer webhook.
+  const partnerAppEventNames = new Set([
+    'app.market.subscription.active',
+    'app.market.subscription.renew',
+    'app.market.subscription.upgrade',
+    'app.market.subscription.suspended',
+    'app.market.subscription.expired',
+    'app.market.subscription.refunded',
+    'app.market.subscription.warning',
+    'app.market.application.uninstall',
+  ])
+  const isAuthenticatedPartnerWebhook = !authenticatedMerchantId && partnerAppEventNames.has(registeredEvent)
+  const authResult = isAuthenticatedPartnerWebhook
+    ? verifyZidWebhookAuthorization(headersList.get('authorization'))
+    : verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)
   const isUnauthenticated = authResult.status === 'legacy' || authResult.status === 'unconfigured'
 
   if (authResult.status === 'unconfigured' && process.env.NODE_ENV === 'production') {
@@ -118,7 +141,7 @@ async function handlePost(req: NextRequest) {
 
   if (authResult.status === 'invalid') {
     console.warn('[Zid Webhook] Authorization verification failed', {
-      credential: zidWebhookCredentialFingerprint(),
+      credential: zidWebhookCredentialFingerprint(isAuthenticatedPartnerWebhook ? undefined : authenticatedMerchantId),
       hasHeader: true,
     })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
@@ -386,6 +409,16 @@ async function handlePost(req: NextRequest) {
   // product.delete)، فردّ "No matching record" رغم وجود السجل.
   // الحل: أي قيمة معروفة تُحلّ إلى الـ store_id الفعلي للصف قبل أي استخدام.
   store_id = await normalizeZidStoreId(store_id)
+
+  // A valid credential scoped to merchant A must never authorize delivery to
+  // store B, even when a sender forges another store_id inside the JSON body.
+  if (authResult.status === 'ok' && authenticatedMerchantId) {
+    const linked = await supabase.from('merchant_tokens').select('store_id')
+      .eq('merchant_id', authenticatedMerchantId).maybeSingle()
+    if (linked.error || !linked.data || Number(linked.data.store_id) !== store_id) {
+      return NextResponse.json({ error: 'Webhook store identity does not match Basic credential' }, { status: 401 })
+    }
+  }
 
   // ── App uninstalled → fast 200 + clean the token (before any other lookup) ──
   if (isUninstallEvent(event)) {

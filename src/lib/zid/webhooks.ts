@@ -149,17 +149,14 @@ export async function registerZidWebhook(
   // `Authorization: Basic base64(username:password)` with every delivery.
   // The `secret` field this used to send is not in Zid's webhook schema, so it
   // was silently ignored and every delivery arrived unsigned.
-  const credential = getZidWebhookCredential()
+  const credential = getZidWebhookCredential(merchantId)
   if (credential) {
     body.username = credential.username
     body.password = credential.password
   } else {
-    // Unreachable in production (crypto.ts refuses to boot without
-    // ENCRYPTION_KEY). Never send a placeholder: Zid would store it as the
-    // real password and every later delivery would fail authentication.
-    console.error(
-      '[Zid Webhook] No credential derivable (ENCRYPTION_KEY missing) — registering without Basic Auth. Deliveries will not authenticate.'
-    )
+    // Fail closed: a malformed merchant ID or unavailable key must never
+    // register an unsigned webhook that strict ingress will discard.
+    return { success: false, event: zidEventName, message: 'Per-store webhook credential unavailable; registration refused' }
   }
 
   try {
@@ -169,18 +166,18 @@ export async function registerZidWebhook(
     )
     const payload = await response.json().catch(() => null)
 
+    // Provider may echo the registration Basic password. Never log its body.
     console.info('[Zid Webhook] Register', {
       event: zidEventName,
       merchantId,
       status: response.status,
-      payload,
     })
 
     if (!response.ok) {
       return {
         success: false,
         event: zidEventName,
-        message: `Zid API error ${response.status}: ${JSON.stringify(payload)}`,
+        message: `Zid API error ${response.status}`,
       }
     }
     return { success: true, event: zidEventName }
@@ -241,7 +238,7 @@ export async function unregisterZidWebhook(
       return {
         success: false,
         event: zidEventName,
-        message: `Zid API error ${response.status}: ${JSON.stringify(payload)}`,
+        message: `Zid API error ${response.status}`,
       }
     }
     return { success: true, event: zidEventName }

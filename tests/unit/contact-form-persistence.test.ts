@@ -23,17 +23,18 @@ const store = read('src', 'lib', 'contact-messages.ts')
 // so the search string must not include the opening parenthesis.
 const ODOO_CALL = 'executeKw<'
 
-describe('the message is saved to the database before anything external runs', () => {
+describe('the message is saved before optional notifications and never uses a merchant ERP', () => {
   const insertAt = action.indexOf('await insertContactMessage(')
   const odooAt = action.indexOf(ODOO_CALL)
 
-  it('finds both calls', () => {
+  it('persists to Supabase and keeps merchant Odoo calls out of the public form', () => {
     expect(insertAt).toBeGreaterThan(-1)
-    expect(odooAt).toBeGreaterThan(-1)
+    expect(odooAt).toBe(-1)
+    expect(action).toContain('const ticketId: number | null = null')
   })
 
-  it('inserts before the first Odoo call', () => {
-    expect(insertAt).toBeLessThan(odooAt)
+  it('inserts before attempting any optional email notification', () => {
+    expect(insertAt).toBeLessThan(action.indexOf('await sendEmail('))
   })
 
   it('reports failure only when BOTH channels failed', () => {

@@ -1,0 +1,28 @@
+name: Cleanup ERP Link security release branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# Deliberately scoped to the exact single security PR and its head branch.
+# This removes the temporary branch after ONE squash commit reaches main.
+permissions:
+  contents: write
+
+jobs:
+  delete-temporary-security-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 60 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'security/harden-webhooks-tokens-ssrf-20261122' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged temporary branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/security/harden-webhooks-tokens-ssrf-20261122"

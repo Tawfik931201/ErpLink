@@ -73,7 +73,10 @@ function fixture(options: { customerFound?: boolean; missingModel?: string; fail
         expect(domain).toEqual(expect.arrayContaining([['currency_id', '=', 4], ['company_id', '=', 7], ['company_id', '=', false]]))
         return [{ id: 20, currency_id: [4, 'SAR'], company_id: [7, 'Existing company'], active: true }]
       }
-      if (method === 'fields_get') return model === 'sale.order' ? orderSchema : model === 'sale.order.line' ? lineSchema : partnerSchema
+      if (method === 'fields_get') {
+        if (model === 'account.tax') return { company_id: { type: 'many2one', relation: 'res.company' } }
+        return model === 'sale.order' ? orderSchema : model === 'sale.order.line' ? lineSchema : partnerSchema
+      }
       if (model === 'ir.model.fields') {
         const targetModel = (args[0] as string[][]).find(c => c[0] === 'model')?.[2]
         const schema = targetModel === 'sale.order.line' ? lineSchema : targetModel === 'res.partner' ? partnerSchema : { barcode: { type: 'char' }, client_order_ref: { type: 'char' } }

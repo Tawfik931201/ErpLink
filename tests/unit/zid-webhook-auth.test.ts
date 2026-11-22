@@ -118,6 +118,38 @@ describe('the webhook credential is derived from ENCRYPTION_KEY', () => {
   })
 })
 
+describe('per-store credentials and cross-tenant replay prevention', () => {
+  it('derives a distinct secret for each merchant and rejects replay to the other merchant', () => {
+    const { mod, restore } = loadAuth({ ENCRYPTION_KEY: TEST_KEY })
+    try {
+      const a = mod.getZidWebhookCredential('merchant-100')!
+      const b = mod.getZidWebhookCredential('merchant-200')!
+      expect(a.headerValue).not.toBe(b.headerValue)
+      expect(mod.verifyZidWebhookAuthorization(a.headerValue, 'merchant-100')).toEqual({ status: 'ok' })
+      expect(mod.verifyZidWebhookAuthorization(a.headerValue, 'merchant-200')).toEqual({ status: 'invalid' })
+      expect(mod.verifyZidWebhookAuthorization(a.headerValue, '')).toEqual({ status: 'invalid' })
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects a legacy shared credential unless the temporary migration toggle is explicit', () => {
+    const previous = process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH
+    const { mod, restore } = loadAuth({ ENCRYPTION_KEY: TEST_KEY })
+    try {
+      delete process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH
+      const legacy = mod.getZidWebhookCredential()!
+      expect(mod.verifyZidWebhookAuthorization(legacy.headerValue, 'merchant-100')).toEqual({ status: 'invalid' })
+      process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH = 'true'
+      expect(mod.verifyZidWebhookAuthorization(legacy.headerValue, 'merchant-100')).toEqual({ status: 'ok' })
+    } finally {
+      if (previous === undefined) delete process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH
+      else process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH = previous
+      restore()
+    }
+  })
+})
+
 describe('inbound Authorization header classification', () => {
   it('accepts the exact header Zid sends', () => {
     const { mod, restore } = loadAuth({ ENCRYPTION_KEY: TEST_KEY })
@@ -178,6 +210,30 @@ describe('inbound Authorization header classification', () => {
   })
 })
 
+describe('Zid Partner app-market webhook isolation', () => {
+  const route = fs.readFileSync(ROUTE_PATH, 'utf8')
+
+  it('keeps the app-wide Basic credential for exact Partner Portal market topics', () => {
+    expect(route).toContain("'app.market.subscription.active'")
+    expect(route).toContain("'app.market.subscription.renew'")
+    expect(route).toContain("'app.market.application.uninstall'")
+    expect(route).toContain("!authenticatedMerchantId && partnerAppEventNames.has(registeredEvent)")
+    expect(route).toContain("? verifyZidWebhookAuthorization(headersList.get('authorization'))")
+  })
+
+  it('keeps every store-scoped callback under its merchant-specific secret', () => {
+    expect(route).toContain(": verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)")
+    expect(route).toContain("Webhook store identity does not match Basic credential")
+  })
+
+  it('does not make app-wide partner authentication an all-event fallback', () => {
+    const partnerSection = route.split('const partnerAppEventNames = new Set([')[1]?.split('])')[0] || ''
+    expect(partnerSection).not.toContain("'order.created'")
+    expect(partnerSection).not.toContain("'product.created'")
+    expect(partnerSection).not.toContain("'customer.created'")
+  })
+})
+
 describe('the endpoint keeps the documented mechanism only', () => {
   const route = fs.readFileSync(ROUTE_PATH, 'utf8')
   const webhooks = fs.readFileSync(WEBHOOKS_PATH, 'utf8')
@@ -190,7 +246,7 @@ describe('the endpoint keeps the documented mechanism only', () => {
   })
 
   it('verifies the Authorization header through the shared helper', () => {
-    expect(route).toMatch(/verifyZidWebhookAuthorization\(headersList\.get\('authorization'\)\)/)
+    expect(route).toContain("verifyZidWebhookAuthorization(headersList.get('authorization'), authenticatedMerchantId)")
   })
 
   it('answers 401 to a wrong credential', () => {
@@ -206,7 +262,7 @@ describe('the endpoint keeps the documented mechanism only', () => {
   })
 
   it('logs the credential fingerprint rather than the credential', () => {
-    expect(route).toMatch(/credential: zidWebhookCredentialFingerprint\(\)/)
+    expect(route).toContain('credential: zidWebhookCredentialFingerprint(isAuthenticatedPartnerWebhook ? undefined : authenticatedMerchantId)')
     expect(route).not.toMatch(/console\.(log|warn|error|info)\([^)]*getZidWebhookCredential\(/)
   })
 
@@ -232,7 +288,7 @@ describe('the re-registration path exists and is admin-only', () => {
   it('refuses to touch webhooks when no credential is derivable', () => {
     // Deleting first and re-creating without a credential would replace working
     // subscriptions with ones that can never authenticate.
-    const guardAt = refresh.indexOf('if (!getZidWebhookCredential())')
+    const guardAt = refresh.indexOf("if (!getZidWebhookCredential('credential-check'))")
     const firstRemoval = refresh.indexOf('unregisterAllZidWebhooks(merchantId)')
     expect(guardAt).toBeGreaterThan(-1)
     expect(firstRemoval).toBeGreaterThan(guardAt)

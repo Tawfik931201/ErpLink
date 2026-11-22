@@ -1,0 +1,77 @@
+name: Security hardening validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/crypto.ts'
+      - 'src/lib/security/**'
+      - 'src/lib/salla-client.ts'
+      - 'src/lib/odoo-client.ts'
+      - 'src/lib/zid/webhooks.ts'
+      - 'src/lib/zid/webhook-auth.ts'
+      - 'src/lib/zid/webhook-auth-migration.ts'
+      - 'src/instrumentation.ts'
+      - 'supabase/migrations/**'
+      - 'src/app/api/admin/zid-webhooks/refresh/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/lib/zid/credentials.ts'
+      - 'src/lib/zid/customers.ts'
+      - 'src/lib/zid/products.ts'
+      - 'src/lib/sync/webhook.ts'
+      - 'src/lib/webhook-strict.ts'
+      - 'src/app/actions/odoo.ts'
+      - 'src/app/actions/workspaces.ts'
+      - 'src/app/api/salla/**'
+      - 'src/app/api/webhooks/**'
+      - 'src/app/api/cron/**'
+      - 'src/app/(app)/app/tickets/**'
+      - 'tests/unit/crypto.test.ts'
+      - 'tests/unit/zid-webhook-auth.test.ts'
+      - 'tests/unit/zid-webhook-auth-migration.test.ts'
+      - 'tests/unit/zid-token-storage.test.ts'
+      - 'tests/unit/shopify-offline-token.test.ts'
+      - 'tests/unit/security-hardening.test.ts'
+      - '.github/workflows/security-hardening-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Enforce patched dependency graph
+        run: npm audit --audit-level=moderate
+      - name: Lint compatibility check (diagnostic)
+        continue-on-error: true
+        run: npm run lint
+      - name: Supply-chain advisory inventory
+        shell: bash
+        run: |
+          npm audit --json > npm-audit.json || true
+          node -e "const a=require('./npm-audit.json');console.log(JSON.stringify(Object.entries(a.vulnerabilities||{}).map(([name,v])=>({name,severity:v.severity,isDirect:v.isDirect,range:v.range,fixAvailable:v.fixAvailable,via:v.via?.map(x=>typeof x==='string'?x:{name:x.name,title:x.title,url:x.url})})),null,2))"
+      - name: Type-check application
+        run: npm run type-check
+      - name: Run security-focused regression tests
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts
+      - name: Full Jest regression baseline (diagnostic)
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand

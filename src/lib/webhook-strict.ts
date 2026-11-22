@@ -5,14 +5,14 @@
  * `legacy` (no credential — webhook registered before the derived secret
  * existed) are rejected with 401 instead of accepted+counted.
  *
- * Default is `false` so existing stores keep syncing while the operator
- * re-registers webhooks (POST /api/admin/*-refresh). Flip it to `true`
- * once the `Unauthenticated delivery #N` counters reach zero.
- *
- * ngrok/testing note: keep it unset (or `false`) while URLs are temporary.
+ * Fail closed by default in production; existing subscriptions must be
+ * re-registered with credentials before deployment. Explicitly setting
+ * STRICT_WEBHOOK_AUTH=false allows temporary legacy migration only.
+ * Development keeps the previous relaxed default for test subscriptions.
  */
 export function isStrictWebhookAuth(): boolean {
   const v = (process.env.STRICT_WEBHOOK_AUTH ?? '').trim().toLowerCase()
+  if (!v) return process.env.NODE_ENV === 'production'
   return v === 'true' || v === '1' || v === 'yes'
 }
 

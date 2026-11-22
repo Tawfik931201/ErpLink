@@ -31,6 +31,7 @@ import xmlrpc from 'xmlrpc'
 import { checkImpersonationWriteBlock } from './auth'
 import { runErpCreateEffect } from './erp-effect-context'
 import { parseOdooVersionInfo, type OdooVersionInfo } from './odoo/version'
+import { assertSecureErpTransport, publicErpDnsLookup } from './security/safe-external-fetch'
 
 export interface OdooConfig {
   url: string      // e.g. https://mycompany.odoo.com
@@ -95,6 +96,7 @@ function getAgent(url: string): https.Agent | http.Agent {
     let agent = httpsAgents.get(key)
     if (!agent) {
       agent = new https.Agent({
+        ...(process.env.NODE_ENV === 'production' ? { lookup: publicErpDnsLookup, autoSelectFamily: false } : {}),
         keepAlive: true,
         keepAliveMsecs: 30_000,
         maxSockets: 24,
@@ -108,6 +110,7 @@ function getAgent(url: string): https.Agent | http.Agent {
   let agent = httpAgents.get(key)
   if (!agent) {
     agent = new http.Agent({
+      ...(process.env.NODE_ENV === 'production' ? { lookup: publicErpDnsLookup, autoSelectFamily: false } : {}),
       keepAlive: true,
       keepAliveMsecs: 30_000,
       maxSockets: 24,
@@ -122,9 +125,13 @@ function getAgent(url: string): https.Agent | http.Agent {
 function createXmlRpcClient(url: string, path: string, freshConnection = false) {
   const parsed = new URL(url)
   const isHttps = parsed.protocol === 'https:'
+  assertSecureErpTransport(url)
+  const secureLookup = process.env.NODE_ENV === 'production'
+    ? { lookup: publicErpDnsLookup, autoSelectFamily: false }
+    : {}
   const freshAgent = isHttps
-    ? new https.Agent({ keepAlive: false })
-    : new http.Agent({ keepAlive: false })
+    ? new https.Agent({ keepAlive: false, ...secureLookup })
+    : new http.Agent({ keepAlive: false, ...secureLookup })
   const options = {
     host: parsed.hostname,
     port: parsed.port ? parseInt(parsed.port) : isHttps ? 443 : 80,
@@ -181,6 +188,7 @@ export class OdooClient {
   private versionInfo: OdooVersionInfo | null = null
 
   constructor(config: OdooConfig) {
+    assertSecureErpTransport(config.url)
     this.config = config
   }
 

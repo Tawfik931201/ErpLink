@@ -56,7 +56,7 @@ it('automatically encrypts legacy plaintext without extending its expiry', async
   rows = [row('42', 'workspace-a', true)]
   const updatedAt = rows[0].updated_at
   expect((await store.getTokens('42'))?.accessToken).toBe('access-42')
-  for (const key of ['access_token', 'refresh_token', 'authorization_token']) expect(rows[0][key]).toMatch(/^[a-f0-9]{32}:/)
+  for (const key of ['access_token', 'refresh_token', 'authorization_token']) expect(rows[0][key]).toMatch(/^v2:[0-9a-f]{24}:[0-9a-f]{32}:/)
   expect(rows[0].updated_at).toBe(updatedAt)
 })
 it('encrypts all renewed credentials and only updates the exact source store', async () => {

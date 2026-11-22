@@ -384,13 +384,13 @@ const getCachedSallaTokens = unstable_cache(
     // Multi-store — see getCachedZidTokens (all rows, newest first).
     const { data: tokens, error } = await supabase
       .from('salla_tokens')
-      .select('*')
+      .select('merchant_id,workspace_id,store_name,name,email,username,mobile,scope,token_type,expires_in,sync_settings,updated_at')
       .eq('workspace_id', workspaceId)
       .order('updated_at', { ascending: false, nullsFirst: false })
     if (error) throw new Error('Failed to query Salla tokens: ' + error.message)
     return tokens ?? []
   },
-  ['salla-token'],
+  ['salla-token-public-v2'], // Do not reuse cached rows containing historical secrets.
   { revalidate: 30, tags: ['salla-token'] }
 )
 
@@ -405,7 +405,7 @@ export async function getActiveWorkspaceSallaTokens(): Promise<{ success: true; 
     if (!tokens || tokens.length === 0) {
       const { data: freshTokens } = await supabase
         .from('salla_tokens')
-        .select('*')
+        .select('merchant_id,workspace_id,store_name,name,email,username,mobile,scope,token_type,expires_in,sync_settings,updated_at')
         .eq('workspace_id', user.active_workspace_id)
         .order('updated_at', { ascending: false, nullsFirst: false })
       if (freshTokens && freshTokens.length > 0) {

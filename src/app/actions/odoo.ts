@@ -7,6 +7,8 @@ import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
 import { encrypt, decrypt } from '@/lib/crypto'
 import { formatOdooVersion } from '@/lib/odoo/version'
 import { OdooClient } from '@/lib/odoo-client'
+import { isIP } from 'node:net'
+import { isPublicIpAddress, resolvePublicDestination, safeExternalFetch } from '@/lib/security/safe-external-fetch'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
@@ -70,7 +72,7 @@ const getCachedErpConnection = unstable_cache(
   { revalidate: 30, tags: ['erp-connection'] }
 )
 
-export async function getActiveWorkspaceErpConnection() {
+async function getActiveWorkspaceErpConnectionInternal() {
   try {
     const user = await getOrCreateDbUser()
     if (!user.active_workspace_id) {
@@ -83,6 +85,32 @@ export async function getActiveWorkspaceErpConnection() {
     console.error('[Odoo Action] getActiveWorkspaceOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to fetch Odoo connection' }
   }
+}
+
+/**
+ * Client callable action: return ONLY display columns. The encrypted password
+ * and every unknown future field must remain on the server.
+ */
+function toPublicErpConnection(c: Record<string, any>) {
+  return {
+    id: c.id,
+    workspace_id: c.workspace_id,
+    connection_name: c.connection_name,
+    erp_type: c.erp_type,
+    url: c.url,
+    db_name: c.db_name,
+    username: c.username,
+    status: c.status,
+    odoo_version: c.odoo_version,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+  }
+}
+
+export async function getActiveWorkspaceErpConnection() {
+  const result = await getActiveWorkspaceErpConnectionInternal()
+  if (!result.success || !result.connection) return result
+  return { success: true, connection: toPublicErpConnection(result.connection) }
 }
 
 const TTL_VERSION_MS = 6 * 60 * 60 * 1000 // 6 h — an ERP version does not change intraday
@@ -143,29 +171,23 @@ export async function detectOdooVersion(): Promise<{
 function validateSafeExternalUrl(rawUrl: string): { valid: boolean; error?: string } {
   try {
     const parsed = new URL(rawUrl)
-    const hostname = parsed.hostname.toLowerCase()
-
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') {
+      return { valid: false, error: 'اتصالات ERP يجب أن تستخدم HTTPS في بيئة الإنتاج' }
+    }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { valid: false, error: 'بروتوكول الرابط غير مدعوم، يجب أن يكون http أو https' }
     }
-
-    // Block localhost, internal IPs and cloud metadata addresses
-    if (
-      hostname === 'localhost' ||
-      hostname.endsWith('.localhost') ||
-      hostname === '127.0.0.1' ||
-      hostname === '0.0.0.0' ||
-      hostname === '::1' ||
-      hostname === '169.254.169.254' ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('192.168.') ||
-      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
-    ) {
-      if (process.env.NODE_ENV === 'production') {
-        return { valid: false, error: 'غير مسموح بربط عناوين الشبكات الداخلية أو المحلية (SSRF Protection)' }
-      }
+    if (parsed.username || parsed.password) {
+      return { valid: false, error: 'لا تضف بيانات اعتماد داخل رابط الخادم' }
     }
-
+    if (process.env.NODE_ENV === 'production' && (
+      hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') || hostname.endsWith('.internal') ||
+      (isIP(hostname) !== 0 && !isPublicIpAddress(hostname))
+    )) {
+      return { valid: false, error: 'غير مسموح بعناوين الشبكات الداخلية أو المحلية (SSRF Protection)' }
+    }
     return { valid: true }
   } catch {
     return { valid: false, error: 'صيغة الرابط غير صحيحة (Invalid URL format)' }
@@ -196,6 +218,14 @@ export async function testErpConnection(url: string, db: string, username: strin
       const urlCheck = validateSafeExternalUrl(formattedUrl)
       if (!urlCheck.valid) {
         return { success: false, error: urlCheck.error }
+      }
+
+      if (process.env.NODE_ENV === 'production') {
+        try {
+          await resolvePublicDestination(formattedUrl)
+        } catch {
+          return { success: false, error: 'رابط أودو يشير إلى عنوان داخلي أو غير مسموح' }
+        }
       }
 
       const client = new OdooClient({
@@ -243,7 +273,7 @@ export async function testErpConnection(url: string, db: string, username: strin
 
       const authHeader = `token ${username.trim()}:${apiKey.trim()}`
       try {
-        const response = await fetch(`${formattedUrl}/api/method/frappe.auth.get_logged_user`, {
+        const response = await safeExternalFetch(`${formattedUrl}/api/method/frappe.auth.get_logged_user`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -361,7 +391,7 @@ export async function saveErpConnection(data: {
     const encryptedKey = encrypt(data.apiKey.trim())
 
     // Check if connection already exists for this workspace
-    const existingRes = await getActiveWorkspaceErpConnection()
+    const existingRes = await getActiveWorkspaceErpConnectionInternal()
     const existing = existingRes.success ? existingRes.connection : null
 
     let result
@@ -448,7 +478,7 @@ export async function saveErpConnection(data: {
       )
     }
 
-    return { success: true, connection: { ...result, odoo_version: storedVersion } }
+    return { success: true, connection: { ...toPublicErpConnection(result), odoo_version: storedVersion } }
   } catch (error: any) {
     console.error('[Odoo Action] saveOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to save connection details' }
@@ -522,7 +552,7 @@ async function fetchModelsRaw(connection: any) {
 
   if (erp_type === 'erpnext') {
     const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
-    const response = await fetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
+    const response = await safeExternalFetch(`${url}/api/resource/DocType?fields=["name"]&limit_page_length=9999`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
@@ -578,7 +608,7 @@ const getCachedModels = unstable_cache(
  */
 export async function getOdooModels() {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive. Please connect to your ERP first.' }
     }
@@ -601,7 +631,7 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
 
   if (erp_type === 'erpnext') {
     const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
-    const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
+    const response = await safeExternalFetch(`${url}/api/resource/DocType/${modelName}`, {
       method: 'GET',
       headers: {
         'Authorization': authHeader,
@@ -621,7 +651,7 @@ async function fetchModelFieldsRaw(connection: any, modelName: string) {
       try {
         const cfFilters = JSON.stringify([["dt", "=", modelName]])
         const cfUrl = `${url}/api/resource/Custom Field?fields=["fieldname","label","fieldtype","options","reqd","read_only","description"]&filters=${encodeURIComponent(cfFilters)}&limit_page_length=9999`
-        const cfResponse = await fetch(cfUrl, {
+        const cfResponse = await safeExternalFetch(cfUrl, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -775,7 +805,7 @@ export async function getOdooModelFields(modelName: string, forceRefresh = false
       return { success: false, error: 'Model name is required' }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.' }
     }
@@ -817,7 +847,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
       return { success: false, error: 'Model and field are required', options: [] }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -831,7 +861,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
         const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
         try {
           // First get the DocType layout to read Select field options or Link relations
-          const response = await fetch(`${url}/api/resource/DocType/${modelName}`, {
+          const response = await safeExternalFetch(`${url}/api/resource/DocType/${modelName}`, {
             method: 'GET',
             headers: {
               'Authorization': authHeader,
@@ -877,7 +907,7 @@ export async function getOdooFieldValueOptions(modelName: string, fieldName: str
 
           if (ftype === 'link' && fieldMeta.options) {
             const relation = fieldMeta.options
-            const relRes = await fetch(`${url}/api/resource/${relation}?limit_page_length=100`, {
+            const relRes = await safeExternalFetch(`${url}/api/resource/${relation}?limit_page_length=100`, {
               method: 'GET',
               headers: {
                 'Authorization': authHeader,
@@ -1056,7 +1086,7 @@ export async function getOdooWarehouses(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1102,7 +1132,7 @@ export async function getOdooTaxes(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', taxes: [] }
     }
@@ -1176,7 +1206,7 @@ export async function getOdooLocations(usage?: string, force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1233,7 +1263,7 @@ export async function dryRunMatch(args: {
       return { success: false, error: 'No active workspace', phase: 'error' }
     }
 
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', phase: 'error' }
     }
@@ -1290,7 +1320,7 @@ export async function dryRunMatch(args: {
 
 export async function getOdooAccountsByType(type: 'receivable' | 'payable', companyId?: number, force = false) {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1358,7 +1388,7 @@ export async function getOdooAccountsByType(type: 'receivable' | 'payable', comp
  */
 export async function getOdooAnalyticAccounts(force = false, companyId?: number) {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', accounts: [] }
     }
@@ -1419,7 +1449,7 @@ export async function getOdooAnalyticAccounts(force = false, companyId?: number)
 
 export async function searchOdooCategories(searchTerm: string = '') {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1452,7 +1482,7 @@ export async function searchOdooCategories(searchTerm: string = '') {
 
 export async function searchOdooProducts(searchTerm: string = '') {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1489,7 +1519,7 @@ export async function getOdooCustomers(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1499,7 +1529,7 @@ export async function getOdooCustomers(force = false): Promise<{
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
       try {
-        const response = await fetch(`${url}/api/resource/Customer?limit_page_length=100`, {
+        const response = await safeExternalFetch(`${url}/api/resource/Customer?limit_page_length=100`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -1575,7 +1605,7 @@ export async function getOdooProducts(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found or inactive.', options: [] }
     }
@@ -1585,7 +1615,7 @@ export async function getOdooProducts(force = false): Promise<{
       const decryptedPassword = decrypt(password)
       const authHeader = `token ${username.trim()}:${decryptedPassword.trim()}`
       try {
-        const response = await fetch(`${url}/api/resource/Item?limit_page_length=100`, {
+        const response = await safeExternalFetch(`${url}/api/resource/Item?limit_page_length=100`, {
           method: 'GET',
           headers: {
             'Authorization': authHeader,
@@ -1668,7 +1698,7 @@ export async function getOdooJournals(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found' }
     }
@@ -1718,7 +1748,7 @@ export async function getOdooCurrencies(force = false): Promise<{
   error?: string
 }> {
   try {
-    const connRes = await getActiveWorkspaceErpConnection()
+    const connRes = await getActiveWorkspaceErpConnectionInternal()
     if (!connRes.success || !connRes.connection) {
       return { success: false, error: 'ERP connection not found', options: [] }
     }

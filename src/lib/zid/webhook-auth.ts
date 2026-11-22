@@ -53,7 +53,18 @@ export interface ZidWebhookCredential {
   encoded: string
 }
 
-function derivePassword(): string | null {
+const MERCHANT_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/
+
+/**
+ * Per-merchant credentials are distinct across workspaces / stores. Keeping
+ * the legacy v1 derivation (when merchantId is omitted) lets operators migrate
+ * existing registrations under an explicit temporary compatibility toggle.
+ */
+function derivePassword(merchantId?: string): string | null {
+  if (merchantId !== undefined) {
+    if (!MERCHANT_ID_RE.test(merchantId)) return null
+    return hkdfHex('zid-webhook-basic-auth:merchant:v2', [merchantId], DERIVED_PASSWORD_BYTES)
+  }
   return hkdfHex(HKDF_INFO, [], DERIVED_PASSWORD_BYTES)
 }
 
@@ -61,8 +72,8 @@ function derivePassword(): string | null {
  * The credential to register with Zid, or `null` when nothing can be derived
  * (`ENCRYPTION_KEY` unset — development only; production refuses to boot).
  */
-export function getZidWebhookCredential(): ZidWebhookCredential | null {
-  const password = derivePassword()
+export function getZidWebhookCredential(merchantId?: string): ZidWebhookCredential | null {
+  const password = derivePassword(merchantId)
   if (!password) return null
 
   const username = WEBHOOK_AUTH_USERNAME
@@ -86,20 +97,34 @@ export type ZidWebhookAuthResult =
  * `secretMatches`; never logs or returns the credential itself.
  */
 export function verifyZidWebhookAuthorization(
-  authorizationHeader: string | null | undefined
+  authorizationHeader: string | null | undefined,
+  merchantId?: string
 ): ZidWebhookAuthResult {
-  const credential = getZidWebhookCredential()
+  // The ingress route supplies the exact merchant id from its registered URL.
+  // An empty string must NOT silently downgrade to the shared legacy secret.
+  const credential = getZidWebhookCredential(merchantId)
   const provided = (authorizationHeader ?? '').trim()
 
-  if (!provided) return credential ? { status: 'legacy' } : { status: 'unconfigured' }
-  if (!credential) return { status: 'unconfigured' }
+  if (!provided) {
+    if (credential) return { status: 'legacy' }
+    return merchantId !== undefined && process.env.ENCRYPTION_KEY ? { status: 'invalid' } : { status: 'unconfigured' }
+  }
+  if (!credential) return process.env.ENCRYPTION_KEY ? { status: 'invalid' } : { status: 'unconfigured' }
 
   const scheme = /^basic\s+(.+)$/i.exec(provided)
   const candidates = scheme ? [provided, scheme[1].trim()] : [provided]
-
   for (const candidate of candidates) {
     if (secretMatches(candidate, credential.headerValue)) return { status: 'ok' }
     if (secretMatches(candidate, credential.encoded)) return { status: 'ok' }
+  }
+
+  // Explicit, short-lived migration escape hatch ONLY. Default rejects
+  // cross-store replay of the old application-wide Basic credential.
+  if (merchantId !== undefined && process.env.ZID_ACCEPT_LEGACY_GLOBAL_BASIC_AUTH === 'true') {
+    const legacy = getZidWebhookCredential()
+    if (legacy && candidates.some(candidate =>
+      secretMatches(candidate, legacy.headerValue) || secretMatches(candidate, legacy.encoded)
+    )) return { status: 'ok' }
   }
 
   return { status: 'invalid' }
@@ -109,8 +134,8 @@ export function verifyZidWebhookAuthorization(
  * A stable, non-reversible tag for the active credential, safe to log so an
  * operator can tell which credential a delivery was checked against.
  */
-export function zidWebhookCredentialFingerprint(): string {
-  const credential = getZidWebhookCredential()
+export function zidWebhookCredentialFingerprint(merchantId?: string): string {
+  const credential = getZidWebhookCredential(merchantId)
   if (!credential) return 'none'
   return crypto.createHash('sha256').update(credential.encoded).digest('hex').slice(0, 12)
 }

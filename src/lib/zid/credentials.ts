@@ -1,4 +1,4 @@
-import { encrypt } from '@/lib/crypto'
+import { encrypt, isEncryptedValue } from '@/lib/crypto'
 
 /** Shared by OAuth completion, renewal and legacy-row upgrades. */
 export function encryptZidCredentials<T extends { access_token: string; refresh_token: string; authorization_token?: string | null }>(data: T): T {
@@ -12,7 +12,7 @@ export function encryptZidCredentials<T extends { access_token: string; refresh_
 }
 
 export function isEncryptedZidCredential(value: string): boolean {
-  return /^[0-9a-f]{32}:[0-9a-f]+$/i.test(value)
+  return isEncryptedValue(value)
 }
 
 export const ZID_STORE_PUBLIC_COLUMNS = 'id,merchant_id,store_id,workspace_id,name,email,username,uuid,old_id,sync_settings,created_at,updated_at,expires_in,token_type'
