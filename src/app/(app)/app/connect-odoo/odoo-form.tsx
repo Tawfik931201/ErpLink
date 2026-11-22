@@ -225,9 +225,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
       })
 
       if (res.success) {
-        if (res.connection) {
-          delete res.connection.password;
-        }
+        // Server action returns an allowlisted public connection (no password).
         setConnection(res.connection)
         setOdooVersion(res.connection?.odoo_version ?? null)
         setIsEditing(false)
