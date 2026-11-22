@@ -154,12 +154,9 @@ export async function registerZidWebhook(
     body.username = credential.username
     body.password = credential.password
   } else {
-    // Unreachable in production (crypto.ts refuses to boot without
-    // ENCRYPTION_KEY). Never send a placeholder: Zid would store it as the
-    // real password and every later delivery would fail authentication.
-    console.error(
-      '[Zid Webhook] No credential derivable (ENCRYPTION_KEY missing) — registering without Basic Auth. Deliveries will not authenticate.'
-    )
+    // Fail closed: a malformed merchant ID or unavailable key must never
+    // register an unsigned webhook that strict ingress will discard.
+    return { success: false, event: zidEventName, message: 'Per-store webhook credential unavailable; registration refused' }
   }
 
   try {
