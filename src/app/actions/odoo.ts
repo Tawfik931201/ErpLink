@@ -91,26 +91,26 @@ async function getActiveWorkspaceErpConnectionInternal() {
  * Client callable action: return ONLY display columns. The encrypted password
  * and every unknown future field must remain on the server.
  */
+function toPublicErpConnection(c: Record<string, any>) {
+  return {
+    id: c.id,
+    workspace_id: c.workspace_id,
+    connection_name: c.connection_name,
+    erp_type: c.erp_type,
+    url: c.url,
+    db_name: c.db_name,
+    username: c.username,
+    status: c.status,
+    odoo_version: c.odoo_version,
+    created_at: c.created_at,
+    updated_at: c.updated_at,
+  }
+}
+
 export async function getActiveWorkspaceErpConnection() {
   const result = await getActiveWorkspaceErpConnectionInternal()
   if (!result.success || !result.connection) return result
-  const c = result.connection
-  return {
-    success: true,
-    connection: {
-      id: c.id,
-      workspace_id: c.workspace_id,
-      connection_name: c.connection_name,
-      erp_type: c.erp_type,
-      url: c.url,
-      db_name: c.db_name,
-      username: c.username,
-      status: c.status,
-      odoo_version: c.odoo_version,
-      created_at: c.created_at,
-      updated_at: c.updated_at,
-    },
-  }
+  return { success: true, connection: toPublicErpConnection(result.connection) }
 }
 
 const TTL_VERSION_MS = 6 * 60 * 60 * 1000 // 6 h — an ERP version does not change intraday
@@ -478,7 +478,7 @@ export async function saveErpConnection(data: {
       )
     }
 
-    return { success: true, connection: { ...result, odoo_version: storedVersion } }
+    return { success: true, connection: { ...toPublicErpConnection(result), odoo_version: storedVersion } }
   } catch (error: any) {
     console.error('[Odoo Action] saveOdooConnection failed:', error)
     return { success: false, error: error.message || 'Failed to save connection details' }
