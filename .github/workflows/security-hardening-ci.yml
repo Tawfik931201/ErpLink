@@ -30,6 +30,12 @@ on:
       - 'src/app/actions/workspaces.ts'
       - 'src/app/api/salla/**'
       - 'src/app/api/webhooks/**'
+      - 'src/app/api/health/**'
+      - 'src/app/api/admin/impersonate/**'
+      - 'src/lib/odoo/webhook-secret.ts'
+      - 'tests/unit/odoo-webhook-auth.test.ts'
+      - 'tests/unit/prelaunch-security.test.ts'
+      - 'scripts/security-release-smoke.mjs'
       - 'src/app/api/cron/**'
       - 'src/app/(app)/app/tickets/**'
       - 'tests/unit/crypto.test.ts'
@@ -72,7 +78,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
           SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
-        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts tests/unit/ingress-admission.test.ts tests/unit/webhook-request-hardening.test.ts
+        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts tests/unit/ingress-admission.test.ts tests/unit/webhook-request-hardening.test.ts tests/unit/odoo-webhook-auth.test.ts tests/unit/prelaunch-security.test.ts
       - name: Full Jest regression suite (hard gate)
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
