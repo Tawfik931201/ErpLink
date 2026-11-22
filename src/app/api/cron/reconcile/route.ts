@@ -15,17 +15,16 @@ import { secretMatches } from '@/lib/webhook-secret'
  * دائمة ولا ذاكرة. يجدول كل 10 دقائق من cPanel Cron:
  *
  *   curl -sS -H "Authorization: Bearer <CRON_SECRET>" "https://<domain>/api/cron/reconcile"
- * Legacy ?key= remains for existing schedulers; migrate to the header
- * because query secrets may be written into proxy and runtime logs.
+ * Query-string credentials are rejected: URLs may be recorded by proxies,
+ * browsers and server logs. Update Hostinger cron to the Bearer form first.
  */
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
-  const queryKey = req.nextUrl.searchParams.get('key') ?? ''
   const cronSecret = process.env.CRON_SECRET
 
   if (cronSecret) {
     const bearer = authHeader?.replace(/^Bearer\s+/i, '')
-    if (!secretMatches(bearer ?? '', cronSecret) && !secretMatches(queryKey, cronSecret)) {
+    if (!secretMatches(bearer ?? '', cronSecret)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
