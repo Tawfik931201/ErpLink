@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
       )
     } catch (error: unknown) {
       const reason = error instanceof Error ? error.message : String(error)
-      if (!/invalid field ['"]raw['"]|keyerror:\\s*['"]raw['"]/i.test(reason)) throw error
+      if (!/invalid field ['"]raw['"]|keyerror:\s*['"]raw['"]/i.test(reason)) throw error
       binaryRows = await executeKw<any[]>(
         'ir.attachment', 'read', [[attachmentId]], { fields: ['datas'] }
       )
