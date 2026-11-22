@@ -119,7 +119,9 @@ describe('the platform-facing HTTP responses are unchanged', () => {
     const rejectIdx = zid.indexOf('status: 429')
     expect(limitIdx).toBeGreaterThan(-1)
     expect(rejectIdx).toBeGreaterThan(limitIdx)
-    expect(zid.match(/status: 429/g)?.length ?? 0).toBe(1)
+    // One early anonymous throttle + one invalid-presented-credential throttle.
+    // Neither path is reachable by a verified Basic authorization.
+    expect(zid.match(/status: 429/g)?.length ?? 0).toBe(2)
   })
 
   it('keeps 503 for a durable-storage failure (the retry signal)', () => {
