@@ -131,10 +131,10 @@ async function processWebhookEventInternal(
   )
   if (syncPlatform === 'zid') {
     if (normalizedEvent.startsWith('customer.')) {
-      data = await enrichZidCustomer(data, storeIdStr, isLegacyDelivery)
+      data = await enrichZidCustomer(data, storeIdStr, isLegacyDelivery, resolvedWorkspaceId || '')
     }
     if (isProduct) {
-      data = await enrichZidProduct(data, storeIdStr, isLegacyDelivery)
+      data = await enrichZidProduct(data, storeIdStr, isLegacyDelivery, resolvedWorkspaceId || '')
     }
     if (normalizedEvent.startsWith('order.')) {
       const prepared = await enrichZidOrder(data, storeIdStr, resolvedWorkspaceId, normalizedEvent, isLegacyDelivery)
