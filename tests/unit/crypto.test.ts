@@ -122,10 +122,10 @@ describe('encrypt / decrypt', () => {
     }
   })
 
-  it('produces the <iv>:<ciphertext> shape', () => {
+  it('produces the authenticated v2:GCM nonce:tag:ciphertext envelope', () => {
     const { mod, restore } = loadCrypto({ ENCRYPTION_KEY: KEY })
     try {
-      expect(mod.encrypt('x')).toMatch(/^[0-9a-f]{32}:[0-9a-f]+$/)
+      expect(mod.encrypt('x')).toMatch(/^v2:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/)
     } finally {
       restore()
     }
@@ -154,6 +154,36 @@ describe('encrypt / decrypt', () => {
     const { mod, restore } = loadCrypto({ ENCRYPTION_KEY: KEY })
     try {
       expect(mod.decrypt(mod.encrypt('كلمة السر'))).toBe('كلمة السر')
+    } finally {
+      restore()
+    }
+  })
+})
+
+describe('legacy CBC migration', () => {
+  it('still decrypts credentials produced before AES-GCM migration', () => {
+    const crypto = require('crypto') as typeof import('crypto')
+    const keyString = 'a'.repeat(64)
+    const iv = crypto.randomBytes(16)
+    const key = crypto.createHash('sha256').update(keyString).digest()
+    const cipher = crypto.createCipheriv('aes-256-cbc', key, iv)
+    const ciphertext = Buffer.concat([cipher.update('old-odoo-password', 'utf8'), cipher.final()])
+    const legacy = iv.toString('hex') + ':' + ciphertext.toString('hex')
+    const { mod, restore } = loadCrypto({ ENCRYPTION_KEY: keyString })
+    try {
+      expect(mod.decrypt(legacy)).toBe('old-odoo-password')
+      expect(mod.encrypt('re-saved')).toMatch(/^v2:/)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rejects a corrupted GCM authentication tag', () => {
+    const { mod, restore } = loadCrypto({ ENCRYPTION_KEY: 'a'.repeat(64) })
+    try {
+      const [version, iv, tag, body] = mod.encrypt('important-credential').split(':')
+      const modifiedTag = (tag[0] === 'a' ? 'b' : 'a') + tag.slice(1)
+      expect(() => mod.decrypt([version, iv, modifiedTag, body].join(':'))).toThrow(/Failed to decrypt/)
     } finally {
       restore()
     }
@@ -224,9 +254,9 @@ describe('decrypt never returns ciphertext it could not read', () => {
     const { mod, restore } = loadCrypto({ ENCRYPTION_KEY: 'a'.repeat(64) })
     try {
       const enc = mod.encrypt('value')
-      const [iv, body] = enc.split(':')
+      const [version, iv, tag, body] = enc.split(':')
       const flipped = body.slice(0, -2) + (body.endsWith('00') ? '11' : '00')
-      expect(() => mod.decrypt(`${iv}:${flipped}`)).toThrow(/Failed to decrypt/)
+      expect(() => mod.decrypt(`${version}:${iv}:${tag}:${flipped}`)).toThrow(/Failed to decrypt/)
     } finally {
       restore()
     }
