@@ -1,0 +1,43 @@
+name: Security hardening validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/crypto.ts'
+      - 'src/lib/security/**'
+      - 'src/lib/salla-client.ts'
+      - 'src/lib/webhook-strict.ts'
+      - 'src/app/actions/odoo.ts'
+      - 'src/app/actions/workspaces.ts'
+      - 'src/app/api/salla/**'
+      - 'src/app/api/webhooks/**'
+      - 'src/app/api/cron/**'
+      - 'src/app/(app)/app/tickets/**'
+      - 'tests/unit/crypto.test.ts'
+      - 'tests/unit/security-hardening.test.ts'
+      - '.github/workflows/security-hardening-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Type-check application
+        run: npm run type-check
+      - name: Run security-focused regression tests
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts
