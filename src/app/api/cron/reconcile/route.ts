@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { reconcileZidOrders } from '@/lib/reconciliation'
+import { secretMatches } from '@/lib/webhook-secret'
 
 /**
  * GET /api/cron/reconcile -- التسوية الدورية
@@ -13,7 +14,9 @@ import { reconcileZidOrders } from '@/lib/reconciliation'
  * مصممة للاستضافة المشتركة (Hostinger): دورة واحدة قصيرة ثم خروج. لا عملية
  * دائمة ولا ذاكرة. يجدول كل 10 دقائق من cPanel Cron:
  *
- *   curl -sS "https://<domain>/api/cron/reconcile?key=<CRON_SECRET>"
+ *   curl -sS -H "Authorization: Bearer <CRON_SECRET>" "https://<domain>/api/cron/reconcile"
+ * Legacy ?key= remains for existing schedulers; migrate to the header
+ * because query secrets may be written into proxy and runtime logs.
  */
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
@@ -22,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   if (cronSecret) {
     const bearer = authHeader?.replace(/^Bearer\s+/i, '')
-    if (bearer !== cronSecret && queryKey !== cronSecret) {
+    if (!secretMatches(bearer ?? '', cronSecret) && !secretMatches(queryKey, cronSecret)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
   } else if (process.env.NODE_ENV === 'production') {
