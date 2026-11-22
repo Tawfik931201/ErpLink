@@ -242,8 +242,11 @@ export default function StoreSelector({
           : 'The connection session expired or failed its security check. Start again.'
       case 'shopify_token_exchange_failed':
         return ar
-          ? 'تعذر إكمال تفويض Shopify أو حفظ الاتصال. تحقق من إعدادات التطبيق والصلاحيات ثم أعد المحاولة.'
-          : 'Could not complete Shopify authorization or save the connection. Check app configuration and scopes.'
+          ? 'تعذر الحصول على رمز الوصول من Shopify. أعد بدء الربط من زر ربط الحساب.'
+          : 'Could not obtain an access token from Shopify. Start again from Connect Account.'
+      case 'shopify_connection_save_failed':
+        return ar ? 'تم التفويض في Shopify، لكن تعذر حفظ اتصال المتجر في مساحة العمل.'
+          : 'Shopify authorized the app, but the store connection could not be saved in the workspace.'
       case 'no_active_workspace':
         return ar
           ? 'يجب اختيار مساحة عمل نشطة داخل ERP Link قبل ربط متجر Shopify.'
