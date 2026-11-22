@@ -55,8 +55,28 @@ function assertMerchantKey(key: string) {
 }
 
 export class SupabaseZidTokenStore implements ZidTokenStore {
+  // Collapse only concurrent identical reads. Do not retain credential rows
+  // after a request finishes: uninstall, store moves and token rotation must
+  // all take effect on the next operation.
+  private readonly tokenReads = new Map<string, Promise<StoredZidTokens | null>>()
+
   async getTokens(merchantId = DEFAULT_TOKEN_KEY, retry = 0, workspaceId?: string): Promise<StoredZidTokens | null> {
     assertMerchantKey(merchantId)
+    // A workspace-scoped read must not share a result with another workspace.
+    // Including retry avoids self-deadlock if legacy encryption upgrades race.
+    const key = JSON.stringify([merchantId, workspaceId ?? null, retry])
+    const existing = this.tokenReads.get(key)
+    if (existing) return existing
+    const task = this.loadTokens(merchantId, retry, workspaceId)
+    this.tokenReads.set(key, task)
+    try {
+      return await task
+    } finally {
+      if (this.tokenReads.get(key) === task) this.tokenReads.delete(key)
+    }
+  }
+
+  private async loadTokens(merchantId: string, retry: number, workspaceId?: string): Promise<StoredZidTokens | null> {
     const { data, error } = await supabase.from('merchant_tokens')
       .select('id,merchant_id,store_id,workspace_id,access_token,refresh_token,expires_in,updated_at,token_type,authorization_token')
       .eq('merchant_id', merchantId).maybeSingle()
