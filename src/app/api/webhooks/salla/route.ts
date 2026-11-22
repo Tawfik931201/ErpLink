@@ -33,6 +33,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { recordAudit } from '@/lib/audit-logs'
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
   verifySallaWebhookAuth,
@@ -44,8 +45,6 @@ import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
 import {
   isStrictWebhookAuth,
-  isWebhookBodyTooLarge,
-  MAX_WEBHOOK_BODY_BYTES,
 } from '@/lib/webhook-strict'
 
 /**
@@ -156,31 +155,30 @@ async function handlePost(req: NextRequest) {
     }).catch(() => {})
   }
 
-  const rawBody = await req.text()
   const headersList = await headers()
   const getHeader = (name: string) => headersList.get(name)
-
-  // ── 0. حد الاستقبال (للمجهولين فقط) + حارس حجم الجسم ─────────────────────
-  // الطلب الموقّع (x-salla-signature أو السر المشتق) لا يخضع لحد الـIP:
-  // حد 120/دقيقة كان يحوّل عملاء الموسم إلى ضياع صامت (429 ⇒ سلة لا تعيد
-  // الإرسال بعد 4xx). الموثّق يمرّ ببوابة الاستقبال التي تؤجّل ولا ترفض.
   const credentialPresented =
     !!headersList.get('x-salla-signature') ||
     !!headersList.get('x-erplink-webhook-secret') ||
     !!headersList.get('authorization')
-  const unauthLimit = checkUnauthenticatedIngressLimit({
+  const unauthenticatedBucketKey = rateLimitKeyFromHeaders(getHeader, 'salla-webhook')
+
+  if (!credentialPresented && !checkUnauthenticatedIngressLimit({
     scope: 'salla',
-    credentialPresented,
-    bucketKey: rateLimitKeyFromHeaders(getHeader, 'salla-webhook'),
-  })
-  if (!unauthLimit.allowed) {
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
     return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
   }
-  if (isWebhookBodyTooLarge(rawBody)) {
-    return NextResponse.json(
-      { error: `Payload too large (max ${MAX_WEBHOOK_BODY_BYTES} bytes)` },
-      { status: 413 }
-    )
+
+  let rawBody: string
+  try {
+    rawBody = await readWebhookBodyWithinLimit(req)
+  } catch (error) {
+    if (error instanceof WebhookBodyTooLargeError) {
+      return NextResponse.json({ error: error.message }, { status: 413 })
+    }
+    return NextResponse.json({ error: 'Unable to read webhook body' }, { status: 400 })
   }
 
   // ── 1. Ingress auth (before any parsing or DB I/O) ─────────────────────────
@@ -190,6 +188,16 @@ async function handlePost(req: NextRequest) {
   // (constant time) — see src/lib/salla/webhook-auth.ts.
   const authResult = verifySallaWebhookAuth(rawBody, getHeader)
   const isUnauthenticated = authResult.status === 'legacy' || authResult.status === 'unconfigured'
+
+  // Invalid HMAC, Basic or token-like headers must share the same anonymous
+  // budget; only a *verified* Salla delivery is exempt.
+  if (credentialPresented && authResult.status !== 'ok' && !checkUnauthenticatedIngressLimit({
+    scope: 'salla',
+    credentialVerified: false,
+    bucketKey: unauthenticatedBucketKey,
+  }).allowed) {
+    return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
+  }
 
   if (authResult.status === 'unconfigured' && process.env.NODE_ENV === 'production') {
     // Unreachable in production: crypto.ts throws at boot without ENCRYPTION_KEY.
