@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing or invalid signature headers' }, { status: 401 })
     }
     // A valid signature cannot make an expired/future message fresh.
-    const timestampMs = /^\\d{1,15}$/.test(svixTimestamp) ? Number(svixTimestamp) * 1000 : NaN
+    const timestampMs = /^\d{1,15}$/.test(svixTimestamp) ? Number(svixTimestamp) * 1000 : NaN
     if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > 5 * 60 * 1000) {
       if (!limitInvalid()) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
       return NextResponse.json({ error: 'Timestamp outside acceptable window' }, { status: 401 })
