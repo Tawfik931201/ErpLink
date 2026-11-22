@@ -33,7 +33,6 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { recordAudit } from '@/lib/audit-logs'
 import { withDurableWebhookResponse } from '@/lib/durable-webhook-response'
 import { checkUnauthenticatedIngressLimit } from '@/lib/ingress-admission'
-import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import {
   verifySallaWebhookAuth,
@@ -41,11 +40,10 @@ import {
 } from '@/lib/salla/webhook-auth'
 import { SALLA_DEFAULT_WEBHOOK_EVENTS } from '@/lib/salla-client'
 import { supabase } from '@/lib/supabase'
+import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { isWebhookEventEnabled } from '@/lib/webhook-gate'
 import { logWebhookSkip } from '@/lib/webhook-skip-log'
-import {
-  isStrictWebhookAuth,
-} from '@/lib/webhook-strict'
+import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 
 /**
  * Deliveries that carried no verifiable credential, i.e. from a subscription
