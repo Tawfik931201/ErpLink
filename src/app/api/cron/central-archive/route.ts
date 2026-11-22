@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { isOdooArchiveEnabled } from '@/lib/central-odoo-archive'
+import { secretMatches } from '@/lib/webhook-secret'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +20,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET
   const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
-  if (!secret || bearer !== secret) {
+  if (!secret || !secretMatches(bearer ?? '', secret)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   if (!isOdooArchiveEnabled()) {
