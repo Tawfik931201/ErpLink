@@ -105,7 +105,10 @@ export function verifyZidWebhookAuthorization(
   const credential = getZidWebhookCredential(merchantId)
   const provided = (authorizationHeader ?? '').trim()
 
-  if (!provided) return credential ? { status: 'legacy' } : { status: 'unconfigured' }
+  if (!provided) {
+    if (credential) return { status: 'legacy' }
+    return merchantId !== undefined && process.env.ENCRYPTION_KEY ? { status: 'invalid' } : { status: 'unconfigured' }
+  }
   if (!credential) return process.env.ENCRYPTION_KEY ? { status: 'invalid' } : { status: 'unconfigured' }
 
   const scheme = /^basic\s+(.+)$/i.exec(provided)
