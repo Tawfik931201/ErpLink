@@ -10,6 +10,9 @@ on:
       - 'src/lib/odoo-client.ts'
       - 'src/lib/zid/webhooks.ts'
       - 'src/lib/zid/webhook-auth.ts'
+      - 'src/lib/zid/webhook-auth-migration.ts'
+      - 'src/instrumentation.ts'
+      - 'supabase/migrations/**'
       - 'src/app/api/admin/zid-webhooks/refresh/**'
       - 'package.json'
       - 'package-lock.json'
@@ -26,6 +29,7 @@ on:
       - 'src/app/(app)/app/tickets/**'
       - 'tests/unit/crypto.test.ts'
       - 'tests/unit/zid-webhook-auth.test.ts'
+      - 'tests/unit/zid-webhook-auth-migration.test.ts'
       - 'tests/unit/zid-token-storage.test.ts'
       - 'tests/unit/shopify-offline-token.test.ts'
       - 'tests/unit/security-hardening.test.ts'
@@ -63,7 +67,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
           SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
-        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts
+        run: npm test -- --runInBand tests/unit/crypto.test.ts tests/unit/security-hardening.test.ts tests/unit/zid-webhook-auth.test.ts tests/unit/zid-webhook-auth-migration.test.ts
       - name: Full Jest regression baseline (diagnostic)
         continue-on-error: true
         env:
