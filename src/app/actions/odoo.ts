@@ -145,7 +145,7 @@ export async function detectOdooVersion(): Promise<{
 function validateSafeExternalUrl(rawUrl: string): { valid: boolean; error?: string } {
   try {
     const parsed = new URL(rawUrl)
-    const hostname = parsed.hostname.replace(/^\\[|\\]$/g, '').toLowerCase()
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase()
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return { valid: false, error: 'بروتوكول الرابط غير مدعوم، يجب أن يكون http أو https' }
     }
