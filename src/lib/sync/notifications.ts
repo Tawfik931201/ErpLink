@@ -36,9 +36,11 @@ function extractDetailsFromPayload(event: string, data?: Record<string, unknown>
     const prod = (d.product && typeof d.product === 'object') ? d.product : d
     const prodName = prod.name?.ar || prod.name?.en || prod.name || prod.title || d.name?.ar || d.name?.en || d.name || d.title
     const sku = prod.sku || prod.code || prod.barcode || d.sku || d.code || d.barcode
+    const storeProdId = prod.id || d.id || prod.product_id || d.product_id
     return {
       productName: prodName ? String(prodName) : null,
       productSku: sku ? String(sku) : null,
+      orderNumber: storeProdId ? String(storeProdId) : null,
     }
   }
 
@@ -127,14 +129,25 @@ export async function notifySyncForRecord(
   await notifySyncResult({ workspaceId: wsId, record: summary, eventKey: eventKey ?? null }).catch(() => {})
   // Independent best-effort channel; does not change Odoo commits or mapping.
   try {
+    let platform = 'zid'
+    const evLower = (event || '').toLowerCase()
+    if (evLower.startsWith('salla') || evLower.includes('.salla.')) platform = 'salla'
+    else if (evLower.startsWith('shopify') || evLower.includes('.shopify.')) platform = 'shopify'
+    else if ((mappingName || '').toLowerCase().includes('salla')) platform = 'salla'
+    else if ((mappingName || '').toLowerCase().includes('shopify')) platform = 'shopify'
+
     const { recordAppNotification } = await import('@/lib/app-notifications')
     await recordAppNotification({
       workspaceId: wsId,
-      platform: 'zid',
+      platform,
       event,
       eventKey: 'result:' + (eventKey || [storeId || '', event, record.odooRecordId || '', record.status, mappingId].join(':')),
       status: summary.status === 'processing' ? 'received' : summary.status,
       reference: details?.orderNumber ? String(details.orderNumber) : details?.productSku ? String(details.productSku) : null,
+      odooRecordId: record.odooRecordId,
+      details,
+      payload: payloadData,
+      errorMessage: summary.errorMessage,
     })
   } catch {
     console.warn('[Sync Notifications] App notification enqueue unavailable')
