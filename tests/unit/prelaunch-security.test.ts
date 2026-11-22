@@ -7,7 +7,7 @@ import { POST as impersonate } from '@/app/api/admin/impersonate/route'
 import { GET as releaseHealth } from '@/app/api/health/live/route'
 
 // These only exercise safe early-rejection branches; never call Clerk or DB.
-const fakeRequest = (body: string | Uint8Array, headers: Record<string, string> = {}) =>
+const fakeRequest = (body: string, headers: Record<string, string> = {}) =>
   new Request('https://erplink.bizsahla.com/api/webhooks/clerk', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...headers },
@@ -37,7 +37,7 @@ describe('Clerk Svix webhook prelaunch guards', () => {
   })
 
   it('limits a streaming upload to one megabyte before validating the signature', async () => {
-    const response = await clerkWebhook(fakeRequest(new Uint8Array(1_000_010), {
+    const response = await clerkWebhook(fakeRequest('a'.repeat(1_000_010), {
       'svix-id': 'msg_test',
       'svix-timestamp': String(Math.floor(Date.now() / 1000)),
       'svix-signature': 'v1,deliberately-invalid',
