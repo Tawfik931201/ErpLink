@@ -83,7 +83,15 @@ export default function NotificationCenter() {
       const res = await fetch(endpoint, { cache: 'no-store' })
       if (!res.ok) { setError('تعذر التحقق من إعدادات الإشعارات على الخادم.'); return }
       const data: ResponseData = await res.json()
-      setItems(data.notifications)
+      setItems(current => {
+        const merged = new Map<string, Entry>()
+        for (const item of data.notifications ?? []) merged.set(item.id, item)
+        // Keep events received over SSE while this HTTP refresh was in flight.
+        for (const item of current) if (!merged.has(item.id)) merged.set(item.id, item)
+        return [...merged.values()]
+          .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+          .slice(0, 30)
+      })
       setWorkspaceId(data.workspaceId || '')
       setConfigured(Boolean(data.pushReady && data.vapidPublicKey))
       if ('serviceWorker' in navigator) {
