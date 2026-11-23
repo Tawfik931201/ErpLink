@@ -12,6 +12,7 @@ import {
   HelpCircle,
   MessageSquare,
   Headset,
+  Smile,
   Send,
   Loader2,
   User,
@@ -32,6 +33,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { TicketChatImageLightbox, TicketChatSelectedFiles, type TicketChatImagePreview } from '@/components/tickets/ticket-chat-media'
+import { getPastedTicketImages, mergeTicketChatFiles, type TicketChatFileError } from '@/lib/ticket-chat-media'
 
 /**
  * Minimal HTML sanitizer for Odoo chatter bodies (XSS fix).
@@ -87,6 +90,31 @@ function sanitizeOdooHtml(dirty: string): string {
     return ''
   }
 }
+
+/** Small dependency-free picker, including commonly used support emojis. */
+const CHAT_EMOJIS = [
+  '😀', '😁', '😂', '🤣', '😊', '😍', '🥰', '😎',
+  '🤔', '😕', '😢', '😭', '😡', '😮', '🙏', '👏',
+  '👍', '👎', '👌', '🤝', '👋', '💪', '❤️', '💚',
+  '🎉', '✅', '❌', '⚠️', '📷', '📎', '💡', '💬',
+  '🔥', '⭐', '🚀', '🛠️', '📦', '🧾', '🛒', '✨',
+]
+
+const TICKET_ATTACHMENT_ERRORS: Record<'ar' | 'en', Record<TicketChatFileError, string>> = {
+  ar: {
+    too_many: 'يمكن إرسال 5 مرفقات كحد أقصى في الرسالة.',
+    file_too_large: 'الحد الأقصى لحجم المرفق الواحد 10 ميجابايت.',
+    total_too_large: 'إجمالي المرفقات يجب ألا يتجاوز 20 ميجابايت.',
+    invalid_file: 'الملف المرفق غير صالح.',
+  },
+  en: {
+    too_many: 'You can attach up to 5 files per message.',
+    file_too_large: 'Each attachment must be 10 MB or less.',
+    total_too_large: 'Combined attachments must be 20 MB or less.',
+    invalid_file: 'Invalid attachment.',
+  },
+}
+
 interface TicketsClientProps {
   initialTickets: Ticket[]
   success: boolean
@@ -203,6 +231,11 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   const [messages, setMessages] = useState<OdooMessage[]>([])
   const [attachments, setAttachments] = useState<OdooAttachment[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [activeImage, setActiveImage] = useState<TicketChatImagePreview | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const activeTicketIdRef = useRef<number | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
@@ -218,6 +251,55 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   
   const { lang, dir } = useLanguage()
   const tLocal = LOCAL_TEXTS[lang === 'ar' ? 'ar' : 'en']
+  const chatLang: 'ar' | 'en' = lang === 'ar' ? 'ar' : 'en'
+
+  const appendFiles = (files: File[]) => {
+    if (!files.length || sendingReply) return
+    const result = mergeTicketChatFiles(selectedFiles, files)
+    if (result.error) {
+      setReplyError(TICKET_ATTACHMENT_ERRORS[chatLang][result.error])
+      return
+    }
+    setSelectedFiles(result.files)
+    setReplyError(null)
+  }
+
+  const pasteImages = (event: React.ClipboardEvent<HTMLElement>) => {
+    const files = getPastedTicketImages(event.clipboardData.items)
+    if (!files.length) return // Normal text paste continues unchanged.
+    event.preventDefault()
+    appendFiles(files)
+  }
+
+  const insertEmoji = (emoji: string) => {
+    const input = composerRef.current
+    const cursor = input?.selectionStart ?? replyText.length
+    const end = input?.selectionEnd ?? replyText.length
+    setReplyText(text => text.slice(0, cursor) + emoji + text.slice(end))
+    setShowEmojiPicker(false)
+    requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(cursor + emoji.length, cursor + emoji.length)
+    })
+  }
+
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !emojiPickerRef.current?.contains(event.target)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowEmojiPicker(false)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [showEmojiPicker])
 
   // Sync state if initialTickets change on server revalidation
   useEffect(() => {
@@ -247,6 +329,9 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   useEffect(() => {
     activeTicketIdRef.current = selectedTicketId
     stickToBottomRef.current = true
+    setSelectedFiles([])
+    setActiveImage(null)
+    setShowEmojiPicker(false)
     if (selectedTicketId !== null) {
       setMessages([])
       setAttachments([])
@@ -391,6 +476,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
       const res = await sendTicketMessage(formData)
       if (res.success) {
         setReplyText('')
+        setActiveImage(null)
         setSelectedFiles([])
         const fileInput = document.getElementById('chatter-attachments') as HTMLInputElement
         if (fileInput) fileInput.value = ''
