@@ -799,101 +799,134 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                   </p>
                 </div>
               ) : (
-                <form onSubmit={handleSendReply} className="shrink-0 space-y-3 border-t border-border/60 bg-card/95 p-3 sm:p-4">
+                <form
+                  onSubmit={handleSendReply}
+                  onDragOver={event => {
+                    if (event.dataTransfer.types.includes('Files')) event.preventDefault()
+                  }}
+                  onDrop={event => {
+                    if (!event.dataTransfer.files.length) return
+                    event.preventDefault()
+                    appendFiles(Array.from(event.dataTransfer.files))
+                  }}
+                  className="shrink-0 space-y-2.5 border-t border-[#d1d7db] bg-[#f0f2f5] p-3 dark:border-[#2a3942] dark:bg-[#202c33]"
+                >
                   {replyError && (
-                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/10 text-destructive text-[11px] border border-destructive/20">
+                    <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-950/60 dark:text-red-200">
                       <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                       <span>{replyError}</span>
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <textarea
-                      placeholder={tLocal.chatterPlaceholder}
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      disabled={sendingReply}
-                      rows={2}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                          event.preventDefault()
-                          event.currentTarget.form?.requestSubmit()
-                        }
-                      }}
-                      className={cn(
-                        'w-full rounded-2xl border border-border bg-secondary/15 px-4 py-3 text-sm leading-6 text-foreground resize-none',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 focus-visible:border-foreground',
-                        'disabled:opacity-50 disabled:bg-muted'
-                      )}
-                    />
-                    
-                    {selectedFiles.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold text-muted-foreground pb-2">
-                        {selectedFiles.map((file, idx) => (
-                          <span key={idx} className="flex items-center gap-1 bg-secondary/80 px-2 py-0.5 rounded-lg border border-border">
-                            <FileText className="h-3 w-3 shrink-0 text-foreground" />
-                            <span className="truncate max-w-[120px]">{file.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                              className="text-muted-foreground hover:text-destructive shrink-0 ml-1 rounded-md p-0.5"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                  <TicketChatSelectedFiles
+                    files={selectedFiles}
+                    lang={chatLang}
+                    onPreview={setActiveImage}
+                    onRemove={index => {
+                      setActiveImage(null)
+                      setSelectedFiles(files => files.filter((_, i) => i !== index))
+                    }}
+                  />
 
-                    <div className="flex justify-between items-center gap-3">
-                      {/* Styled Paperclip Button to Trigger Hidden File Input */}
-                      <div className="flex items-center">
-                        <input
-                          id="chatter-attachments"
-                          name="attachments"
-                          type="file"
-                          multiple
-                          disabled={sendingReply}
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files) {
-                              const newFiles = Array.from(e.target.files)
-                              setSelectedFiles((prev) => [...prev, ...newFiles])
-                            }
-                          }}
-                        />
-                        <Button
+                  <div className="flex items-end gap-2" dir={dir}>
+                    <div className="relative flex min-w-0 flex-1 items-end rounded-2xl border border-[#d1d7db] bg-white shadow-sm focus-within:border-[#00a884] dark:border-[#3b4a54] dark:bg-[#2a3942]">
+                      <div ref={emojiPickerRef} className="relative shrink-0 self-end">
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          onClick={() => setShowEmojiPicker(open => !open)}
                           disabled={sendingReply}
-                          className="h-8 w-8 p-0 rounded-lg"
-                          onClick={() => document.getElementById('chatter-attachments')?.click()}
+                          aria-label={chatLang === 'ar' ? 'إضافة رمز تعبيري' : 'Insert emoji'}
+                          aria-expanded={showEmojiPicker}
+                          aria-controls="ticket-chat-emoji-picker"
+                          className="flex h-11 w-10 items-center justify-center text-[#54656f] transition-colors hover:text-[#00a884] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] disabled:opacity-50 dark:text-[#8696a0] dark:hover:text-[#25d366]"
                         >
-                          <Paperclip className="h-4.5 w-4.5 text-muted-foreground hover:text-foreground transition-colors" />
-                        </Button>
+                          <Smile className="h-[22px] w-[22px]" />
+                        </button>
+                        {showEmojiPicker && (
+                          <div
+                            id="ticket-chat-emoji-picker"
+                            role="dialog"
+                            aria-label={chatLang === 'ar' ? 'الرموز التعبيرية' : 'Emojis'}
+                            className="absolute bottom-full start-0 z-30 mb-3 w-[min(318px,78vw)] rounded-xl border border-[#d1d7db] bg-white p-3 shadow-2xl dark:border-[#3b4a54] dark:bg-[#202c33]"
+                          >
+                            <p className="mb-2 text-xs font-semibold text-[#54656f] dark:text-[#d1d7db]">
+                              {chatLang === 'ar' ? 'اختر رمزًا تعبيريًا' : 'Choose an emoji'}
+                            </p>
+                            <div className="grid grid-cols-8 gap-1" dir="ltr">
+                              {CHAT_EMOJIS.map(emoji => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onMouseDown={event => event.preventDefault()}
+                                  onClick={() => insertEmoji(emoji)}
+                                  aria-label={(chatLang === 'ar' ? 'إدراج ' : 'Insert ') + emoji}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-[22px] transition-colors hover:bg-[#e9edef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:hover:bg-[#374952]"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <Button 
-                        type="submit" 
-                        variant="brand" 
-                        size="sm"
-                        className="font-bold gap-1.5 rounded-lg text-xs"
-                        disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
+                      <textarea
+                        ref={composerRef}
+                        placeholder={tLocal.chatterPlaceholder}
+                        value={replyText}
+                        onChange={event => setReplyText(event.target.value)}
+                        onPaste={pasteImages}
+                        disabled={sendingReply}
+                        rows={1}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                            event.preventDefault()
+                            if (!sendingReply) event.currentTarget.form?.requestSubmit()
+                          }
+                        }}
+                        className="min-h-[44px] max-h-28 w-full min-w-0 flex-1 resize-none bg-transparent px-2 py-2.5 text-[13px] leading-6 text-[#111b21] placeholder:text-[#8696a0] focus-visible:outline-none disabled:opacity-50 dark:text-[#e9edef]"
+                      />
+
+                      <input
+                        ref={fileInputRef}
+                        id="chatter-attachments"
+                        name="attachments"
+                        type="file"
+                        multiple
+                        disabled={sendingReply}
+                        className="hidden"
+                        onChange={event => {
+                          const files = event.currentTarget.files
+                          if (files?.length) appendFiles(Array.from(files))
+                          event.currentTarget.value = ''
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={sendingReply}
+                        onClick={() => fileInputRef.current?.click()}
+                        aria-label={chatLang === 'ar' ? 'إرفاق صور أو ملفات' : 'Attach pictures or files'}
+                        className="flex h-11 w-10 shrink-0 items-center justify-center text-[#54656f] transition-colors hover:text-[#00a884] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] disabled:opacity-50 dark:text-[#8696a0] dark:hover:text-[#25d366]"
                       >
-                        {sendingReply ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <>
-                            <Send className={cn("h-3 w-3 shrink-0", dir === 'rtl' ? "rotate-180" : "")} />
-                            <span>{tLocal.sendReplyBtn}</span>
-                          </>
-                        )}
-                      </Button>
+                        <Paperclip className="h-[21px] w-[21px]" />
+                      </button>
                     </div>
+
+                    <button
+                      type="submit"
+                      disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
+                      aria-label={tLocal.sendReplyBtn}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white shadow-sm transition-colors hover:bg-[#008f72] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25d366] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#00a884]"
+                    >
+                      {sendingReply
+                        ? <Loader2 className="h-5 w-5 animate-spin" />
+                        : <Send className={cn('h-5 w-5', dir === 'rtl' ? 'rotate-180' : '')} />}
+                    </button>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/80">
-                    {lang === 'ar' ? 'Enter للإرسال · Shift + Enter لسطر جديد' : 'Enter to send · Shift + Enter for a new line'}
+                  <p className="px-1 text-[10px] text-[#667781] dark:text-[#8696a0]">
+                    {chatLang === 'ar'
+                      ? 'Ctrl + V للصق صورة · Enter للإرسال · Shift + Enter لسطر جديد'
+                      : 'Ctrl + V to paste an image · Enter to send · Shift + Enter for a new line'}
                   </p>
                 </form>
               )}
