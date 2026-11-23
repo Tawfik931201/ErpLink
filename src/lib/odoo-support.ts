@@ -105,14 +105,16 @@ function validateFiles(files: File[]) {
   }
   if (total > MAX_TOTAL_BYTES) throw new Error('Attachments exceed 20 MB')
 }
-async function partnerByEmail(email: string, name: string): Promise<number> {
+async function partnerByEmail(email: string, name: string, phone = '', company = ''): Promise<number> {
   const rows = await centralSupportCall<Array<{ id: number }>>(
     'res.partner', 'search_read', [[['email', '=ilike', email]]],
     { fields: ['id'], limit: 1 },
   )
   if (rows.length) return rows[0].id
   return centralSupportCall<number>('res.partner', 'create', [{
-    name: name || email, email, company_type: 'person',
+    name: name || email, email,
+    ...(phone ? { phone } : {}),
+    ...(company ? { comment: '<p>Company: ' + html(company) + '</p>' } : {}),
   }])
 }
 async function addAttachments(ticketId: number, messageId: number, files: File[]) {
@@ -163,7 +165,7 @@ export async function listOdooTickets() {
       name: row.x_subject || row.x_name || 'Support Ticket',
       ticket_ref: 'SUP-' + row.id,
       stage_id: [0, stageNames[stage] || stage] as [number, string],
-      create_date: row.create_date,
+      create_date: row.create_date.includes('T') ? row.create_date : row.create_date.replace(' ', 'T') + 'Z',
       description: row.x_description || false,
     }
   })
@@ -214,14 +216,14 @@ export async function readOdooMessages(id: number) {
     ),
   ])
   const messages = rows.map(row => ({
-    id: row.id, body: row.body || '', date: row.date,
+    id: row.id, body: row.body || '', date: row.date.includes('T') ? row.date : row.date.replace(' ', 'T') + 'Z',
     author_id: row.author_id, attachment_ids: row.attachment_ids || [],
   }))
   for (const msg of legacy) {
     messages.push({
       id: -msg.id,
       body: html(msg.x_message || ''),
-      date: msg.x_submitted_at || msg.create_date,
+      date: (msg.x_submitted_at || msg.create_date).replace(' ', 'T') + 'Z',
       author_id: [0, msg.x_author_email || 'Support'],
       attachment_ids: [],
     })
@@ -247,7 +249,7 @@ export async function sendOdooMessage(id: number, body: string, files: File[]) {
   validateFiles(files)
   if (!body.trim() && files.length === 0) throw new Error('Please enter a message or attach a file')
   const ticket = await ownedTicket(id)
-  if (ticket.x_ticket_stage === 'closed' || ticket.x_status === 'closed') {
+  if (ticket.x_ticket_stage === 'closed' || (!ticket.x_ticket_stage && ticket.x_status === 'closed')) {
     throw new Error('Ticket is closed')
   }
   const partnerId = Array.isArray(ticket.x_partner_id) ? ticket.x_partner_id[0] : null
@@ -346,7 +348,7 @@ export async function createPublicContactTicket(input: {
   name: string; email: string; phone: string; company: string; message: string;
 }, sourceUuid: string): Promise<number> {
   const email = input.email.trim().toLowerCase()
-  const partnerId = await partnerByEmail(email, input.name)
+  const partnerId = await partnerByEmail(email, input.name, input.phone, input.company)
   const subject = 'Contact: ' + input.company + ' — ' + input.name
   const id = await centralSupportCall<number>(TICKET, 'create', [{
     x_name: subject, x_subject: subject, x_description: input.message,
