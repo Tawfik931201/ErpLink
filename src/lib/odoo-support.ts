@@ -5,6 +5,7 @@ import { auth, currentUser } from '@clerk/nextjs/server'
 
 import { centralSupportCall } from '@/lib/central-odoo-archive'
 import { normalizeOdooMessageId } from '@/lib/odoo-message-id'
+import { publishTicketLiveEvent } from '@/lib/ticket-live-events'
 import {
   checkImpersonationWriteBlock, getActiveUserId, getActiveWorkspaceId, isAdmin,
 } from '@/lib/auth'
@@ -83,6 +84,11 @@ async function session() {
   if (!admin && !workspaceId) throw new Error('No active workspace')
   return { userId, workspaceId, admin }
 }
+/** Authorize realtime stream subscription using the same scope as ticket reads. */
+export async function assertTicketLiveAccess(id: number): Promise<void> {
+  await ownedTicket(id)
+}
+
 async function ownedTicket(id: number) {
   validId(id)
   const { userId, workspaceId, admin } = await session()
@@ -149,6 +155,9 @@ async function postCustomerMessage(
   )
   const postedId = normalizeOdooMessageId(postedResult)
   await addAttachments(ticketId, postedId, files)
+  // Notify active browsers on this Node process after the Odoo write succeeds.
+  // Odoo's Studio webhook also signals replies created inside Odoo itself.
+  publishTicketLiveEvent(ticketId)
   return postedId
 }
 
