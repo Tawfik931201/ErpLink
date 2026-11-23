@@ -133,8 +133,8 @@ export function archiveDatetime(value: string | null | undefined): string | fals
 
 /** Server-only access to the central Odoo Discuss models for support tickets. */
 export async function centralDiscussCall<T>(
-  model: 'discuss.channel' | 'mail.message' | 'res.users',
-  method: 'search_read' | 'search' | 'create' | 'message_post' | 'read',
+  model: 'discuss.channel' | 'mail.message' | 'res.users' | 'ir.attachment' | 'res.partner' | 'x_erplink_support_ticket' | 'x_erplink_contact_message',
+  method: 'search_read' | 'search' | 'create' | 'message_post' | 'read' | 'write' | 'search_count',
   args: unknown[],
   kwargs: Record<string, unknown> = {},
 ): Promise<T> {
@@ -150,3 +150,6 @@ export async function centralDiscussCall<T>(
   return rpc<T>(cfg, 'object', 'execute_kw',
     [cfg.db, authentication.uid, cfg.password, model, method, args, kwargs])
 }
+
+/** All support records live in the central Odoo Studio database, never in merchant Odoo. */
+export const centralSupportCall = centralDiscussCall
