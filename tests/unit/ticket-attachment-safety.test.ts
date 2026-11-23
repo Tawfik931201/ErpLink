@@ -1,44 +1,44 @@
-import fs from 'fs'
+import { readFileSync } from 'fs'
 import path from 'path'
 
-const source = fs.readFileSync(
-  path.join(process.cwd(), 'src/app/api/tickets/attachments/route.ts'), 'utf8'
+const route = readFileSync(
+  path.join(process.cwd(), 'src/app/api/tickets/attachments/route.ts'), 'utf8',
+)
+const support = readFileSync(
+  path.join(process.cwd(), 'src/lib/odoo-support.ts'), 'utf8',
 )
 
-describe('Odoo helpdesk attachment security and compatibility', () => {
-  it('reads metadata without including removed Odoo 20 binary fields', () => {
-    expect(source).toContain("fields: ['name', 'mimetype', 'res_model', 'res_id', 'file_size']")
-    expect(source).not.toContain("fields: ['name', 'raw', 'datas'")
+describe('central Odoo Studio attachment security', () => {
+  it('never reaches a merchant Odoo or Supabase instance for ticket binaries', () => {
+    expect(route).not.toContain("from '@/lib/odoo'")
+    expect(route).not.toContain('supabase')
+    expect(route).toContain('readOwnedOdooAttachment(id)')
+    expect(support).toContain("'ir.attachment', 'read'")
   })
-
-  it('validates ticket ownership before fetching binary content', () => {
-    const owner = source.indexOf("if (!isOwner)")
-    const binary = source.indexOf("fields: ['raw']")
-    expect(owner).toBeGreaterThan(-1)
-    expect(binary).toBeGreaterThan(owner)
-    expect(source).toContain("['partner_email', '=', userEmail]")
+  it('authorizes the ticket owner before reading the attachment binary', () => {
+    const start = support.indexOf('export async function readOwnedOdooAttachment')
+    const snippet = support.slice(start)
+    expect(snippet.indexOf('await ownedTicket(ticketId)')).toBeGreaterThan(-1)
+    expect(snippet.indexOf("['raw']")).toBeGreaterThan(
+      snippet.indexOf('await ownedTicket(ticketId)'))
   })
-
-  it('rejects oversized file_size metadata before fetching from Odoo', () => {
-    const cap = source.indexOf('declaredSize > MAX_ATTACHMENT_BYTES')
-    const binary = source.indexOf("fields: ['raw']")
-    expect(cap).toBeGreaterThan(-1)
-    expect(cap).toBeLessThan(binary)
+  it('never exposes Odoo internal notes and only serves public linked attachments', () => {
+    expect(support).toContain("['is_internal', '=', false]")
+    expect(support).toContain("['attachment_ids', 'in', [id]]")
+    expect(support).toContain("throw new Error('Internal attachment')")
+    expect(support).toContain("!msgs[0].is_internal")
   })
-
-  it('retries the legacy datas field only when raw is not in the model', () => {
-    expect(source).toContain("fields: ['raw']")
-    expect(source).toContain("fields: ['datas']")
-    expect(source).toContain('if (!/invalid field')
-    expect(source).toContain('throw error')
+  it('checks file size before base64 decoding', () => {
+    const start = support.indexOf('export async function readOwnedOdooAttachment')
+    const snippet = support.slice(start)
+    expect(snippet.indexOf('file.file_size > MAX_FILE_BYTES')).toBeGreaterThan(-1)
+    expect(snippet.indexOf('encoded.length >')).toBeLessThan(
+      snippet.indexOf("Buffer.from(encoded, 'base64')"))
+    expect(snippet).toContain("buffer.length > MAX_FILE_BYTES")
   })
-
-  it('rejects oversized encoded payloads before Buffer.from allocates a decoded copy', () => {
-    const lenGuard = source.indexOf('base64Data.length > MAX_BASE64_CHARS')
-    const decoding = source.indexOf("Buffer.from(base64Data, 'base64')")
-    expect(lenGuard).toBeGreaterThan(-1)
-    expect(decoding).toBeGreaterThan(lenGuard)
-    expect(source).toContain("Content-Disposition")
-    expect(source).toContain("X-Content-Type-Options")
+  it('returns downloaded files as attachments with strict browser headers', () => {
+    expect(route).toContain('Content-Disposition')
+    expect(route).toContain('X-Content-Type-Options')
+    expect(route).toContain('private, no-store')
   })
 })

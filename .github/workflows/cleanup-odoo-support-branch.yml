@@ -1,0 +1,27 @@
+name: Cleanup merged Odoo support feature branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-temporary-support-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 64 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'feat/odoo-only-support-studio-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the merged temporary support branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/feat/odoo-only-support-studio-20261123" ||
+            echo 'Temporary support branch was already removed'

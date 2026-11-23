@@ -3,9 +3,9 @@
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { auth } from '@clerk/nextjs/server'
 import {
-  listSupabaseTickets, createSupabaseTicket, readSupabaseMessages,
-  sendSupabaseMessage, closeSupabaseTicket, pendingSupabaseTickets,
-} from '@/lib/supabase-support'
+  listOdooTickets, createOdooTicket, readOdooMessages,
+  sendOdooMessage, closeOdooTicket, pendingOdooTickets,
+} from '@/lib/odoo-support'
 
 export interface Ticket {
   id: number
@@ -30,11 +30,10 @@ export interface OdooAttachment {
   mimetype: string
 }
 
-/** ERP Link support is private, workspace-scoped and stored in Supabase.
- * Merchant Odoo connections are used for ERP integrations only. */
+/** ERP Link support is workspace-scoped and stored in central Odoo Studio only. */
 export async function getClientTickets() {
   try {
-    const tickets: Ticket[] = await listSupabaseTickets()
+    const tickets: Ticket[] = await listOdooTickets()
     return { success: true, tickets }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Ticket list failed' }
@@ -49,7 +48,7 @@ export async function createTicket(formData: FormData) {
   const description = String(formData.get('description') || '')
   const files = formData.getAll('attachments').filter((value): value is File => typeof value !== 'string')
   try {
-    const result = await createSupabaseTicket(title, description, files)
+    const result = await createOdooTicket(title, description, files)
     if (result.success) revalidatePath('/app/tickets')
     return result
   } catch (error) {
@@ -59,8 +58,8 @@ export async function createTicket(formData: FormData) {
 
 export async function getTicketMessages(ticketId: number) {
   try {
-    if (ticketId >= 0) throw new Error('Invalid ticket ID')
-    const result = await readSupabaseMessages(ticketId)
+    if (!Number.isSafeInteger(ticketId) || ticketId <= 0) throw new Error('Invalid ticket ID')
+    const result = await readOdooMessages(ticketId)
     const messages: OdooMessage[] = result.messages
     return { success: true, messages, attachments: result.attachments as OdooAttachment[] }
   } catch (error) {
@@ -73,8 +72,8 @@ export async function sendTicketMessage(formData: FormData) {
   const message = String(formData.get('message') || '')
   const files = formData.getAll('attachments').filter((value): value is File => typeof value !== 'string')
   try {
-    if (!Number.isSafeInteger(ticketId) || ticketId >= 0) throw new Error('Invalid ticket ID')
-    const result = await sendSupabaseMessage(ticketId, message, files)
+    if (!Number.isSafeInteger(ticketId) || ticketId <= 0) throw new Error('Invalid ticket ID')
+    const result = await sendOdooMessage(ticketId, message, files)
     if (result.success) {
       revalidatePath('/app/tickets')
       revalidateTag('pending-tickets')
@@ -87,8 +86,8 @@ export async function sendTicketMessage(formData: FormData) {
 
 export async function closeTicket(ticketId: number) {
   try {
-    if (!Number.isSafeInteger(ticketId) || ticketId >= 0) throw new Error('Invalid ticket ID')
-    const result = await closeSupabaseTicket(ticketId)
+    if (!Number.isSafeInteger(ticketId) || ticketId <= 0) throw new Error('Invalid ticket ID')
+    const result = await closeOdooTicket(ticketId)
     if (result.success) {
       revalidatePath('/app/tickets')
       revalidateTag('pending-tickets')
@@ -101,7 +100,7 @@ export async function closeTicket(ticketId: number) {
 
 export async function checkPendingTickets() {
   try {
-    return await pendingSupabaseTickets()
+    return await pendingOdooTickets()
   } catch {
     return { success: false, hasPending: false }
   }
