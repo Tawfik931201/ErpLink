@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
 
 import { getUrlLocaleFromLanguage } from '@/lib/locale'
+import { publicBusinessProfile } from '@/lib/public-business-profile'
 import { resolveLanguage } from '@/lib/translations'
 
 // SEO is intentionally limited to publicly accessible marketing pages.
@@ -90,7 +91,10 @@ export async function publicPageMetadata(path: PublicPagePath): Promise<Metadata
   }
 }
 
-// Published public company and software facts; no unverified social profile URLs.
+// The core entity identity is public and known. Optional fields only appear
+// when the owner configures verified business facts in Hostinger.
+const business = publicBusinessProfile()
+
 export const homepageStructuredData = {
   '@context': 'https://schema.org',
   '@graph': [
@@ -100,12 +104,17 @@ export const homepageStructuredData = {
       name: 'ERP Link',
       url: PUBLIC_SITE_URL,
       logo: `${PUBLIC_SITE_URL}/logo.png`,
+      description: 'ERP Link connects Zid, Salla and Shopify stores to enterprise resource planning systems such as Odoo.',
       email: 'support@erplinks.com',
+      ...(business.telephone ? { telephone: business.telephone } : {}),
+      ...(business.address ? { address: business.address } : {}),
+      ...(business.sameAs.length ? { sameAs: business.sameAs } : {}),
       contactPoint: {
         '@type': 'ContactPoint',
         contactType: 'customer support',
         email: 'support@erplinks.com',
         url: `${PUBLIC_SITE_URL}/ar-sa/contact`,
+        ...(business.telephone ? { telephone: business.telephone } : {}),
       },
     },
     {

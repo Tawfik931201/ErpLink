@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers'
 import { ThemeProvider } from 'next-themes'
+import Script from 'next/script'
 
 import { LanguageProvider } from '@/components/language-provider'
 import { ScrollReveal } from '@/components/ui/scroll-reveal'
@@ -19,6 +20,7 @@ export default async function PublicLayout({ children }: { children: React.React
       >
         {children}
         <ScrollReveal />
+        <Script src="/agent-tools.js" strategy="afterInteractive" />
       </ThemeProvider>
     </LanguageProvider>
   )

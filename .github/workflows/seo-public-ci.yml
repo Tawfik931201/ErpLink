@@ -11,6 +11,18 @@ on:
       - 'src/app/(public)/**'
       - 'src/components/public-site-footer.tsx'
       - 'src/lib/public-seo.ts'
+      - 'src/lib/public-agent-content.ts'
+      - 'src/lib/public-business-profile.ts'
+      - 'src/lib/public-mcp.ts'
+      - 'src/middleware.ts'
+      - 'src/app/api/public-mcp/**'
+      - 'src/app/api/public-markdown/**'
+      - 'public/.well-known/**'
+      - 'public/agent-tools.js'
+      - 'scripts/verify-public-agent.mjs'
+      - 'tests/unit/agent-readiness.test.ts'
+      - 'docs/agent-readiness.md'
+      - '.github/workflows/cleanup-agent-discovery-branch.yml'
       - 'scripts/verify-public-seo.mjs'
       - '.github/workflows/seo-public-ci.yml'
 
@@ -33,6 +45,10 @@ jobs:
         run: npm run type-check
       - name: Check SEO routes and private-route exclusions
         run: node scripts/verify-public-seo.mjs
+      - name: Validate public agent card, Markdown, WebMCP and isolation
+        run: |
+          node scripts/verify-public-agent.mjs
+          node --check public/agent-tools.js
       - name: Existing application regression tests
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co

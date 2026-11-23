@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "com.bizsahla.erplink/public",
+  "version": "1.0.0",
+  "title": "ERP Link Public Information",
+  "description": "Public read-only integration guides for Zid, Salla, Shopify and Odoo.",
+  "websiteUrl": "https://erplink.bizsahla.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://erplink.bizsahla.com/api/public-mcp",
+      "supportedProtocolVersions": [
+        "2025-06-18"
+      ]
+    }
+  ]
+}
