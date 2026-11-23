@@ -41,7 +41,9 @@ export default async function IntegrationsPage() {
                     <p className="text-xs font-bold uppercase tracking-widest text-primary">{details.platformName} + Odoo</p>
                     <h3 className="mt-3 text-xl font-bold">{details.title[lang]}</h3>
                     <p className="mt-3 flex-1 text-sm leading-7 text-muted-foreground">{details.summary[lang]}</p>
-                    <Link href={`/integrations/${platform}-odoo`} className="mt-6 font-bold text-primary underline">{isAr ? 'تفاصيل الربط' : 'Explore integration'}</Link>
+                    <Link href={`/integrations/${platform}-odoo`} className="mt-6 font-bold text-primary underline">
+                      {isAr ? `تفاصيل ربط ${details.platformName} بأودوو` : `Explore ${details.platformName} Odoo integration`}
+                    </Link>
                   </article>
                 )
               })}

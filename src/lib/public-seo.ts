@@ -12,8 +12,8 @@ export type PublicPagePath = '/' | '/about' | '/pricing' | '/contact' | '/privac
 
 const copy: Record<PublicPagePath, { ar: { title: string; description: string }; en: { title: string; description: string } }> = {
   '/': {
-    ar: { title: 'ERP Link | ربط زد وسلة وشوبيفاي بأودوو وأنظمة ERP', description: 'اربط متجرك على زد أو سلة أو شوبيفاي بأنظمة ERP، ونسّق الطلبات والمنتجات والعملاء والمخزون من مكان واحد.' },
-    en: { title: 'ERP Link | Zid, Salla & Shopify Integration with Odoo', description: 'Connect Zid, Salla or Shopify with your ERP system. Synchronize orders, products, customers and inventory.' },
+    ar: { title: 'ERP Link (إي آر بي لينك) | ربط زد وسلة وشوبيفاي بأودوو', description: 'ERP Link منصة ربط المتاجر الإلكترونية بأودوو Odoo؛ اربط زد أو سلة أو شوبيفاي، ونسّق الطلبات والمنتجات والعملاء والمخزون وفق إعدادات متجرك.' },
+    en: { title: 'ERP Link (ErpLink) | Zid, Salla & Shopify Odoo Integration', description: 'Connect your Zid, Salla or Shopify store to Odoo with ERP Link. Configure order, product, customer and inventory synchronization for your business.' },
   },
   '/integrations': {
     ar: { title: 'ربط المتاجر الإلكترونية بأودوو | تكاملات ERP Link', description: 'دليلك لربط زد وسلة وشوبيفاي بأودوو Odoo: مزامنة الطلبات والمنتجات والمخزون والعملاء، وإعداد الخرائط وحالات الطلب.' },
@@ -102,6 +102,7 @@ export const homepageStructuredData = {
       '@type': 'Organization',
       '@id': `${PUBLIC_SITE_URL}/#organization`,
       name: 'ERP Link',
+      alternateName: ['ErpLink', 'ERPLink', 'إي آر بي لينك'],
       url: PUBLIC_SITE_URL,
       logo: `${PUBLIC_SITE_URL}/logo.png`,
       description: 'ERP Link connects Zid, Salla and Shopify stores to enterprise resource planning systems such as Odoo.',
@@ -121,6 +122,7 @@ export const homepageStructuredData = {
       '@type': 'WebSite',
       '@id': `${PUBLIC_SITE_URL}/#website`,
       name: 'ERP Link',
+      alternateName: ['ErpLink', 'إي آر بي لينك'],
       url: PUBLIC_SITE_URL,
       publisher: { '@id': `${PUBLIC_SITE_URL}/#organization` },
       inLanguage: ['ar-SA', 'en-US'],
