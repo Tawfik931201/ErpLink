@@ -120,15 +120,15 @@ export default async function HomePage() {
               >
                 {isAr ? (
                   <>
-                    اربط متجرك بالـ ERP
+                    ERP Link: ربط متجرك بأودوو
                     <br />
-                    <span className="text-primary">بخطٍّ واحد لا ينقطع</span>
+                    <span className="text-primary">زد وسلة وشوبيفاي في مكان واحد</span>
                   </>
                 ) : (
                   <>
-                    Connect your store to your ERP
+                    ERP Link: Connect your store to Odoo
                     <br />
-                    <span className="text-primary">over one unbroken line</span>
+                    <span className="text-primary">Zid, Salla &amp; Shopify in one place</span>
                   </>
                 )}
               </h1>
@@ -138,6 +138,11 @@ export default async function HomePage() {
                 style={{ animationDelay: '140ms' }}
               >
                 {t('landing.heroSubtitle')}
+              </p>
+              <p className="rise-in mt-3 max-w-xl text-sm leading-7 text-muted-foreground" style={{ animationDelay: '175ms' }}>
+                {isAr
+                  ? 'ERP Link (إي آر بي لينك) منصة ربط المتاجر الإلكترونية بنظام أودوو Odoo. تعرّف على إعدادات ربط زد وسلة وشوبيفاي، واختبر نقل الطلبات والمنتجات والمخزون قبل التشغيل.'
+                  : 'ERP Link (ErpLink) helps connect Zid, Salla and Shopify stores with Odoo. Review order, product and stock synchronization settings and test your workflows before launch.'}
               </p>
 
               <div
@@ -630,7 +635,9 @@ export default async function HomePage() {
                 <article key={item.href} className="rounded-2xl border border-border bg-card p-6">
                   <h3 className="text-lg font-bold">{item.title}</h3>
                   <p className="mt-2 text-sm leading-7 text-muted-foreground">{item.description}</p>
-                  <Link href={item.href} className="mt-5 inline-flex text-sm font-bold text-primary underline">{isAr ? 'اقرأ دليل الربط' : 'Read integration guide'}</Link>
+                  <Link href={item.href} className="mt-5 inline-flex text-sm font-bold text-primary underline">
+                    {isAr ? `اقرأ دليل ${item.title}` : `Read the ${item.title} guide`}
+                  </Link>
                 </article>
               ))}
             </div>
