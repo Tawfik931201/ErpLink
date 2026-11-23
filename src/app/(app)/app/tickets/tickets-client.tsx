@@ -11,6 +11,7 @@ import {
   AlertCircle, 
   HelpCircle,
   MessageSquare,
+  Headset,
   Send,
   Loader2,
   User,
@@ -23,7 +24,7 @@ import {
 import { useState, useEffect, useRef } from 'react'
 
 import type { Ticket, OdooMessage, OdooAttachment} from '@/app/actions/tickets';
-import { getTicketMessages, sendTicketMessage, closeTicket } from '@/app/actions/tickets'
+import { getTicketMessages, sendTicketMessage, closeTicket, markTicketRead, getClientTickets } from '@/app/actions/tickets'
 import CreateTicketForm from '@/components/CreateTicketForm'
 import { useLanguage } from '@/components/language-provider'
 import { Badge } from '@/components/ui/badge'
@@ -204,6 +205,10 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const activeTicketIdRef = useRef<number | null>(null)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const acknowledgedRef = useRef<Map<number, number>>(new Map())
+  const readInFlightRef = useRef<Set<number>>(new Set())
   const [replyText, setReplyText] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
   const [replyError, setReplyError] = useState<string | null>(null)
@@ -241,6 +246,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
   useEffect(() => {
     activeTicketIdRef.current = selectedTicketId
+    stickToBottomRef.current = true
     if (selectedTicketId !== null) {
       void loadMessages(selectedTicketId)
     } else {
@@ -292,6 +298,47 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     }
   }, [view, selectedTicketId])
 
+  // Messenger-style behavior: preserve scroll position while a customer reads
+  // older messages; otherwise keep the newest reply visible.
+  useEffect(() => {
+    if (view !== 'detail' || selectedTicketId === null) return
+    const el = chatScrollRef.current
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [messages, view, selectedTicketId])
+
+  const acknowledgeVisibleSupportMessages = async () => {
+    const ticketId = selectedTicket?.id
+    const el = chatScrollRef.current
+    if (ticketId == null || view !== 'detail' || !el ||
+        document.visibilityState !== 'visible') return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 90
+    if (!atBottom || readInFlightRef.current.has(ticketId)) return
+    const lastSupportId = messages.reduce((max, msg) =>
+      !msg.is_customer && msg.id > max ? msg.id : max, 0)
+    if (!lastSupportId || lastSupportId <= (acknowledgedRef.current.get(ticketId) || 0)) return
+    readInFlightRef.current.add(ticketId)
+    try {
+      const result = await markTicketRead(ticketId, lastSupportId)
+      if (result.success) {
+        acknowledgedRef.current.set(ticketId, lastSupportId)
+        setTickets(current => current.map(ticket =>
+          ticket.id === ticketId ? { ...ticket, unread_count: 0 } : ticket))
+        window.dispatchEvent(new Event('erp-ticket-read'))
+      }
+    } catch (error) {
+      console.warn('[tickets] failed to acknowledge support messages:', error)
+    } finally {
+      readInFlightRef.current.delete(ticketId)
+    }
+  }
+
+  // Only acknowledge when the discussion is visible AND scrolled to the newest
+  // message, never just because a hidden tab received an SSE invalidation.
+  useEffect(() => {
+    if (view !== 'detail' || selectedTicketId === null) return
+    void acknowledgeVisibleSupportMessages()
+  }, [messages, view, selectedTicketId])
+
   // Filtered tickets based on search
   const filteredTickets = tickets.filter(ticket => {
     const titleMatch = ticket.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -303,7 +350,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   // Submit reply action
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!replyText.trim() || !selectedTicket) return
+    if ((!replyText.trim() && selectedFiles.length === 0) || !selectedTicket) return
 
     setSendingReply(true)
     setReplyError(null)
@@ -733,7 +780,13 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
         <div className="max-w-xl mx-auto">
           <CreateTicketForm 
-            onSuccess={() => setView('list')} 
+            onSuccess={() => {
+              window.dispatchEvent(new Event('erp-tickets-changed'))
+              void getClientTickets().then(result => {
+                if (result.success && result.tickets) setTickets(result.tickets)
+              })
+              setView('list')
+            }} 
             onCancel={() => setView('list')} 
           />
         </div>
