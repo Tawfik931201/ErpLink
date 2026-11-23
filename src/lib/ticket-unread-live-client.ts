@@ -12,6 +12,9 @@ function notify() {
   for (const fn of listeners) {
     try { fn() } catch { /* one bad component must not stop others */ }
   }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('erp-ticket-updated'))
+  }
 }
 
 function open() {
