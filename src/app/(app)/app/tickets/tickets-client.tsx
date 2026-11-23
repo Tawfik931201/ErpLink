@@ -341,6 +341,29 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     void acknowledgeVisibleSupportMessages()
   }, [messages, loadingMessages, view, selectedTicketId])
 
+  // Keep per-ticket unread pills in sync when an agent replies while the
+  // customer is browsing the ticket list. Never poll Odoo in the background.
+  useEffect(() => {
+    if (view !== 'list') return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let active = true
+    const refreshTickets = () => {
+      if (document.visibilityState !== 'visible') return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        void getClientTickets().then(result => {
+          if (active && result.success && result.tickets) setTickets(result.tickets)
+        }).catch(() => {})
+      }, 850)
+    }
+    window.addEventListener('erp-ticket-updated', refreshTickets)
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('erp-ticket-updated', refreshTickets)
+    }
+  }, [view])
+
   // Filtered tickets based on search
   const filteredTickets = tickets.filter(ticket => {
     const titleMatch = ticket.name.toLowerCase().includes(searchQuery.toLowerCase())
