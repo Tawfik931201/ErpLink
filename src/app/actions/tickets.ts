@@ -104,7 +104,7 @@ export async function checkPendingTickets() {
   try {
     return await pendingOdooTickets()
   } catch {
-    return { success: false, hasPending: false }
+    return { success: false, hasPending: false, unreadCount: 0 }
   }
 }
 
