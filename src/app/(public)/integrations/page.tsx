@@ -5,6 +5,7 @@ import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { integrations, type IntegrationPlatform } from '@/lib/integration-content'
 import { publicPageMetadata } from '@/lib/public-seo'
+import { integrationsIndexStructuredData } from '@/lib/public-structured-data'
 import { resolveLanguage } from '@/lib/translations'
 
 export const generateMetadata = () => publicPageMetadata('/integrations')
@@ -14,8 +15,10 @@ export default async function IntegrationsPage() {
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const isAr = lang === 'ar'
+  const structuredData = integrationsIndexStructuredData(lang)
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground" dir={isAr ? 'rtl' : 'ltr'}>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }} />
       <PublicSiteHeader lang={lang} />
       <main className="flex-1">
         <section className="border-b border-border bg-secondary/20 px-6 py-20 md:px-12">

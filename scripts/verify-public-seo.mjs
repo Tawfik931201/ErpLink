@@ -53,4 +53,23 @@ for (const platform of ['zid', 'salla', 'shopify']) {
 }
 assert.ok(read('src/components/public-site-header.tsx').includes('href="/integrations"'))
 assert.ok(read('src/app/(public)/guides/zid-odoo-checklist/page.tsx').includes('scenarios.map'))
+
+const semanticSchema = read('src/lib/public-structured-data.ts')
+const integrationRender = read('src/components/public-integration-detail.tsx')
+const hubRender = read('src/app/(public)/integrations/page.tsx')
+const guideRender = read('src/app/(public)/guides/zid-odoo-checklist/page.tsx')
+assert.ok(integrationRender.includes('integrationPageStructuredData(platform, lang)'))
+assert.ok(hubRender.includes('integrationsIndexStructuredData(lang)'))
+assert.ok(guideRender.includes('zidOdooGuideStructuredData(lang)'))
+for (const route of [integrationRender, hubRender, guideRender]) {
+  assert.ok(route.includes('application/ld+json'), 'Missing structured data render')
+  assert.ok(route.includes('JSON.stringify(structuredData)'), 'Structured data render must be derived from public content')
+}
+for (const type of ['BreadcrumbList', 'Service', 'CollectionPage', 'ItemList', 'Article', 'WebPage']) {
+  assert.ok(semanticSchema.includes(`'@type': '${type}'`), `Missing supported public schema type: ${type}`)
+}
+assert.ok(semanticSchema.includes("provider: { '@id': ORGANIZATION }"))
+assert.ok(semanticSchema.includes("author: { '@id': ORGANIZATION }"))
+assert.doesNotMatch(semanticSchema, /customerId|webhookSecret|SUPABASE_SERVICE_ROLE_KEY|order_id/)
+
 console.log('Public SEO checks passed: 22 localized URLs, private-route exclusions, intent pages, metadata and structured data.')
