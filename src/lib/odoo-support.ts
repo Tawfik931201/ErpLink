@@ -205,7 +205,7 @@ export async function readOdooMessages(id: number) {
   const [rows, legacy] = await Promise.all([
     centralSupportCall<MessageRecord[]>(
       'mail.message', 'search_read',
-      [[['model', '=', TICKET], ['res_id', '=', id], ['message_type', '=', 'comment']]],
+      [[['model', '=', TICKET], ['res_id', '=', id], ['message_type', '=', 'comment'], ['is_internal', '=', false]]],
       { fields: ['id', 'body', 'date', 'author_id', 'attachment_ids'], order: 'date asc, id asc', limit: 200 },
     ),
     centralSupportCall<LegacyMessage[]>(
@@ -280,7 +280,7 @@ export async function pendingOdooTickets() {
   if (!tickets.length) return { success: true, hasPending: false }
   const messages = await centralSupportCall<Array<{ res_id: number; author_id: Relation }>>(
     'mail.message', 'search_read',
-    [[['model', '=', TICKET], ['res_id', 'in', tickets.map(row => row.id)], ['message_type', '=', 'comment']]],
+    [[['model', '=', TICKET], ['res_id', 'in', tickets.map(row => row.id)], ['message_type', '=', 'comment'], ['is_internal', '=', false]]],
     { fields: ['res_id', 'author_id'], order: 'date desc, id desc', limit: 200 },
   )
   const seen = new Set<number>()
@@ -307,13 +307,23 @@ export async function readOwnedOdooAttachment(id: number) {
   if (file.res_model === TICKET) {
     ticketId = file.res_id
   } else if (file.res_model === 'mail.message') {
-    const msgs = await centralSupportCall<Array<{ model: string; res_id: number }>>(
-      'mail.message', 'read', [[file.res_id], ['model', 'res_id']],
+    const msgs = await centralSupportCall<Array<{ model: string; res_id: number; is_internal: boolean }>>(
+      'mail.message', 'read', [[file.res_id], ['model', 'res_id', 'is_internal']],
     )
-    if (msgs[0]?.model === TICKET) ticketId = msgs[0].res_id
+    if (msgs[0]?.model === TICKET && !msgs[0].is_internal) ticketId = msgs[0].res_id
   }
   if (!ticketId) throw new Error('Attachment is not part of an ERP Link ticket')
   await ownedTicket(ticketId)
+  // A ticket may contain internal Odoo notes and private attachments. Only
+  // files explicitly linked to a customer-visible chatter message can leave Odoo.
+  const linked = await centralSupportCall<Array<{ id: number }>>(
+    'mail.message', 'search_read',
+    [[['model', '=', TICKET], ['res_id', '=', ticketId],
+      ['attachment_ids', 'in', [id]], ['message_type', '=', 'comment'],
+      ['is_internal', '=', false]]],
+    { fields: ['id'], limit: 1 },
+  )
+  if (!linked.length) throw new Error('Internal attachment')
   if (file.file_size > MAX_FILE_BYTES) throw new Error('Attachment too large')
   const dataRows = await centralSupportCall<Array<{ raw: string | { content?: string } | false }>>(
     'ir.attachment', 'read', [[id], ['raw']],
