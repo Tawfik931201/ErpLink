@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { auth, currentUser } from '@clerk/nextjs/server'
 
 import { centralSupportCall } from '@/lib/central-odoo-archive'
+import { normalizeOdooMessageId } from '@/lib/odoo-message-id'
 import {
   checkImpersonationWriteBlock, getActiveUserId, getActiveWorkspaceId, isAdmin,
 } from '@/lib/auth'
@@ -135,7 +136,10 @@ async function addAttachments(ticketId: number, messageId: number, files: File[]
 async function postCustomerMessage(
   ticketId: number, partnerId: number | null, body: string, files: File[],
 ) {
-  const postedId = await centralSupportCall<number>(
+  // Odoo 20 execute_kw returns a recordset ID list (e.g. [297]) for
+  // message_post, not always a scalar. Passing that array to mail.message
+  // write nests the IDs and Odoo raises "unhashable type: 'list'".
+  const postedResult = await centralSupportCall<number | number[]>(
     TICKET, 'message_post', [[ticketId]],
     {
       body: html(body || 'Attachment sent'),
@@ -143,6 +147,7 @@ async function postCustomerMessage(
       ...(partnerId ? { author_id: partnerId } : {}),
     },
   )
+  const postedId = normalizeOdooMessageId(postedResult)
   await addAttachments(ticketId, postedId, files)
   return postedId
 }
