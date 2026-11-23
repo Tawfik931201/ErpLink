@@ -248,6 +248,8 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     activeTicketIdRef.current = selectedTicketId
     stickToBottomRef.current = true
     if (selectedTicketId !== null) {
+      setMessages([])
+      setAttachments([])
       void loadMessages(selectedTicketId)
     } else {
       setMessages([])
@@ -304,7 +306,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     if (view !== 'detail' || selectedTicketId === null) return
     const el = chatScrollRef.current
     if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
-  }, [messages, view, selectedTicketId])
+  }, [messages, loadingMessages, view, selectedTicketId])
 
   const acknowledgeVisibleSupportMessages = async () => {
     const ticketId = selectedTicket?.id
@@ -337,7 +339,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   useEffect(() => {
     if (view !== 'detail' || selectedTicketId === null) return
     void acknowledgeVisibleSupportMessages()
-  }, [messages, view, selectedTicketId])
+  }, [messages, loadingMessages, view, selectedTicketId])
 
   // Filtered tickets based on search
   const filteredTickets = tickets.filter(ticket => {
@@ -687,7 +689,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                   </p>
                 </div>
               ) : (
-                <form onSubmit={handleSendReply} className="p-4 border-t border-border/50 bg-card/85 space-y-3 shrink-0">
+                <form onSubmit={handleSendReply} className="shrink-0 space-y-3 border-t border-border/60 bg-card/95 p-3 sm:p-4">
                   {replyError && (
                     <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/10 text-destructive text-[11px] border border-destructive/20">
                       <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -702,12 +704,17 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       onChange={(e) => setReplyText(e.target.value)}
                       disabled={sendingReply}
                       rows={2}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault()
+                          event.currentTarget.form?.requestSubmit()
+                        }
+                      }}
                       className={cn(
-                        'w-full rounded-xl border border-border bg-card px-4 py-2.5 text-xs text-foreground resize-none',
+                        'w-full rounded-2xl border border-border bg-secondary/15 px-4 py-3 text-sm leading-6 text-foreground resize-none',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 focus-visible:border-foreground',
                         'disabled:opacity-50 disabled:bg-muted'
                       )}
-                      required
                     />
                     
                     {selectedFiles.length > 0 && (
@@ -762,7 +769,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                         variant="brand" 
                         size="sm"
                         className="font-bold gap-1.5 rounded-lg text-xs"
-                        disabled={sendingReply || !replyText.trim()}
+                        disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
                       >
                         {sendingReply ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -775,6 +782,9 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       </Button>
                     </div>
                   </div>
+                  <p className="text-[10px] text-muted-foreground/80">
+                    {lang === 'ar' ? 'Enter للإرسال · Shift + Enter لسطر جديد' : 'Enter to send · Shift + Enter for a new line'}
+                  </p>
                 </form>
               )}
             </Card>
@@ -959,9 +969,16 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       </span>
                       
                       <div className="space-y-0.5 min-w-0 flex-1">
-                        <h3 className="text-sm font-bold group-hover:text-foreground transition-colors duration-200 truncate">
-                          {ticket.name}
-                        </h3>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <h3 className="min-w-0 truncate text-sm font-bold transition-colors duration-200 group-hover:text-foreground">
+                            {ticket.name}
+                          </h3>
+                          {ticket.unread_count > 0 && (
+                            <span className="inline-flex shrink-0 items-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white" aria-label={ticket.unread_count + ' unread messages'}>
+                              {ticket.unread_count > 99 ? '99+' : ticket.unread_count}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground line-clamp-1">
                           {formatDescription(ticket.description)}
                         </p>
