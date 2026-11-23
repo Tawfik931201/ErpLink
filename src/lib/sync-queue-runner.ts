@@ -47,7 +47,7 @@ function envInterval(name: string, fallbackMs: number, minMs: number): number {
 
 /** تصريف الطابور كل 10 ثوانٍ افتراضياً (قابل للضبط من البيئة). */
 const POLL_INTERVAL_MS = envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 10_000, 5_000)
-const IDLE_INTERVAL_MS = envInterval('SYNC_QUEUE_IDLE_INTERVAL_MS', 60_000, 15_000)
+const IDLE_INTERVAL_MS = envInterval('SYNC_QUEUE_IDLE_INTERVAL_MS', 120_000, 30_000)
 
 /** تسوية زد كل 10 دقائق افتراضياً (نفس-periodic كـ cron التسوية). */
 const RECONCILE_INTERVAL_MS = envInterval('SYNC_RECONCILE_INTERVAL_MS', 600_000, 60_000)
@@ -288,7 +288,7 @@ export function startSyncQueueRunner(): void {
 /**
  * Wake promptly after an admitted webhook is durably queued, without
  * continuously polling Supabase while idle. One coalesced timer per process.
- * Periodic idle polling remains the cross-process/restart safety net.
+ * Periodic idle polling remains the cross-process/restart safety net, every two minutes by default.
  */
 export function wakeQueueRunnerAt(nextRetryAt: string): void {
   if (!g.__syncQueueRunnerStarted) return
@@ -300,7 +300,7 @@ export function wakeQueueRunnerAt(nextRetryAt: string): void {
     g.__syncQueueWakeTimer = undefined
     g.__syncQueueWakeAt = undefined
     void runDrainCycle()
-  }, Math.min(60_000, Math.max(0, dueAt - Date.now())))
+  }, Math.min(2_147_483_647, Math.max(0, dueAt - Date.now())))
   unref(g.__syncQueueWakeTimer)
 }
 

@@ -490,6 +490,7 @@ interface QueueItem {
   outcome_unknown: boolean
   erp_connection_id: string | null
   connection_generation: string | null
+  execution_key?: string | null
 }
 
 /**
@@ -524,6 +525,54 @@ async function recoverExpiredLeases(): Promise<boolean> {
 }
 
 /**
+ * Cached, read-only view of unknown-outcome execution fences. When an ERP write
+ * may have happened, claim_sync_job MUST reject all later jobs for that key.
+ * Repeatedly trying those jobs during idle polling is expensive and can never
+ * succeed until an operator reconciles the unknown remote effect.
+ *
+ * This is only a cheap prefilter: the database claim RPC remains authoritative.
+ * The cache lasts at most one minute, so a verified release can resume soon.
+ * On lookup errors we fail open to the fenced RPC, never bypass it.
+ */
+const UNKNOWN_BLOCKER_TTL_MS = 60_000
+let unknownBlockersCheckedAt = 0
+let unknownBlockedExecutionKeys = new Set<string>()
+let unknownBlockerLookupInFlight: Promise<ReadonlySet<string> | null> | null = null
+
+async function getUnknownBlockedExecutionKeys(): Promise<ReadonlySet<string> | null> {
+  if (unknownBlockerLookupInFlight) return unknownBlockerLookupInFlight
+  if (unknownBlockersCheckedAt > 0 && Date.now() - unknownBlockersCheckedAt < UNKNOWN_BLOCKER_TTL_MS) {
+    return unknownBlockedExecutionKeys
+  }
+  const lookup = (async (): Promise<ReadonlySet<string> | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('sync_queue')
+        .select('execution_key')
+        .eq('outcome_unknown', true)
+        .not('execution_key', 'is', null)
+        .limit(1000)
+      if (error) return null
+      unknownBlockedExecutionKeys = new Set(
+        ((data ?? []) as Array<{ execution_key?: string | null }>)
+          .map(row => row.execution_key)
+          .filter((key): key is string => Boolean(key))
+      )
+      unknownBlockersCheckedAt = Date.now()
+      return unknownBlockedExecutionKeys
+    } catch {
+      return null
+    }
+  })()
+  unknownBlockerLookupInFlight = lookup
+  try {
+    return await lookup
+  } finally {
+    if (unknownBlockerLookupInFlight === lookup) unknownBlockerLookupInFlight = null
+  }
+}
+
+/**
  * Process due queue items with fair-share scheduling and multi-tenant parallelism.
  * Returns the number of items successfully claimed and processed.
  */
@@ -537,7 +586,7 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   try {
     const { data, error } = await supabase
       .from('sync_queue')
-      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
+      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at,execution_key')
       .not('next_retry_at', 'is', null)
       .is('lease_token', null)
       .eq('outcome_unknown', false)
@@ -572,7 +621,7 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
         try {
           const { data: wsRows } = await supabase
             .from('sync_queue')
-            .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
+            .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at,execution_key')
             .eq('workspace_id', ws)
             .not('next_retry_at', 'is', null)
       .is('lease_token', null)
@@ -591,6 +640,15 @@ export async function processSyncQueue(maxItems = SYNC_QUEUE_DEFAULT_BATCH): Pro
   } catch (err: unknown) {
     metrics.lastError = err instanceof Error ? err.message.slice(0, 300) : 'queue fetch failed'
     return 0
+  }
+
+  // Skip known-fenced execution families before attempting any claim RPC.
+  // A failed lookup never skips work; claim_sync_job still enforces the fence.
+  if (items.length > 0) {
+    const blocked = await getUnknownBlockedExecutionKeys()
+    if (blocked && blocked.size > 0) {
+      items = items.filter(item => !item.execution_key || !blocked.has(item.execution_key))
+    }
   }
 
   if (items.length === 0) {
@@ -771,7 +829,7 @@ export async function processWorkspaceQueue(
   try {
     let query = supabase
       .from('sync_queue')
-      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at')
+      .select('id,workspace_id,store_id,event,platform,payload,retry_count,max_retries,next_retry_at,created_at,updated_at,execution_key')
       .eq('workspace_id', workspaceId)
       .not('next_retry_at', 'is', null)
       .is('lease_token', null)
