@@ -459,9 +459,13 @@ async function handlePost(req: NextRequest) {
           const { unregisterAllZidWebhooks } = await import('@/lib/zid/webhooks')
           await unregisterAllZidWebhooks(merchantId).catch(() => {})
           await supabase.from('merchant_tokens').delete().eq('merchant_id', merchantId)
+          ttlCache.delete(`zid:workspace:${merchantId}`)
+          ttlCache.delete(`zid:store-normalize:${merchantId}`)
         } else {
           await supabase.from('merchant_tokens').delete().eq('store_id', storeStr)
         }
+        ttlCache.delete(`zid:workspace:${storeStr}`)
+        ttlCache.delete(`zid:store-normalize:${storeStr}`)
         const { handleZidSubscriptionWebhook } = await import('@/lib/zid/subscription-webhook')
         await handleZidSubscriptionWebhook('app.market.subscription.suspended', store_id, payload).catch(() => {})
         const { recordAudit } = await import('@/lib/audit-logs')

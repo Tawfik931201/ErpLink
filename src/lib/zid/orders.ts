@@ -42,7 +42,7 @@ export async function enrichZidOrder(
               'Zid API pull budget exhausted (60 reads/min) — the order is rescheduled instead of being written without its line items'
             )
           }
-          const storedTokens = await getAccessToken(tokenRow.merchant_id)
+          const storedTokens = await getAccessToken(tokenRow.merchant_id, resolvedWorkspaceId)
           const creds = {
             authorization: storedTokens.authorization || '',
             managerToken: storedTokens.accessToken,

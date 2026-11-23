@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks'
 import { createHash } from 'crypto'
 
 import { supabase } from '@/lib/supabase'
+import { getSyncRequestContext } from '@/lib/sync/request-context'
 
 export type CommercePlatform = 'zid' | 'salla' | 'shopify' | 'odoo'
 export function isCommercePlatform(platform: string): platform is Exclude<CommercePlatform, 'odoo'> {
@@ -82,6 +83,10 @@ async function requireStore(workspaceId: string, platform: string, storeId: stri
   // Odoo ingress is scoped by the authenticated workspace/mapping trigger;
   // it has no commerce token row. The connection is independently revalidated below.
   if (platform === 'odoo') return
+  const ctx = getSyncRequestContext()
+  const cacheKey = `${workspaceId}:${platform}:${storeId}`
+  if (ctx && ctx.verifiedStores.has(cacheKey)) return
+
   const table = platform === 'zid' ? 'merchant_tokens' : platform === 'salla' ? 'salla_tokens' : 'shopify_tokens'
   let query = supabase.from(table).select('workspace_id').eq('workspace_id', workspaceId)
   if (platform === 'shopify') query = query.eq('shop_domain', storeId)
@@ -92,6 +97,7 @@ async function requireStore(workspaceId: string, platform: string, storeId: stri
   }
   const { data, error } = await query.maybeSingle()
   if (error || !data) throw new Error('Store does not belong to ERP execution workspace')
+  if (ctx) ctx.verifiedStores.add(cacheKey)
 }
 
 export async function resolveExecutionTarget(workspaceId: string, platform: string, storeId: string): Promise<ExecutionTarget> {

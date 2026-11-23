@@ -1034,47 +1034,59 @@ async function processOneItem(item: QueueItem) {
   heartbeat.unref?.()
   try {
     const { validateExecutionTarget, withErpTarget } = await import('./erp-execution-target')
-    await validateExecutionTarget(item.workspace_id, item.platform, item.store_id, {
-      erpConnectionId: item.erp_connection_id, connectionGeneration: item.connection_generation,
-    })
-    // isQueueExecution=true لمنع إعادة الإدراج المكررة من داخل المحرك.
-    // ── مهلة لكل حدث ───────────────────────────────────────────────────────
-    // بلاها: حدث فيه 15 نداء متتالي وأحدها بطيء = 150 ثانية يحتجز عاملاً
-    // من أصل 10. عشرة أحداث سيئة = الطابور كله يقف.
-    const work = withErpTarget({
-      workspaceId: item.workspace_id, platform: item.platform as 'zid' | 'salla' | 'shopify' | 'odoo',
-      storeId: item.store_id, eventId: item.id,
-      erpConnectionId: item.erp_connection_id, connectionGeneration: item.connection_generation,
-    }, async () => {
-      if (item.platform === 'odoo') {
-        if (item.event === 'odoo.model.sync') {
-          const { runBackgroundSync } = await import('@/app/api/webhooks/odoo/route')
-          const p = (item.payload || {}) as Record<string, unknown>
-          return runBackgroundSync(
-            String(p.field_mapping_id || ''),
-            String(p.model || ''),
-            Number(p.odooRecordId || 0),
-            p.payloadData as Record<string, unknown> | undefined,
-            typeof p.auth_status === 'string' ? p.auth_status : undefined
-          )
-        }
-        return processOdooStockEvent(item.payload as Record<string, unknown>)
-      }      return processWebhookEvent(
-        item.event,
-        item.store_id,
-        item.payload as Record<string, unknown>,
-        item.platform as 'zid' | 'salla' | 'shopify',
-        true,
-        item.workspace_id,
-        item.id,
-        { erpConnectionId: item.erp_connection_id!, connectionGeneration: item.connection_generation! }
-      )
-    })
+    const { withSyncRequestContext } = await import('./sync/request-context')
 
-    const result = (await withItemTimeout(work, SYNC_QUEUE_ITEM_TIMEOUT_MS)) as
-      | { ok: boolean; message?: string }
-      | { success: number; failed: number; skipped?: number; records: Array<{ status: string; message?: string }> }
-      | void
+    const executeItem = async () => {
+      await validateExecutionTarget(item.workspace_id, item.platform, item.store_id, {
+        erpConnectionId: item.erp_connection_id!, connectionGeneration: item.connection_generation!,
+      })
+      // isQueueExecution=true لمنع إعادة الإدراج المكررة من داخل المحرك.
+      // ── مهلة لكل حدث ───────────────────────────────────────────────────────
+      // بلاها: حدث فيه 15 نداء متتالي وأحدها بطيء = 150 ثانية يحتجز عاملاً
+      // من أصل 10. عشرة أحداث سيئة = الطابور كله يقف.
+      const work = withErpTarget({
+        workspaceId: item.workspace_id, platform: item.platform as 'zid' | 'salla' | 'shopify' | 'odoo',
+        storeId: item.store_id, eventId: item.id,
+        erpConnectionId: item.erp_connection_id!, connectionGeneration: item.connection_generation!,
+      }, async () => {
+        if (item.platform === 'odoo') {
+          if (item.event === 'odoo.model.sync') {
+            const { runBackgroundSync } = await import('@/app/api/webhooks/odoo/route')
+            const p = (item.payload || {}) as Record<string, unknown>
+            return runBackgroundSync(
+              String(p.field_mapping_id || ''),
+              String(p.model || ''),
+              Number(p.odooRecordId || 0),
+              p.payloadData as Record<string, unknown> | undefined,
+              typeof p.auth_status === 'string' ? p.auth_status : undefined
+            )
+          }
+          return processOdooStockEvent(item.payload as Record<string, unknown>)
+        }
+        return processWebhookEvent(
+          item.event,
+          item.store_id,
+          item.payload as Record<string, unknown>,
+          item.platform as 'zid' | 'salla' | 'shopify',
+          true,
+          item.workspace_id,
+          item.id,
+          { erpConnectionId: item.erp_connection_id!, connectionGeneration: item.connection_generation! }
+        )
+      })
+
+      return (await withItemTimeout(work, SYNC_QUEUE_ITEM_TIMEOUT_MS)) as
+        | { ok: boolean; message?: string }
+        | { success: number; failed: number; skipped?: number; records: Array<{ status: string; message?: string }> }
+        | void
+    }
+
+    const result = await withSyncRequestContext({
+      workspaceId: item.workspace_id,
+      platform: item.platform,
+      storeId: item.store_id,
+      eventId: item.id,
+    }, executeItem)
 
     if (result && typeof result === 'object' && 'ok' in result) {
       if (result.ok) {

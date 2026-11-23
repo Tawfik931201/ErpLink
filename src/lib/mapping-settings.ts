@@ -27,6 +27,8 @@
  * resolution logic is unit-testable without a database.
  */
 
+import { getSyncRequestContext } from '@/lib/sync/request-context'
+
 // The literal members give editor autocomplete; the last arm keeps the type
 // open so a new platform does not require a code change here. Deliberately
 // `Record<never, never>` rather than `{}` (which the lint rule bans).
@@ -65,6 +67,20 @@ export async function resolveSettingsStoreKey(
   if (storeType !== 'zid') return key
   if (!/^\d+$/.test(key)) return key
 
+  const ctx = getSyncRequestContext()
+  const cacheKey = `${workspaceId ?? ''}:${storeType}:${key}`
+  if (ctx && ctx.settingsStoreKeys.has(cacheKey)) {
+    return ctx.settingsStoreKeys.get(cacheKey)!
+  }
+  if (ctx && storeType === 'zid' && workspaceId) {
+    const scope = ctx.zidTokenScopes.get(`${workspaceId}:${key}`)
+    if (scope?.merchant_id) {
+      const res = String(scope.merchant_id)
+      ctx.settingsStoreKeys.set(cacheKey, res)
+      return res
+    }
+  }
+
   try {
     // store_id first, then merchant_id — a single `.or(...)` can match two
     // different rows and make `maybeSingle` fail or pick arbitrarily.
@@ -75,7 +91,11 @@ export async function resolveSettingsStoreKey(
     if (workspaceId) byStoreQuery = byStoreQuery.eq('workspace_id', workspaceId)
     const byStore = await byStoreQuery.maybeSingle()
     const byStoreMerchant = (byStore?.data as { merchant_id?: unknown } | null)?.merchant_id
-    if (!byStore?.error && byStoreMerchant) return String(byStoreMerchant)
+    if (!byStore?.error && byStoreMerchant) {
+      const result = String(byStoreMerchant)
+      if (ctx) ctx.settingsStoreKeys.set(cacheKey, result)
+      return result
+    }
 
     let byMerchantQuery = client
       .from('merchant_tokens')
@@ -84,7 +104,9 @@ export async function resolveSettingsStoreKey(
     if (workspaceId) byMerchantQuery = byMerchantQuery.eq('workspace_id', workspaceId)
     const byMerchant = await byMerchantQuery.maybeSingle()
     const merchant = (byMerchant?.data as { merchant_id?: unknown } | null)?.merchant_id
-    return merchant ? String(merchant) : key
+    const result = merchant ? String(merchant) : key
+    if (ctx) ctx.settingsStoreKeys.set(cacheKey, result)
+    return result
   } catch {
     return key
   }
@@ -106,6 +128,12 @@ export async function getEffectiveStandardMappingSettings(
   // is keyed by merchant_id. Idempotent for a key that is already a merchant.
   const key = await resolveSettingsStoreKey(client, storeType, storeKey, workspaceId)
 
+  const ctx = getSyncRequestContext()
+  const cacheKey = `${workspaceId}:${storeType}:${entityType}:${key}`
+  if (ctx && ctx.standardMappingSettings.has(cacheKey)) {
+    return ctx.standardMappingSettings.get(cacheKey)!
+  }
+
   const { data, error } = await client
     .from('standard_mapping_settings')
     .select('store_id, settings')
@@ -120,5 +148,7 @@ export async function getEffectiveStandardMappingSettings(
   const hit =
     rows.find((r) => (r.store_id || '') === key) ??
     rows.find((r) => (r.store_id || '') === '')
-  return (hit?.settings as Record<string, any>) || null
+  const result = (hit?.settings as Record<string, any>) || null
+  if (ctx) ctx.standardMappingSettings.set(cacheKey, result)
+  return result
 }

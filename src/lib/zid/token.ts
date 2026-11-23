@@ -1,5 +1,6 @@
 import { decrypt } from '@/lib/crypto'
 import { supabase } from '@/lib/supabase'
+import { getSyncRequestContext } from '@/lib/sync/request-context'
 
 import { getZidConfig } from './config'
 import { encryptZidCredentials, isEncryptedZidCredential } from './credentials'
@@ -62,6 +63,14 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
 
   async getTokens(merchantId = DEFAULT_TOKEN_KEY, retry = 0, workspaceId?: string): Promise<StoredZidTokens | null> {
     assertMerchantKey(merchantId)
+    const ctx = getSyncRequestContext()
+    const effectiveWs = workspaceId ?? ctx?.workspaceId
+    const cacheKey = `${merchantId}:${effectiveWs ?? ''}`
+    if (ctx && retry === 0 && ctx.zidTokens.has(cacheKey)) {
+      const cached = ctx.zidTokens.get(cacheKey)!
+      if (effectiveWs) assertTokenWorkspace(cached, effectiveWs)
+      if (!isExpired(cached.expiresAt)) return cached
+    }
     // A workspace-scoped read must not share a result with another workspace.
     // Including retry avoids self-deadlock if legacy encryption upgrades race.
     const key = JSON.stringify([merchantId, workspaceId ?? null, retry])
@@ -70,7 +79,11 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
     const task = this.loadTokens(merchantId, retry, workspaceId)
     this.tokenReads.set(key, task)
     try {
-      return await task
+      const result = await task
+      if (ctx && result && retry === 0) {
+        ctx.zidTokens.set(cacheKey, result)
+      }
+      return result
     } finally {
       if (this.tokenReads.get(key) === task) this.tokenReads.delete(key)
     }
@@ -128,6 +141,12 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
       .eq('workspace_id', snapshot.workspace_id).eq('store_id', snapshot.store_id)
       .eq('refresh_token', snapshot.refresh_token).select('id').maybeSingle()
     if (error || !data) throw new Error('Zid connection changed or credentials could not be saved')
+    snapshots.set(tokens, {
+      id: snapshot.id,
+      workspace_id: snapshot.workspace_id,
+      store_id: snapshot.store_id,
+      refresh_token: tokenData.refresh_token,
+    })
   }
 }
 
@@ -272,11 +291,19 @@ export async function refreshAccessToken(key = DEFAULT_TOKEN_KEY, workspaceId?: 
       })
     }
 
-    return saveTokens({
+    const refreshed = await saveTokens({
       ...payload,
       refresh_token: payload.refresh_token || storedTokens.refreshToken,
       Authorization: payload.Authorization || payload.authorization || storedTokens.authorization,
     }, key, storedTokens)
+
+    const ctx = getSyncRequestContext()
+    if (ctx) {
+      const effectiveWs = workspaceId ?? ctx.workspaceId
+      ctx.zidTokens.set(`${key}:${effectiveWs ?? ''}`, refreshed)
+    }
+
+    return refreshed
   })()
 
   refreshInFlight.set(flightKey, task)
@@ -288,8 +315,20 @@ export async function refreshAccessToken(key = DEFAULT_TOKEN_KEY, workspaceId?: 
 }
 
 export async function getAccessToken(key = DEFAULT_TOKEN_KEY, workspaceId?: string): Promise<StoredZidTokens> {
+  const ctx = getSyncRequestContext()
+  const effectiveWorkspaceId = workspaceId ?? ctx?.workspaceId
+  const cacheKey = `${key}:${effectiveWorkspaceId ?? ''}`
+
+  if (ctx && ctx.zidTokens.has(cacheKey)) {
+    const cached = ctx.zidTokens.get(cacheKey)!
+    assertTokenWorkspace(cached, effectiveWorkspaceId)
+    if (!isExpired(cached.expiresAt)) {
+      return cached
+    }
+  }
+
   const tokens = tokenStore instanceof SupabaseZidTokenStore
-    ? await tokenStore.getTokens(key, 0, workspaceId) : await tokenStore.getTokens(key)
+    ? await tokenStore.getTokens(key, 0, effectiveWorkspaceId) : await tokenStore.getTokens(key)
 
   if (!tokens) {
     throw new ZidOAuthError({
@@ -298,10 +337,18 @@ export async function getAccessToken(key = DEFAULT_TOKEN_KEY, workspaceId?: stri
     })
   }
 
-  assertTokenWorkspace(tokens, workspaceId)
+  assertTokenWorkspace(tokens, effectiveWorkspaceId)
 
   if (isExpired(tokens.expiresAt)) {
-    return refreshAccessToken(key, workspaceId)
+    const refreshed = await refreshAccessToken(key, effectiveWorkspaceId)
+    if (ctx) {
+      ctx.zidTokens.set(cacheKey, refreshed)
+    }
+    return refreshed
+  }
+
+  if (ctx) {
+    ctx.zidTokens.set(cacheKey, tokens)
   }
 
   return tokens

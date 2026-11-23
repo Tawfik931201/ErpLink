@@ -4,6 +4,7 @@ import { prepareShopifyWebhookData } from '@/lib/shopify/enrichment'
 import { derivePresetKey, normalizeEvent } from '@/lib/sync/events'
 import { processFixedMappingFallback, processSingleMapping } from '@/lib/sync/mappings'
 import { notifySyncForRecord } from '@/lib/sync/notifications'
+import { withSyncRequestContext } from '@/lib/sync/request-context'
 import { logSync, supabaseAdmin } from '@/lib/sync-runtime'
 import type { FieldMappingRow, SyncEngineResult } from '@/lib/sync-types'
 import { enrichZidCustomer } from '@/lib/zid/customers'
@@ -23,11 +24,18 @@ export async function processWebhookEvent(
 ): Promise<SyncEngineResult> {
   if (!workspaceIdParam || !platformHint) throw new Error('Trusted workspace and platform required for ERP execution')
   const store = String(storeId)
-  if (isQueueExecution && !executionTarget) throw new Error('Unpinned ERP execution target requires controlled recovery')
-  const target = executionTarget ?? await resolveExecutionTarget(workspaceIdParam, platformHint, store)
-  await validateExecutionTarget(workspaceIdParam, platformHint, store, target)
-  return withErpTarget({ ...target, workspaceId: workspaceIdParam, platform: platformHint, storeId: store, eventId: queueItemId || `manual:${event}` },
-    () => processWebhookEventInternal(event, storeId, data, platformHint, isQueueExecution, workspaceIdParam, queueItemId))
+  return withSyncRequestContext({
+    workspaceId: workspaceIdParam,
+    platform: platformHint,
+    storeId: store,
+    eventId: queueItemId || `manual:${event}`,
+  }, async () => {
+    if (isQueueExecution && !executionTarget) throw new Error('Unpinned ERP execution target requires controlled recovery')
+    const target = executionTarget ?? await resolveExecutionTarget(workspaceIdParam, platformHint, store)
+    await validateExecutionTarget(workspaceIdParam, platformHint, store, target)
+    return withErpTarget({ ...target, workspaceId: workspaceIdParam, platform: platformHint, storeId: store, eventId: queueItemId || `manual:${event}` },
+      () => processWebhookEventInternal(event, storeId, data, platformHint, isQueueExecution, workspaceIdParam, queueItemId))
+  })
 }
 
 async function processWebhookEventInternal(

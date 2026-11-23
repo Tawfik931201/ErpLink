@@ -10,11 +10,16 @@
  * merchant_id — نفس قاعدة resolveZidTokenRow) وتعيد الـ store_id الحقيقي.
  */
 import { supabase } from '@/lib/supabase'
+import { getSyncRequestContext } from '@/lib/sync/request-context'
 import { ttlCache } from '@/lib/ttl-cache'
 
 export async function normalizeZidStoreId(storeId: number): Promise<number> {
   if (!Number.isInteger(storeId) || storeId <= 0) return storeId
   const storeStr = String(storeId)
+  const ctx = getSyncRequestContext()
+  if (ctx && ctx.normalizedStoreIds.has(storeStr)) {
+    return ctx.normalizedStoreIds.get(storeStr)!
+  }
   try {
     const row = await ttlCache.get(
       `zid:store-normalize:${storeStr}`,
@@ -37,7 +42,9 @@ export async function normalizeZidStoreId(storeId: number): Promise<number> {
       }
     )
     const normalized = Number((row as { store_id?: unknown } | null)?.store_id)
-    return Number.isInteger(normalized) && normalized > 0 ? normalized : storeId
+    const result = Number.isInteger(normalized) && normalized > 0 ? normalized : storeId
+    if (ctx) ctx.normalizedStoreIds.set(storeStr, result)
+    return result
   } catch {
     // لا صف ربط ولا خطأ استعلام — أعِد ما جاء؛ الاستقبال يتعامل مع الهوية
     // غير المعروفة بمسارها المعتاد (يتيم أو مستأجر غير موجود).

@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { getSyncRequestContext } from '@/lib/sync/request-context'
 
 import { isOrderCreationEvent } from './order-helpers'
 
@@ -14,6 +15,22 @@ export async function resolveZidOrderTokenScope(
   workspaceId: string,
 ): Promise<ZidOrderTokenScope | null> {
   if (!workspaceId) throw new Error('Zid order enrichment requires a workspace')
+  const ctx = getSyncRequestContext()
+  const cacheKey = `${workspaceId}:${storeId}`
+  if (ctx && ctx.zidTokenScopes.has(cacheKey)) {
+    return ctx.zidTokenScopes.get(cacheKey)!
+  }
+  if (ctx && ctx.settingsStoreKeys.has(`${workspaceId}:zid:${storeId}`)) {
+    const knownMerchantId = ctx.settingsStoreKeys.get(`${workspaceId}:zid:${storeId}`)!
+    const result: ZidOrderTokenScope = {
+      merchant_id: knownMerchantId,
+      store_id: storeId,
+      workspace_id: workspaceId,
+    }
+    ctx.zidTokenScopes.set(cacheKey, result)
+    return result
+  }
+
   const columns = 'merchant_id,store_id,workspace_id'
   const byStore = await supabase.from('merchant_tokens').select(columns)
     .eq('store_id', storeId).maybeSingle()
@@ -22,12 +39,21 @@ export async function resolveZidOrderTokenScope(
     if (byStore.data.workspace_id !== workspaceId) {
       throw new Error('Zid order store is no longer linked to this workspace')
     }
-    return byStore.data as ZidOrderTokenScope
+    const result = byStore.data as ZidOrderTokenScope
+    if (ctx) {
+      ctx.zidTokenScopes.set(cacheKey, result)
+      if (result.merchant_id) {
+        ctx.settingsStoreKeys.set(`${workspaceId}:zid:${storeId}`, String(result.merchant_id))
+      }
+    }
+    return result
   }
   const byMerchant = await supabase.from('merchant_tokens').select(columns)
     .eq('merchant_id', storeId).eq('workspace_id', workspaceId).maybeSingle()
   if (byMerchant.error) throw byMerchant.error
-  return byMerchant.data as ZidOrderTokenScope | null
+  const result = byMerchant.data as ZidOrderTokenScope | null
+  if (ctx) ctx.zidTokenScopes.set(cacheKey, result)
+  return result
 }
 
 export function zidOrderCacheScope(workspaceId: string, storeId: string): string {
