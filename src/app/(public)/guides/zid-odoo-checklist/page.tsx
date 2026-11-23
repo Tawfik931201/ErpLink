@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { publicPageMetadata } from '@/lib/public-seo'
+import { zidOdooGuideStructuredData } from '@/lib/public-structured-data'
 import { resolveLanguage } from '@/lib/translations'
 
 export const generateMetadata = () => publicPageMetadata('/guides/zid-odoo-checklist')
@@ -54,8 +55,10 @@ export default async function ZidOdooChecklistPage() {
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const isAr = lang === 'ar'
+  const structuredData = zidOdooGuideStructuredData(lang)
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground" dir={isAr ? 'rtl' : 'ltr'}>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }} />
       <PublicSiteHeader lang={lang} />
       <main className="flex-1">
         <article>

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { integrations, type IntegrationPlatform } from '@/lib/integration-content'
+import { integrationPageStructuredData } from '@/lib/public-structured-data'
 import { resolveLanguage } from '@/lib/translations'
 
 const platforms: IntegrationPlatform[] = ['zid', 'salla', 'shopify']
@@ -16,19 +17,11 @@ export async function PublicIntegrationDetail({ platform }: { platform: Integrat
   const here = `/integrations/${platform}-odoo`
   const linkClass = 'inline-flex rounded-lg border border-border px-5 py-3 text-sm font-bold transition-colors hover:border-primary hover:text-primary'
 
-  const breadcrumbs = {
-    '@context': 'https://schema.org',
-    '@type': 'BreadcrumbList',
-    itemListElement: [
-      { '@type': 'ListItem', position: 1, name: isAr ? 'الرئيسية' : 'Home', item: 'https://erplink.bizsahla.com/' + (isAr ? 'ar-sa' : 'en-us') },
-      { '@type': 'ListItem', position: 2, name: isAr ? 'التكاملات' : 'Integrations', item: 'https://erplink.bizsahla.com/' + (isAr ? 'ar-sa' : 'en-us') + '/integrations' },
-      { '@type': 'ListItem', position: 3, name: details.platformName + ' + Odoo', item: 'https://erplink.bizsahla.com/' + (isAr ? 'ar-sa' : 'en-us') + here },
-    ],
-  }
+  const structuredData = integrationPageStructuredData(platform, lang)
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground" dir={isAr ? 'rtl' : 'ltr'}>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbs).replace(/</g, '\\u003c') }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }} />
       <PublicSiteHeader lang={lang} />
       <main className="flex-1">
         <section className="border-b border-border bg-secondary/20 px-6 py-16 md:px-12 md:py-24">
