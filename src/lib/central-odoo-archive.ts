@@ -133,7 +133,7 @@ export function archiveDatetime(value: string | null | undefined): string | fals
 
 /** Server-only access to the central Odoo Discuss models for support tickets. */
 export async function centralDiscussCall<T>(
-  model: 'discuss.channel' | 'mail.message' | 'res.users' | 'ir.attachment' | 'res.partner' | 'ir.config_parameter' | 'x_erplink_support_ticket' | 'x_erplink_support_message' | 'x_erplink_contact_message',
+  model: 'discuss.channel' | 'mail.message' | 'res.users' | 'ir.attachment' | 'res.partner' | 'x_erplink_support_ticket' | 'x_erplink_support_message' | 'x_erplink_contact_message',
   method: 'search_read' | 'search' | 'create' | 'message_post' | 'read' | 'write' | 'search_count',
   args: unknown[],
   kwargs: Record<string, unknown> = {},
