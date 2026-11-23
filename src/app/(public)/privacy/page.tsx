@@ -1,11 +1,13 @@
+import { publicPageMetadata } from '@/lib/public-seo'
 import { Lock, ArrowLeft } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
-
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
+
+export const generateMetadata = () => publicPageMetadata('/privacy')
 
 function t(lang: Language, key: string): string {
   const dict = translations[lang] as Record<string, string>

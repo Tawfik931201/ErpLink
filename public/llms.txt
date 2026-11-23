@@ -1,0 +1,19 @@
+# ERP Link
+
+> ERP Link connects online stores with enterprise resource planning (ERP) systems, helping synchronize products, orders, customers and inventory.
+
+Official website: https://erplink.bizsahla.com/
+
+## Public pages
+- [Home (Arabic)](https://erplink.bizsahla.com/ar-sa)
+- [Home (English)](https://erplink.bizsahla.com/en-us)
+- [About](https://erplink.bizsahla.com/en-us/about)
+- [Pricing](https://erplink.bizsahla.com/en-us/pricing)
+- [Contact](https://erplink.bizsahla.com/en-us/contact)
+- [Privacy policy](https://erplink.bizsahla.com/en-us/privacy)
+- [Terms of service](https://erplink.bizsahla.com/en-us/terms)
+
+## Scope
+ERP Link's public information covers integrations involving platforms such as Zid, Salla, Shopify and Odoo. Features described on the website include synchronization, field mapping and operation logs.
+
+This file describes public content only. Private dashboards, support tickets, customer records, API endpoints and administrative operations are not public resources.

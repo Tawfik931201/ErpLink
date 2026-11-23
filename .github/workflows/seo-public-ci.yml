@@ -1,0 +1,40 @@
+name: Public SEO safety checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'public/robots.txt'
+      - 'public/sitemap.xml'
+      - 'public/llms.txt'
+      - 'src/app/(public)/**'
+      - 'src/components/public-site-footer.tsx'
+      - 'src/lib/public-seo.ts'
+      - 'scripts/verify-public-seo.mjs'
+      - '.github/workflows/seo-public-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  public-seo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Type-check app
+        run: npm run type-check
+      - name: Check SEO routes and private-route exclusions
+        run: node scripts/verify-public-seo.mjs
+      - name: Existing application regression tests
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+          SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+        run: npm test -- --runInBand
