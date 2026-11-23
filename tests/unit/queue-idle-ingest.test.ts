@@ -26,6 +26,9 @@ describe('idle Supabase API ingest budget', () => {
     expect(code).toContain('export function wakeQueueRunnerAt(')
     expect(code).not.toContain('g.__syncQueueRunnerInterval = setInterval(')
     expect(code).toContain('Math.min(2_147_483_647, Math.max(0, dueAt - Date.now()))')
+    expect(code).toContain('g.__syncQueueWakePending = true')
+    expect(code).toContain('if (g.__syncQueueWakePending && g.__syncQueueRunnerStarted)')
+    expect(code).toContain('g.__syncQueueWakePending = false')
   })
 
   it('does not repeatedly claim queue families blocked by unknown ERP outcomes', () => {

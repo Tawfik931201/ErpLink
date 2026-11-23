@@ -32,6 +32,7 @@ const g = global as unknown as {
   __workspaceArchiveProcessing?: boolean
   __syncQueueWakeTimer?: NodeJS.Timeout
   __syncQueueWakeAt?: number
+  __syncQueueWakePending?: boolean
   __lastDepthPublishAt?: number
   __lastAlertCheckAt?: number
 }
@@ -88,7 +89,12 @@ function unref(timer: NodeJS.Timeout | undefined): void {
  * الأمان معطّلة على استضافة بلا cron صالح.
  */
 async function runDrainCycle(): Promise<boolean> {
-  if (g.__syncQueueRunnerProcessing) return false
+  if (g.__syncQueueRunnerProcessing) {
+    // A webhook can land after the active cycle scanned its inbox/queue.
+    // Re-run once when that cycle finishes rather than delaying until idle poll.
+    g.__syncQueueWakePending = true
+    return false
+  }
   try {
     g.__syncQueueRunnerProcessing = true
     const { drainWebhookInbox } = await import('./webhook-inbox')
@@ -131,6 +137,13 @@ async function runDrainCycle(): Promise<boolean> {
     return true // Retry sooner after a transient error.
   } finally {
     g.__syncQueueRunnerProcessing = false
+    if (g.__syncQueueWakePending && g.__syncQueueRunnerStarted) {
+      g.__syncQueueWakePending = false
+      const immediate = setTimeout(() => {
+        if (g.__syncQueueRunnerStarted) void runDrainCycle()
+      }, 0)
+      unref(immediate)
+    }
   }
 }
 
@@ -316,6 +329,7 @@ export function stopSyncQueueRunner(): void {
   if (g.__syncQueueWakeTimer) clearTimeout(g.__syncQueueWakeTimer)
   g.__syncQueueWakeTimer = undefined
   g.__syncQueueWakeAt = undefined
+  g.__syncQueueWakePending = false
   if (g.__syncQueueRunnerInterval) {
     clearTimeout(g.__syncQueueRunnerInterval)
     g.__syncQueueRunnerInterval = undefined
