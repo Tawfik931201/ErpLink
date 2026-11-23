@@ -10,6 +10,31 @@ export const dynamic = 'force-dynamic'
 const TICKET_MODEL = 'x_erplink_support_ticket'
 const MAX_WEBHOOK_BYTES = 4096
 
+async function boundedBody(request: NextRequest): Promise<string> {
+  const reader = request.body?.getReader()
+  if (!reader) throw new Error('Empty webhook')
+  const chunks: Uint8Array[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_WEBHOOK_BYTES) throw new Error('Webhook payload too large')
+      chunks.push(value)
+    }
+    const bytes = new Uint8Array(size)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return new TextDecoder().decode(bytes)
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 function sameSourceId(received: string, expected: string): boolean {
   if (!received || !expected || received.length > 200 || expected.length > 200) return false
   // Per-ticket source UUIDs are random, private server-side Odoo record fields.
@@ -26,8 +51,7 @@ export async function POST(request: NextRequest) {
     return new Response('Invalid webhook', { status: 413 })
   }
   try {
-    const body = await request.text()
-    if (body.length > MAX_WEBHOOK_BYTES) return new Response('Invalid webhook', { status: 413 })
+    const body = await boundedBody(request)
     const payload: unknown = JSON.parse(body)
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return new Response('Invalid webhook', { status: 400 })
