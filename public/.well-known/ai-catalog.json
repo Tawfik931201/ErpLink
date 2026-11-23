@@ -1,0 +1,10 @@
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:erplink.bizsahla.com:mcp:public",
+      "type": "application/mcp-server-card+json",
+      "url": "https://erplink.bizsahla.com/.well-known/mcp/server-card.json"
+    }
+  ]
+}

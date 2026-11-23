@@ -8,6 +8,7 @@ import {
   stripLocaleFromPathname,
   DEFAULT_LANG,
 } from '@/lib/locale'
+import { isAgentPublicPath } from '@/lib/public-agent-content'
 import { getZidEmbeddedRedirectTarget } from '@/lib/zid/embedded-url'
 
 const LOCALE_COOKIE = 'lang'
@@ -126,6 +127,38 @@ export default clerkMiddleware(async (auth, req) => {
           ? `/${first}`
           : `/${getUrlLocaleFromLanguage(req.cookies.get(LOCALE_COOKIE)?.value || DEFAULT_LANG)}`
         return NextResponse.redirect(new URL(`${localePrefix}${target}${search}`, req.url))
+      }
+    }
+  }
+
+  // --- OPT-IN PUBLIC MARKDOWN REPRESENTATION ---
+  // Only known public marketing pages; never rewrite API, private app,
+  // authentication, OAuth launches, form submissions or Next RSC requests.
+  // Normal browser Accept headers keep existing HTML and locale behavior.
+  if (
+    req.method === 'GET' &&
+    !search &&
+    !req.headers.has('rsc') &&
+    !req.headers.has('next-router-state-tree') &&
+    !req.headers.has('next-action')
+  ) {
+    const acceptsMarkdown = (req.headers.get('accept') ?? '').split(',').some((token) => {
+      const [type, ...params] = token.trim().split(';').map((value) => value.trim().toLowerCase())
+      return type === 'text/markdown' && !params.some((parameter) => /^q=0(?:\.0*)?$/.test(parameter))
+    })
+    if (acceptsMarkdown) {
+      const segments = pathname.split('/').filter(Boolean)
+      const first = segments[0]?.toLowerCase() ?? ''
+      const hasLocale = SUPPORTED_URL_LOCALES.includes(first)
+      const publicPath = hasLocale ? `/${segments.slice(1).join('/')}` : pathname
+      if (isAgentPublicPath(publicPath)) {
+        const language = hasLocale
+          ? getLanguageFromUrlLocale(first)
+          : req.cookies.get(LOCALE_COOKIE)?.value === 'en' ? 'en' : 'ar'
+        const target = new URL('/api/public-markdown', req.url)
+        target.searchParams.set('page', publicPath)
+        target.searchParams.set('lang', language)
+        return NextResponse.rewrite(target)
       }
     }
   }

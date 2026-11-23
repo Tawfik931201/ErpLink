@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { publicPageMetadata } from '@/lib/public-seo'
+import { publicBusinessProfile } from '@/lib/public-business-profile'
 import { resolveLanguage } from '@/lib/translations'
 
 export const generateMetadata = () => publicPageMetadata('/about')
@@ -11,6 +12,7 @@ export default async function AboutPage() {
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const isAr = lang === 'ar'
+  const business = publicBusinessProfile()
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground" dir={isAr ? 'rtl' : 'ltr'}>
       <PublicSiteHeader lang={lang} />
@@ -32,6 +34,31 @@ export default async function AboutPage() {
                 : 'The platform helps synchronize orders, products, inventory and customers, with mapping settings and operational logs. Platforms described on this site include Zid, Salla and Shopify, with ERP systems such as Odoo.'}
             </p>
           </section>
+          {(business.telephone || business.address || business.sameAs.length > 0) && (
+            <section className="space-y-4">
+              <h2 className="text-2xl font-bold">{isAr ? 'معلومات الشركة الرسمية' : 'Official business details'}</h2>
+              {business.telephone && (
+                <p><a href={`tel:${business.telephone}`} className="text-primary underline">{business.telephone}</a></p>
+              )}
+              {business.address && (
+                <p className="leading-8 text-muted-foreground">
+                  {[business.address.streetAddress, business.address.addressLocality,
+                    business.address.addressRegion, business.address.postalCode,
+                    business.address.addressCountry].filter(Boolean).join(', ')}
+                </p>
+              )}
+              {business.sameAs.length > 0 && (
+                <ul className="flex flex-wrap gap-4">
+                  {business.sameAs.map((url) => (
+                    <li key={url}><a href={url} rel="noopener noreferrer" target="_blank"
+                      className="text-sm font-semibold text-primary underline">
+                      {new URL(url).hostname}
+                    </a></li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
           <section className="space-y-3">
             <h2 className="text-2xl font-bold">{isAr ? 'تواصل معنا' : 'Get in touch'}</h2>
             <p className="leading-8 text-muted-foreground">
