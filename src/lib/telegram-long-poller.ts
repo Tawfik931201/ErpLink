@@ -388,12 +388,15 @@ export function startTelegramPoller(): void {
 
   // Read pending link codes once at boot; do not read the bot table when
   // nobody is linking. Registering a bot calls forceRefreshTelegramPoller.
-  void supabase
-    .from('telegram_bot_codes')
-    .select('expires_at')
-    .gt('expires_at', new Date().toISOString())
-    .limit(1)
-    .then(async ({ data, error }) => {
+  // Supabase PostgREST builders are PromiseLike (not full Promises):
+  // an async IIFE provides a real catch boundary for boot recovery.
+  void (async () => {
+    try {
+      const { data, error } = await supabase
+        .from('telegram_bot_codes')
+        .select('expires_at')
+        .gt('expires_at', new Date().toISOString())
+        .limit(1)
       if (error) throw error
       const codeRow = data?.[0]
       if (!codeRow?.expires_at) return
@@ -403,10 +406,10 @@ export function startTelegramPoller(): void {
       activateTelegramPoller(remainingMs)
       console.info(`[TelegramPoller] Resuming ${getBotsMap().size} bot(s) with a pending link code`)
       await pollAllOnce()
-    })
-    .catch((err: any) => {
-      console.warn('[TelegramPoller] initial link-code recovery failed:', err?.message ?? err)
-    })
+    } catch (err: unknown) {
+      console.warn('[TelegramPoller] initial link-code recovery failed:', err instanceof Error ? err.message : String(err))
+    }
+  })()
   g.__telegramPollerLastRefresh = Date.now()
 }
 

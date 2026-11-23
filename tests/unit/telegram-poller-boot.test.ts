@@ -42,6 +42,8 @@ describe('the Telegram poller is actually running', () => {
     expect(startup.indexOf(".from('telegram_bot_codes')")).toBeGreaterThan(-1)
     expect(startup.indexOf(".from('telegram_bot_codes')")).toBeLessThan(startup.indexOf('await refreshBotsFromDb()'))
     expect(startup).toContain('if (!codeRow?.expires_at) return')
+    expect(startup).toContain('void (async () => {')
+    expect(startup).not.toContain('.then(async (')
     expect(startup).not.toContain('setInterval(() =>')
     expect(poller).toContain('ensurePollTimer()')
     expect(poller).toContain('stopPollInterval()')
