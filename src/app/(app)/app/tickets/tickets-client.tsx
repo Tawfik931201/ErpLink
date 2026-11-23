@@ -630,15 +630,15 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
           {/* Column 2: Chatter Discussion */}
           <div className="lg:col-span-7 space-y-6">
-            <Card className="flex h-[min(76dvh,690px)] min-h-[460px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:h-[650px]">
-              <CardHeader className="shrink-0 border-b border-border/60 bg-card/90 px-4 py-3">
+            <Card className="flex h-[min(78dvh,700px)] min-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-[#f0f2f5] shadow-lg dark:border-[#2a3942] dark:bg-[#202c33] lg:h-[660px]">
+              <CardHeader className="shrink-0 border-b border-[#d1d7db] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <CardTitle className="flex items-center gap-3 text-sm font-bold">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
                     <Headset className="h-5 w-5" />
                   </span>
                   <span className="flex flex-col gap-0.5">
-                    <span>{tLocal.chatterTitle}</span>
-                    <span className="text-[11px] font-normal text-muted-foreground">
+                    <span className="text-[#111b21] dark:text-[#e9edef]">{tLocal.chatterTitle}</span>
+                    <span className="text-[11px] font-normal text-[#667781] dark:text-[#8696a0]">
                       {lang === 'ar' ? 'المحادثة مع فريق دعم ERP Link' : 'Conversation with ERP Link support'}
                     </span>
                   </span>
@@ -656,7 +656,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                     element.scrollHeight - element.scrollTop - element.clientHeight < 90
                   if (stickToBottomRef.current) void acknowledgeVisibleSupportMessages()
                 }}
-                className="flex-1 min-h-0 overflow-y-auto bg-gradient-to-b from-secondary/25 via-background to-secondary/10 px-3 py-5 sm:px-5"
+                className="min-h-0 flex-1 overflow-y-auto bg-[#efeae2] px-3 py-5 dark:bg-[#0b141a] sm:px-5"
               >
                 {loadingMessages ? (
                   <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -690,7 +690,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                         <div key={msg.id} className="space-y-3">
                           {showDate && (
                             <div className="flex items-center justify-center py-2">
-                              <span className="rounded-full border border-border/70 bg-card/80 px-3 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+                              <span className="rounded-full border border-[#d1d7db] bg-white/90 px-3 py-1 text-[10px] font-medium text-[#54656f] shadow-sm dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#8696a0]">
                                 {formattedDay}
                               </span>
                             </div>
@@ -698,7 +698,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
                           <div dir="ltr" className={cn('flex items-end gap-2', isMine ? 'justify-end' : 'justify-start')}>
                             {!isMine && (
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#075e54] text-white shadow-sm dark:bg-[#00a884]">
                                 <Headset className="h-4 w-4" />
                               </span>
                             )}
@@ -706,14 +706,14 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             <div
                               dir={dir}
                               className={cn(
-                                'min-w-0 max-w-[84%] rounded-2xl border px-3.5 py-3 shadow-sm sm:max-w-[76%]',
+                                'min-w-0 max-w-[84%] rounded-xl border px-3.5 py-2.5 shadow-sm sm:max-w-[76%]',
                                 isMine
-                                  ? 'rounded-br-sm border-primary/20 bg-primary/10'
-                                  : 'rounded-bl-sm border-border/80 bg-card'
+                                  ? 'rounded-br-sm border-[#c6e9be] bg-[#d9fdd3] text-[#111b21] dark:border-[#005c4b] dark:bg-[#005c4b] dark:text-[#e9edef]'
+                                  : 'rounded-bl-sm border-[#ece5dd] bg-white text-[#111b21] dark:border-[#202c33] dark:bg-[#202c33] dark:text-[#e9edef]'
                               )}
                             >
                               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                                <span className={cn('text-[11px] font-bold', isMine ? 'text-primary' : 'text-foreground')}>
+                                <span className={cn('text-[11px] font-bold', isMine ? 'text-[#075e54] dark:text-[#7ae6c5]' : 'text-[#075e54] dark:text-[#53bdeb]')}>
                                   {isMine ? tLocal.customerLabel : tLocal.agentLabel}
                                   {!isMine && authorName && authorName !== 'Support' && (
                                     <span className="ms-1 font-normal text-muted-foreground">· {authorName}</span>
@@ -722,40 +722,41 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                               </div>
 
                               <div
-                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-foreground/90 dark:prose-invert"
+                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-[#111b21] dark:prose-invert dark:text-[#e9edef]"
                                 dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
                               />
 
                               {msg.attachment_ids?.length > 0 && (
-                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-border/40 pt-2.5">
+                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-[#111b21]/10 pt-2.5 dark:border-white/10">
                                   {msg.attachment_ids.map(attId => {
                                     const attachment = attachments.find(item => item.id === attId)
                                     if (!attachment) return null
                                     const url = `/api/tickets/attachments?id=${attachment.id}`
-                                    const isImage = attachment.mimetype.startsWith('image/')
+                                    const isImage = isTicketChatPreviewImage(attachment.mimetype)
+                                    const previewUrl = url + '&preview=1'
                                     return isImage ? (
-                                      <a
+                                      <button
                                         key={attachment.id}
-                                        href={url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="group relative block overflow-hidden rounded-xl border border-border/60 bg-background"
+                                        type="button"
+                                        onClick={() => setActiveImage({ src: previewUrl, name: attachment.name })}
+                                        aria-label={(chatLang === 'ar' ? 'معاينة الصورة: ' : 'Preview image: ') + attachment.name}
+                                        className="group relative block overflow-hidden rounded-xl border border-[#111b21]/10 bg-white text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:border-white/10 dark:bg-[#111b21]"
                                         title={attachment.name}
                                       >
                                         <img
-                                          src={url}
+                                          src={previewUrl}
                                           alt={attachment.name}
                                           loading="lazy"
-                                          className="max-h-[150px] max-w-[210px] object-cover transition-transform group-hover:scale-105"
+                                          className="max-h-[155px] max-w-[215px] object-cover transition-transform group-hover:scale-105"
                                         />
-                                      </a>
+                                      </button>
                                     ) : (
                                       <a
                                         key={attachment.id}
                                         href={url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[11px] font-medium text-foreground hover:bg-secondary/60"
+                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-[#d1d7db] bg-[#f0f2f5]/90 px-3 py-2 text-[11px] font-medium text-[#111b21] hover:bg-[#dfe5e7] dark:border-[#3b4a54] dark:bg-[#2a3942] dark:text-[#e9edef] dark:hover:bg-[#374952]"
                                       >
                                         <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
                                         <span className="min-w-0 truncate">{attachment.name}</span>
@@ -768,7 +769,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                               <div className="mt-2 flex justify-end">
                                 <time
                                   dateTime={msg.date}
-                                  className="text-[10px] tabular-nums text-muted-foreground"
+                                  className="text-[10px] tabular-nums text-[#667781] dark:text-[#a1adb5]"
                                   title={formattedDay}
                                 >
                                   {formattedTime}
@@ -777,7 +778,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             </div>
 
                             {isMine && (
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-[#075e54] dark:bg-[#005c4b] dark:text-[#a8ebd2]">
                                 <User className="h-4 w-4" />
                               </span>
                             )}
@@ -899,6 +900,12 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
             </Card>
           </div>
         </div>
+
+        <TicketChatImageLightbox
+          preview={activeImage}
+          onClose={() => setActiveImage(null)}
+          lang={chatLang}
+        />
 
         {/* Custom Confirmation Modal */}
         {showCloseConfirm && (
