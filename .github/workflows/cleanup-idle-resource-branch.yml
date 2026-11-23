@@ -1,0 +1,27 @@
+name: Cleanup merged ERP Link performance branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-perf-resource:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 63 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'perf/idle-sync-queue-budget-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the merged temporary performance branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/perf/idle-sync-queue-budget-20261123" ||
+            echo 'Temporary branch was already removed'
