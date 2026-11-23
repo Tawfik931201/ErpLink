@@ -25,6 +25,9 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
         </Link>
 
         <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-muted-foreground">
+          <Link href="/integrations" className="transition-colors hover:text-foreground">
+            {lang === 'ar' ? 'التكاملات' : 'Integrations'}
+          </Link>
           <Link href="/pricing" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'الأسعار' : 'Pricing'}
           </Link>

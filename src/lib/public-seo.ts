@@ -7,12 +7,32 @@ import { resolveLanguage } from '@/lib/translations'
 // SEO is intentionally limited to publicly accessible marketing pages.
 // Never generate indexable metadata for app, admin, OAuth or API routes.
 export const PUBLIC_SITE_URL = 'https://erplink.bizsahla.com'
-export type PublicPagePath = '/' | '/about' | '/pricing' | '/contact' | '/privacy' | '/terms'
+export type PublicPagePath = '/' | '/about' | '/pricing' | '/contact' | '/privacy' | '/terms' | '/integrations' | '/integrations/zid-odoo' | '/integrations/salla-odoo' | '/integrations/shopify-odoo' | '/guides/zid-odoo-checklist'
 
 const copy: Record<PublicPagePath, { ar: { title: string; description: string }; en: { title: string; description: string } }> = {
   '/': {
-    ar: { title: 'ERP Link | اربط متجرك الإلكتروني بنظام ERP', description: 'اربط متجرك على زد أو سلة أو شوبيفاي بأنظمة ERP، ونسّق الطلبات والمنتجات والعملاء والمخزون من مكان واحد.' },
-    en: { title: 'ERP Link | Connect your online store to ERP', description: 'Connect Zid, Salla or Shopify with your ERP system. Synchronize orders, products, customers and inventory.' },
+    ar: { title: 'ERP Link | ربط زد وسلة وشوبيفاي بأودوو وأنظمة ERP', description: 'اربط متجرك على زد أو سلة أو شوبيفاي بأنظمة ERP، ونسّق الطلبات والمنتجات والعملاء والمخزون من مكان واحد.' },
+    en: { title: 'ERP Link | Zid, Salla & Shopify Integration with Odoo', description: 'Connect Zid, Salla or Shopify with your ERP system. Synchronize orders, products, customers and inventory.' },
+  },
+  '/integrations': {
+    ar: { title: 'ربط المتاجر الإلكترونية بأودوو | تكاملات ERP Link', description: 'دليلك لربط زد وسلة وشوبيفاي بأودوو Odoo: مزامنة الطلبات والمنتجات والمخزون والعملاء، وإعداد الخرائط وحالات الطلب.' },
+    en: { title: 'E-commerce & Odoo Integrations | ERP Link', description: 'Explore Zid, Salla and Shopify Odoo integration guides for orders, inventory, products, customers and mapping.' },
+  },
+  '/integrations/zid-odoo': {
+    ar: { title: 'ربط زد بأودوو Odoo | الطلبات والمخزون | ERP Link', description: 'كيف تربط متجر زد مع أودوو Odoo؟ تعرف على إعداد مزامنة الطلبات والمخزون والعملاء والمرتجعات والضريبة واختبار التكامل.' },
+    en: { title: 'Zid Odoo Integration | Orders & Inventory | ERP Link', description: 'Connect Zid with Odoo. Understand orders, stock, customer matching, taxes, returns and testing your ERP integration.' },
+  },
+  '/integrations/salla-odoo': {
+    ar: { title: 'ربط سلة بأودوو Odoo | مزامنة الطلبات | ERP Link', description: 'ربط متجر سلة مع أودوو: إعداد المنتجات والمخزون والعملاء والضرائب وحالات الطلب، وخطوات الفحص قبل التشغيل.' },
+    en: { title: 'Salla Odoo Integration | Store Sync | ERP Link', description: 'Explore Salla Odoo integration for orders, products, customers, stock, tax mapping and order status testing.' },
+  },
+  '/integrations/shopify-odoo': {
+    ar: { title: 'ربط شوبيفاي بأودوو Odoo | Shopify | ERP Link', description: 'دليل تكامل Shopify مع Odoo: Webhooks والمنتجات والطلبات والمخزون وحالات الدفع والشحن والمرتجعات.' },
+    en: { title: 'Shopify Odoo Integration | Orders & Stock | ERP Link', description: 'Plan Shopify Odoo integration including webhooks, variants, orders, inventory, payment and fulfillment workflows.' },
+  },
+  '/guides/zid-odoo-checklist': {
+    ar: { title: 'كيفية ربط زد بأودوو: دليل الاختبار | ERP Link', description: 'قائمة عملية لتجهيز وربط زد مع أودوو: خريطة البيانات والضرائب والشحن والطلبات والمرتجعات والتأكد من عدم التكرار.' },
+    en: { title: 'Zid Odoo Setup & Testing Checklist | ERP Link', description: 'A practical Zid Odoo integration checklist for product matching, taxes, shipping, returns, order events and test scenarios.' },
   },
   '/about': {
     ar: { title: 'عن ERP Link | منصة ربط المتاجر بأنظمة ERP', description: 'تعرف على ERP Link، منصة تكامل المتاجر الإلكترونية مع أنظمة إدارة الأعمال ومزامنة العمليات والبيانات.' },

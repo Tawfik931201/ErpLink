@@ -49,6 +49,10 @@ export function PublicSiteFooter({ lang }: { lang: Language }) {
                 {lang === 'ar' ? 'الصفحات' : 'Pages'}
               </h4>
               <ul className="space-y-1.5">
+                <li><Link href="/integrations" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط المتاجر بأودوو' : 'Odoo Integrations'}</Link></li>
+                <li><Link href="/integrations/zid-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط زد بأودوو' : 'Zid + Odoo'}</Link></li>
+                <li><Link href="/integrations/salla-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط سلة بأودوو' : 'Salla + Odoo'}</Link></li>
+                <li><Link href="/integrations/shopify-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط شوبيفاي بأودوو' : 'Shopify + Odoo'}</Link></li>
                 <li><Link href="/pricing" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{t(lang, 'landing.pricing')}</Link></li>
               </ul>
             </div>
