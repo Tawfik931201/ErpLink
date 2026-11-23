@@ -339,3 +339,25 @@ export async function readOwnedOdooAttachment(id: number) {
     name: file.name, mimetype: file.mimetype || 'application/octet-stream', buffer,
   }
 }
+
+
+/** Public contact submissions also become Odoo Studio support tickets. */
+export async function createPublicContactTicket(input: {
+  name: string; email: string; phone: string; company: string; message: string;
+}, sourceUuid: string): Promise<number> {
+  const email = input.email.trim().toLowerCase()
+  const partnerId = await partnerByEmail(email, input.name)
+  const subject = 'Contact: ' + input.company + ' — ' + input.name
+  const id = await centralSupportCall<number>(TICKET, 'create', [{
+    x_name: subject, x_subject: subject, x_description: input.message,
+    x_email: email, x_contact_name: input.name, x_phone: input.phone,
+    x_company: input.company, x_partner_id: partnerId,
+    x_source_uuid: 'public-contact:' + sourceUuid,
+    x_status: 'open', x_ticket_stage: 'open', x_channel: 'contact',
+    x_last_customer_reply: timestamp(),
+  }])
+  // A failed chatter post must never erase a successfully stored ticket.
+  try { await postCustomerMessage(id, partnerId, input.message, []) }
+  catch (error) { console.error('[support] public ticket chatter post failed:', error) }
+  return id
+}
