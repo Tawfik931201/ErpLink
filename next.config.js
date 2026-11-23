@@ -133,6 +133,31 @@ const nextConfig = {
       },
     ]
 
+    // Public, static MCP discovery metadata must be fetchable by browser
+    // discovery clients. These rules target exactly two public JSON files;
+    // never broaden CORS on account, integration or authenticated APIs.
+    headers.push(
+      {
+        source: '/.well-known/mcp/server-card.json',
+        headers: [
+          { key: 'Content-Type', value: 'application/mcp-server-card+json; charset=utf-8' },
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, HEAD, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, If-None-Match' },
+          { key: 'Cache-Control', value: 'public, max-age=3600' },
+        ],
+      },
+      {
+        source: '/.well-known/ai-catalog.json',
+        headers: [
+          { key: 'Content-Type', value: 'application/ai-catalog+json; charset=utf-8' },
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, HEAD, OPTIONS' },
+          { key: 'Cache-Control', value: 'public, max-age=3600' },
+        ],
+      },
+    )
+
     if (corsAllowedOrigin) {
       headers.push({
         source: '/api/:path*',

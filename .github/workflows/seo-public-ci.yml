@@ -15,6 +15,7 @@ on:
       - 'src/lib/public-business-profile.ts'
       - 'src/lib/public-mcp.ts'
       - 'src/middleware.ts'
+      - 'next.config.js'
       - 'src/app/api/public-mcp/**'
       - 'src/app/api/public-markdown/**'
       - 'public/.well-known/**'
