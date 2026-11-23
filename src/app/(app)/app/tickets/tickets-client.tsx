@@ -12,13 +12,12 @@ import {
   HelpCircle,
   MessageSquare,
   Headset,
+  Smile,
   Send,
   Loader2,
   User,
   ShieldCheck,
   Paperclip,
-  FileText,
-  X,
   CheckCircle2
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
@@ -31,6 +30,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { TicketChatImageLightbox, TicketChatSelectedFiles, type TicketChatImagePreview } from '@/components/tickets/ticket-chat-media'
+import { getPastedTicketImages, isTicketChatPreviewImage, mergeTicketChatFiles, type TicketChatFileError } from '@/lib/ticket-chat-media'
 import { cn } from '@/lib/utils'
 
 /**
@@ -87,6 +88,31 @@ function sanitizeOdooHtml(dirty: string): string {
     return ''
   }
 }
+
+/** Small dependency-free picker, including commonly used support emojis. */
+const CHAT_EMOJIS = [
+  '😀', '😁', '😂', '🤣', '😊', '😍', '🥰', '😎',
+  '🤔', '😕', '😢', '😭', '😡', '😮', '🙏', '👏',
+  '👍', '👎', '👌', '🤝', '👋', '💪', '❤️', '💚',
+  '🎉', '✅', '❌', '⚠️', '📷', '📎', '💡', '💬',
+  '🔥', '⭐', '🚀', '🛠️', '📦', '🧾', '🛒', '✨',
+]
+
+const TICKET_ATTACHMENT_ERRORS: Record<'ar' | 'en', Record<TicketChatFileError, string>> = {
+  ar: {
+    too_many: 'يمكن إرسال 5 مرفقات كحد أقصى في الرسالة.',
+    file_too_large: 'الحد الأقصى لحجم المرفق الواحد 10 ميجابايت.',
+    total_too_large: 'إجمالي المرفقات يجب ألا يتجاوز 20 ميجابايت.',
+    invalid_file: 'الملف المرفق غير صالح.',
+  },
+  en: {
+    too_many: 'You can attach up to 5 files per message.',
+    file_too_large: 'Each attachment must be 10 MB or less.',
+    total_too_large: 'Combined attachments must be 20 MB or less.',
+    invalid_file: 'Invalid attachment.',
+  },
+}
+
 interface TicketsClientProps {
   initialTickets: Ticket[]
   success: boolean
@@ -203,6 +229,11 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   const [messages, setMessages] = useState<OdooMessage[]>([])
   const [attachments, setAttachments] = useState<OdooAttachment[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [activeImage, setActiveImage] = useState<TicketChatImagePreview | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const emojiPickerRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const activeTicketIdRef = useRef<number | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
@@ -218,6 +249,55 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   
   const { lang, dir } = useLanguage()
   const tLocal = LOCAL_TEXTS[lang === 'ar' ? 'ar' : 'en']
+  const chatLang: 'ar' | 'en' = lang === 'ar' ? 'ar' : 'en'
+
+  const appendFiles = (files: File[]) => {
+    if (!files.length || sendingReply) return
+    const result = mergeTicketChatFiles(selectedFiles, files)
+    if (result.error) {
+      setReplyError(TICKET_ATTACHMENT_ERRORS[chatLang][result.error])
+      return
+    }
+    setSelectedFiles(result.files)
+    setReplyError(null)
+  }
+
+  const pasteImages = (event: React.ClipboardEvent<HTMLElement>) => {
+    const files = getPastedTicketImages(event.clipboardData.items)
+    if (!files.length) return // Normal text paste continues unchanged.
+    event.preventDefault()
+    appendFiles(files)
+  }
+
+  const insertEmoji = (emoji: string) => {
+    const input = composerRef.current
+    const cursor = input?.selectionStart ?? replyText.length
+    const end = input?.selectionEnd ?? replyText.length
+    setReplyText(text => text.slice(0, cursor) + emoji + text.slice(end))
+    setShowEmojiPicker(false)
+    requestAnimationFrame(() => {
+      input?.focus()
+      input?.setSelectionRange(cursor + emoji.length, cursor + emoji.length)
+    })
+  }
+
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Node && !emojiPickerRef.current?.contains(event.target)) {
+        setShowEmojiPicker(false)
+      }
+    }
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowEmojiPicker(false)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', onEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', onEscape)
+    }
+  }, [showEmojiPicker])
 
   // Sync state if initialTickets change on server revalidation
   useEffect(() => {
@@ -247,6 +327,9 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   useEffect(() => {
     activeTicketIdRef.current = selectedTicketId
     stickToBottomRef.current = true
+    setSelectedFiles([])
+    setActiveImage(null)
+    setShowEmojiPicker(false)
     if (selectedTicketId !== null) {
       setMessages([])
       setAttachments([])
@@ -391,6 +474,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
       const res = await sendTicketMessage(formData)
       if (res.success) {
         setReplyText('')
+        setActiveImage(null)
         setSelectedFiles([])
         const fileInput = document.getElementById('chatter-attachments') as HTMLInputElement
         if (fileInput) fileInput.value = ''
@@ -544,15 +628,15 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
           {/* Column 2: Chatter Discussion */}
           <div className="lg:col-span-7 space-y-6">
-            <Card className="flex h-[min(76dvh,690px)] min-h-[460px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:h-[650px]">
-              <CardHeader className="shrink-0 border-b border-border/60 bg-card/90 px-4 py-3">
+            <Card className="flex h-[min(78dvh,700px)] min-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-[#f0f2f5] shadow-lg dark:border-[#2a3942] dark:bg-[#202c33] lg:h-[660px]">
+              <CardHeader className="shrink-0 border-b border-[#d1d7db] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <CardTitle className="flex items-center gap-3 text-sm font-bold">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
                     <Headset className="h-5 w-5" />
                   </span>
                   <span className="flex flex-col gap-0.5">
-                    <span>{tLocal.chatterTitle}</span>
-                    <span className="text-[11px] font-normal text-muted-foreground">
+                    <span className="text-[#111b21] dark:text-[#e9edef]">{tLocal.chatterTitle}</span>
+                    <span className="text-[11px] font-normal text-[#667781] dark:text-[#8696a0]">
                       {lang === 'ar' ? 'المحادثة مع فريق دعم ERP Link' : 'Conversation with ERP Link support'}
                     </span>
                   </span>
@@ -570,7 +654,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                     element.scrollHeight - element.scrollTop - element.clientHeight < 90
                   if (stickToBottomRef.current) void acknowledgeVisibleSupportMessages()
                 }}
-                className="flex-1 min-h-0 overflow-y-auto bg-gradient-to-b from-secondary/25 via-background to-secondary/10 px-3 py-5 sm:px-5"
+                className="min-h-0 flex-1 overflow-y-auto bg-[#efeae2] px-3 py-5 dark:bg-[#0b141a] sm:px-5"
               >
                 {loadingMessages ? (
                   <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -604,7 +688,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                         <div key={msg.id} className="space-y-3">
                           {showDate && (
                             <div className="flex items-center justify-center py-2">
-                              <span className="rounded-full border border-border/70 bg-card/80 px-3 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+                              <span className="rounded-full border border-[#d1d7db] bg-white/90 px-3 py-1 text-[10px] font-medium text-[#54656f] shadow-sm dark:border-[#2a3942] dark:bg-[#202c33] dark:text-[#8696a0]">
                                 {formattedDay}
                               </span>
                             </div>
@@ -612,7 +696,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
                           <div dir="ltr" className={cn('flex items-end gap-2', isMine ? 'justify-end' : 'justify-start')}>
                             {!isMine && (
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#075e54] text-white shadow-sm dark:bg-[#00a884]">
                                 <Headset className="h-4 w-4" />
                               </span>
                             )}
@@ -620,14 +704,14 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             <div
                               dir={dir}
                               className={cn(
-                                'min-w-0 max-w-[84%] rounded-2xl border px-3.5 py-3 shadow-sm sm:max-w-[76%]',
+                                'min-w-0 max-w-[84%] rounded-xl border px-3.5 py-2.5 shadow-sm sm:max-w-[76%]',
                                 isMine
-                                  ? 'rounded-br-sm border-primary/20 bg-primary/10'
-                                  : 'rounded-bl-sm border-border/80 bg-card'
+                                  ? 'rounded-br-sm border-[#c6e9be] bg-[#d9fdd3] text-[#111b21] dark:border-[#005c4b] dark:bg-[#005c4b] dark:text-[#e9edef]'
+                                  : 'rounded-bl-sm border-[#ece5dd] bg-white text-[#111b21] dark:border-[#202c33] dark:bg-[#202c33] dark:text-[#e9edef]'
                               )}
                             >
                               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                                <span className={cn('text-[11px] font-bold', isMine ? 'text-primary' : 'text-foreground')}>
+                                <span className={cn('text-[11px] font-bold', isMine ? 'text-[#075e54] dark:text-[#7ae6c5]' : 'text-[#075e54] dark:text-[#53bdeb]')}>
                                   {isMine ? tLocal.customerLabel : tLocal.agentLabel}
                                   {!isMine && authorName && authorName !== 'Support' && (
                                     <span className="ms-1 font-normal text-muted-foreground">· {authorName}</span>
@@ -636,40 +720,41 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                               </div>
 
                               <div
-                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-foreground/90 dark:prose-invert"
+                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-[#111b21] dark:prose-invert dark:text-[#e9edef]"
                                 dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
                               />
 
                               {msg.attachment_ids?.length > 0 && (
-                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-border/40 pt-2.5">
+                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-[#111b21]/10 pt-2.5 dark:border-white/10">
                                   {msg.attachment_ids.map(attId => {
                                     const attachment = attachments.find(item => item.id === attId)
                                     if (!attachment) return null
                                     const url = `/api/tickets/attachments?id=${attachment.id}`
-                                    const isImage = attachment.mimetype.startsWith('image/')
+                                    const isImage = isTicketChatPreviewImage(attachment.mimetype)
+                                    const previewUrl = url + '&preview=1'
                                     return isImage ? (
-                                      <a
+                                      <button
                                         key={attachment.id}
-                                        href={url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="group relative block overflow-hidden rounded-xl border border-border/60 bg-background"
+                                        type="button"
+                                        onClick={() => setActiveImage({ src: previewUrl, name: attachment.name })}
+                                        aria-label={(chatLang === 'ar' ? 'معاينة الصورة: ' : 'Preview image: ') + attachment.name}
+                                        className="group relative block overflow-hidden rounded-xl border border-[#111b21]/10 bg-white text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:border-white/10 dark:bg-[#111b21]"
                                         title={attachment.name}
                                       >
                                         <img
-                                          src={url}
+                                          src={previewUrl}
                                           alt={attachment.name}
                                           loading="lazy"
-                                          className="max-h-[150px] max-w-[210px] object-cover transition-transform group-hover:scale-105"
+                                          className="max-h-[155px] max-w-[215px] object-cover transition-transform group-hover:scale-105"
                                         />
-                                      </a>
+                                      </button>
                                     ) : (
                                       <a
                                         key={attachment.id}
                                         href={url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[11px] font-medium text-foreground hover:bg-secondary/60"
+                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-[#d1d7db] bg-[#f0f2f5]/90 px-3 py-2 text-[11px] font-medium text-[#111b21] hover:bg-[#dfe5e7] dark:border-[#3b4a54] dark:bg-[#2a3942] dark:text-[#e9edef] dark:hover:bg-[#374952]"
                                       >
                                         <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
                                         <span className="min-w-0 truncate">{attachment.name}</span>
@@ -682,7 +767,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                               <div className="mt-2 flex justify-end">
                                 <time
                                   dateTime={msg.date}
-                                  className="text-[10px] tabular-nums text-muted-foreground"
+                                  className="text-[10px] tabular-nums text-[#667781] dark:text-[#a1adb5]"
                                   title={formattedDay}
                                 >
                                   {formattedTime}
@@ -691,7 +776,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             </div>
 
                             {isMine && (
-                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#25d366] text-[#075e54] dark:bg-[#005c4b] dark:text-[#a8ebd2]">
                                 <User className="h-4 w-4" />
                               </span>
                             )}
@@ -712,107 +797,146 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                   </p>
                 </div>
               ) : (
-                <form onSubmit={handleSendReply} className="shrink-0 space-y-3 border-t border-border/60 bg-card/95 p-3 sm:p-4">
+                <form
+                  onSubmit={handleSendReply}
+                  onDragOver={event => {
+                    if (event.dataTransfer.types.includes('Files')) event.preventDefault()
+                  }}
+                  onDrop={event => {
+                    if (!event.dataTransfer.files.length) return
+                    event.preventDefault()
+                    appendFiles(Array.from(event.dataTransfer.files))
+                  }}
+                  className="shrink-0 space-y-2.5 border-t border-[#d1d7db] bg-[#f0f2f5] p-3 dark:border-[#2a3942] dark:bg-[#202c33]"
+                >
                   {replyError && (
-                    <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/10 text-destructive text-[11px] border border-destructive/20">
+                    <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-950/60 dark:text-red-200">
                       <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                       <span>{replyError}</span>
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <textarea
-                      placeholder={tLocal.chatterPlaceholder}
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      disabled={sendingReply}
-                      rows={2}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                          event.preventDefault()
-                          event.currentTarget.form?.requestSubmit()
-                        }
-                      }}
-                      className={cn(
-                        'w-full rounded-2xl border border-border bg-secondary/15 px-4 py-3 text-sm leading-6 text-foreground resize-none',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 focus-visible:border-foreground',
-                        'disabled:opacity-50 disabled:bg-muted'
-                      )}
-                    />
-                    
-                    {selectedFiles.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold text-muted-foreground pb-2">
-                        {selectedFiles.map((file, idx) => (
-                          <span key={idx} className="flex items-center gap-1 bg-secondary/80 px-2 py-0.5 rounded-lg border border-border">
-                            <FileText className="h-3 w-3 shrink-0 text-foreground" />
-                            <span className="truncate max-w-[120px]">{file.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedFiles((prev) => prev.filter((_, i) => i !== idx))}
-                              className="text-muted-foreground hover:text-destructive shrink-0 ml-1 rounded-md p-0.5"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                  <TicketChatSelectedFiles
+                    files={selectedFiles}
+                    lang={chatLang}
+                    onPreview={setActiveImage}
+                    onRemove={index => {
+                      setActiveImage(null)
+                      setSelectedFiles(files => files.filter((_, i) => i !== index))
+                    }}
+                  />
 
-                    <div className="flex justify-between items-center gap-3">
-                      {/* Styled Paperclip Button to Trigger Hidden File Input */}
-                      <div className="flex items-center">
-                        <input
-                          id="chatter-attachments"
-                          name="attachments"
-                          type="file"
-                          multiple
-                          disabled={sendingReply}
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files) {
-                              const newFiles = Array.from(e.target.files)
-                              setSelectedFiles((prev) => [...prev, ...newFiles])
-                            }
-                          }}
-                        />
-                        <Button
+                  <div className="flex items-end gap-2" dir={dir}>
+                    <div className="relative flex min-w-0 flex-1 items-end rounded-2xl border border-[#d1d7db] bg-white shadow-sm focus-within:border-[#00a884] dark:border-[#3b4a54] dark:bg-[#2a3942]">
+                      <div ref={emojiPickerRef} className="relative shrink-0 self-end">
+                        <button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          onClick={() => setShowEmojiPicker(open => !open)}
                           disabled={sendingReply}
-                          className="h-8 w-8 p-0 rounded-lg"
-                          onClick={() => document.getElementById('chatter-attachments')?.click()}
+                          aria-label={chatLang === 'ar' ? 'إضافة رمز تعبيري' : 'Insert emoji'}
+                          aria-expanded={showEmojiPicker}
+                          aria-controls="ticket-chat-emoji-picker"
+                          className="flex h-11 w-10 items-center justify-center text-[#54656f] transition-colors hover:text-[#00a884] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] disabled:opacity-50 dark:text-[#8696a0] dark:hover:text-[#25d366]"
                         >
-                          <Paperclip className="h-4.5 w-4.5 text-muted-foreground hover:text-foreground transition-colors" />
-                        </Button>
+                          <Smile className="h-[22px] w-[22px]" />
+                        </button>
+                        {showEmojiPicker && (
+                          <div
+                            id="ticket-chat-emoji-picker"
+                            role="dialog"
+                            aria-label={chatLang === 'ar' ? 'الرموز التعبيرية' : 'Emojis'}
+                            className="absolute bottom-full start-0 z-30 mb-3 w-[min(318px,78vw)] rounded-xl border border-[#d1d7db] bg-white p-3 shadow-2xl dark:border-[#3b4a54] dark:bg-[#202c33]"
+                          >
+                            <p className="mb-2 text-xs font-semibold text-[#54656f] dark:text-[#d1d7db]">
+                              {chatLang === 'ar' ? 'اختر رمزًا تعبيريًا' : 'Choose an emoji'}
+                            </p>
+                            <div className="grid grid-cols-8 gap-1" dir="ltr">
+                              {CHAT_EMOJIS.map(emoji => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onMouseDown={event => event.preventDefault()}
+                                  onClick={() => insertEmoji(emoji)}
+                                  aria-label={(chatLang === 'ar' ? 'إدراج ' : 'Insert ') + emoji}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-[22px] transition-colors hover:bg-[#e9edef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:hover:bg-[#374952]"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <Button 
-                        type="submit" 
-                        variant="brand" 
-                        size="sm"
-                        className="font-bold gap-1.5 rounded-lg text-xs"
-                        disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
+                      <textarea
+                        ref={composerRef}
+                        placeholder={tLocal.chatterPlaceholder}
+                        value={replyText}
+                        onChange={event => setReplyText(event.target.value)}
+                        onPaste={pasteImages}
+                        disabled={sendingReply}
+                        rows={1}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                            event.preventDefault()
+                            if (!sendingReply) event.currentTarget.form?.requestSubmit()
+                          }
+                        }}
+                        className="min-h-[44px] max-h-28 w-full min-w-0 flex-1 resize-none bg-transparent px-2 py-2.5 text-[13px] leading-6 text-[#111b21] placeholder:text-[#8696a0] focus-visible:outline-none disabled:opacity-50 dark:text-[#e9edef]"
+                      />
+
+                      <input
+                        ref={fileInputRef}
+                        id="chatter-attachments"
+                        name="attachments"
+                        type="file"
+                        multiple
+                        disabled={sendingReply}
+                        className="hidden"
+                        onChange={event => {
+                          const files = event.currentTarget.files
+                          if (files?.length) appendFiles(Array.from(files))
+                          event.currentTarget.value = ''
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={sendingReply}
+                        onClick={() => fileInputRef.current?.click()}
+                        aria-label={chatLang === 'ar' ? 'إرفاق صور أو ملفات' : 'Attach pictures or files'}
+                        className="flex h-11 w-10 shrink-0 items-center justify-center text-[#54656f] transition-colors hover:text-[#00a884] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] disabled:opacity-50 dark:text-[#8696a0] dark:hover:text-[#25d366]"
                       >
-                        {sendingReply ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <>
-                            <Send className={cn("h-3 w-3 shrink-0", dir === 'rtl' ? "rotate-180" : "")} />
-                            <span>{tLocal.sendReplyBtn}</span>
-                          </>
-                        )}
-                      </Button>
+                        <Paperclip className="h-[21px] w-[21px]" />
+                      </button>
                     </div>
+
+                    <button
+                      type="submit"
+                      disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
+                      aria-label={tLocal.sendReplyBtn}
+                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#00a884] text-white shadow-sm transition-colors hover:bg-[#008f72] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25d366] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#00a884]"
+                    >
+                      {sendingReply
+                        ? <Loader2 className="h-5 w-5 animate-spin" />
+                        : <Send className={cn('h-5 w-5', dir === 'rtl' ? 'rotate-180' : '')} />}
+                    </button>
                   </div>
-                  <p className="text-[10px] text-muted-foreground/80">
-                    {lang === 'ar' ? 'Enter للإرسال · Shift + Enter لسطر جديد' : 'Enter to send · Shift + Enter for a new line'}
+                  <p className="px-1 text-[10px] text-[#667781] dark:text-[#8696a0]">
+                    {chatLang === 'ar'
+                      ? 'Ctrl + V للصق صورة · Enter للإرسال · Shift + Enter لسطر جديد'
+                      : 'Ctrl + V to paste an image · Enter to send · Shift + Enter for a new line'}
                   </p>
                 </form>
               )}
             </Card>
           </div>
         </div>
+
+        <TicketChatImageLightbox
+          preview={activeImage}
+          onClose={() => setActiveImage(null)}
+          lang={chatLang}
+        />
 
         {/* Custom Confirmation Modal */}
         {showCloseConfirm && (
