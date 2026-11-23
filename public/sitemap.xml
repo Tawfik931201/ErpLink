@@ -60,4 +60,54 @@
     <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/terms" />
     <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/terms" />
   </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/integrations</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/integrations</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/integrations/zid-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/zid-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/zid-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/integrations/zid-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/zid-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/zid-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/integrations/salla-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/salla-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/salla-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/integrations/salla-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/salla-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/salla-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/integrations/shopify-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/shopify-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/shopify-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/integrations/shopify-odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/integrations/shopify-odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/shopify-odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist" />
+  </url>
 </urlset>

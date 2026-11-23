@@ -606,6 +606,37 @@ export default async function HomePage() {
           </div>
         </section>
 
+        {/* ── Search-friendly integration entry points ──────────── */}
+        <section className="border-t border-border px-6 py-16 md:px-12 md:py-20" aria-labelledby="integration-guides-heading">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className={EYEBROW}>erp-link / integrations</p>
+                <h2 id="integration-guides-heading" className="mt-3 text-2xl font-black md:text-4xl">
+                  {isAr ? 'ربط زد وسلة وشوبيفاي بأودوو' : 'Connect Zid, Salla and Shopify with Odoo'}
+                </h2>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
+                  {isAr ? 'اعرف خطوات مزامنة الطلبات والمنتجات والمخزون والعملاء، وما يجب اختباره قبل التشغيل.' : 'Explore order, product, inventory and customer flows, with practical checks before rollout.'}
+                </p>
+              </div>
+              <Link href="/integrations" className="text-sm font-bold text-primary underline">{isAr ? 'كل التكاملات' : 'All integrations'}</Link>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {[
+                { href: '/integrations/zid-odoo', title: isAr ? 'ربط زد بأودوو' : 'Zid Odoo Integration', description: isAr ? 'الطلبات والمرتجعات والضريبة والمخزون.' : 'Orders, returns, VAT and stock.' },
+                { href: '/integrations/salla-odoo', title: isAr ? 'ربط سلة بأودوو' : 'Salla Odoo Integration', description: isAr ? 'الأصناف وحالات الطلب والمخازن.' : 'Catalog, order statuses and warehouses.' },
+                { href: '/integrations/shopify-odoo', title: isAr ? 'ربط شوبيفاي بأودوو' : 'Shopify Odoo Integration', description: isAr ? 'الأحداث والمنتجات والمدفوعات والشحن.' : 'Webhooks, products, payments and fulfillment.' },
+              ].map((item) => (
+                <article key={item.href} className="rounded-2xl border border-border bg-card p-6">
+                  <h3 className="text-lg font-bold">{item.title}</h3>
+                  <p className="mt-2 text-sm leading-7 text-muted-foreground">{item.description}</p>
+                  <Link href={item.href} className="mt-5 inline-flex text-sm font-bold text-primary underline">{isAr ? 'اقرأ دليل الربط' : 'Read integration guide'}</Link>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ── FAQ ─────────────────────────────────────────────── */}
         <section className="border-t border-border px-6 py-20 md:px-12 md:py-28">
           <div className="mx-auto max-w-4xl">

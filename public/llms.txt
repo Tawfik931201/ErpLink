@@ -13,6 +13,15 @@ Official website: https://erplink.bizsahla.com/
 - [Privacy policy](https://erplink.bizsahla.com/en-us/privacy)
 - [Terms of service](https://erplink.bizsahla.com/en-us/terms)
 
+## Detailed integration resources
+- [Integration overview](https://erplink.bizsahla.com/en-us/integrations)
+- [Zid Odoo integration](https://erplink.bizsahla.com/en-us/integrations/zid-odoo)
+- [Salla Odoo integration](https://erplink.bizsahla.com/en-us/integrations/salla-odoo)
+- [Shopify Odoo integration](https://erplink.bizsahla.com/en-us/integrations/shopify-odoo)
+- [Zid–Odoo setup and testing checklist](https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist)
+
+These pages describe configuration choices, workflow considerations and test scenarios. Actual integration behavior depends on the enabled connection settings and permissions.
+
 ## Scope
 ERP Link's public information covers integrations involving platforms such as Zid, Salla, Shopify and Odoo. Features described on the website include synchronization, field mapping and operation logs.
 
