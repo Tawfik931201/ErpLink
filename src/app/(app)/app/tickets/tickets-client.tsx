@@ -11,6 +11,7 @@ import {
   AlertCircle, 
   HelpCircle,
   MessageSquare,
+  Headset,
   Send,
   Loader2,
   User,
@@ -23,7 +24,7 @@ import {
 import { useState, useEffect, useRef } from 'react'
 
 import type { Ticket, OdooMessage, OdooAttachment} from '@/app/actions/tickets';
-import { getTicketMessages, sendTicketMessage, closeTicket } from '@/app/actions/tickets'
+import { getTicketMessages, sendTicketMessage, closeTicket, markTicketRead, getClientTickets } from '@/app/actions/tickets'
 import CreateTicketForm from '@/components/CreateTicketForm'
 import { useLanguage } from '@/components/language-provider'
 import { Badge } from '@/components/ui/badge'
@@ -204,6 +205,10 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
   const activeTicketIdRef = useRef<number | null>(null)
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const acknowledgedRef = useRef<Map<number, number>>(new Map())
+  const readInFlightRef = useRef<Set<number>>(new Set())
   const [replyText, setReplyText] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
   const [replyError, setReplyError] = useState<string | null>(null)
@@ -241,7 +246,10 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
   useEffect(() => {
     activeTicketIdRef.current = selectedTicketId
+    stickToBottomRef.current = true
     if (selectedTicketId !== null) {
+      setMessages([])
+      setAttachments([])
       void loadMessages(selectedTicketId)
     } else {
       setMessages([])
@@ -292,6 +300,70 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     }
   }, [view, selectedTicketId])
 
+  // Messenger-style behavior: preserve scroll position while a customer reads
+  // older messages; otherwise keep the newest reply visible.
+  useEffect(() => {
+    if (view !== 'detail' || selectedTicketId === null) return
+    const el = chatScrollRef.current
+    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [messages, loadingMessages, view, selectedTicketId])
+
+  const acknowledgeVisibleSupportMessages = async () => {
+    const ticketId = selectedTicket?.id
+    const el = chatScrollRef.current
+    if (ticketId == null || view !== 'detail' || !el ||
+        document.visibilityState !== 'visible') return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 90
+    if (!atBottom || readInFlightRef.current.has(ticketId)) return
+    const lastSupportId = messages.reduce((max, msg) =>
+      !msg.is_customer && msg.id > max ? msg.id : max, 0)
+    if (!lastSupportId || lastSupportId <= (acknowledgedRef.current.get(ticketId) || 0)) return
+    readInFlightRef.current.add(ticketId)
+    try {
+      const result = await markTicketRead(ticketId, lastSupportId)
+      if (result.success) {
+        acknowledgedRef.current.set(ticketId, lastSupportId)
+        setTickets(current => current.map(ticket =>
+          ticket.id === ticketId ? { ...ticket, unread_count: 0 } : ticket))
+        window.dispatchEvent(new Event('erp-ticket-read'))
+      }
+    } catch (error) {
+      console.warn('[tickets] failed to acknowledge support messages:', error)
+    } finally {
+      readInFlightRef.current.delete(ticketId)
+    }
+  }
+
+  // Only acknowledge when the discussion is visible AND scrolled to the newest
+  // message, never just because a hidden tab received an SSE invalidation.
+  useEffect(() => {
+    if (view !== 'detail' || selectedTicketId === null) return
+    void acknowledgeVisibleSupportMessages()
+  }, [messages, loadingMessages, view, selectedTicketId])
+
+  // Keep per-ticket unread pills in sync when an agent replies while the
+  // customer is browsing the ticket list. Never poll Odoo in the background.
+  useEffect(() => {
+    if (view !== 'list') return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let active = true
+    const refreshTickets = () => {
+      if (document.visibilityState !== 'visible') return
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        void getClientTickets().then(result => {
+          if (active && result.success && result.tickets) setTickets(result.tickets)
+        }).catch(() => {})
+      }, 850)
+    }
+    window.addEventListener('erp-ticket-updated', refreshTickets)
+    return () => {
+      active = false
+      if (timer) clearTimeout(timer)
+      window.removeEventListener('erp-ticket-updated', refreshTickets)
+    }
+  }, [view])
+
   // Filtered tickets based on search
   const filteredTickets = tickets.filter(ticket => {
     const titleMatch = ticket.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -303,7 +375,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   // Submit reply action
   const handleSendReply = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!replyText.trim() || !selectedTicket) return
+    if ((!replyText.trim() && selectedFiles.length === 0) || !selectedTicket) return
 
     setSendingReply(true)
     setReplyError(null)
@@ -472,95 +544,158 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
           {/* Column 2: Chatter Discussion */}
           <div className="lg:col-span-7 space-y-6">
-            <Card className=" border border-border bg-card/60 backdrop-blur-md overflow-hidden flex flex-col h-[520px]">
-              <CardHeader className="pb-3 border-b border-border/50 shrink-0">
-                <CardTitle className="text-sm font-bold flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-foreground" />
-                  {tLocal.chatterTitle}
+            <Card className="flex h-[min(76dvh,690px)] min-h-[460px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm lg:h-[650px]">
+              <CardHeader className="shrink-0 border-b border-border/60 bg-card/90 px-4 py-3">
+                <CardTitle className="flex items-center gap-3 text-sm font-bold">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <Headset className="h-5 w-5" />
+                  </span>
+                  <span className="flex flex-col gap-0.5">
+                    <span>{tLocal.chatterTitle}</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      {lang === 'ar' ? 'المحادثة مع فريق دعم ERP Link' : 'Conversation with ERP Link support'}
+                    </span>
+                  </span>
                 </CardTitle>
               </CardHeader>
               
-              {/* Scrollable messages history */}
-              <div className="flex-1 p-4 space-y-4 overflow-y-auto bg-secondary/5 min-h-0">
+              {/* Messenger-style chat: customer messages on the right, support on the left. */}
+              <div
+                ref={chatScrollRef}
+                role="log"
+                aria-label={tLocal.chatterTitle}
+                onScroll={(event) => {
+                  const element = event.currentTarget
+                  stickToBottomRef.current =
+                    element.scrollHeight - element.scrollTop - element.clientHeight < 90
+                  if (stickToBottomRef.current) void acknowledgeVisibleSupportMessages()
+                }}
+                className="flex-1 min-h-0 overflow-y-auto bg-gradient-to-b from-secondary/25 via-background to-secondary/10 px-3 py-5 sm:px-5"
+              >
                 {loadingMessages ? (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-xs gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-foreground" />
-                    Loading discussion...
+                  <div className="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    {lang === 'ar' ? 'جاري تحميل المحادثة...' : 'Loading conversation...'}
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                    {tLocal.noMessages}
+                  <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+                    <span className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary">
+                      <MessageSquare className="h-6 w-6 opacity-70" />
+                    </span>
+                    <span className="text-sm">{tLocal.noMessages}</span>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {messages.map((msg) => {
-                      const authorName = Array.isArray(msg.author_id) ? msg.author_id[1] : 'System'
-                      const msgDate = new Date(msg.date).toLocaleString(lang === 'ar' ? 'ar-SA' : 'en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
+                  <div className="space-y-3">
+                    {messages.map((msg, index) => {
+                      const isMine = msg.is_customer
+                      const authorName = Array.isArray(msg.author_id) ? msg.author_id[1] : 'Support'
+                      const date = new Date(msg.date)
+                      const previousDate = index > 0 ? new Date(messages[index - 1].date) : null
+                      const showDate = !previousDate ||
+                        date.toDateString() !== previousDate.toDateString()
+                      const formattedDay = date.toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                        day: 'numeric', month: 'short', year: 'numeric',
                       })
-                      
+                      const formattedTime = date.toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                        hour: '2-digit', minute: '2-digit',
+                      })
+
                       return (
-                        <div key={msg.id} className="flex flex-col gap-1.5 p-3 rounded-xl border border-border bg-card">
-                          <div className="flex items-center justify-between gap-3 text-[10px]">
-                            <span className="font-bold flex items-center gap-1 text-foreground">
-                              <User className="h-3.5 w-3.5 text-foreground shrink-0" />
-                              {authorName}
-                            </span>
-                            <span className="text-[9px] text-muted-foreground font-semibold">
-                              {msgDate}
-                            </span>
-                          </div>
-                          
-                          <div
-                            className="text-xs text-foreground/85 leading-relaxed break-words odoo-chatter-html pt-1 prose prose-sm dark:prose-invert"
-                            dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
-                          />
-
-                          {/* Render message attachments */}
-                          {msg.attachment_ids && msg.attachment_ids.length > 0 && (
-                            <div className="mt-3 pt-2.5 border-t border-border/40 flex flex-wrap gap-2">
-                              {msg.attachment_ids.map((attId) => {
-                                const att = attachments.find(a => a.id === attId)
-                                if (!att) return null
-
-                                const isImg = att.mimetype.startsWith('image/')
-                                const downloadUrl = `/api/tickets/attachments?id=${att.id}`
-
-                                return (
-                                  <div key={att.id} className="max-w-[180px]">
-                                    {isImg ? (
-                                      <div 
-                                        className="group/img relative rounded-lg overflow-hidden border border-border bg-card cursor-pointer" 
-                                        onClick={() => window.open(downloadUrl, '_blank')}
-                                      >
-                                        <img 
-                                          src={downloadUrl} 
-                                          alt={att.name}
-                                          className="max-h-[90px] w-full object-cover hover:scale-105 transition-transform duration-200" 
-                                        />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center text-[9px] text-white font-bold transition-opacity duration-200">
-                                          Open
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <a 
-                                        href={downloadUrl} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1.5 p-1.5 rounded-lg bg-secondary/40 border border-border/50 hover:bg-secondary/60 transition-colors text-[10px] text-foreground/80 font-medium"
-                                      >
-                                        <Paperclip className="h-3 w-3 text-foreground shrink-0" />
-                                        <span className="truncate flex-1 max-w-[100px]">{att.name}</span>
-                                      </a>
-                                    )}
-                                  </div>
-                                )
-                              })}
+                        <div key={msg.id} className="space-y-3">
+                          {showDate && (
+                            <div className="flex items-center justify-center py-2">
+                              <span className="rounded-full border border-border/70 bg-card/80 px-3 py-1 text-[10px] font-medium text-muted-foreground shadow-sm">
+                                {formattedDay}
+                              </span>
                             </div>
                           )}
+
+                          <div dir="ltr" className={cn('flex items-end gap-2', isMine ? 'justify-end' : 'justify-start')}>
+                            {!isMine && (
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm">
+                                <Headset className="h-4 w-4" />
+                              </span>
+                            )}
+
+                            <div
+                              dir={dir}
+                              className={cn(
+                                'min-w-0 max-w-[84%] rounded-2xl border px-3.5 py-3 shadow-sm sm:max-w-[76%]',
+                                isMine
+                                  ? 'rounded-br-sm border-primary/20 bg-primary/10'
+                                  : 'rounded-bl-sm border-border/80 bg-card'
+                              )}
+                            >
+                              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                                <span className={cn('text-[11px] font-bold', isMine ? 'text-primary' : 'text-foreground')}>
+                                  {isMine ? tLocal.customerLabel : tLocal.agentLabel}
+                                  {!isMine && authorName && authorName !== 'Support' && (
+                                    <span className="ms-1 font-normal text-muted-foreground">· {authorName}</span>
+                                  )}
+                                </span>
+                              </div>
+
+                              <div
+                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-foreground/90 dark:prose-invert"
+                                dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
+                              />
+
+                              {msg.attachment_ids?.length > 0 && (
+                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-border/40 pt-2.5">
+                                  {msg.attachment_ids.map(attId => {
+                                    const attachment = attachments.find(item => item.id === attId)
+                                    if (!attachment) return null
+                                    const url = `/api/tickets/attachments?id=${attachment.id}`
+                                    const isImage = attachment.mimetype.startsWith('image/')
+                                    return isImage ? (
+                                      <a
+                                        key={attachment.id}
+                                        href={url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="group relative block overflow-hidden rounded-xl border border-border/60 bg-background"
+                                        title={attachment.name}
+                                      >
+                                        <img
+                                          src={url}
+                                          alt={attachment.name}
+                                          loading="lazy"
+                                          className="max-h-[150px] max-w-[210px] object-cover transition-transform group-hover:scale-105"
+                                        />
+                                      </a>
+                                    ) : (
+                                      <a
+                                        key={attachment.id}
+                                        href={url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[11px] font-medium text-foreground hover:bg-secondary/60"
+                                      >
+                                        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                        <span className="min-w-0 truncate">{attachment.name}</span>
+                                      </a>
+                                    )
+                                  })}
+                                </div>
+                              )}
+
+                              <div className="mt-2 flex justify-end">
+                                <time
+                                  dateTime={msg.date}
+                                  className="text-[10px] tabular-nums text-muted-foreground"
+                                  title={formattedDay}
+                                >
+                                  {formattedTime}
+                                </time>
+                              </div>
+                            </div>
+
+                            {isMine && (
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
+                                <User className="h-4 w-4" />
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )
                     })}
@@ -577,7 +712,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                   </p>
                 </div>
               ) : (
-                <form onSubmit={handleSendReply} className="p-4 border-t border-border/50 bg-card/85 space-y-3 shrink-0">
+                <form onSubmit={handleSendReply} className="shrink-0 space-y-3 border-t border-border/60 bg-card/95 p-3 sm:p-4">
                   {replyError && (
                     <div className="flex items-start gap-2 p-2.5 rounded-lg bg-destructive/10 text-destructive text-[11px] border border-destructive/20">
                       <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -592,12 +727,17 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       onChange={(e) => setReplyText(e.target.value)}
                       disabled={sendingReply}
                       rows={2}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault()
+                          event.currentTarget.form?.requestSubmit()
+                        }
+                      }}
                       className={cn(
-                        'w-full rounded-xl border border-border bg-card px-4 py-2.5 text-xs text-foreground resize-none',
+                        'w-full rounded-2xl border border-border bg-secondary/15 px-4 py-3 text-sm leading-6 text-foreground resize-none',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40 focus-visible:border-foreground',
                         'disabled:opacity-50 disabled:bg-muted'
                       )}
-                      required
                     />
                     
                     {selectedFiles.length > 0 && (
@@ -652,7 +792,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                         variant="brand" 
                         size="sm"
                         className="font-bold gap-1.5 rounded-lg text-xs"
-                        disabled={sendingReply || !replyText.trim()}
+                        disabled={sendingReply || (!replyText.trim() && selectedFiles.length === 0)}
                       >
                         {sendingReply ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -665,6 +805,9 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       </Button>
                     </div>
                   </div>
+                  <p className="text-[10px] text-muted-foreground/80">
+                    {lang === 'ar' ? 'Enter للإرسال · Shift + Enter لسطر جديد' : 'Enter to send · Shift + Enter for a new line'}
+                  </p>
                 </form>
               )}
             </Card>
@@ -733,7 +876,13 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
         <div className="max-w-xl mx-auto">
           <CreateTicketForm 
-            onSuccess={() => setView('list')} 
+            onSuccess={() => {
+              window.dispatchEvent(new Event('erp-tickets-changed'))
+              void getClientTickets().then(result => {
+                if (result.success && result.tickets) setTickets(result.tickets)
+              })
+              setView('list')
+            }} 
             onCancel={() => setView('list')} 
           />
         </div>
@@ -843,9 +992,16 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                       </span>
                       
                       <div className="space-y-0.5 min-w-0 flex-1">
-                        <h3 className="text-sm font-bold group-hover:text-foreground transition-colors duration-200 truncate">
-                          {ticket.name}
-                        </h3>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <h3 className="min-w-0 truncate text-sm font-bold transition-colors duration-200 group-hover:text-foreground">
+                            {ticket.name}
+                          </h3>
+                          {ticket.unread_count > 0 && (
+                            <span className="inline-flex shrink-0 items-center rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white" aria-label={ticket.unread_count + ' unread messages'}>
+                              {ticket.unread_count > 99 ? '99+' : ticket.unread_count}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground line-clamp-1">
                           {formatDescription(ticket.description)}
                         </p>
