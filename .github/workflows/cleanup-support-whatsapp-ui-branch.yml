@@ -1,0 +1,27 @@
+name: Cleanup merged support WhatsApp-style branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  remove-temporary-support-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 72 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'feat/support-whatsapp-image-paste-emoji-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the merged support UI feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/feat/support-whatsapp-image-paste-emoji-20261123" ||
+            echo 'Temporary support UI branch already removed'
