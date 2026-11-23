@@ -20,7 +20,7 @@ import {
   X,
   CheckCircle2
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 import type { Ticket, OdooMessage, OdooAttachment} from '@/app/actions/tickets';
 import { getTicketMessages, sendTicketMessage, closeTicket } from '@/app/actions/tickets'
@@ -203,6 +203,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
   const [attachments, setAttachments] = useState<OdooAttachment[]>([])
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const activeTicketIdRef = useRef<number | null>(null)
   const [replyText, setReplyText] = useState('')
   const [sendingReply, setSendingReply] = useState(false)
   const [replyError, setReplyError] = useState<string | null>(null)
@@ -218,11 +219,13 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     setTickets(initialTickets)
   }, [initialTickets])
 
-  // Load ticket discussion from Odoo Chatter
-  const loadMessages = async (ticketId: number) => {
-    setLoadingMessages(true)
+  // On-demand read only: no recurring Odoo/Supabase polling.
+  const loadMessages = async (ticketId: number, silent = false) => {
+    if (!silent) setLoadingMessages(true)
     try {
       const res = await getTicketMessages(ticketId)
+      // Never display an old ticket's response after changing conversations.
+      if (activeTicketIdRef.current !== ticketId) return
       if (res.success && res.messages) {
         setMessages(res.messages)
         setAttachments(res.attachments || [])
@@ -230,18 +233,64 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     } catch (err) {
       console.error('Failed to load Odoo chatter messages:', err)
     } finally {
-      setLoadingMessages(false)
+      if (!silent && activeTicketIdRef.current === ticketId) setLoadingMessages(false)
     }
   }
 
-  // Reload messages when ticket detail view is opened
+  const selectedTicketId = selectedTicket?.id ?? null
+
   useEffect(() => {
-    if (selectedTicket) {
-      loadMessages(selectedTicket.id)
+    activeTicketIdRef.current = selectedTicketId
+    if (selectedTicketId !== null) {
+      void loadMessages(selectedTicketId)
     } else {
       setMessages([])
+      setAttachments([])
     }
-  }, [selectedTicket])
+  }, [selectedTicketId])
+
+  // A single ticket-specific SSE stream while this discussion is open.
+  // Odoo Studio fires the webhook for support agent replies. We only fetch
+  // messages on that event, reconnect, or tab focus (to recover missed events).
+  useEffect(() => {
+    if (view !== 'detail' || selectedTicketId === null ||
+        typeof EventSource === 'undefined') return
+    const ticketId = selectedTicketId
+    const source = new EventSource('/api/tickets/live/stream?ticketId=' + ticketId)
+    let hasConnected = false
+    let dirtyWhileHidden = false
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
+
+    const scheduleRefresh = () => {
+      if (document.visibilityState !== 'visible') {
+        dirtyWhileHidden = true
+        return
+      }
+      if (refreshTimer) clearTimeout(refreshTimer)
+      // Odoo may dispatch the webhook just before committing its transaction.
+      refreshTimer = setTimeout(() => { void loadMessages(ticketId, true) }, 800)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        if (dirtyWhileHidden) dirtyWhileHidden = false
+        scheduleRefresh()
+      }
+    }
+    const onReady = () => {
+      if (hasConnected) scheduleRefresh()
+      hasConnected = true
+    }
+    source.addEventListener('ticket-updated', scheduleRefresh)
+    source.addEventListener('ready', onReady)
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onVisibility)
+    return () => {
+      source.close()
+      if (refreshTimer) clearTimeout(refreshTimer)
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onVisibility)
+    }
+  }, [view, selectedTicketId])
 
   // Filtered tickets based on search
   const filteredTickets = tickets.filter(ticket => {
