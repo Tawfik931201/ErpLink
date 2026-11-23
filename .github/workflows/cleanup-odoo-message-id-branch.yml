@@ -1,0 +1,27 @@
+name: Cleanup Odoo ticket attachment fix branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  remove-merged-fix-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 66 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'fix/odoo-ticket-attachment-message-id-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the merged fix branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/fix/odoo-ticket-attachment-message-id-20261123" ||
+            echo 'Temporary fix branch was already removed'
