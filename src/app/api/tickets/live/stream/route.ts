@@ -17,8 +17,9 @@ export async function GET(request: NextRequest) {
   const ticketId = Number(rawId)
   if (!Number.isSafeInteger(ticketId)) return new Response('Invalid ticket ID', { status: 400 })
 
+  let sourceId: string
   try {
-    await assertTicketLiveAccess(ticketId)
+    sourceId = await assertTicketLiveAccess(ticketId)
   } catch {
     return new Response('Unauthorized or ticket not found', { status: 403 })
   }
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
         try { controller.enqueue(encoder.encode('event: ' + event + '\ndata: {}\n\n')) }
         catch { close() }
       }
-      unsubscribe = subscribeTicketLiveEvent(ticketId, () => send('ticket-updated'))
+      unsubscribe = subscribeTicketLiveEvent(ticketId, sourceId, () => send('ticket-updated'))
       send('ready')
       heartbeat = setInterval(() => {
         if (closed) return
