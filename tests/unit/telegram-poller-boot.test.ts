@@ -36,6 +36,17 @@ describe('the Telegram poller is actually running', () => {
     expect(instrumentation.lastIndexOf('if (!process.env.VERCEL)', pollerStart)).toBeGreaterThan(-1)
   })
 
+  it('does not read registered bots on boot when no link code is pending', () => {
+    const poller = read('src/lib/telegram-long-poller.ts')
+    const startup = poller.slice(poller.indexOf('export function startTelegramPoller'), poller.indexOf('export async function forceRefreshTelegramPoller'))
+    expect(startup.indexOf(".from('telegram_bot_codes')")).toBeGreaterThan(-1)
+    expect(startup.indexOf(".from('telegram_bot_codes')")).toBeLessThan(startup.indexOf('await refreshBotsFromDb()'))
+    expect(startup).toContain('if (!codeRow?.expires_at) return')
+    expect(startup).not.toContain('setInterval(() =>')
+    expect(poller).toContain('ensurePollTimer()')
+    expect(poller).toContain('stopPollInterval()')
+  })
+
   it('never survives only as a side effect of a server action', () => {
     // The actions may still nudge it, but that is an optimisation, not the
     // reason it runs. If this ever becomes the only start path again, the

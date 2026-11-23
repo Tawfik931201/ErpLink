@@ -33,10 +33,12 @@ export function activateTelegramPoller(durationMs = 5 * 60_000): void {
   if ((g.__telegramPollerActiveUntil || 0) < until) {
     g.__telegramPollerActiveUntil = until
   }
+  ensurePollTimer()
 }
 
 export function deactivateTelegramPoller(): void {
   g.__telegramPollerActiveUntil = 0
+  stopPollInterval()
 }
 
 export function isTelegramPollerActive(): boolean {
@@ -62,6 +64,26 @@ const g = global as unknown as PollerGlobal
 function unref(timer: NodeJS.Timeout | undefined): void {
   const maybe = timer as unknown as { unref?: () => void } | undefined
   if (typeof maybe?.unref === 'function') maybe.unref()
+}
+
+// A five-second setInterval is only needed during an active linking flow.
+// With zero pending links there are no timers and no Supabase requests.
+function stopPollInterval(): void {
+  if (g.__telegramPollerInterval) clearInterval(g.__telegramPollerInterval)
+  g.__telegramPollerInterval = undefined
+}
+
+function ensurePollTimer(): void {
+  if (!POLLER_ENABLED || !g.__telegramPollerStarted || !isTelegramPollerActive() || g.__telegramPollerInterval) return
+  const timer = setInterval(() => {
+    if (!isTelegramPollerActive()) {
+      stopPollInterval()
+      return
+    }
+    void runPollCycle()
+  }, POLL_INTERVAL_MS)
+  unref(timer)
+  g.__telegramPollerInterval = timer
 }
 
 function getBotsMap(): Map<string, BotPollerState> {
@@ -360,39 +382,32 @@ export function startTelegramPoller(): void {
   if (!POLLER_ENABLED) return
   if (g.__telegramPollerStarted) return
   g.__telegramPollerStarted = true
+  ensurePollTimer()
 
   console.info('[TelegramPoller] Started Telegram long-poller (on-demand mode)')
 
-  // Report what is actually being polled. "0 bots" is the single most useful
-  // line when a chat refuses to link: it separates "no poller" from
-  // "poller with nothing to poll".
-  void refreshBotsFromDb()
-    .then(() => {
-      console.info(`[TelegramPoller] Polling ${getBotsMap().size} bot(s) every ${POLL_INTERVAL_MS / 1000}s`)
-      // Check if there are active pending link codes from before restart
-      return supabase
-        .from('telegram_bot_codes')
-        .select('expires_at')
-        .gt('expires_at', new Date().toISOString())
-        .limit(1)
-    })
-    .then((res: any) => {
-      const codeRow = res?.data?.[0]
-      if (codeRow?.expires_at) {
-        const remainingMs = Math.max(60_000, new Date(codeRow.expires_at).getTime() - Date.now())
-        activateTelegramPoller(remainingMs)
-        return pollAllOnce()
-      }
+  // Read pending link codes once at boot; do not read the bot table when
+  // nobody is linking. Registering a bot calls forceRefreshTelegramPoller.
+  void supabase
+    .from('telegram_bot_codes')
+    .select('expires_at')
+    .gt('expires_at', new Date().toISOString())
+    .limit(1)
+    .then(async ({ data, error }) => {
+      if (error) throw error
+      const codeRow = data?.[0]
+      if (!codeRow?.expires_at) return
+      await refreshBotsFromDb()
+      g.__telegramPollerLastRefresh = Date.now()
+      const remainingMs = Math.max(60_000, new Date(codeRow.expires_at).getTime() - Date.now())
+      activateTelegramPoller(remainingMs)
+      console.info(`[TelegramPoller] Resuming ${getBotsMap().size} bot(s) with a pending link code`)
+      await pollAllOnce()
     })
     .catch((err: any) => {
-      console.warn('[TelegramPoller] initial refresh failed:', err?.message ?? err)
+      console.warn('[TelegramPoller] initial link-code recovery failed:', err?.message ?? err)
     })
   g.__telegramPollerLastRefresh = Date.now()
-
-  g.__telegramPollerInterval = setInterval(() => {
-    void runPollCycle()
-  }, POLL_INTERVAL_MS)
-  unref(g.__telegramPollerInterval)
 }
 
 /**
@@ -446,8 +461,7 @@ export async function pollBotByIdNow(botId: string): Promise<boolean> {
 }
 
 export function stopTelegramPoller(): void {
-  if (g.__telegramPollerInterval) clearInterval(g.__telegramPollerInterval)
-  g.__telegramPollerInterval = undefined
+  stopPollInterval()
   g.__telegramPollerStarted = false
   g.__telegramPollerProcessing = false
 }

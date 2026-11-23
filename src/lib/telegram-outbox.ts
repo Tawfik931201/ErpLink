@@ -219,6 +219,9 @@ export async function enqueueTelegramMessage(args: EnqueueTelegramArgs): Promise
     return { queued: false, reason: 'insert_failed' }
   }
   outboxMissingLogged = false
+  // Wake only after a webhook notification is durably stored.
+  startTelegramOutboxRunner()
+  scheduleTelegramOutboxWake(args.availableAt?.getTime() ?? Date.now())
   return { queued: true }
 }
 
@@ -418,77 +421,118 @@ export async function sendTelegramMessage(
   }
 }
 
-// ─── الحلقة الخلفية ──────────────────────────────────────────────────────────
+// ─── Event-driven durable sender ─────────────────────────────────────────────
+// No recurring bot-presence lookup or ten-second idle outbox poll.
+// At boot, perform one recovery read to re-arm persisted delayed/retry messages.
 
 interface OutboxGlobals {
   __telegramOutboxStarted?: boolean
   __telegramOutboxProcessing?: boolean
-  __telegramOutboxInterval?: NodeJS.Timeout
+  __telegramOutboxTimer?: NodeJS.Timeout
+  __telegramOutboxDueAt?: number
+  __telegramOutboxInterval?: NodeJS.Timeout // Legacy interval from dev/HMR.
 }
-
 const g = globalThis as unknown as OutboxGlobals
+const NEXT_DUE_SCAN_LIMIT = 100
+const OUTBOX_DB_RETRY_MS = 60_000
 
-// Do not query telegram_outbox every few seconds when no linked bots exist.
-// Re-check infrequently so a newly linked bot starts sending without restart.
-let telegramBotPresenceUntil = 0
-let telegramHasLinkedBot = true
-async function hasLinkedTelegramBot(): Promise<boolean> {
-  if (Date.now() < telegramBotPresenceUntil) return telegramHasLinkedBot
-  const { data, error } = await supabase.from('telegram_bots')
-    .select('id').eq('status', 'linked').limit(1)
-  if (error) return true // Fail open: never suppress durable delivery on DB errors.
-  telegramHasLinkedBot = (data?.length ?? 0) > 0
-  telegramBotPresenceUntil = Date.now() + 60_000
-  return telegramHasLinkedBot
+/** Later of availability and retry times; pick the earliest pending item. */
+export function nextTelegramDueAt(rows: Array<{ available_at: string; next_attempt_at: string }>): number | null {
+  let next = Infinity
+  for (const row of rows) {
+    const at = Math.max(Date.parse(row.available_at), Date.parse(row.next_attempt_at))
+    if (Number.isFinite(at) && at < next) next = at
+  }
+  return Number.isFinite(next) ? next : null
 }
 
-// Keep Telegram durable delivery independent of the Odoo sync worker.
-// A 2-second idle poll produced ~43,200 Supabase REST reads per day per process.
-// Ten seconds retains prompt notifications while avoiding ~80% of idle reads.
-// Operators can temporarily lower this interval without a code change.
-const requestedOutboxIntervalMs = Number(process.env.TELEGRAM_OUTBOX_POLL_INTERVAL_MS)
-export const OUTBOX_INTERVAL_MS =
-  Number.isFinite(requestedOutboxIntervalMs) && requestedOutboxIntervalMs >= 2_000
-    ? Math.min(60_000, Math.trunc(requestedOutboxIntervalMs))
-    : 10_000
+/** Schedule only when an actual outbox message needs work. */
+function scheduleTelegramOutboxWake(dueAt: number): void {
+  if (!g.__telegramOutboxStarted) return
+  const target = Math.max(Date.now(), Number.isFinite(dueAt) ? dueAt : Date.now())
+  if (g.__telegramOutboxTimer && (g.__telegramOutboxDueAt ?? Infinity) <= target) return
+  if (g.__telegramOutboxTimer) clearTimeout(g.__telegramOutboxTimer)
+  const delay = Math.min(Math.max(0, target - Date.now()), 2_147_483_647)
+  g.__telegramOutboxDueAt = Date.now() + delay
+  const timer = setTimeout(() => {
+    g.__telegramOutboxTimer = undefined
+    g.__telegramOutboxDueAt = undefined
+    void drainTelegramOutbox()
+  }, delay)
+  if (typeof timer.unref === 'function') timer.unref()
+  g.__telegramOutboxTimer = timer
+}
 
-/** يبدأ مُرسّل الصندوق — مرة واحدة لكل عملية. */
+/** One DB read at boot and after a drain; returns without a timer when empty. */
+async function armNextPendingTelegram(): Promise<void> {
+  if (!g.__telegramOutboxStarted || outboxUnavailable()) return
+  try {
+    const { data, error } = await supabase.from('telegram_outbox')
+      .select('available_at,next_attempt_at')
+      .eq('status', 'pending')
+      .order('next_attempt_at', { ascending: true })
+      .limit(NEXT_DUE_SCAN_LIMIT)
+    if (error) {
+      if (isMissingRelationError(error.code)) {
+        markOutboxUnavailable(error.message)
+        return
+      }
+      scheduleTelegramOutboxWake(Date.now() + OUTBOX_DB_RETRY_MS)
+      return
+    }
+    const rows = (data ?? []) as Array<{ available_at: string; next_attempt_at: string }>
+    const next = nextTelegramDueAt(rows)
+    if (next === null) return // No pending messages => no future Supabase reads.
+    // Large backlogs can include delayed arrivals ahead of ready messages.
+    // Continue scanning while there is real work, not during idle.
+    const capped = rows.length >= NEXT_DUE_SCAN_LIMIT
+      ? Math.min(next, Date.now() + 10_000)
+      : next
+    scheduleTelegramOutboxWake(Math.max(Date.now() + 1_000, capped))
+  } catch (err: unknown) {
+    console.warn('[TelegramOutbox] next-due recovery failed:', err instanceof Error ? err.message : err)
+    scheduleTelegramOutboxWake(Date.now() + OUTBOX_DB_RETRY_MS)
+  }
+}
+
+async function drainTelegramOutbox(): Promise<void> {
+  if (!g.__telegramOutboxStarted || g.__telegramOutboxProcessing) return
+  g.__telegramOutboxProcessing = true
+  try {
+    const result = await runTelegramOutboxCycle()
+    if (result.failed > 0) {
+      console.warn(`[TelegramOutbox] ${result.failed} message(s) exhausted retries`)
+    }
+  } catch (err: unknown) {
+    console.error('[TelegramOutbox] drain failed:', err instanceof Error ? err.message : err)
+    scheduleTelegramOutboxWake(Date.now() + OUTBOX_DB_RETRY_MS)
+  } finally {
+    g.__telegramOutboxProcessing = false
+    void armNextPendingTelegram()
+  }
+}
+
+/** Boot recovery only; webhook enqueue is the normal trigger. */
 export function startTelegramOutboxRunner(): void {
   if (process.env.NEXT_PHASE === 'phase-production-build') return
   if (process.env.TELEGRAM_OUTBOX_ENABLED === 'false') return
-  if (g.__telegramOutboxStarted) return
-  g.__telegramOutboxStarted = true
-
-  const tick = async () => {
-    if (g.__telegramOutboxProcessing) return
-    g.__telegramOutboxProcessing = true
-    try {
-      if (!await hasLinkedTelegramBot()) return
-      const result = await runTelegramOutboxCycle()
-      if (result.failed > 0) {
-        console.warn(`[TelegramOutbox] ${result.failed} message(s) exhausted retries`)
-      }
-    } catch (err: unknown) {
-      console.error('[TelegramOutbox] cycle error:', err instanceof Error ? err.message : err)
-    } finally {
-      g.__telegramOutboxProcessing = false
-    }
-  }
-
-  void tick()
-  const timer = setInterval(() => {
-    void tick()
-  }, OUTBOX_INTERVAL_MS)
-  if (typeof timer.unref === 'function') timer.unref()
-  g.__telegramOutboxInterval = timer
-  console.log('[TelegramOutbox] outbox sender started')
-}
-
-export function stopTelegramOutboxRunner(): void {
   if (g.__telegramOutboxInterval) {
     clearInterval(g.__telegramOutboxInterval)
     g.__telegramOutboxInterval = undefined
+    g.__telegramOutboxStarted = false
   }
+  if (g.__telegramOutboxStarted) return
+  g.__telegramOutboxStarted = true
+  void armNextPendingTelegram()
+  console.info('[TelegramOutbox] event-driven sender started (no idle polling)')
+}
+
+export function stopTelegramOutboxRunner(): void {
+  if (g.__telegramOutboxTimer) clearTimeout(g.__telegramOutboxTimer)
+  if (g.__telegramOutboxInterval) clearInterval(g.__telegramOutboxInterval)
+  g.__telegramOutboxTimer = undefined
+  g.__telegramOutboxInterval = undefined
+  g.__telegramOutboxDueAt = undefined
   g.__telegramOutboxStarted = false
 }
 

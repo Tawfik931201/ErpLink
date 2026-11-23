@@ -41,8 +41,9 @@ export async function register() {
       const { startTelegramPoller } = await import('@/lib/telegram-long-poller')
       startTelegramPoller()
 
-      // مُرسّل صندوق التليجرام: كل إشعار يُحفظ أولاً ثم يُرسل بمُرسّل
-      // مستقل. قبل ذلك كان `notifySyncResult` يستدعي api.telegram.org داخل
+      // Telegram outbox wakes only for stored webhook notifications, with a
+      // one-time boot recovery of any pending delayed deliveries.
+      // Before this, notifySyncResult sent directly to api.telegram.org from
       // عامل المزامنة — 429 كان يبتلع الرسالة بلا إعادة محاولة، و`fetch` بلا
       // مهلة كان يحتجز عامل المزامنة إلى الأبد.
       const { startTelegramOutboxRunner } = await import('@/lib/telegram-outbox')

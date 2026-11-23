@@ -2,7 +2,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 
 import {
-  OUTBOX_INTERVAL_MS,
+  nextTelegramDueAt,
   TELEGRAM_ARRIVAL_DELAY_MS,
   decideOutboxAction,
   nextAttemptDelayMs,
@@ -24,18 +24,43 @@ function read(...parts: string[]): string {
   return readFileSync(join(SRC, ...parts), 'utf8')
 }
 
-describe('the Telegram idle polling budget', () => {
-  it('defaults to a 10-second interval instead of hammering Supabase every 2 seconds', () => {
-    expect(OUTBOX_INTERVAL_MS).toBeGreaterThanOrEqual(2_000)
-    expect(OUTBOX_INTERVAL_MS).toBeLessThanOrEqual(60_000)
-    if (!process.env.TELEGRAM_OUTBOX_POLL_INTERVAL_MS) {
-      expect(OUTBOX_INTERVAL_MS).toBe(10_000)
-    }
+describe('the Telegram event-driven idle budget', () => {
+  it('does not poll Supabase when no notification is pending', () => {
+    const outbox = read('lib', 'telegram-outbox.ts')
+    expect(outbox).not.toContain('setInterval(() =>')
+    expect(outbox).not.toContain('hasLinkedTelegramBot()')
+    expect(outbox).toContain('scheduleTelegramOutboxWake(args.availableAt?.getTime() ?? Date.now())')
+    expect(outbox).toContain("if (next === null) return")
+    expect(outbox).toContain("startTelegramOutboxRunner()")
   })
 
-  it('does not alter the separate Odoo sync-queue polling cadence', () => {
+  it('recovers persisted retry timers at boot and processes only pending work', () => {
+    const outbox = read('lib', 'telegram-outbox.ts')
+    expect(outbox).toContain('void armNextPendingTelegram()')
+    expect(outbox).toContain("await runTelegramOutboxCycle()")
+    expect(outbox).toContain(".eq('status', 'pending')")
+  })
+
+  it('does not alter the Odoo sync-queue cadence', () => {
     const runner = read('lib', 'sync-queue-runner.ts')
     expect(runner).toContain("envInterval('SYNC_QUEUE_POLL_INTERVAL_MS', 10_000, 5_000)")
+  })
+})
+
+describe('Telegram scheduled message due times', () => {
+  it('respects the later of arrival delay and retry time', () => {
+    const a = '2026-11-23T00:00:10Z'
+    const b = '2026-11-23T00:00:20Z'
+    expect(nextTelegramDueAt([{ available_at: a, next_attempt_at: b }])).toBe(Date.parse(b))
+    expect(nextTelegramDueAt([{ available_at: b, next_attempt_at: a }])).toBe(Date.parse(b))
+  })
+
+  it('returns the first due message, and null when empty', () => {
+    expect(nextTelegramDueAt([])).toBeNull()
+    expect(nextTelegramDueAt([
+      { available_at: '2026-11-23T00:00:20Z', next_attempt_at: '2026-11-23T00:00:10Z' },
+      { available_at: '2026-11-23T00:00:05Z', next_attempt_at: '2026-11-23T00:00:06Z' },
+    ])).toBe(Date.parse('2026-11-23T00:00:06Z'))
   })
 })
 
