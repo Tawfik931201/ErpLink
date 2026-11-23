@@ -3,8 +3,8 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
 import { readOwnedOdooAttachment } from '@/lib/odoo-support'
-import { isTicketChatPreviewImage } from '@/lib/ticket-chat-media'
 import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
+import { isTicketChatPreviewImage } from '@/lib/ticket-chat-media'
 
 export const dynamic = 'force-dynamic'
 
