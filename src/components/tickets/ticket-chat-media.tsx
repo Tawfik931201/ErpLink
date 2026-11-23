@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
 import { FileText, X, ZoomIn } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 
 import { isTicketChatPreviewImage } from '@/lib/ticket-chat-media'
 
