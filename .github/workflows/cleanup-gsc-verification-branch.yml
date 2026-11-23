@@ -1,0 +1,26 @@
+name: Remove merged Google Search Console verification branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'seo/gsc-html-ownership-20261123' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete only the merged temporary verification branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/seo/gsc-html-ownership-20261123" ||
+            echo 'The merged temporary branch was already removed'
