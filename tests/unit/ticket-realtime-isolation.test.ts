@@ -27,10 +27,11 @@ describe('ticket-only Odoo realtime streaming', () => {
     expect(stream).toContain('await assertTicketLiveAccess(ticketId)')
     expect(support).toContain('await ownedTicket(ticketId)')
   })
-  it('requires Odoo-held webhook secret before any broadcast', () => {
+  it('authenticates webhook by Odoo-held private per-ticket source UUID', () => {
     expect(hook).toContain('timingSafeEqual')
-    expect(hook).toContain("'ir.config_parameter', 'search_read'")
-    expect(hook.indexOf('sameSecret(supplied, entries[0]?.value')).toBeLessThan(hook.indexOf('publishTicketLiveEvent(ticketId)'))
+    expect(hook).toContain("fields: ['x_source_uuid']")
+    expect(hook).toContain('sameSourceId(sourceId, rows[0]?.x_source_uuid')
+    expect(hook.indexOf('sameSourceId(sourceId, rows[0]?.x_source_uuid')).toBeLessThan(hook.indexOf('publishTicketLiveEvent(ticketId)'))
     expect(hook).not.toContain('supabase')
   })
   it('loads messages through the existing authorized server action, not raw payloads', () => {
