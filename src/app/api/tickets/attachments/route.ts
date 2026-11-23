@@ -3,11 +3,16 @@ import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 
 import { readOwnedOdooAttachment } from '@/lib/odoo-support'
+import { isTicketChatPreviewImage } from '@/lib/ticket-chat-media'
 import { checkRateLimit, rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
-/** Downloads Odoo Studio files only after the central-ticket owner/workspace check. */
+/**
+ * Serve ticket images inline ONLY for a safe MIME allowlist and an explicit
+ * preview request. All other formats (including SVG/HTML) stay downloads.
+ * Ownership, workspace and customer-visible-message checks remain unchanged.
+ */
 export async function GET(request: NextRequest) {
   const rl = checkRateLimit(
     rateLimitKeyFromHeaders((name) => request.headers.get(name), 'ticket-attachment'),
@@ -25,12 +30,16 @@ export async function GET(request: NextRequest) {
   try {
     const file = await readOwnedOdooAttachment(id)
     const safeName = file.name.replace(/["\r\n]/g, '_')
+    const inlinePreview = request.nextUrl.searchParams.get('preview') === '1' &&
+      isTicketChatPreviewImage(file.mimetype)
     return new NextResponse(file.buffer, {
       headers: {
-        'Content-Type': file.mimetype,
-        'Content-Disposition': 'attachment; filename="' + encodeURIComponent(safeName) + '"',
+        'Content-Type': inlinePreview ? file.mimetype.toLowerCase().trim() : file.mimetype,
+        'Content-Disposition': (inlinePreview ? 'inline' : 'attachment') +
+          '; filename="' + encodeURIComponent(safeName) + '"',
         'Cache-Control': 'private, no-store',
         'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
       },
     })
   } catch (error) {
