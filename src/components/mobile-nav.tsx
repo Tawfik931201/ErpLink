@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 
+import { PendingTicketsBadge } from '@/components/pending-tickets-badge'
 import { Logo } from '@/components/ui/logo'
 import { cn } from '@/lib/utils'
 
@@ -91,7 +92,8 @@ export default function MobileNav({
                     )}
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
-                    {item.label}
+                    <span className="flex-1">{item.label}</span>
+                    {item.href === '/app/tickets' && <PendingTicketsBadge />}
                   </Link>
                 )
               })}
