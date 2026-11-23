@@ -29,6 +29,7 @@ type TicketRecord = {
   x_ticket_stage: string | false
   x_user_id: string | false
   x_workspace_uuid: string | false
+  x_source_uuid: string | false
   x_email: string | false
   x_partner_id: Relation
   create_date: string
@@ -57,7 +58,7 @@ type AttachmentRecord = {
 }
 const TICKET_FIELDS = [
   'id', 'x_name', 'x_subject', 'x_description', 'x_status',
-  'x_ticket_stage', 'x_user_id', 'x_workspace_uuid', 'x_email',
+  'x_ticket_stage', 'x_user_id', 'x_workspace_uuid', 'x_source_uuid', 'x_email',
   'x_partner_id', 'create_date',
 ]
 const stageNames: Record<string, string> = {
@@ -85,8 +86,9 @@ async function session() {
   return { userId, workspaceId, admin }
 }
 /** Authorize realtime stream subscription using the same scope as ticket reads. */
-export async function assertTicketLiveAccess(id: number): Promise<void> {
-  await ownedTicket(id)
+export async function assertTicketLiveAccess(id: number): Promise<string> {
+  const ticket = await ownedTicket(id)
+  return ticket.x_source_uuid || ''
 }
 
 async function ownedTicket(id: number) {
