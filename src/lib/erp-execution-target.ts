@@ -14,6 +14,7 @@ export interface TrustedErpConnection {
 }
 export interface ExecutionScope extends ExecutionTarget {
   workspaceId: string; platform: CommercePlatform; storeId: string; eventId: string
+  validatedConn?: TrustedErpConnection
 }
 const executionScope = new AsyncLocalStorage<ExecutionScope>()
 export const getErpExecutionScope = () => executionScope.getStore()
@@ -103,11 +104,26 @@ export async function resolveExecutionTarget(workspaceId: string, platform: stri
 
 export async function validateExecutionTarget(workspaceId: string, platform: string, storeId: string, target: ExecutionTarget): Promise<TrustedErpConnection> {
   if (!target?.erpConnectionId || !target.connectionGeneration) throw new Error('Unpinned ERP execution target requires controlled recovery')
+  const scope = getErpExecutionScope()
+  if (
+    scope?.validatedConn &&
+    scope.workspaceId === workspaceId &&
+    scope.platform === platform &&
+    scope.storeId === storeId &&
+    scope.erpConnectionId === target.erpConnectionId &&
+    scope.connectionGeneration === target.connectionGeneration
+  ) {
+    return scope.validatedConn
+  }
   await requireStore(workspaceId, platform, storeId)
   const { data, error } = await supabase.from('erp_connections').select('*')
     .eq('id', target.erpConnectionId).eq('workspace_id', workspaceId).maybeSingle()
   if (error || !data || (data.status && data.status !== 'connected')) throw new Error('ERP execution connection missing, disabled or outside workspace')
   await requireWorkspaceBinding(data as TrustedErpConnection)
   if (connectionGeneration(data as TrustedErpConnection) !== target.connectionGeneration) throw new Error('ERP execution connection generation changed; controlled recovery required')
-  return data as TrustedErpConnection
+  const connection = data as TrustedErpConnection
+  if (scope && scope.erpConnectionId === target.erpConnectionId && scope.connectionGeneration === target.connectionGeneration) {
+    scope.validatedConn = connection
+  }
+  return connection
 }

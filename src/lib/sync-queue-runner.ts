@@ -112,11 +112,10 @@ async function runDrainCycle(): Promise<boolean> {
     const nowTs = Date.now()
 
     // ── نشر عمق الطابور لبوابة الاستقبال ───────────────────────────────────
-    // السقف الديناميكي (120 ← 2000) يُشتق من فراغ الطابور: وهو المصدر
-    // الوحيد الصادق لـ«كم ضغط النظام الآن». بدونه يبقى السقف على أساسه.
-    // publishIngressPendingDepth مرة كل دقيقة كافية للحد من PostgREST calls غير الضرورية.
-    const DEPTH_PUBLISH_INTERVAL_MS = 60_000
-    if (!g.__lastDepthPublishAt || nowTs - g.__lastDepthPublishAt >= DEPTH_PUBLISH_INTERVAL_MS) {
+    // نشر عمق الطابور لبوابة الاستقبال عند وجود معالجة أو كل 5 دقائق في الخمول
+    // للحد من PostgREST HEAD calls غير الضرورية أثناء فترات الهدوء.
+    const DEPTH_PUBLISH_INTERVAL_MS = 300_000
+    if (!g.__lastDepthPublishAt || nowTs - g.__lastDepthPublishAt >= DEPTH_PUBLISH_INTERVAL_MS || processed > 0) {
       g.__lastDepthPublishAt = nowTs
       await publishIngressPendingDepth()
     }
@@ -130,7 +129,7 @@ async function runDrainCycle(): Promise<boolean> {
       const { checkAdminAlerts } = await import('./admin-alerts')
       await checkAdminAlerts().catch(() => {})
     }
-    return drained.scanned > 0 || processed > 0
+    return drained.enqueued > 0 || processed > 0
   } catch {
     // Keep worker failures visible without serializing provider/customer data.
     console.error('[sync-queue] drain cycle failed; durable pending work will be retried on a later cycle')

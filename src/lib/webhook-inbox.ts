@@ -238,11 +238,13 @@ const INBOX_DRAIN_MAX_ATTEMPTS = 10
 async function markInboxFailed(id: string, message: string, attempts: number): Promise<void> {
   const nextAttempts = (attempts ?? 0) + 1
   const status = nextAttempts >= INBOX_DRAIN_MAX_ATTEMPTS ? 'failed' : 'pending'
+  const retryDelayMs = Math.min(600_000, Math.max(30_000, Math.pow(2, Math.min(nextAttempts, 8)) * 15_000))
   await supabase
     .from('webhook_inbox')
     .update({
       last_error: message?.slice(0, 300) ?? 'enqueue failed',
       attempts: nextAttempts,
+      next_dispatch_at: new Date(Date.now() + retryDelayMs).toISOString(),
       ...(status === 'failed' ? { status: 'failed' as const } : {}),
     })
     .eq('id', id).eq('status', 'pending')

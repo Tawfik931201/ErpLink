@@ -157,9 +157,11 @@ export async function reconcileZidOrders(
     const cursor = { from, to, page }
     if (!result.windowFrom || from < result.windowFrom) result.windowFrom = from
     try {
-      // Persist the fixed window before its first API call. A partial page may
-      // be replayed, but must never disappear as wall time advances.
-      await writeState(scope, { cursor, lastError: null })
+      // Persist the fixed window before its first API call if continuing a multi-page run.
+      // A fresh single-page cycle avoids an eager write before knowing if orders exist.
+      if (page > 1 || state.cursor) {
+        await writeState(scope, { cursor, lastError: null })
+      }
       const token = await getAccessToken(merchantKey, row.workspace_id)
       if (!token) {
         result.merchantsSkipped += 1
@@ -222,7 +224,10 @@ export async function reconcileZidOrders(
         seen++
       }
       if (pageComplete && orders.length < 50) {
-        await writeState(scope, { lastSuccess: to, cursor: null, lastError: null, itemsSeen: seen })
+        const shouldUpdate = seen > 0 || !state.lastSuccess || (Date.now() - (Date.parse(state.lastSuccess) || 0) > 3_600_000)
+        if (shouldUpdate) {
+          await writeState(scope, { lastSuccess: to, cursor: null, lastError: null, itemsSeen: seen })
+        }
       } else {
         await writeState(scope, { cursor: { from, to, page: pageComplete ? page + 1 : page }, lastError: null, itemsSeen: seen })
       }

@@ -68,7 +68,9 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
     return result
   }
   if (!(merchants ?? []).length) {
-    await persistState(schedulerScope, { offset: 0 }, now.toISOString())
+    if (startOffset !== 0) {
+      await persistState(schedulerScope, { offset: 0 }, now.toISOString())
+    }
     return result
   }
 
@@ -152,7 +154,9 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
         }
       }
       const nextOffset = rows.length === pageSize ? offset + rows.length : 0
-      await persistState(scope, { offset: nextOffset }, now.toISOString())
+      if (offset !== 0 || nextOffset !== 0) {
+        await persistState(scope, { offset: nextOffset }, now.toISOString())
+      }
     } catch (error) {
       result.errors.push(storeId + ': ' +
         (error instanceof Error ? error.message.slice(0, 180) : 'category audit failed'))
@@ -160,6 +164,8 @@ export async function reconcileZidDeletedCategories(now = new Date()): Promise<C
   }
   const nextMerchantOffset = visited >= (merchants ?? []).length && (merchants ?? []).length < 100
     ? 0 : startOffset + visited
-  await persistState(schedulerScope, { offset: nextMerchantOffset }, now.toISOString())
+  if (startOffset !== 0 || nextMerchantOffset !== 0) {
+    await persistState(schedulerScope, { offset: nextMerchantOffset }, now.toISOString())
+  }
   return result
 }

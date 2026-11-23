@@ -8,10 +8,11 @@
  */
 
 import { createHash } from 'crypto'
-import { productFamilyKey, selectQueueClaimWave } from './queue-claim-planner'
+
 
 import { isCommercePlatform } from './erp-execution-target'
 import { admitWorkspaceEvent, getActiveWorkspaceIds } from './ingress-admission'
+import { productFamilyKey, selectQueueClaimWave } from './queue-claim-planner'
 import { processOdooStockEvent } from './stock-sync-engine'
 import { supabase } from './supabase'
 import { processWebhookEvent, cleanupExpiredLogs } from './sync-engine'
@@ -509,10 +510,11 @@ async function recoverExpiredLeases(): Promise<boolean> {
   const task = (async () => {
     try {
       const { error } = await supabase.rpc('expire_sync_job_leases')
-      if (error) return false
       lastLeaseRecoveryAt = Date.now()
+      if (error) return false
       return true
     } catch {
+      lastLeaseRecoveryAt = Date.now()
       return false
     }
   })()
