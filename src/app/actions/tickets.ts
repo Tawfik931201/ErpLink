@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { auth } from '@clerk/nextjs/server'
 import {
   listOdooTickets, createOdooTicket, readOdooMessages,
-  sendOdooMessage, closeOdooTicket, pendingOdooTickets,
+  sendOdooMessage, closeOdooTicket, pendingOdooTickets, markOdooTicketRead,
 } from '@/lib/odoo-support'
 
 export interface Ticket {
@@ -14,6 +14,7 @@ export interface Ticket {
   stage_id: [number, string] | false
   create_date: string
   description: string | false
+  unread_count: number
 }
 
 export interface OdooMessage {
@@ -22,6 +23,7 @@ export interface OdooMessage {
   date: string
   author_id: [number, string] | false
   attachment_ids: number[]
+  is_customer: boolean
 }
 
 export interface OdooAttachment {
@@ -103,5 +105,15 @@ export async function checkPendingTickets() {
     return await pendingOdooTickets()
   } catch {
     return { success: false, hasPending: false }
+  }
+}
+
+/** Persist the last support reply actually displayed by this customer in Odoo. */
+export async function markTicketRead(ticketId: number, supportMessageId: number) {
+  try {
+    const result = await markOdooTicketRead(ticketId, supportMessageId)
+    return result
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to mark ticket as read' }
   }
 }
