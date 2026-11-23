@@ -30,9 +30,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
 import { TicketChatImageLightbox, TicketChatSelectedFiles, type TicketChatImagePreview } from '@/components/tickets/ticket-chat-media'
-import { getPastedTicketImages, mergeTicketChatFiles, type TicketChatFileError } from '@/lib/ticket-chat-media'
+import { getPastedTicketImages, isTicketChatPreviewImage, mergeTicketChatFiles, type TicketChatFileError } from '@/lib/ticket-chat-media'
+import { cn } from '@/lib/utils'
 
 /**
  * Minimal HTML sanitizer for Odoo chatter bodies (XSS fix).
