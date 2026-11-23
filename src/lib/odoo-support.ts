@@ -166,7 +166,7 @@ export async function listOdooTickets() {
       ticket_ref: 'SUP-' + row.id,
       stage_id: [0, stageNames[stage] || stage] as [number, string],
       create_date: row.create_date.includes('T') ? row.create_date : row.create_date.replace(' ', 'T') + 'Z',
-      description: row.x_description || false,
+      description: row.x_description || (false as false),
     }
   })
 }
@@ -259,7 +259,7 @@ export async function sendOdooMessage(id: number, body: string, files: File[]) {
     x_ticket_stage: ticket.x_ticket_stage === 'waiting_customer' ? 'open' : (ticket.x_ticket_stage || 'open'),
     x_status: 'open',
   }])
-  return { success: true }
+  return { success: true, error: undefined }
 }
 
 export async function closeOdooTicket(id: number) {
@@ -268,7 +268,7 @@ export async function closeOdooTicket(id: number) {
   await centralSupportCall<boolean>(TICKET, 'write', [[id], {
     x_ticket_stage: 'closed', x_status: 'closed',
   }])
-  return { success: true }
+  return { success: true, error: undefined }
 }
 
 export async function pendingOdooTickets() {
