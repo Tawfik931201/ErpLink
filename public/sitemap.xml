@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/about</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/about" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/about" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/about</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/about" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/about" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/pricing</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/pricing" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/pricing" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/pricing</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/pricing" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/pricing" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/contact</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/contact" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/contact" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/contact</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/contact" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/contact" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/privacy</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/privacy" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/privacy" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/privacy</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/privacy" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/privacy" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/terms</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/terms" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/terms" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/terms</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/terms" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/terms" />
+  </url>
+</urlset>

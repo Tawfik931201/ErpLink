@@ -1,0 +1,31 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app
+Disallow: /admin
+Disallow: /embedded
+Disallow: /invoice
+Disallow: /onboarding
+Disallow: /sign-in
+Disallow: /sign-up
+Disallow: /connect
+Disallow: /ar-sa/app
+Disallow: /ar-sa/admin
+Disallow: /ar-sa/embedded
+Disallow: /ar-sa/invoice
+Disallow: /ar-sa/onboarding
+Disallow: /ar-sa/sign-in
+Disallow: /ar-sa/sign-up
+Disallow: /ar-sa/connect
+Disallow: /en-us/app
+Disallow: /en-us/admin
+Disallow: /en-us/embedded
+Disallow: /en-us/invoice
+Disallow: /en-us/onboarding
+Disallow: /en-us/sign-in
+Disallow: /en-us/sign-up
+Disallow: /en-us/connect
+
+# Voluntary content-use preference; not a security measure.
+Content-Signal: search=yes, ai-train=no
+Sitemap: https://erplink.bizsahla.com/sitemap.xml

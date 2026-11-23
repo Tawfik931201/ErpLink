@@ -1,3 +1,4 @@
+import { publicPageMetadata } from '@/lib/public-seo'
 import {
   ArrowLeft,
   Clock,
@@ -10,12 +11,13 @@ import {
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
-
 import { ContactForm } from '@/components/contact-form'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
+
+export const generateMetadata = () => publicPageMetadata('/contact')
 
 const EYEBROW = 'font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground'
 

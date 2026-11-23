@@ -1,3 +1,4 @@
+import { homepageStructuredData, publicPageMetadata } from '@/lib/public-seo'
 import {
   Activity,
   ArrowLeft,
@@ -17,12 +18,13 @@ import {
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
-
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
 import { resolveLanguage, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
+
+export const generateMetadata = () => publicPageMetadata('/')
 
 const EYEBROW = 'font-mono text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground'
 
@@ -92,6 +94,8 @@ export default async function HomePage() {
       className="flex min-h-screen flex-col overflow-x-clip bg-background font-sans text-foreground"
       dir={dir}
     >
+      {/* Public schema, not app data */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(homepageStructuredData).replace(/</g, '\\u003c') }} />
       <PublicSiteHeader lang={lang} />
 
       <main className="flex-1">
