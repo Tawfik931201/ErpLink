@@ -198,26 +198,8 @@ export default function ContactMessagesClient({
           role="alert"
           className="border border-destructive/30 bg-destructive/[0.06] px-3 py-2 text-[11px] font-medium text-destructive"
         >
-          {error === 'migration_missing' ? (
-            isAr ? (
-              <>
-                جدول الرسائل غير موجود بعد. طبّق الترحيل{' '}
-                <span className="font-mono">20261025_contact_messages.sql</span> في محرر SQL
-                بسوبابيز، ثم اضغط «تحديث». حتى ذلك الحين تُحفظ الرسائل في أودوو فقط.
-              </>
-            ) : (
-              <>
-                The messages table does not exist yet. Apply migration{' '}
-                <span className="font-mono">20261025_contact_messages.sql</span> in the Supabase SQL
-                editor, then press Refresh. Until then messages are only stored in Odoo.
-              </>
-            )
-          ) : (
-            <>
-              {isAr ? 'تعذر تنفيذ العملية: ' : 'Operation failed: '}
-              {error}
-            </>
-          )}
+          {isAr ? 'تعذر الاتصال بصندوق الدعم في أودوو: ' : 'Odoo support inbox unavailable: '}
+          {error}
         </div>
       )}
 
