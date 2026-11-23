@@ -7,6 +7,10 @@ import { centralSupportCall } from '@/lib/central-odoo-archive'
 import { normalizeOdooMessageId } from '@/lib/odoo-message-id'
 import { publishTicketLiveEvent } from '@/lib/ticket-live-events'
 import {
+  advanceTicketReadReceipt, countUnreadTicketMessages, isCustomerTicketMessage,
+  type TicketMessageReadRecord, type TicketReadRecord,
+} from '@/lib/ticket-read-receipts'
+import {
   checkImpersonationWriteBlock, getActiveUserId, getActiveWorkspaceId, isAdmin,
 } from '@/lib/auth'
 
@@ -32,6 +36,7 @@ type TicketRecord = {
   x_source_uuid: string | false
   x_email: string | false
   x_partner_id: Relation
+  x_customer_read_receipts: string | false
   create_date: string
 }
 type MessageRecord = {
@@ -59,7 +64,7 @@ type AttachmentRecord = {
 const TICKET_FIELDS = [
   'id', 'x_name', 'x_subject', 'x_description', 'x_status',
   'x_ticket_stage', 'x_user_id', 'x_workspace_uuid', 'x_source_uuid', 'x_email',
-  'x_partner_id', 'create_date',
+  'x_partner_id', 'x_customer_read_receipts', 'create_date',
 ]
 const stageNames: Record<string, string> = {
   open: 'Open', in_progress: 'In Progress',
@@ -163,17 +168,34 @@ async function postCustomerMessage(
   return postedId
 }
 
+const QA_SOURCE = 'qa-studio-20261123-1932'
+
+function customerDomain(userId: string, workspaceId: string | null, admin: boolean): unknown[] {
+  const domain: unknown[] = [['x_source_uuid', '!=', QA_SOURCE]]
+  if (!admin) domain.push(['x_user_id', '=', userId], ['x_workspace_uuid', '=', workspaceId])
+  return domain
+}
+
+async function unreadCountsForRows(rows: TicketReadRecord[], userId: string) {
+  if (!rows.length) return { total: 0, byTicket: {} as Record<number, number> }
+  const messages = await centralSupportCall<TicketMessageReadRecord[]>(
+    'mail.message', 'search_read',
+    [[['model', '=', TICKET], ['res_id', 'in', rows.map(row => row.id)],
+      ['message_type', '=', 'comment'], ['is_internal', '=', false]]],
+    { fields: ['id', 'res_id', 'author_id'], order: 'id desc', limit: 2000 },
+  )
+  return countUnreadTicketMessages(rows, messages, userId)
+}
+
+/** One Odoo list query + one bounded chatter query; no periodic polling. */
 export async function listOdooTickets() {
   const { userId, workspaceId, admin } = await session()
-  const domain: unknown[] = [['x_source_uuid', '!=', 'qa-studio-20261123-1932']]
-  if (!admin) {
-    domain.push(['x_user_id', '=', userId], ['x_workspace_uuid', '=', workspaceId])
-  }
   const rows = await centralSupportCall<TicketRecord[]>(
-    TICKET, 'search_read', [domain], {
+    TICKET, 'search_read', [customerDomain(userId, workspaceId, admin)], {
       fields: TICKET_FIELDS, limit: 100, order: 'create_date desc, id desc',
     },
   )
+  const unread = await unreadCountsForRows(rows, userId)
   return rows.map(row => {
     const stage = row.x_ticket_stage || row.x_status || 'open'
     return {
@@ -183,8 +205,20 @@ export async function listOdooTickets() {
       stage_id: [0, stageNames[stage] || stage] as [number, string],
       create_date: row.create_date.includes('T') ? row.create_date : row.create_date.replace(' ', 'T') + 'Z',
       description: row.x_description || (false as false),
+      unread_count: unread.byTicket[row.id] || 0,
     }
   })
+}
+
+/** A single authorized SSE stream can follow all of this customer's tickets. */
+export async function listAuthorizedTicketLiveSources() {
+  const { userId, workspaceId, admin } = await session()
+  const rows = await centralSupportCall<Array<{ id: number; x_source_uuid: string | false }>>(
+    TICKET, 'search_read', [customerDomain(userId, workspaceId, admin)],
+    { fields: ['id', 'x_source_uuid'], limit: 100, order: 'id desc' },
+  )
+  return rows.filter((row): row is { id: number; x_source_uuid: string } =>
+    typeof row.x_source_uuid === 'string' && /^(app-ticket|public-contact):[0-9a-f-]{36}$/i.test(row.x_source_uuid))
 }
 
 export async function createOdooTicket(title: string, description: string, files: File[]) {
@@ -219,7 +253,7 @@ export async function createOdooTicket(title: string, description: string, files
 }
 
 export async function readOdooMessages(id: number) {
-  await ownedTicket(id)
+  const ticket = await ownedTicket(id)
   const [rows, legacy] = await Promise.all([
     centralSupportCall<MessageRecord[]>(
       'mail.message', 'search_read',
@@ -234,6 +268,7 @@ export async function readOdooMessages(id: number) {
   const messages = rows.map(row => ({
     id: row.id, body: row.body || '', date: row.date.includes('T') ? row.date : row.date.replace(' ', 'T') + 'Z',
     author_id: row.author_id, attachment_ids: row.attachment_ids || [],
+    is_customer: isCustomerTicketMessage(row.author_id, ticket.x_partner_id),
   }))
   for (const msg of legacy) {
     messages.push({
@@ -242,6 +277,8 @@ export async function readOdooMessages(id: number) {
       date: (msg.x_submitted_at || msg.create_date).replace(' ', 'T') + 'Z',
       author_id: [0, msg.x_author_email || 'Support'],
       attachment_ids: [],
+      is_customer: Boolean(ticket.x_email && msg.x_author_email &&
+        msg.x_author_email.trim().toLowerCase() === ticket.x_email.trim().toLowerCase()),
     })
   }
   messages.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id)
@@ -287,31 +324,42 @@ export async function closeOdooTicket(id: number) {
   return { success: true, error: undefined }
 }
 
+/** Durable per-user unread count: only customer-visible support replies. */
 export async function pendingOdooTickets() {
   const { userId, workspaceId, admin } = await session()
-  const domain: unknown[] = [['x_ticket_stage', 'not in', ['closed', 'resolved']]]
-  if (!admin) domain.push(['x_user_id', '=', userId], ['x_workspace_uuid', '=', workspaceId])
-  const tickets = await centralSupportCall<Array<{ id: number; x_partner_id: Relation }>>(
-    TICKET, 'search_read', [domain],
-    { fields: ['id', 'x_partner_id'], limit: 50, order: 'create_date desc' },
+  const tickets = await centralSupportCall<TicketReadRecord[]>(
+    TICKET, 'search_read', [customerDomain(userId, workspaceId, admin)],
+    { fields: ['id', 'x_partner_id', 'x_customer_read_receipts'], limit: 100, order: 'id desc' },
   )
-  if (!tickets.length) return { success: true, hasPending: false }
-  const messages = await centralSupportCall<Array<{ res_id: number; author_id: Relation }>>(
+  const unread = await unreadCountsForRows(tickets, userId)
+  return { success: true, hasPending: unread.total > 0, unreadCount: unread.total }
+}
+
+/** Viewing a support reply explicitly acknowledges it in central Odoo only.
+ * Never trust client-provided message IDs without checking ownership and author.
+ */
+export async function markOdooTicketRead(ticketId: number, supportMessageId: number) {
+  await checkImpersonationWriteBlock('support ticket read receipts')
+  validId(ticketId)
+  validId(supportMessageId)
+  const ticket = await ownedTicket(ticketId)
+  const { userId } = await session()
+  const validated = await centralSupportCall<Array<{ id: number; author_id: Relation }>>(
     'mail.message', 'search_read',
-    [[['model', '=', TICKET], ['res_id', 'in', tickets.map(row => row.id)], ['message_type', '=', 'comment'], ['is_internal', '=', false]]],
-    { fields: ['res_id', 'author_id'], order: 'date desc, id desc', limit: 200 },
+    [[['id', '=', supportMessageId], ['model', '=', TICKET],
+      ['res_id', '=', ticketId], ['message_type', '=', 'comment'], ['is_internal', '=', false]]],
+    { fields: ['id', 'author_id'], limit: 1 },
   )
-  const seen = new Set<number>()
-  for (const msg of messages) {
-    if (seen.has(msg.res_id)) continue
-    seen.add(msg.res_id)
-    const ticket = tickets.find(row => row.id === msg.res_id)
-    const customer = ticket?.x_partner_id
-    if (ticket && (!Array.isArray(customer) || !Array.isArray(msg.author_id) || msg.author_id[0] !== customer[0])) {
-      return { success: true, hasPending: true }
-    }
+  if (!validated.length || isCustomerTicketMessage(validated[0].author_id, ticket.x_partner_id)) {
+    throw new Error('Unread marker is not a visible support reply')
   }
-  return { success: true, hasPending: false }
+  const next = advanceTicketReadReceipt(ticket.x_customer_read_receipts, userId, supportMessageId)
+  if (next.changed) {
+    await centralSupportCall<boolean>(TICKET, 'write', [[ticketId], {
+      x_customer_read_receipts: next.value,
+    }])
+  }
+  return { success: true, readThrough: supportMessageId }
 }
 
 export async function readOwnedOdooAttachment(id: number) {
