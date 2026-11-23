@@ -7,6 +7,7 @@ on:
       - 'public/robots.txt'
       - 'public/sitemap.xml'
       - 'public/llms.txt'
+      - 'public/google5f56418af287a69f.html'
       - 'src/app/(public)/**'
       - 'src/components/public-site-footer.tsx'
       - 'src/lib/public-seo.ts'

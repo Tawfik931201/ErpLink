@@ -9,6 +9,10 @@ const sitemap = read('public/sitemap.xml')
 const robots = read('public/robots.txt')
 const llms = read('public/llms.txt')
 
+// A Google Search Console HTML verification file must be served byte-for-byte
+// under the exact root filename. Do not index it as a marketing page.
+assert.equal(read('public/google5f56418af287a69f.html').trim(), 'google-site-verification: google5f56418af287a69f.html')
+
 assert.match(sitemap, /<urlset\s/)
 assert.equal((sitemap.match(/<url>/g) || []).length, paths.length * locales.length)
 for (const p of paths) {
