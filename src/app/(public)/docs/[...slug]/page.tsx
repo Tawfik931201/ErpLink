@@ -69,9 +69,9 @@ export default async function DocArticlePage({ params }: DocPageProps) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_240px] gap-8">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_260px] 2xl:grid-cols-[1fr_280px] gap-8 xl:gap-12 w-full">
         {/* Main Article Body */}
-        <article className="min-w-0 max-w-3xl">
+        <article className="min-w-0 w-full max-w-none">
           <DocsBreadcrumbs items={breadcrumbs} lang={lang} />
 
           {/* Article Header */}
@@ -116,9 +116,6 @@ export default async function DocArticlePage({ params }: DocPageProps) {
               {article.description[lang]}
             </p>
           </header>
-
-          {/* Mobile TOC */}
-          <DocsTableOfContents headings={article.headings} lang={lang} />
 
           {/* Rendered Article Content */}
           <div className="mt-6">

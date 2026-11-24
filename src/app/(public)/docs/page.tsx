@@ -44,7 +44,7 @@ export default async function DocsHomePage() {
 
   return (
     <DocsLayout lang={lang}>
-      <div className="max-w-4xl mx-auto space-y-12">
+      <div className="w-full space-y-12">
         {/* Hero Section */}
         <div className="text-center space-y-4 pt-4 pb-6 border-b border-border">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/20">

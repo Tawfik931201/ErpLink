@@ -135,7 +135,7 @@ export function zidOdooGuideStructuredData(lang: SiteLanguage) {
 
 export function knowledgeCenterStructuredData(lang: SiteLanguage) {
   const url = canonical(lang, '/guides')
-  const headline = lang === 'ar' ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge Center'
+  const headline = lang === 'ar' ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge'
   const description = lang === 'ar'
     ? 'أدلة عملية وتطبيقية لفهم ربط المتاجر الإلكترونية بأنظمة ERP، ومزامنة الطلبات والمخزون والضرائب والمرتجعات.'
     : 'Practical, in-depth guides to connecting e-commerce stores with ERP systems: orders, inventory, taxes, and returns.'
@@ -148,7 +148,7 @@ export function knowledgeCenterStructuredData(lang: SiteLanguage) {
         '@id': `${url}#breadcrumb`,
         itemListElement: [
           { '@type': 'ListItem', position: 1, name: lang === 'ar' ? 'الرئيسية' : 'Home', item: canonical(lang, '') },
-          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center', item: url },
+          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge', item: url },
         ],
       },
       {
@@ -189,7 +189,7 @@ export function guideArticleStructuredData(guide: GuideContent, lang: SiteLangua
         '@id': `${url}#breadcrumb`,
         itemListElement: [
           { '@type': 'ListItem', position: 1, name: lang === 'ar' ? 'الرئيسية' : 'Home', item: canonical(lang, '') },
-          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center', item: canonical(lang, '/guides') },
+          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge', item: canonical(lang, '/guides') },
           { '@type': 'ListItem', position: 3, name: guide.meta.title[lang], item: url },
         ],
       },

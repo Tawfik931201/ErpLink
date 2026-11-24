@@ -52,7 +52,7 @@ const copy: Record<PublicPagePath, { ar: { title: string; description: string };
   },
   '/guides': {
     ar: { title: 'مركز المعرفة | أدلة ربط المتاجر بأنظمة ERP | ERP Link', description: 'مركز معرفة ERP Link: أدلة عملية وشروحات تطبيقية لربط متاجر زد وسلة وشوبيفاي بنظام أودوو ومزامنة الطلبات والمخزون والضرائب.' },
-    en: { title: 'Knowledge Center | E-Commerce & ERP Integration Guides | ERP Link', description: 'ERP Link Knowledge Center: in-depth technical guides for connecting Zid, Salla, and Shopify stores with Odoo ERP, stock sync, and VAT.' },
+    en: { title: 'Knowledge | E-Commerce & ERP Integration Guides | ERP Link', description: 'ERP Link Knowledge: in-depth technical guides for connecting Zid, Salla, and Shopify stores with Odoo ERP, stock sync, and VAT.' },
   },
   '/guides/zid-odoo-checklist': {
     ar: { title: 'كيفية ربط زد بأودوو: دليل الاختبار | ERP Link', description: 'قائمة عملية لتجهيز وربط زد مع أودوو: خريطة البيانات والضرائب والشحن والطلبات والمرتجعات والتأكد من عدم التكرار.' },

@@ -158,7 +158,7 @@ export function GuideSearchFilter({ guides, categories, lang }: GuideSearchFilte
 
       {/* Grid of Results */}
       {filteredGuides.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4">
           {filteredGuides.map((guide) => (
             <GuideCard key={guide.meta.slug} guide={guide} lang={lang} featured={guide.meta.featured} />
           ))}

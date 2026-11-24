@@ -38,7 +38,7 @@ export function GuideToc({ sections, lang }: GuideTocProps) {
   return (
     <nav
       aria-label={isAr ? 'فهرس محتويات الدليل' : 'Table of contents'}
-      className="rounded-2xl border border-border bg-card/60 p-5 backdrop-blur-sm lg:sticky lg:top-24"
+      className="rounded-2xl border border-border bg-card/60 p-5 backdrop-blur-sm"
     >
       <div className="flex items-center gap-2 border-b border-border pb-3 text-xs font-bold uppercase tracking-wider text-foreground">
         <List className="h-4 w-4 text-primary" />

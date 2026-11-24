@@ -72,7 +72,7 @@ export default async function IndividualGuidePage({ params }: GuidePageProps) {
 
   const breadcrumbItems = [
     { name: isAr ? 'الرئيسية' : 'Home', href: '/' },
-    { name: isAr ? 'مركز المعرفة' : 'Knowledge Center', href: '/guides' },
+    { name: isAr ? 'مركز المعرفة' : 'Knowledge', href: '/guides' },
     { name: guide.meta.title[lang] },
   ]
 
@@ -86,8 +86,8 @@ export default async function IndividualGuidePage({ params }: GuidePageProps) {
 
       <main className="flex-1">
         {/* ── Header / Hero Section ───────────────────────────── */}
-        <header className="border-b border-border bg-secondary/15 px-6 py-12 md:px-12 md:py-16">
-          <div className="mx-auto max-w-5xl">
+        <header className="border-b border-border bg-secondary/15 px-4 py-10 sm:px-8 md:px-12 xl:px-16 md:py-14">
+          <div className="w-full">
             <GuideBreadcrumbs items={breadcrumbItems} lang={lang} />
 
             <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -113,17 +113,17 @@ export default async function IndividualGuidePage({ params }: GuidePageProps) {
               {guide.meta.h1Title[lang]}
             </h1>
 
-            <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base sm:leading-8">
+            <p className="mt-5 text-sm leading-relaxed text-muted-foreground sm:text-base sm:leading-8 max-w-4xl">
               {guide.meta.summary[lang]}
             </p>
           </div>
         </header>
 
         {/* ── Main Content Layout ─────────────────────────────── */}
-        <div className="mx-auto max-w-5xl px-6 py-12 md:px-12">
-          <div className="grid gap-12 lg:grid-cols-[1fr_260px] lg:gap-16">
+        <div className="w-full px-4 py-10 sm:px-8 md:px-12 xl:px-16 md:py-14">
+          <div className="grid gap-10 lg:grid-cols-[1fr_280px] xl:grid-cols-[1fr_320px] lg:gap-12 xl:gap-16 w-full">
             {/* Guide Body */}
-            <article className="min-w-0 space-y-12 leading-relaxed">
+            <article className="min-w-0 w-full max-w-none overflow-hidden space-y-12 leading-relaxed">
               {guide.sections.map((section, sIdx) => (
                 <section key={section.id} id={section.id} className="scroll-mt-24 space-y-5">
                   <h2 className="text-xl font-black tracking-tight text-foreground sm:text-2xl border-b border-border/60 pb-3">
@@ -260,14 +260,36 @@ export default async function IndividualGuidePage({ params }: GuidePageProps) {
               {/* FAQs Section */}
               <GuideFaqSection faqs={guide.faqs} lang={lang} />
 
+              {/* Mobile In-Article Integration Callout (Clean, static, non-jumping) */}
+              {guide.meta.relatedIntegrationPath && (
+                <div className="lg:hidden w-full max-w-full overflow-hidden rounded-2xl border border-primary/25 bg-primary/5 p-5 text-start shadow-sm space-y-3">
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-foreground">
+                      {isAr ? 'هل تريد تشغيل هذا الربط؟' : 'Need this integration?'}
+                    </h4>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {isAr
+                        ? 'يقوم ERP Link بربط هذا المتجر مع أودوو ومزامنة كافة العمليات تلقائيًا.'
+                        : 'ERP Link connects this platform with Odoo, synchronizing transactions automatically.'}
+                    </p>
+                  </div>
+                  <Link
+                    href={guide.meta.relatedIntegrationPath}
+                    className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity"
+                  >
+                    {isAr ? 'استكشف تفاصيل الربط' : 'Explore Integration Details'}
+                  </Link>
+                </div>
+              )}
+
               {/* Back to Hub & Integration Links */}
               <div className="pt-6 border-t border-border flex flex-wrap items-center justify-between gap-4">
                 <Link
                   href="/guides"
-                  className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground hover:text-foreground"
+                  className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <Arrow className="h-4 w-4 rotate-180" />
-                  <span>{isAr ? 'العودة إلى مركز المعرفة' : 'Back to Knowledge Center'}</span>
+                  <span>{isAr ? 'العودة إلى مركز المعرفة' : 'Back to Knowledge'}</span>
                 </Link>
 
                 {guide.meta.relatedIntegrationPath && (
@@ -282,28 +304,30 @@ export default async function IndividualGuidePage({ params }: GuidePageProps) {
               </div>
             </article>
 
-            {/* Sidebar with Table of Contents */}
-            <aside className="space-y-6">
-              <GuideToc sections={guide.sections} lang={lang} />
+            {/* Desktop Stable Sidebar (TOC + CTA in unified sticky container) */}
+            <aside className="hidden lg:block shrink-0">
+              <div className="sticky top-24 space-y-5">
+                <GuideToc sections={guide.sections} lang={lang} />
 
-              {guide.meta.relatedIntegrationPath && (
-                <div className="rounded-2xl border border-border bg-card/60 p-5 text-xs">
-                  <h4 className="font-bold text-foreground">
-                    {isAr ? 'هل تريد تشغيل هذا الربط؟' : 'Need this integration?'}
-                  </h4>
-                  <p className="mt-1.5 leading-relaxed text-muted-foreground">
-                    {isAr
-                      ? 'يقوم ERP Link بربط هذا المتجر مع أودوو ومزامنة كافة العمليات تلقائيًا.'
-                      : 'ERP Link connects this platform with Odoo, synchronizing transactions automatically.'}
-                  </p>
-                  <Link
-                    href={guide.meta.relatedIntegrationPath}
-                    className="mt-3.5 inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:opacity-90"
-                  >
-                    {isAr ? 'تفاصيل الربط' : 'Integration Details'}
-                  </Link>
-                </div>
-              )}
+                {guide.meta.relatedIntegrationPath && (
+                  <div className="w-full rounded-2xl border border-border bg-card/85 p-5 text-xs shadow-sm space-y-2">
+                    <h4 className="font-bold text-foreground">
+                      {isAr ? 'هل تريد تشغيل هذا الربط؟' : 'Need this integration?'}
+                    </h4>
+                    <p className="leading-relaxed text-muted-foreground">
+                      {isAr
+                        ? 'يقوم ERP Link بربط هذا المتجر مع أودوو ومزامنة كافة العمليات تلقائيًا.'
+                        : 'ERP Link connects this platform with Odoo, synchronizing transactions automatically.'}
+                    </p>
+                    <Link
+                      href={guide.meta.relatedIntegrationPath}
+                      className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 transition-opacity"
+                    >
+                      {isAr ? 'تفاصيل الربط' : 'Integration Details'}
+                    </Link>
+                  </div>
+                )}
+              </div>
             </aside>
           </div>
 

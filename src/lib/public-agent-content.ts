@@ -88,7 +88,7 @@ export function publicMarkdown(path: string, lang: AgentLanguage): string {
   const contact = isAr
     ? `للتواصل مع فريق ERP Link: ${PUBLIC_CONTACT_EMAIL} أو صفحة التواصل.`
     : `Contact ERP Link at ${PUBLIC_CONTACT_EMAIL} or through the contact page.`
-  const footer = `\n\n---\n\n[ERP Link](${agentPageUrl('/', lang)}) · [${isAr ? 'التكاملات' : 'Integrations'}](${agentPageUrl('/integrations', lang)}) · [${isAr ? 'التوثيق' : 'Docs'}](${agentPageUrl('/docs', lang)}) · [${isAr ? 'مركز المعرفة' : 'Knowledge Center'}](${agentPageUrl('/guides', lang)}) · [${isAr ? 'تواصل' : 'Contact'}](${agentPageUrl('/contact', lang)})\nSource: ${url}\n`
+  const footer = `\n\n---\n\n[ERP Link](${agentPageUrl('/', lang)}) · [${isAr ? 'التكاملات' : 'Integrations'}](${agentPageUrl('/integrations', lang)}) · [${isAr ? 'التوثيق' : 'Docs'}](${agentPageUrl('/docs', lang)}) · [${isAr ? 'مركز المعرفة' : 'Knowledge'}](${agentPageUrl('/guides', lang)}) · [${isAr ? 'تواصل' : 'Contact'}](${agentPageUrl('/contact', lang)})\nSource: ${url}\n`
 
   // 1. Documentation individual article
   if (path.startsWith('/docs/')) {
@@ -138,7 +138,7 @@ export function publicMarkdown(path: string, lang: AgentLanguage): string {
     const guideLinks = allGuides
       .map((g) => `- [${g.meta.h1Title[lang]}](${agentPageUrl(`/guides/${g.meta.slug}`, lang)}) — ${g.meta.summary[lang]}`)
       .join('\n')
-    return `# ${isAr ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge Center'}\n\n${
+    return `# ${isAr ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge'}\n\n${
       isAr
         ? 'أدلة إرشادية وتطبيقية متقدمة لربط المتاجر الإلكترونية (زد، سلة، شوبيفاي) بنظام أودوو Odoo ERP، مع شروحات عملية للمخزون والضرائب والمرتجعات.'
         : 'In-depth practical guides for connecting Zid, Salla, and Shopify stores with Odoo ERP: inventory sync, VAT compliance, and returns.'

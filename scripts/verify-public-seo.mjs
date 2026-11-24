@@ -106,9 +106,8 @@ for (const platform of ['zid', 'salla', 'shopify']) {
   assert.ok(read('src/app/(public)/page.tsx').includes(`/integrations/${platform}-odoo`))
   assert.ok(read('src/components/public-site-footer.tsx').includes(`href="/integrations/${platform}-odoo"`))
 }
-assert.ok(read('src/components/public-site-header.tsx').includes('href="/integrations"'))
-assert.ok(read('src/components/public-site-header.tsx').includes('href="/docs"'))
-assert.ok(read('src/components/public-site-header.tsx').includes('href="/guides"'))
+assert.ok(read('src/components/public-site-header.tsx').includes('href="/pricing"'))
+assert.ok(read('src/components/public-site-header.tsx').includes('href="/contact"'))
 assert.ok(read('src/app/(public)/page.tsx').includes('href="/guides"'))
 assert.ok(read('src/app/(public)/guides/zid-odoo-checklist/page.tsx').includes('scenarios.map'))
 

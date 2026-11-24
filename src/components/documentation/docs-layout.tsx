@@ -101,7 +101,7 @@ export function DocsLayout({
       )}
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto w-full flex-1 flex">
+      <div className="w-full flex-1 flex px-2 sm:px-4 lg:px-6 xl:px-8">
         {/* Desktop Sticky Sidebar */}
         <div className="hidden lg:block shrink-0">
           <DocsSidebar
@@ -111,7 +111,7 @@ export function DocsLayout({
         </div>
 
         {/* Article & Content Area */}
-        <div className="flex-1 min-w-0 px-4 sm:px-8 lg:px-12 py-8">
+        <div className="flex-1 min-w-0 px-4 sm:px-8 lg:px-10 xl:px-12 py-8">
           {children}
         </div>
       </div>
