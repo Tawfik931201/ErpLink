@@ -111,7 +111,7 @@ describe('durable queue claims and fencing (offline execution)', () => {
         attempts++
         return { data: null, error: { message: 'database temporarily unavailable' } }
       }
-      return original(name as any, args)
+      return (original as (...params: unknown[]) => unknown)(name, args)
     }) as typeof supabase.rpc
     const originalNow = Date.now()
     const spy = jest.spyOn(Date, 'now').mockReturnValue(originalNow + 180_000)
