@@ -52,9 +52,19 @@ export function withSyncRequestContext<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   const current = getSyncRequestContext()
-  // If already running inside an active context with the same workspaceId, preserve it.
-  if (current && (!contextOrOptions.workspaceId || current.workspaceId === contextOrOptions.workspaceId)) {
-    return fn()
+  // If already running inside an active context with matching workspace, store, and platform, preserve it.
+  if (current) {
+    const isContextInstance = 'zidTokens' in contextOrOptions
+    if (isContextInstance) {
+      if (current === contextOrOptions) return fn()
+    } else {
+      const sameWs = !contextOrOptions.workspaceId || current.workspaceId === contextOrOptions.workspaceId
+      const sameStore = !contextOrOptions.storeId || current.storeId === contextOrOptions.storeId
+      const samePlatform = !contextOrOptions.platform || current.platform === contextOrOptions.platform
+      if (sameWs && sameStore && samePlatform) {
+        return fn()
+      }
+    }
   }
 
   const context: SyncRequestContext = 'zidTokens' in contextOrOptions

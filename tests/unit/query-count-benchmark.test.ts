@@ -23,7 +23,7 @@ import {
   resolveSettingsStoreKey,
   type SettingsClient,
 } from '../../src/lib/mapping-settings'
-import { withSyncRequestContext } from '../../src/lib/sync/request-context'
+import { getSyncRequestContext, withSyncRequestContext } from '../../src/lib/sync/request-context'
 import {
   resolveZidOrderTokenScope,
 } from '../../src/lib/zid/order-enrichment'
@@ -694,6 +694,43 @@ describe('Query Count Benchmark: Order Lifecycle Simulation & Budget Assertion',
     expect(() => {
       assertQueryBudget({ maxMerchantTokensReads: 2 })
     }).not.toThrow()
+  })
+
+  it('guarantees store-level isolation when nesting withSyncRequestContext for different stores', async () => {
+    const ws = 'ws-multi'
+    const storeA = 'store-a'
+    const storeB = 'store-b'
+
+    await withSyncRequestContext({ workspaceId: ws, storeId: storeA }, async () => {
+      const outerCtx = getSyncRequestContext()
+      expect(outerCtx?.storeId).toBe(storeA)
+
+      await withSyncRequestContext({ workspaceId: ws, storeId: storeB }, async () => {
+        const innerCtx = getSyncRequestContext()
+        expect(innerCtx?.storeId).toBe(storeB)
+        expect(innerCtx).not.toBe(outerCtx)
+      })
+
+      // Outer context is preserved on return
+      expect(getSyncRequestContext()?.storeId).toBe(storeA)
+    })
+  })
+
+  it('caches fallback key on transient Supabase error to prevent query storms', async () => {
+    supabase.reset()
+    const ws = 'ws-storm'
+    const store = '99999'
+
+    await withSyncRequestContext({ workspaceId: ws, storeId: store }, async () => {
+      const first = await resolveSettingsStoreKey(mockDb, 'zid', store, ws)
+      expect(first).toBe(store)
+      const countAfterFirst = supabase.calls.length
+
+      // Second call must use context cache without extra query
+      const second = await resolveSettingsStoreKey(mockDb, 'zid', store, ws)
+      expect(second).toBe(store)
+      expect(supabase.calls.length).toBe(countAfterFirst)
+    })
   })
 })
 

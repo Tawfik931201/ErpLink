@@ -36,11 +36,11 @@ it('preserves reconciliation if the additive DB migration is not yet installed',
   expect(await claimZidMaintenanceSlot('orders')).toBe(true)
 })
 
-it('coalesces the idle safety-net scan independently from Zid reconciliation', async () => {
+it('coalesces the idle safety-net scan independently with a clock-skew buffer', async () => {
   rpc.mockResolvedValue({ data: false, error: null })
   expect(await claimIdleQueueDrainSlot(120_000)).toBe(false)
   expect(rpc.mock.calls).toEqual([
-    ['claim_erp_maintenance_slot', { p_name: 'queue_idle_drain_v1', p_interval_seconds: 120 }],
+    ['claim_erp_maintenance_slot', { p_name: 'queue_idle_drain_v1', p_interval_seconds: 115 }],
   ])
 })
 

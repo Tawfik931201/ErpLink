@@ -7,19 +7,16 @@
  * the two engines, which both need the same DB access.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { supabase } from '@/lib/supabase'
 
 import { upsertEntityLink } from './entity-links'
 import { getErpExecutionScope } from './erp-execution-target'
 
 // ─── Supabase admin client (bypasses RLS) ─────────────────────────────────────
-// Webhook requests have NO Clerk auth session, so the standard supabase client
-// would be blocked by Row Level Security on field_mappings / erp_connections.
-// We use the service role key here which has full read access.
-export const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Webhook requests have NO Clerk auth session, so the service-role client is used.
+// Reusing the central `supabase` instance avoids duplicate connection pools
+// and ensures consistent mocking across unit tests.
+export const supabaseAdmin = supabase
 
 export async function logSync(entry: {
   id?: string

@@ -112,12 +112,18 @@ async function runDrainCycle(): Promise<boolean> {
     const nowTs = Date.now()
 
     // ── نشر عمق الطابور لبوابة الاستقبال ───────────────────────────────────
-    // نشر عمق الطابور لبوابة الاستقبال عند وجود معالجة أو كل 5 دقائق في الخمول
-    // للحد من PostgREST HEAD calls غير الضرورية أثناء فترات الهدوء.
+    // نشر عمق الطابور لبوابة الاستقبال عند وجود معالجة أو كل 5 دقائق في الخمول.
+    // أثناء الخمول، إذا انتهت الدورة بصفر عناصر مُعالجة وبدون إدراج جديد، فالعمق 0
+    // ويتم ضبطه محلياً دون استعلام HEAD غير ضروري إلى Supabase.
     const DEPTH_PUBLISH_INTERVAL_MS = 300_000
     if (!g.__lastDepthPublishAt || nowTs - g.__lastDepthPublishAt >= DEPTH_PUBLISH_INTERVAL_MS || processed > 0) {
       g.__lastDepthPublishAt = nowTs
-      await publishIngressPendingDepth()
+      if (processed === 0 && drained.enqueued === 0) {
+        const { setIngressPendingDepth } = await import('./ingress-admission')
+        setIngressPendingDepth(0)
+      } else {
+        await publishIngressPendingDepth()
+      }
     }
 
     // ── تنبيهات الأدمن ─────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import {
   unregisterShopifyWebhooks,
 } from '@/lib/shopify-client'
 import { supabase } from '@/lib/supabase'
+import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser as ensureDbUser } from '@/lib/users'
 import { isWorkspaceClosed } from '@/lib/workspace-archive'
 import { publicZidStore, ZID_STORE_PUBLIC_COLUMNS } from '@/lib/zid/credentials'
@@ -335,6 +336,9 @@ export async function disconnectZidStore(merchantId: string) {
 
     if (error) throw new Error('Failed to disconnect Zid store: ' + error.message)
 
+    ttlCache.delete(`zid:workspace:${merchantId}`)
+    ttlCache.delete(`zid:store-normalize:${merchantId}`)
+
     revalidateTag('zid-token')
     revalidatePath('/app/connect-store')
     revalidatePath('/app/settings/workspace')
@@ -437,6 +441,8 @@ export async function disconnectSallaStore(merchantId: string) {
 
     if (error) throw new Error('Failed to disconnect Salla store: ' + error.message)
 
+    ttlCache.delete(`salla:workspace:${merchantId}`)
+
     revalidateTag('salla-token')
     revalidatePath('/app/connect-store')
     revalidatePath('/app/settings/workspace')
@@ -520,6 +526,9 @@ export async function disconnectShopifyStore(shopDomain: string) {
       .eq('workspace_id', user.active_workspace_id)
 
     if (error) throw new Error('Failed to disconnect Shopify store: ' + error.message)
+
+    ttlCache.delete(`shopify:token:${shopDomain}`)
+    ttlCache.delete(`shopify:workspace:${shopDomain}`)
 
     revalidateTag('shopify-token')
     revalidatePath('/app/connect-store')

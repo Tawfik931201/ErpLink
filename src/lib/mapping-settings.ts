@@ -108,6 +108,7 @@ export async function resolveSettingsStoreKey(
     if (ctx) ctx.settingsStoreKeys.set(cacheKey, result)
     return result
   } catch {
+    if (ctx) ctx.settingsStoreKeys.set(cacheKey, key)
     return key
   }
 }
