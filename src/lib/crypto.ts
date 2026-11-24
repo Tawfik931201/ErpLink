@@ -1,7 +1,5 @@
 import crypto from 'crypto'
 
-const IV_LENGTH = 16 // For AES, this is always 16
-
 /**
  * Ciphertext layout produced by `encrypt()`: `<32 hex IV>:<hex ciphertext>`.
  * AES-256-CBC with a 16-byte IV is always 32 hex characters of IV.

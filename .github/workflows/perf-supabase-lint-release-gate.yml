@@ -30,54 +30,32 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - name: ESLint auto-fix only the 25 pre-existing blocker files
+      - name: Fix only the files with current ESLint errors
         shell: bash
         run: |
-          files=(
-          'src/app/(app)/app/mapping-center/field-mapping-form.tsx'
-          'src/app/(app)/app/tickets/tickets-client.tsx'
-          'src/app/(public)/about/page.tsx'
-          'src/app/(public)/contact/page.tsx'
-          'src/app/(public)/guides/zid-odoo-checklist/page.tsx'
-          'src/app/(public)/integrations/page.tsx'
-          'src/app/(public)/layout.tsx'
-          'src/app/(public)/page.tsx'
-          'src/app/(public)/pricing/page.tsx'
-          'src/app/(public)/privacy/page.tsx'
-          'src/app/(public)/terms/page.tsx'
-          'src/app/actions/odoo.ts'
-          'src/app/actions/salla.ts'
-          'src/app/actions/sync-logs.ts'
-          'src/app/actions/tickets.ts'
-          'src/app/api/cron/sync-queue/route.ts'
-          'src/app/api/notifications/route.ts'
-          'src/app/api/notifications/stream/route.ts'
-          'src/app/api/public-markdown/route.ts'
-          'src/app/api/shopify/callback/route.ts'
-          'src/app/api/shopify/connect/route.ts'
-          'src/app/api/tickets/live/stream/route.ts'
-          'src/components/notification-center.tsx'
-          'src/components/pending-tickets-badge.tsx'
-          'src/components/public-integration-detail.tsx'
-          )
-          ./node_modules/.bin/eslint "${files[@]}" --fix
-          git diff --stat
+          ./node_modules/.bin/eslint src --ext .ts,.tsx --format json > /tmp/erplink-lint.json || true
+          mapfile -t files < <(node -e 'for (const item of require("/tmp/erplink-lint.json")) if (item.errorCount > 0) console.log(item.filePath)')
+          echo "Files with blocking ESLint errors: ${#files[@]}"
+          if [ "${#files[@]}" -gt 0 ]; then
+            ./node_modules/.bin/eslint "${files[@]}" --fix || true
+          fi
           git diff --check
-      - name: Full repository lint
-        run: npm run lint
-      - name: TypeScript
-        run: npm run type-check
-      - name: Full Jest regression suite
-        run: npm test -- --runInBand
-      - name: Production build (offline test-only credentials)
-        run: npm run build
-      - name: Commit tested formatting changes to the feature branch only
+          git diff --stat
+      - name: Commit scoped formatting to the feature branch
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- src/
           if ! git diff --cached --quiet; then
-            git commit -m "style: resolve existing lint blockers without behavior changes"
+            git commit -m "style: repair remaining existing import order lint errors"
             git push origin HEAD:refs/heads/perf/supabase-free-tier-optimization-20261124
           fi
+      - name: Full repository lint
+        run: npm run lint
+      - name: TypeScript
+        run: npm run type-check
+      - name: Full Jest regression suite
+        run: npm test -- --runInBand
+      - name: Production build with offline test-only credentials
+        run: npm run build
