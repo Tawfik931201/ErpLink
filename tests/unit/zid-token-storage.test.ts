@@ -45,6 +45,9 @@ afterAll(() => {
 })
 
 it('does not share in-flight Zid credentials across implicit workspace contexts', async () => {
+  // Use per-builder filters: the sequential mock cursor cannot model simultaneous reads.
+  supabase.setMockResponder(null)
+  supabase.addMock('merchant_tokens', rows)
   const a = withSyncRequestContext({ workspaceId: 'workspace-a' }, () => store.getTokens('42'))
   const b = withSyncRequestContext({ workspaceId: 'workspace-b' }, () => store.getTokens('42'))
   const results = await Promise.allSettled([a, b])

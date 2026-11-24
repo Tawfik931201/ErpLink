@@ -76,7 +76,7 @@ describe('privileged impersonation and deployment probes', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toContain('no-store')
     expect(await response.json()).toEqual({
-      ok: true, release: 'erplink-security-prelaunch-20261123-r1',
+      ok: true, release: 'erplink-supabase-capacity-20261124-r2',
     })
   })
 
