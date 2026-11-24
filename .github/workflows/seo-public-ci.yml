@@ -11,6 +11,8 @@ on:
       - 'src/app/(public)/**'
       - 'src/components/public-site-footer.tsx'
       - 'src/lib/public-seo.ts'
+      - 'src/lib/public-contact.ts'
+      - 'tests/unit/public-contact-identity.test.ts'
       - 'tests/unit/public-search-discovery.test.ts'
       - 'docs/search-visibility-checkpoint.md'
       - 'src/lib/public-structured-data.ts'

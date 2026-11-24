@@ -59,7 +59,7 @@
     execute(input) {
       const lang = input && input.language === 'en' ? 'en-us' : 'ar-sa'
       return {
-        email: 'support@erplinks.com',
+        email: 'info@bizsahla.com',
         contactUrl: `https://erplink.bizsahla.com/${lang}/contact`,
       }
     },

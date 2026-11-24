@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 
 import { getUrlLocaleFromLanguage } from '@/lib/locale'
 import { publicBusinessProfile } from '@/lib/public-business-profile'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 import { resolveLanguage } from '@/lib/translations'
 
 // SEO is intentionally limited to publicly accessible marketing pages.
@@ -106,16 +107,13 @@ export const homepageStructuredData = {
       url: PUBLIC_SITE_URL,
       logo: `${PUBLIC_SITE_URL}/logo.png`,
       description: 'ERP Link connects Zid, Salla and Shopify stores to enterprise resource planning systems such as Odoo.',
-      email: 'support@erplinks.com',
-      ...(business.telephone ? { telephone: business.telephone } : {}),
-      ...(business.address ? { address: business.address } : {}),
+      email: PUBLIC_CONTACT_EMAIL,
       ...(business.sameAs.length ? { sameAs: business.sameAs } : {}),
       contactPoint: {
         '@type': 'ContactPoint',
         contactType: 'customer support',
-        email: 'support@erplinks.com',
+        email: PUBLIC_CONTACT_EMAIL,
         url: `${PUBLIC_SITE_URL}/ar-sa/contact`,
-        ...(business.telephone ? { telephone: business.telephone } : {}),
       },
     },
     {

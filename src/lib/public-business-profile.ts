@@ -2,8 +2,7 @@
  * Publish company identity only when the business owner supplies verified,
  * publicly shareable details in the deployment environment.
  *
- * Do NOT infer a business address from a visitor's location, the hosting
- * company, a store's warehouse, or a personal social-media profile.
+ * Only verified external company profiles can be linked via sameAs.
  */
 const allowedProfileHosts = new Set([
   'linkedin.com', 'www.linkedin.com', 'facebook.com', 'www.facebook.com',
@@ -13,25 +12,6 @@ const allowedProfileHosts = new Set([
 ])
 
 export function publicBusinessProfile() {
-  const rawTelephone = process.env.PUBLIC_BUSINESS_PHONE_E164?.trim() ?? ''
-  const telephone = /^\+[1-9]\d{6,14}$/.test(rawTelephone) ? rawTelephone : null
-
-  const street = process.env.PUBLIC_BUSINESS_ADDRESS_STREET?.trim() ?? ''
-  const city = process.env.PUBLIC_BUSINESS_ADDRESS_CITY?.trim() ?? ''
-  const region = process.env.PUBLIC_BUSINESS_ADDRESS_REGION?.trim() ?? ''
-  const postalCode = process.env.PUBLIC_BUSINESS_ADDRESS_POSTAL?.trim() ?? ''
-  const country = process.env.PUBLIC_BUSINESS_ADDRESS_COUNTRY?.trim() ?? ''
-  const address = city && /^[A-Za-z]{2}$/.test(country)
-    ? {
-        '@type': 'PostalAddress' as const,
-        ...(street ? { streetAddress: street } : {}),
-        addressLocality: city,
-        ...(region ? { addressRegion: region } : {}),
-        ...(postalCode ? { postalCode } : {}),
-        addressCountry: country.toUpperCase(),
-      }
-    : null
-
   const sameAs: string[] = []
   for (const entry of (process.env.PUBLIC_BUSINESS_SAME_AS ?? '').split(/[\n,]+/)) {
     if (!entry.trim()) continue
@@ -45,5 +25,5 @@ export function publicBusinessProfile() {
       // Ignore invalid or unverified profile URLs, never output them in schema.
     }
   }
-  return { telephone, address, sameAs }
+  return { sameAs }
 }
