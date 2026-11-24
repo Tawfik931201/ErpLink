@@ -135,16 +135,22 @@ async function refreshBotsFromDb(): Promise<void> {
       console.warn('[TelegramPoller] refresh codes failed:', codeErr.message)
     } else {
       const now = Date.now()
+      // Already loaded all bots above. Avoid one REST read per pending code.
+      const botsById = new Map((botRows ?? []).map((bot) => [bot.id, bot] as const))
       for (const row of codeRows || []) {
         if (!row.bot_id) continue
         const expiresAt = new Date(row.expires_at)
         if (isNaN(expiresAt.getTime()) || expiresAt.getTime() < now) continue
-        // Ensure the referenced bot is being polled
-        const { data: refBot } = await supabase
-          .from('telegram_bots')
-          .select('id, workspace_id, bot_token')
-          .eq('id', row.bot_id)
-          .maybeSingle()
+        // Only do an individual read if the bulk read failed; preserve recovery.
+        let refBot = botsById.get(row.bot_id)
+        if (!refBot && botErr) {
+          const { data: fallbackBot } = await supabase
+            .from('telegram_bots')
+            .select('id, workspace_id, bot_token')
+            .eq('id', row.bot_id)
+            .maybeSingle()
+          refBot = fallbackBot ?? undefined
+        }
         if (!refBot) continue
         const key = refBot.id
         liveKeys.add(key)

@@ -1,4 +1,5 @@
 import { decrypt } from '@/lib/crypto'
+import { legacyFixedMappingTablesEnabled } from '@/lib/legacy-fixed-mappings'
 import { withErpExecutionContext } from '@/lib/erp-effect-context'
 import { getErpExecutionScope, resolveExecutionTarget, validateExecutionTarget, withErpTarget } from '@/lib/erp-execution-target'
 import { processErpNextMapping } from '@/lib/erpnext/mappings'
@@ -128,13 +129,16 @@ async function processFixedMappingFallbackInternal(
     }
   }
 
-  // Merge field rows from DB
-  const { data: customRows } = await supabaseAdmin
-    .from('fixed_mappings')
-    .select('field_rows')
-    .eq('workspace_id', workspaceId)
-    .eq('preset_key', presetKey)
-    .eq('is_preset', false)
+  // Legacy tables do not exist in the current production schema.
+  // The default Standard Mapping fallback stays unchanged, without a 404 on every event.
+  const { data: customRows } = legacyFixedMappingTablesEnabled()
+    ? await supabaseAdmin
+        .from('fixed_mappings')
+        .select('field_rows')
+        .eq('workspace_id', workspaceId)
+        .eq('preset_key', presetKey)
+        .eq('is_preset', false)
+    : { data: null }
   const customFieldPairs: any[] = []
   if (customRows) {
     for (const cr of customRows) {

@@ -1,3 +1,4 @@
+import { legacyFixedMappingTablesEnabled } from '@/lib/legacy-fixed-mappings'
 import { HARDCODED_FIELD_META } from '@/lib/odoo/field-meta'
 import { extractOrderLocationInfo, resolveWarehouse } from '@/lib/odoo/order-location'
 import type { OdooClient } from '@/lib/odoo-client'
@@ -487,7 +488,7 @@ export async function applyRulesToValues(
   zidData: Record<string, unknown>,
   _client: OdooClient,
 ): Promise<Record<string, unknown>> {
-  if (!presetKey) return odooValues
+  if (!presetKey || !legacyFixedMappingTablesEnabled()) return odooValues
 
   const { data: rules, error } = await supabaseAdmin
     .from('fixed_mapping_rules')
