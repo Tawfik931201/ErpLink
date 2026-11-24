@@ -20,3 +20,5 @@
 - Validate typecheck and Jest against the branch; run live Zid → Odoo E2E in an isolated test workspace before production merge.
 - Check deployment host's configuration and compare measured 404s, Log Ingest, idle and per-order API request counts after release.
 - No evidence of a measured reduction exists until a post-deploy observation window is completed.
+
+4. Reuse the connection generation already validated for the current webhook event in Standard Mapping and custom mappings. No global cache: all validation remains per event and scoped by workspace, platform, store, connection and generation. This removes redundant `erp_connections` / `erp_workspace_bindings` reads during a single mapped delivery without relaxing ingress validation.

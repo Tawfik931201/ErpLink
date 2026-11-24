@@ -32,9 +32,14 @@ export async function processWebhookEvent(
   }, async () => {
     if (isQueueExecution && !executionTarget) throw new Error('Unpinned ERP execution target requires controlled recovery')
     const target = executionTarget ?? await resolveExecutionTarget(workspaceIdParam, platformHint, store)
-    await validateExecutionTarget(workspaceIdParam, platformHint, store, target)
+    // Validate inside the event-scoped execution context, so subsequent mapping
+    // operations can reuse the same pinned/verified connection without repeated
+    // Supabase reads. No ERP work runs before validation succeeds.
     return withErpTarget({ ...target, workspaceId: workspaceIdParam, platform: platformHint, storeId: store, eventId: queueItemId || `manual:${event}` },
-      () => processWebhookEventInternal(event, storeId, data, platformHint, isQueueExecution, workspaceIdParam, queueItemId))
+      async () => {
+        await validateExecutionTarget(workspaceIdParam, platformHint, store, target)
+        return processWebhookEventInternal(event, storeId, data, platformHint, isQueueExecution, workspaceIdParam, queueItemId)
+      })
   })
 }
 

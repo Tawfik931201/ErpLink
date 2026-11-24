@@ -404,12 +404,24 @@ async function processFixedMappingFallbackInternal(
     return null
   }
 
-  const { data: odooConn } = await supabaseAdmin
-    .from('erp_connections')
-    .select('id, url, db_name, username, password, erp_type')
-    .eq('id', erpConnectionId)
-    .eq('workspace_id', workspaceId)
-    .single()
+  // The webhook entry validated the generation and workspace already. Reuse
+  // that exact event-scoped connection instead of another credential lookup.
+  // Legacy/manual callers still use the original scoped DB query.
+  const trustedConnection =
+    pinnedScope?.validatedConn?.id === erpConnectionId &&
+    pinnedScope.validatedConn.workspace_id === workspaceId &&
+    pinnedScope.platform === platform &&
+    pinnedScope.storeId === storeIdStr
+      ? pinnedScope.validatedConn
+      : null
+  const { data: odooConn } = trustedConnection
+    ? { data: trustedConnection }
+    : await supabaseAdmin
+        .from('erp_connections')
+        .select('id, url, db_name, username, password, erp_type')
+        .eq('id', erpConnectionId)
+        .eq('workspace_id', workspaceId)
+        .single()
 
   if (!odooConn) {
     console.warn(`[FixedMapping] ERP connection ${erpConnectionId} not found`)

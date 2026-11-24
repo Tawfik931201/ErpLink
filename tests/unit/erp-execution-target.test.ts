@@ -25,6 +25,21 @@ it('keeps three concurrent tenant targets and async scopes separate', async () =
   expect(observations).toEqual([['erp-a', 'user-a', 'odoo'], ['erp-b', 'user-b', 'odoo'], ['erp-c', 'user-c', 'erpnext']])
 })
 
+
+it('reuses a validated connection only within the same event scope', async () => {
+  const target = await resolveExecutionTarget('ws-a', 'zid', 'a')
+  await withErpTarget({ ...target, platform: 'zid', workspaceId: 'ws-a', storeId: 'a', eventId: 'event-cache' }, async () => {
+    const first = await validateExecutionTarget('ws-a', 'zid', 'a', target)
+    const count = supabase.calls.filter(c => c.table === 'erp_connections' && c.op === 'select').length
+    const second = await validateExecutionTarget('ws-a', 'zid', 'a', target)
+    expect(second).toBe(first)
+    expect(getErpExecutionScope()?.validatedConn).toBe(first)
+    expect(supabase.calls.filter(c => c.table === 'erp_connections' && c.op === 'select')).toHaveLength(count)
+    await expect(validateExecutionTarget('ws-b', 'salla', 'b', target)).rejects.toThrow()
+  })
+  expect(getErpExecutionScope()).toBeUndefined()
+})
+
 it('rejects another tenant connection, forged store workspace, deleted connection and rotation', async () => {
   const target = await resolveExecutionTarget('ws-a', 'zid', 'a')
   await expect(validateExecutionTarget('ws-a', 'zid', 'a', { ...target, erpConnectionId: 'erp-b' })).rejects.toThrow('outside workspace')
