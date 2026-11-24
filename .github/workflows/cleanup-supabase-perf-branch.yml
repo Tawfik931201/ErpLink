@@ -1,4 +1,4 @@
-name: Delete merged Supabase performance feature branch
+name: Delete merged Supabase capacity feature branch
 on:
   pull_request:
     types: [closed]
@@ -11,9 +11,9 @@ jobs:
   delete-merged-feature-branch:
     if: >-
       ${{ github.event.pull_request.merged == true &&
-          github.event.pull_request.number == 76 &&
+          github.event.pull_request.number == 77 &&
           github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.head.ref == 'perf/supabase-free-tier-optimization-20261124' }}
+          github.event.pull_request.head.ref == 'perf/supabase-capacity-phase2-20261124' }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete exactly the merged performance branch
@@ -21,5 +21,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/perf/supabase-free-tier-optimization-20261124" ||
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/perf/supabase-capacity-phase2-20261124" ||
             echo "Feature branch already deleted; verify from GitHub before reporting."
