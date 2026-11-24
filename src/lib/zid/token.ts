@@ -73,10 +73,10 @@ export class SupabaseZidTokenStore implements ZidTokenStore {
     }
     // A workspace-scoped read must not share a result with another workspace.
     // Including retry avoids self-deadlock if legacy encryption upgrades race.
-    const key = JSON.stringify([merchantId, workspaceId ?? null, retry])
+    const key = JSON.stringify([merchantId, effectiveWs ?? null, retry])
     const existing = this.tokenReads.get(key)
     if (existing) return existing
-    const task = this.loadTokens(merchantId, retry, workspaceId)
+    const task = this.loadTokens(merchantId, retry, effectiveWs)
     this.tokenReads.set(key, task)
     try {
       const result = await task

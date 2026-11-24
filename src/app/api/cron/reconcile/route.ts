@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { claimZidMaintenanceSlot } from '@/lib/reconcile-maintenance-slot'
 import { reconcileZidOrders } from '@/lib/reconciliation'
 import { secretMatches } from '@/lib/webhook-secret'
 
@@ -47,6 +48,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // A cron on another process must not repeat the same reconciliation job.
+    // Explicit bounded ?window= calls remain available for manual recovery.
+    if (!req.nextUrl.searchParams.has('window') && !(await claimZidMaintenanceSlot('orders', 600_000))) {
+      return NextResponse.json({ success: true, skipped: 'another_reconcile_cycle_claimed' })
+    }
     const result = await reconcileZidOrders({ windowMinutes })
     // نُبلغ فشلاً جزئياً بغير 200 حتى يظهر في مراقبة cPanel/الخادم.
     const status = result.stopped === 'error' ? 500 : 200

@@ -173,17 +173,22 @@ async function runReconcileCycle(): Promise<void> {
   if (g.__syncQueueReconcileProcessing) return
   try {
     g.__syncQueueReconcileProcessing = true
+    const { claimZidMaintenanceSlot } = await import('./reconcile-maintenance-slot')
     const { reconcileZidOrders } = await import('./reconciliation')
-    const result = await reconcileZidOrders()
-    if (result.stopped === 'error') {
-      console.error('[sync-queue] reconcile cycle failed:', result.errors.join('; '))
+    if (await claimZidMaintenanceSlot('orders', RECONCILE_INTERVAL_MS)) {
+      const result = await reconcileZidOrders()
+      if (result.stopped === 'error') {
+        console.error('[sync-queue] reconcile cycle failed:', result.errors.join('; '))
+      }
     }
     // Zid API category deletes can fail to emit a category.delete delivery.
     // A bounded, twice-confirmed 404 audit repairs only known entity links.
-    const { reconcileZidDeletedCategories } = await import('./category-delete-reconciliation')
-    const categories = await reconcileZidDeletedCategories()
-    if (categories.errors.length > 0) {
-      console.warn('[sync-queue] category deletion audit issues:', categories.errors.join('; '))
+    if (await claimZidMaintenanceSlot('categories', RECONCILE_INTERVAL_MS)) {
+      const { reconcileZidDeletedCategories } = await import('./category-delete-reconciliation')
+      const categories = await reconcileZidDeletedCategories()
+      if (categories.errors.length > 0) {
+        console.warn('[sync-queue] category deletion audit issues:', categories.errors.join('; '))
+      }
     }
   } catch (error: unknown) {
     console.error(
