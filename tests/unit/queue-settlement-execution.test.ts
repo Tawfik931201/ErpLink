@@ -103,6 +103,31 @@ describe('durable queue claims and fencing (offline execution)', () => {
     expect(jobs[0].lease_token).toBe('another-worker')
   })
 
+  it('retries a failed lease recovery rather than trusting a previous failed timestamp', async () => {
+    const original = supabase.rpc
+    let attempts = 0
+    supabase.rpc = (async (name: string, args: any) => {
+      if (name === 'expire_sync_job_leases') {
+        attempts++
+        return { data: null, error: { message: 'database temporarily unavailable' } }
+      }
+      return (original as (...params: unknown[]) => unknown)(name, args)
+    }) as typeof supabase.rpc
+    const originalNow = Date.now()
+    const spy = jest.spyOn(Date, 'now').mockReturnValue(originalNow + 180_000)
+    try {
+      jobs = [fixture(0)]
+      await processSyncQueue(1)
+      await processSyncQueue(1)
+      expect(attempts).toBe(2)
+      expect(worker).not.toHaveBeenCalled()
+      expect(jobs).toHaveLength(1)
+    } finally {
+      spy.mockRestore()
+      supabase.rpc = original
+    }
+  })
+
   it('parks an expired worker lease once the scheduled recovery interval arrives', async () => {
     // processSyncQueue coalesces successful expiry RPCs across calls for 60s.
     // Advance the wall clock beyond that window instead of assuming a new RPC

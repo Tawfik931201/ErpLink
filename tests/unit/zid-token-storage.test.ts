@@ -1,4 +1,5 @@
 import { decrypt, encrypt } from '../../src/lib/crypto'
+import { withSyncRequestContext } from '../../src/lib/sync/request-context'
 import { publicZidStore } from '../../src/lib/zid/credentials'
 import { SupabaseZidTokenStore, getAccessToken, refreshAccessToken } from '../../src/lib/zid/token'
 import { supabase } from '../mocks/supabase'
@@ -41,6 +42,20 @@ afterEach(() => { global.fetch = originalFetch })
 afterAll(() => {
   if (savedKey === undefined) delete process.env.ENCRYPTION_KEY
   else process.env.ENCRYPTION_KEY = savedKey
+})
+
+it('does not share in-flight Zid credentials across implicit workspace contexts', async () => {
+  // Use per-builder filters: the sequential mock cursor cannot model simultaneous reads.
+  supabase.setMockResponder(null)
+  supabase.addMock('merchant_tokens', rows)
+  const a = withSyncRequestContext({ workspaceId: 'workspace-a' }, () => store.getTokens('42'))
+  const b = withSyncRequestContext({ workspaceId: 'workspace-b' }, () => store.getTokens('42'))
+  const results = await Promise.allSettled([a, b])
+  expect(results[0].status).toBe('fulfilled')
+  expect(results[1].status).toBe('rejected')
+  if (results[0].status === 'fulfilled') expect(results[0].value?.accessToken).toBe('access-42')
+  if (results[1].status === 'rejected') expect(String(results[1].reason)).toMatch(/no longer connected/)
+  expect(supabase.calls.filter(call => call.op === 'select' && call.table === 'merchant_tokens')).toHaveLength(2)
 })
 
 it('decrypts two independent stores without mixing credentials or expiry', async () => {

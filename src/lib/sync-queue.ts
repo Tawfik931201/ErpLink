@@ -510,11 +510,10 @@ async function recoverExpiredLeases(): Promise<boolean> {
   const task = (async () => {
     try {
       const { error } = await supabase.rpc('expire_sync_job_leases')
-      lastLeaseRecoveryAt = Date.now()
       if (error) return false
+      lastLeaseRecoveryAt = Date.now()
       return true
     } catch {
-      lastLeaseRecoveryAt = Date.now()
       return false
     }
   })()
