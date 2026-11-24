@@ -7,6 +7,7 @@ import {
   ArrowRight, 
   Search, 
   Calendar, 
+  Clock3,
   Tag, 
   AlertCircle, 
   HelpCircle,
@@ -153,6 +154,7 @@ const LOCAL_TEXTS = {
     closeConfirmYes: 'نعم، أغلق التذكرة',
     closeConfirmNo: 'تراجع',
     closedTicketWarning: 'تم إغلاق هذه التذكرة. لا يمكنك إرسال ردود جديدة عليها.',
+    autoClosePolicy: 'ملاحظة: إذا ردّ فريق الدعم ولم يصل رد منك خلال 5 أيام كاملة من آخر رسالة للدعم، تُغلق التذكرة تلقائيًا. الرد خلال هذه المدة يمنع إغلاقها.',
   },
   en: {
     title: 'Support Tickets',
@@ -187,6 +189,7 @@ const LOCAL_TEXTS = {
     closeConfirmYes: 'Yes, Close Ticket',
     closeConfirmNo: 'Cancel',
     closedTicketWarning: 'This ticket has been closed. You can no longer send replies.',
+    autoClosePolicy: 'Note: If our support team replies and you do not respond within five full days of the last support message, the ticket will close automatically. Replying during that period keeps it open.',
   }
 }
 
@@ -846,6 +849,11 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                   }}
                   className="shrink-0 space-y-2.5 border-t border-[#d1d7db] bg-[#f0f2f5] p-3 dark:border-[#2a3942] dark:bg-[#202c33]"
                 >
+                  <p role="note" className="flex items-start gap-2 rounded-lg border border-[#d1d7db] bg-white/85 px-3 py-2 text-[11px] leading-relaxed text-[#54656f] dark:border-[#3b4a54] dark:bg-[#202c33] dark:text-[#c3ced5]">
+                    <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-[#008f72] dark:text-[#7ae6c5]" aria-hidden="true" />
+                    <span>{tLocal.autoClosePolicy}</span>
+                  </p>
+
                   {replyError && (
                     <div role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 text-[11px] text-red-700 dark:border-red-800 dark:bg-red-950/60 dark:text-red-200">
                       <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -1036,6 +1044,10 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
         </div>
 
         <div className="max-w-xl mx-auto">
+          <p role="note" className="mb-4 flex items-start gap-2 rounded-xl border border-border bg-card/65 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-foreground/65" aria-hidden="true" />
+            <span>{tLocal.autoClosePolicy}</span>
+          </p>
           <CreateTicketForm 
             onSuccess={() => {
               window.dispatchEvent(new Event('erp-tickets-changed'))
@@ -1079,6 +1091,13 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
           </div>
         )}
       </div>
+
+      {success && (
+        <p role="note" className="flex items-start gap-2 rounded-xl border border-border bg-card/65 px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+          <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-foreground/65" aria-hidden="true" />
+          <span>{tLocal.autoClosePolicy}</span>
+        </p>
+      )}
 
       {/* Main List Layout */}
       {!success ? (
