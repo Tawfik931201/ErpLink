@@ -94,23 +94,20 @@ export default async function PrivacyPage() {
           </div>
         </section>
 
-        {/* Content Section with TOC Sidebar */}
-        <section className="py-12 md:py-16 px-6 md:px-12">
-          <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
-            {/* Sidebar Table of Contents */}
-            <aside className="w-full lg:w-72 shrink-0">
-              <LegalTableOfContents items={tocItems} lang={lang} />
-            </aside>
+        {/* Full-Width Sticky Table of Contents */}
+        <LegalTableOfContents items={tocItems} lang={lang} />
 
-            {/* Main Legal Sections */}
-            <article className="flex-1 w-full max-w-3xl space-y-8">
+        {/* Content Section */}
+        <section className="py-12 md:py-16 px-6 md:px-12">
+          <div className="max-w-4xl mx-auto space-y-8">
+            <article className="space-y-8">
               {privacySections.map((section) => {
                 const content = isAr ? section.ar : section.en
                 return (
                   <section
                     key={section.id}
                     id={section.id}
-                    className="scroll-mt-28 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm transition-all hover:border-border/80"
+                    className="scroll-mt-36 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm transition-all hover:border-border/80"
                   >
                     <header className="flex items-start gap-3.5 mb-4 border-b border-border/40 pb-4">
                       <span className="flex h-7 px-2.5 items-center justify-center rounded-lg bg-primary/10 text-primary font-mono text-xs font-bold shrink-0 mt-0.5">
