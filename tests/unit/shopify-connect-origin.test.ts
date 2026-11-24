@@ -1,6 +1,8 @@
 /** @jest-environment node */
 import { createHmac } from 'crypto'
+
 import { NextRequest } from 'next/server'
+
 import { GET } from '../../src/app/api/shopify/connect/route'
 
 jest.mock('@clerk/nextjs/server', () => ({ auth: async () => ({ userId: null }) }))

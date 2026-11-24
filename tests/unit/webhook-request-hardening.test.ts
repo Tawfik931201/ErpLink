@@ -1,9 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 import { readWebhookBodyWithinLimit, WebhookBodyTooLargeError } from '@/lib/webhook-body-reader'
 import { MAX_WEBHOOK_BODY_BYTES } from '@/lib/webhook-strict'
-import { rateLimitKeyFromHeaders } from '@/lib/rate-limit'
 
 const encoder = new TextEncoder()
 

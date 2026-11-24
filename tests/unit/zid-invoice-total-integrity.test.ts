@@ -1,6 +1,7 @@
-import { assertZidOrderTotalBeforeInvoice } from '@/lib/odoo/order-workflow'
 import fs from 'fs'
 import path from 'path'
+
+import { assertZidOrderTotalBeforeInvoice } from '@/lib/odoo/order-workflow'
 
 function fakeClient(total: number, currency='SAR') {
   const client: any = {

@@ -1,9 +1,9 @@
 import fs from 'fs'
 import path from 'path'
 
-import { SHOPIFY_CORE_TOPICS } from '@/lib/shopify-client'
-import { normalizeShopifyMetafields } from '@/lib/shopify/enrichment'
 import { SHOPIFY_EVENTS, SHOPIFY_FIELDS } from '@/lib/platforms/shopify/fields'
+import { normalizeShopifyMetafields } from '@/lib/shopify/enrichment'
+import { SHOPIFY_CORE_TOPICS } from '@/lib/shopify-client'
 
 const ROOT = process.cwd()
 const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
