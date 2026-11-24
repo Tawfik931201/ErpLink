@@ -502,7 +502,9 @@ export function extractZidRemainingLines(
  * to refund the fee.
  */
 export function zidReturnRefundsOrderFees(
-  payload: Record<string, unknown> | null | undefined
+  payload: Record<string, unknown> | null | undefined,
+  pricedReceivedLines?: readonly StoreReturnLine[],
+  refundableFeeGross?: number,
 ): boolean {
   if (!payload) return false
   const order = asRecord(payload.order)
@@ -520,6 +522,18 @@ export function zidReturnRefundsOrderFees(
     const reversed = Number(request.reverse_total)
     if (!Number.isFinite(refunded) || !Number.isFinite(reversed) ||
         reversed <= 0 || refunded < 0 || Math.abs(refunded - reversed) > 0.01) {
+      return false
+    }
+  }
+  // Equal refund_total and reverse_total alone does NOT prove that shipping
+  // was refunded. Zid often reports both as the product-only return amount.
+  // When the original sale contains a fee, verify its exact amount against
+  // the received product lines before allowing the fee on a credit note.
+  if (pricedReceivedLines !== undefined) {
+    if (!Number.isFinite(refundableFeeGross) || !(refundableFeeGross! > 0)) return false
+    try {
+      verifiedZidFallbackRefundTotal(payload, pricedReceivedLines, refundableFeeGross!)
+    } catch {
       return false
     }
   }

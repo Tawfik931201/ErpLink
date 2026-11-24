@@ -286,6 +286,35 @@ describe('extractStoreReturnReason', () => {
 })
 
 describe('Zid full reversal fee-refund accounting', () => {
+  it('does not credit 15 SAR shipping when the full return totals are product-only', () => {
+    const payload = {
+      reverse_order_label_requests: [{ id: 'qa-products-only', reverse_total: 95, refund_total: 95 }],
+    }
+    expect(zidReturnRefundsOrderFees(payload)).toBe(true) // legacy totals alone are ambiguous
+    expect(zidReturnRefundsOrderFees(payload, [{ sku: 'QA', storeProductId: 'p1', quantity: 1, priceUnit: 95 }], 15)).toBe(false)
+    expect(verifiedZidFallbackRefundTotal(payload, [{ sku: 'QA', storeProductId: 'p1', quantity: 1, priceUnit: 95 }])).toBe(95)
+  })
+
+  it('credits shipping only when the source refund is the item total plus the fee', () => {
+    const lines = [{ sku: 'QA', storeProductId: 'p1', quantity: 1, priceUnit: 63 }]
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ id: 'qa-fee-refunded', reverse_total: 78, refund_total: 78 }],
+    }, lines, 15)).toBe(true)
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ id: 'qa-fee-not-refunded', reverse_total: 63, refund_total: 63 }],
+    }, lines, 15)).toBe(false)
+  })
+
+  it('uses source VAT when deciding if a shipping fee is actually refundable', () => {
+    const lines = [{ sku: 'QA', storeProductId: 'p1', quantity: 1, priceUnit: 261.74, taxAmountPerUnit: 39.26 }]
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ reverse_total: 301, refund_total: 301 }],
+    }, lines, 15)).toBe(false)
+    expect(zidReturnRefundsOrderFees({
+      reverse_order_label_requests: [{ reverse_total: 316, refund_total: 316 }],
+    }, lines, 15)).toBe(true)
+  })
+
   it('excludes shipping from the credit when Zid reverses 316 but refunds only 301 SAR', () => {
     expect(zidReturnRefundsOrderFees({
       reverse_order_label_requests: [{

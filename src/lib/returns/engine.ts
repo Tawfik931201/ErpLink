@@ -338,7 +338,23 @@ async function buildReturnLines(
   // returned products are refundable, even when the whole order was reversed.
   const regularLines = original.lines.filter(l => !isFeeOrServiceLine(l, input.orderStdSettings))
   const isFullReturn = isCumulativeFullReturn(regularLines, targets)
-  const includeFees = platform !== 'zid' || zidReturnRefundsOrderFees(input.payload)
+  let includeFees = platform !== 'zid'
+  if (platform === 'zid' && isFullReturn) {
+    const feeLines = original.lines.filter(l => isFeeOrServiceLine(l, input.orderStdSettings))
+    if (feeLines.length > 0) {
+      // A Zid return can report reverse_total === refund_total === item subtotal,
+      // even though the original order also had shipping. Do not refund a fee
+      // unless Zid's actual refund covers the priced received items PLUS that fee.
+      // Unreadable source amounts fail closed before an irreversible credit.
+      const pricedReceived = extractPricedZidReceivedReturnLines(input.payload)
+      const feeGross = feeLines.reduce((sum, line) =>
+        sum + Math.abs(line.orderedQty) * line.priceUnit * (1 - (line.discount || 0) / 100), 0)
+      includeFees = zidReturnRefundsOrderFees(input.payload, pricedReceived, feeGross)
+      if (!includeFees) {
+        verifiedZidFallbackRefundTotal(input.payload, pricedReceived)
+      }
+    }
+  }
 
   if (isFullReturn && includeFees) {
     const fees = new Map<number, number>()
