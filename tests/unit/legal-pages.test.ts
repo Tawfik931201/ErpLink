@@ -214,6 +214,18 @@ describe('Legal Pages Architecture & Content Audit', () => {
   })
 
   describe('UI & Navigation Accessibility Components', () => {
+    const tocSource = read('src', 'components', 'legal', 'legal-toc.tsx')
+
+    it('implements a sticky, full-width Table of Contents navigation bar', () => {
+      expect(tocSource).toContain('sticky top-14 z-40 w-full')
+      expect(tocSource).toContain('max-w-7xl mx-auto')
+      expect(tocSource).toContain('overflow-x-auto')
+      expect(termsPageSource).toContain('<LegalTableOfContents')
+      expect(privacyPageSource).toContain('<LegalTableOfContents')
+      expect(termsPageSource).toContain('scroll-mt-36')
+      expect(privacyPageSource).toContain('scroll-mt-36')
+    })
+
     it('integrates Table of Contents, metadata, and cross-links in page templates', () => {
       expect(termsPageSource).toContain('LegalTableOfContents')
       expect(termsPageSource).toContain("publicPageMetadata('/terms')")
