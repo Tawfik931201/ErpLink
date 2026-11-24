@@ -1,4 +1,5 @@
 import { type NextRequest } from 'next/server'
+
 import { assertTicketLiveAccess } from '@/lib/odoo-support'
 import { subscribeTicketLiveEvent } from '@/lib/ticket-live-events'
 

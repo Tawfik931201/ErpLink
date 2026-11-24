@@ -15,10 +15,6 @@
  */
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
-import { assertSaleOrderLinkOwnership } from '@/lib/orders/matching'
-import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
-import { resolveZidMatchValue } from '@/lib/sync-helpers'
-import { supabaseAdmin } from '@/lib/sync-runtime'
 import {
   extractOrderLocationInfo,
   paymentKeysFromOrder,
@@ -26,11 +22,15 @@ import {
   toOdooAnalyticFields,
 } from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
+import { assertSaleOrderLinkOwnership } from '@/lib/orders/matching'
 import {
   platformIdFieldNames,
   type PlatformKey,
 } from '@/lib/platform-fields'
 import { supabase } from '@/lib/supabase'
+import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
+import { resolveZidMatchValue } from '@/lib/sync-helpers'
+import { supabaseAdmin } from '@/lib/sync-runtime'
 
 export interface SaleOrderLineInfo {
   id: number

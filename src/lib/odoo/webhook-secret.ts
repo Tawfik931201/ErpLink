@@ -1,8 +1,8 @@
 import { createHash } from 'crypto'
 
 import { hkdfHex } from '@/lib/crypto'
-import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 import { secretMatches } from '@/lib/webhook-secret'
+import { isStrictWebhookAuth } from '@/lib/webhook-strict'
 
 /**
  * Inbound authentication for Odoo → store webhooks.

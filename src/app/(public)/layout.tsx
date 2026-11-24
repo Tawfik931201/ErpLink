@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
-import { ThemeProvider } from 'next-themes'
 import Script from 'next/script'
+import { ThemeProvider } from 'next-themes'
 
 import { LanguageProvider } from '@/components/language-provider'
 import { ScrollReveal } from '@/components/ui/scroll-reveal'

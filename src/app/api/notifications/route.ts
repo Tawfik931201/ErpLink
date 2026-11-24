@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from 'next/server'
-import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
-import { supabase } from '@/lib/supabase'
-import { pushConfigured } from '@/lib/browser-push'
-import { getAppBaseUrl } from '@/lib/app-url'
+
 import { drainBrowserPush } from '@/lib/app-notifications'
+import { getAppBaseUrl } from '@/lib/app-url'
+import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
+import { pushConfigured } from '@/lib/browser-push'
+import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 const noStore = { 'Cache-Control': 'private, no-store' }

@@ -2,10 +2,10 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 
-import { archiveDatetime, updateArchiveBySource, upsertArchive } from '@/lib/central-odoo-archive'
 import {
   odooContactById, odooContactList, odooContactNewCount, odooSetContactStatus,
 } from '@/lib/central-contact-inbox'
+import { archiveDatetime, updateArchiveBySource, upsertArchive } from '@/lib/central-odoo-archive'
 
 // The public contact inbox is a central Odoo Studio model. No contact messages,
 // support tickets, replies, attachments or notification data use Supabase.

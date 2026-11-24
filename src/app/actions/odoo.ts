@@ -1,5 +1,7 @@
 'use server'
 
+import { isIP } from 'node:net'
+
 import { revalidatePath, unstable_cache, revalidateTag } from 'next/cache'
 
 import { getActiveUserId } from '@/lib/auth'
@@ -7,7 +9,6 @@ import { autoBootstrapWorkspace } from '@/lib/auto-bootstrap'
 import { encrypt, decrypt } from '@/lib/crypto'
 import { formatOdooVersion } from '@/lib/odoo/version'
 import { OdooClient } from '@/lib/odoo-client'
-import { isIP } from 'node:net'
 import { isPublicIpAddress, resolvePublicDestination, safeExternalFetch } from '@/lib/security/safe-external-fetch'
 import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'

@@ -17,10 +17,6 @@
 
 import { resolveEntityLinkId, upsertEntityLink } from '@/lib/entity-links'
 import { withErpCreateIdentity } from '@/lib/erp-effect-context'
-import { resolveOrderRelatedRecord } from '@/lib/orders/related-matching'
-import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
-import { supabaseAdmin } from '@/lib/sync-runtime'
-import { readOrderRelatedDetails } from '@/lib/zid/order-related-data'
 import {
   extractOrderLocationInfo,
   paymentKeysFromOrder,
@@ -28,15 +24,19 @@ import {
   toOdooAnalyticFields,
 } from '@/lib/odoo/analytic-distribution'
 import type { OdooClient } from '@/lib/odoo-client'
+import { resolveOrderRelatedRecord } from '@/lib/orders/related-matching'
 import type { PlatformKey } from '@/lib/platform-fields'
-import { incrementalReturnLineQuantities, isCumulativeFullReturn } from './allocation'
+import { getCachedStandardMappingSettings } from '@/lib/sync/settings'
+import { supabaseAdmin } from '@/lib/sync-runtime'
 import {
   resolveOrderDiscountAmount,
   resolveOrderVatTax,
   resolveZidCodAmount,
   resolveZidShippingCost,
 } from '@/lib/zid/order-helpers'
+import { readOrderRelatedDetails } from '@/lib/zid/order-related-data'
 
+import { incrementalReturnLineQuantities, isCumulativeFullReturn } from './allocation'
 import {
   extractStoreReturnReason,
   extractZidReceivedReturnLines,

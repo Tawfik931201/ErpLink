@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { cookies } from 'next/headers'
+import Link from 'next/link'
 
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'

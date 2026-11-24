@@ -1,7 +1,7 @@
 'use client'
+import { Bell, BellOff, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bell, BellOff, X } from 'lucide-react'
 
 type Entry = { id: string; title: string; body: string; href: string; status: string; created_at: string }
 type ResponseData = { notifications: Entry[]; endpoints: string[]; vapidPublicKey: string; pushReady: boolean; subscriptionCount: number; workspaceId: string }

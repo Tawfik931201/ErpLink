@@ -1,4 +1,3 @@
-import { homepageStructuredData, publicPageMetadata } from '@/lib/public-seo'
 import {
   Activity,
   ArrowLeft,
@@ -18,9 +17,11 @@ import {
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
+
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
+import { homepageStructuredData, publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage, translations } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 

@@ -1,7 +1,8 @@
 'use server'
 
-import { revalidatePath, revalidateTag } from 'next/cache'
 import { auth } from '@clerk/nextjs/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
+
 import {
   listOdooTickets, createOdooTicket, readOdooMessages,
   sendOdooMessage, closeOdooTicket, pendingOdooTickets, markOdooTicketRead,

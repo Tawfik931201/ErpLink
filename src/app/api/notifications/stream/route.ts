@@ -1,6 +1,7 @@
 import { type NextRequest } from 'next/server'
-import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
+
 import { subscribeAppNotifications } from '@/lib/app-notification-events'
+import { getActiveUserId, getActiveWorkspaceId } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

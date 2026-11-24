@@ -2,8 +2,8 @@ import { cookies } from 'next/headers'
 
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
-import { publicPageMetadata } from '@/lib/public-seo'
 import { publicBusinessProfile } from '@/lib/public-business-profile'
+import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage } from '@/lib/translations'
 
 export const generateMetadata = () => publicPageMetadata('/about')

@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { getSyncQueueMetrics, SYNC_QUEUE_DEFAULT_BATCH } from '@/lib/sync-queue'
-import { secretMatches } from '@/lib/webhook-secret'
 import { runSyncQueueOnce } from '@/lib/sync-queue-runner'
 import { countOrphanReceipts, drainWebhookInbox } from '@/lib/webhook-inbox'
+import { secretMatches } from '@/lib/webhook-secret'
 
 /**
  * GET /api/cron/sync-queue — مشغّل الطابور الدوري
