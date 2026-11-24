@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { publicBusinessProfile } from '@/lib/public-business-profile'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage } from '@/lib/translations'
 
@@ -34,29 +35,17 @@ export default async function AboutPage() {
                 : 'The platform helps synchronize orders, products, inventory and customers, with mapping settings and operational logs. Platforms described on this site include Zid, Salla and Shopify, with ERP systems such as Odoo.'}
             </p>
           </section>
-          {(business.telephone || business.address || business.sameAs.length > 0) && (
+          {business.sameAs.length > 0 && (
             <section className="space-y-4">
-              <h2 className="text-2xl font-bold">{isAr ? 'معلومات الشركة الرسمية' : 'Official business details'}</h2>
-              {business.telephone && (
-                <p><a href={`tel:${business.telephone}`} className="text-primary underline">{business.telephone}</a></p>
-              )}
-              {business.address && (
-                <p className="leading-8 text-muted-foreground">
-                  {[business.address.streetAddress, business.address.addressLocality,
-                    business.address.addressRegion, business.address.postalCode,
-                    business.address.addressCountry].filter(Boolean).join(', ')}
-                </p>
-              )}
-              {business.sameAs.length > 0 && (
-                <ul className="flex flex-wrap gap-4">
-                  {business.sameAs.map((url) => (
-                    <li key={url}><a href={url} rel="noopener noreferrer" target="_blank"
-                      className="text-sm font-semibold text-primary underline">
-                      {new URL(url).hostname}
-                    </a></li>
-                  ))}
-                </ul>
-              )}
+              <h2 className="text-2xl font-bold">{isAr ? 'حساباتنا الرسمية' : 'Official profiles'}</h2>
+              <ul className="flex flex-wrap gap-4">
+                {business.sameAs.map((url) => (
+                  <li key={url}><a href={url} rel="noopener noreferrer" target="_blank"
+                    className="text-sm font-semibold text-primary underline">
+                    {new URL(url).hostname}
+                  </a></li>
+                ))}
+              </ul>
             </section>
           )}
           <section className="space-y-3">
@@ -65,6 +54,8 @@ export default async function AboutPage() {
               {isAr ? 'للاستفسار عن الخدمة أو طلب الدعم، يمكنك التواصل معنا عبر صفحة الاتصال.' : 'For questions about the service or support, reach us through the contact page.'}
               {' '}
               <a href="/contact" className="font-semibold text-primary underline">{isAr ? 'صفحة التواصل' : 'Contact page'}</a>
+              {' · '}
+              <a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="font-semibold text-primary underline">{PUBLIC_CONTACT_EMAIL}</a>
             </p>
           </section>
         </div>

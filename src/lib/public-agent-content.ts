@@ -1,4 +1,5 @@
 import { integrations, type IntegrationPlatform } from '@/lib/integration-content'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 
 export const PUBLIC_AGENT_PATHS = [
   '/', '/about', '/contact', '/integrations',
@@ -43,8 +44,8 @@ export function publicMarkdown(path: AgentPublicPath, lang: AgentLanguage): stri
   const url = agentPageUrl(path, lang)
   const links = agentIntegrationList(lang)
   const contact = isAr
-    ? 'للتواصل مع فريق ERP Link: support@erplinks.com أو صفحة التواصل.'
-    : 'Contact ERP Link support at support@erplinks.com or through the contact page.'
+    ? `للتواصل مع فريق ERP Link: ${PUBLIC_CONTACT_EMAIL} أو صفحة التواصل.`
+    : `Contact ERP Link at ${PUBLIC_CONTACT_EMAIL} or through the contact page.`
   const footer = `\n\n---\n\n[ERP Link](${agentPageUrl('/', lang)}) · [${isAr ? 'التكاملات' : 'Integrations'}](${agentPageUrl('/integrations', lang)}) · [${isAr ? 'تواصل' : 'Contact'}](${agentPageUrl('/contact', lang)})\nSource: ${url}\n`
 
   const integrationPath = (Object.keys(platformPaths) as IntegrationPlatform[])

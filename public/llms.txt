@@ -3,6 +3,7 @@
 > ERP Link connects online stores with enterprise resource planning (ERP) systems, helping synchronize products, orders, customers and inventory.
 
 Official website: https://erplink.bizsahla.com/
+Contact email: info@bizsahla.com
 
 ## Public pages
 - [Home (Arabic)](https://erplink.bizsahla.com/ar-sa)

@@ -2,13 +2,14 @@ import Link from 'next/link'
 
 import { Logo } from '@/components/ui/logo'
 import type { Language } from '@/lib/translations'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 
 const dict: Record<Language, Record<string, string>> = {
   ar: {
     'landing.heroSubtitle': 'مزامنة تلقائية وفورية للطلبات والمنتجات والمخزون والعملاء بين متجرك ونظام الـ ERP — دون أي تدخل يدوي.',
     'landing.pricing': 'الأسعار',
     'footer.about': 'من نحن',
-    'footer.supportEmail': 'البريد الإلكتروني للدعم',
+    'footer.supportEmail': 'البريد الإلكتروني للتواصل',
     'footer.contact': 'اتصل بنا',
     'footer.privacy': 'الخصوصية',
     'footer.terms': 'الشروط',
@@ -18,7 +19,7 @@ const dict: Record<Language, Record<string, string>> = {
     'landing.heroSubtitle': 'Real-time automatic sync of orders, products, inventory, and customers between your store and ERP — no manual work.',
     'landing.pricing': 'Pricing',
     'footer.about': 'About',
-    'footer.supportEmail': 'Support email',
+    'footer.supportEmail': 'Contact email',
     'footer.contact': 'Contact Us',
     'footer.privacy': 'Privacy',
     'footer.terms': 'Terms',
@@ -65,7 +66,7 @@ export function PublicSiteFooter({ lang }: { lang: Language }) {
                 <li><Link href="/contact" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{t(lang, 'footer.contact')}</Link></li>
                 <li><Link href="/privacy" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{t(lang, 'footer.privacy')}</Link></li>
                 <li><Link href="/terms" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{t(lang, 'footer.terms')}</Link></li>
-                <li><a href="mailto:support@erplinks.com" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors" aria-label={t(lang, 'footer.supportEmail')}>support@erplinks.com</a></li>
+                <li><a href={`mailto:${PUBLIC_CONTACT_EMAIL}`} className="text-[11px] text-foreground/60 hover:text-foreground transition-colors" aria-label={t(lang, 'footer.supportEmail')}>{PUBLIC_CONTACT_EMAIL}</a></li>
               </ul>
             </div>
           </div>

@@ -2,21 +2,13 @@
 
 As of 2026-11-23. Implemented only for public marketing content at https://erplink.bizsahla.com.
 
-## 1. Verified Organization identity
+## 1. Verified public contact identity
 
-The homepage already publishes Organization, WebSite and SoftwareApplication JSON-LD with a public support email. To add phone, address, or `sameAs`, the business owner must provide publicly verified and truthful information. The site does NOT fabricate a physical office address from the visitor's location or other tenants' records.
+The official public email supplied by the business owner is `info@bizsahla.com`.
+The public Organization `email` and customer-support ContactPoint, About and Contact pages, footer, public Markdown and browser WebMCP contact tool all present the same contact email and the website's contact page.
+Customer enquiries through the public contact form and logged-in support tickets continue to flow through the pre-existing central Odoo support system; no delivery rules, recipient mailboxes or backend integrations were changed.
 
-Optional environment variables in Hostinger Node deployment:
-
-- `PUBLIC_BUSINESS_PHONE_E164`: an actual published phone number in E.164 format, e.g. `+<country code><subscriber number>`.
-- `PUBLIC_BUSINESS_ADDRESS_STREET`: only if the company has a public business street address.
-- `PUBLIC_BUSINESS_ADDRESS_CITY`: city of the company's verified address.
-- `PUBLIC_BUSINESS_ADDRESS_REGION`: optional.
-- `PUBLIC_BUSINESS_ADDRESS_POSTAL`: optional.
-- `PUBLIC_BUSINESS_ADDRESS_COUNTRY`: ISO 3166-1 alpha-2 country, such as `SA` or `EG`. Both city and country required to publish an address.
-- `PUBLIC_BUSINESS_SAME_AS`: comma-separated owned and verified external company-profile HTTPS URLs, supported on LinkedIn, Facebook, Instagram, X, YouTube, GitHub or Zid. Add actual public company profile URLs; don't submit personal accounts or competitor profiles.
-
-No value is set automatically. Only valid, configured values appear in JSON-LD AND in the public About page; a redeploy/restart is required when these env values are changed.
+The only optional business-identity field currently exposed is `sameAs`, sourced from `PUBLIC_BUSINESS_SAME_AS` (owned HTTPS profile URLs only). These must be genuine company profiles on an allowlisted host. Empty values do not appear in JSON-LD.
 
 ## 2. Markdown for agents
 

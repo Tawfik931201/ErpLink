@@ -51,7 +51,7 @@ describe('agent-ready public information remains isolated from ERP Link customer
     expect(handlePublicMcp({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull()
   })
 
-  it('publishes verified phone, address and sameAs only when configured; rejects fake unsafe profiles', () => {
+  it('publishes verified sameAs links only, ignoring unrelated business-environment fields', () => {
     const keys = [
       'PUBLIC_BUSINESS_PHONE_E164', 'PUBLIC_BUSINESS_ADDRESS_CITY',
       'PUBLIC_BUSINESS_ADDRESS_COUNTRY', 'PUBLIC_BUSINESS_SAME_AS',
@@ -59,17 +59,14 @@ describe('agent-ready public information remains isolated from ERP Link customer
     const before = Object.fromEntries(keys.map((key) => [key, process.env[key]]))
     try {
       keys.forEach((key) => delete process.env[key])
-      expect(publicBusinessProfile()).toEqual({ telephone: null, address: null, sameAs: [] })
-      process.env.PUBLIC_BUSINESS_PHONE_E164 = 'not-public-verified'
-      process.env.PUBLIC_BUSINESS_SAME_AS = 'https://evil.example/erp-link,http://linkedin.com/company/erplink'
-      expect(publicBusinessProfile()).toEqual({ telephone: null, address: null, sameAs: [] })
+      expect(publicBusinessProfile()).toEqual({ sameAs: [] })
       process.env.PUBLIC_BUSINESS_PHONE_E164 = '+201234567890'
       process.env.PUBLIC_BUSINESS_ADDRESS_CITY = 'Cairo'
       process.env.PUBLIC_BUSINESS_ADDRESS_COUNTRY = 'EG'
+      process.env.PUBLIC_BUSINESS_SAME_AS = 'https://evil.example/erp-link,http://linkedin.com/company/erplink'
+      expect(publicBusinessProfile()).toEqual({ sameAs: [] })
       process.env.PUBLIC_BUSINESS_SAME_AS = 'https://www.linkedin.com/company/example-verified-business/'
       expect(publicBusinessProfile()).toEqual({
-        telephone: '+201234567890',
-        address: { '@type': 'PostalAddress', addressLocality: 'Cairo', addressCountry: 'EG' },
         sameAs: ['https://www.linkedin.com/company/example-verified-business/'],
       })
     } finally {

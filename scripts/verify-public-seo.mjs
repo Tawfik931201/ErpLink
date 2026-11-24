@@ -46,7 +46,11 @@ for (const [route, path] of [
 }
 assert.ok(read('src/app/(public)/page.tsx').includes('application/ld+json'))
 assert.ok(read('src/components/public-site-footer.tsx').includes('href="/about"'))
-assert.ok(read('src/components/public-site-footer.tsx').includes('mailto:support@erplinks.com'))
+assert.equal(read('src/lib/public-contact.ts').includes("export const PUBLIC_CONTACT_EMAIL = 'info@bizsahla.com'"), true)
+assert.ok(read('src/components/public-site-footer.tsx').includes('mailto:${PUBLIC_CONTACT_EMAIL}'))
+assert.ok(read('src/lib/public-seo.ts').includes('email: PUBLIC_CONTACT_EMAIL'))
+assert.ok(read('src/lib/public-agent-content.ts').includes('PUBLIC_CONTACT_EMAIL'))
+assert.ok(read('src/app/(public)/contact/page.tsx').includes('mailto:${PUBLIC_CONTACT_EMAIL}'))
 for (const platform of ['zid', 'salla', 'shopify']) {
   assert.ok(read('src/app/(public)/page.tsx').includes(`/integrations/${platform}-odoo`))
   assert.ok(read('src/components/public-site-footer.tsx').includes(`href="/integrations/${platform}-odoo"`))

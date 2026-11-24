@@ -15,6 +15,7 @@ import { ContactForm } from '@/components/contact-form'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { publicPageMetadata } from '@/lib/public-seo'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 
@@ -96,7 +97,7 @@ export default async function ContactPage() {
             <div className="rise-in mb-7 flex flex-wrap items-center gap-3">
               <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
                 <Headset className="h-3 w-3" />
-                {isAr ? 'دعم ٢٤/٧' : '24/7 support'}
+                {isAr ? 'فريق الدعم' : 'Support team'}
               </span>
               <span className={EYEBROW}>erp-link / contact</span>
             </div>
@@ -117,6 +118,12 @@ export default async function ContactPage() {
                   ? 'اكتب لنا أي استفسار عن المزامنة أو الاشتراك أو ربط متجر جديد. رسالتك تصل لفريق يقرأها فعلاً، ويأتيك الرد على بريدك.'
                   : 'Write to us about anything — sync, billing, or connecting a new store. A real person reads it, and the reply comes to your inbox.'}
               </p>
+              <a
+                href={`mailto:${PUBLIC_CONTACT_EMAIL}`}
+                className="mt-4 inline-flex text-sm font-semibold text-primary underline underline-offset-4"
+              >
+                {PUBLIC_CONTACT_EMAIL}
+              </a>
             </div>
           </div>
         </section>
