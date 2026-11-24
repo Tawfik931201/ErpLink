@@ -1,0 +1,27 @@
+name: Cleanup merged support helpdesk image layout branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-temporary-feature-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 80 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'feat/support-helpdesk-image-layout-20261124' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove the merged support UI feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/feat/support-helpdesk-image-layout-20261124" ||
+            echo 'Temporary feature branch was already removed'
