@@ -94,20 +94,23 @@ export default async function TermsPage() {
           </div>
         </section>
 
-        {/* Full-Width Sticky Table of Contents */}
-        <LegalTableOfContents items={tocItems} lang={lang} />
+        {/* Content Section with Sticky Sidebar TOC & Mobile Drawer */}
+        <section className="py-12 md:py-16 px-4 sm:px-6 md:px-12">
+          <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-8 lg:gap-12 items-start relative">
+            {/* Sidebar Table of Contents - Sticky alongside content on desktop, full-width accordion on mobile */}
+            <aside className="w-full lg:w-72 shrink-0 self-start lg:sticky lg:top-20 z-30">
+              <LegalTableOfContents items={tocItems} lang={lang} />
+            </aside>
 
-        {/* Content Section */}
-        <section className="py-12 md:py-16 px-6 md:px-12">
-          <div className="max-w-4xl mx-auto space-y-8">
-            <article className="space-y-8">
+            {/* Main Legal Sections */}
+            <article className="flex-1 w-full min-w-0 max-w-4xl space-y-8">
               {termsSections.map((section) => {
                 const content = isAr ? section.ar : section.en
                 return (
                   <section
                     key={section.id}
                     id={section.id}
-                    className="scroll-mt-36 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm transition-all hover:border-border/80"
+                    className="scroll-mt-24 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm transition-all hover:border-border/80"
                   >
                     <header className="flex items-start gap-3.5 mb-4 border-b border-border/40 pb-4">
                       <span className="flex h-7 px-2.5 items-center justify-center rounded-lg bg-primary/10 text-primary font-mono text-xs font-bold shrink-0 mt-0.5">
