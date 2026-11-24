@@ -684,6 +684,19 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                         hour: '2-digit', minute: '2-digit',
                       })
 
+                      // Image attachments are independent media tiles rather than
+                      // sitting on the customer's green chat bubble.
+                      const attachedFiles = (msg.attachment_ids || [])
+                        .map(id => attachments.find(item => item.id === id))
+                        .filter((file): file is OdooAttachment => Boolean(file))
+                      const imageAttachments = attachedFiles.filter(file => isTicketChatPreviewImage(file.mimetype))
+                      const documentAttachments = attachedFiles.filter(file => !isTicketChatPreviewImage(file.mimetype))
+                      const plainBody = (msg.body || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim()
+                      const hasText = plainBody.length > 0 && !(
+                        imageAttachments.length > 0 && plainBody.toLowerCase() === 'attachment sent'
+                      )
+                      const showBubble = hasText || documentAttachments.length > 0 || imageAttachments.length === 0
+
                       return (
                         <div key={msg.id} className="space-y-3">
                           {showDate && (
@@ -704,75 +717,98 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             <div
                               dir={dir}
                               className={cn(
-                                'min-w-0 max-w-[84%] rounded-xl border px-3.5 py-2.5 shadow-sm sm:max-w-[76%]',
-                                isMine
-                                  ? 'rounded-br-sm border-[#c6e9be] bg-[#d9fdd3] text-[#111b21] dark:border-[#005c4b] dark:bg-[#005c4b] dark:text-[#e9edef]'
-                                  : 'rounded-bl-sm border-[#ece5dd] bg-white text-[#111b21] dark:border-[#202c33] dark:bg-[#202c33] dark:text-[#e9edef]'
+                                'flex min-w-0 max-w-[84%] flex-col gap-1.5 sm:max-w-[76%]',
+                                isMine ? 'items-end' : 'items-start'
                               )}
                             >
-                              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                                <span className={cn('text-[11px] font-bold', isMine ? 'text-[#075e54] dark:text-[#7ae6c5]' : 'text-[#075e54] dark:text-[#53bdeb]')}>
-                                  {isMine ? tLocal.customerLabel : tLocal.agentLabel}
-                                  {!isMine && authorName && authorName !== 'Support' && (
-                                    <span className="ms-1 font-normal text-muted-foreground">· {authorName}</span>
+                              {/* Text and ordinary files keep their chat bubble. */}
+                              {showBubble && (
+                                <div className={cn(
+                                  'max-w-full rounded-xl border px-3.5 py-2.5 shadow-sm',
+                                  isMine
+                                    ? 'rounded-br-sm border-[#c6e9be] bg-[#d9fdd3] text-[#111b21] dark:border-[#005c4b] dark:bg-[#005c4b] dark:text-[#e9edef]'
+                                    : 'rounded-bl-sm border-[#ece5dd] bg-white text-[#111b21] dark:border-[#202c33] dark:bg-[#202c33] dark:text-[#e9edef]'
+                                )}>
+                                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                                    <span className={cn('text-[11px] font-bold', isMine ? 'text-[#075e54] dark:text-[#7ae6c5]' : 'text-[#075e54] dark:text-[#53bdeb]')}>
+                                      {isMine ? tLocal.customerLabel : tLocal.agentLabel}
+                                      {!isMine && authorName && authorName !== 'Support' && (
+                                        <span className="ms-1 font-normal text-muted-foreground">· {authorName}</span>
+                                      )}
+                                    </span>
+                                  </div>
+
+                                  {hasText && (
+                                    <div
+                                      className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-[#111b21] dark:prose-invert dark:text-[#e9edef]"
+                                      dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
+                                    />
                                   )}
-                                </span>
-                              </div>
 
-                              <div
-                                className="odoo-chatter-html prose prose-sm max-w-none break-words text-[13px] leading-6 text-[#111b21] dark:prose-invert dark:text-[#e9edef]"
-                                dangerouslySetInnerHTML={{ __html: sanitizeOdooHtml(msg.body) }}
-                              />
+                                  {documentAttachments.length > 0 && (
+                                    <div className="mt-2.5 flex flex-wrap gap-2 border-t border-[#111b21]/10 pt-2.5 dark:border-white/10">
+                                      {documentAttachments.map(attachment => (
+                                        <a
+                                          key={attachment.id}
+                                          href={'/api/tickets/attachments?id=' + attachment.id}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex max-w-[210px] items-center gap-2 rounded-xl border border-[#d1d7db] bg-[#f0f2f5]/90 px-3 py-2 text-[11px] font-medium text-[#111b21] hover:bg-[#dfe5e7] dark:border-[#3b4a54] dark:bg-[#2a3942] dark:text-[#e9edef] dark:hover:bg-[#374952]"
+                                        >
+                                          <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                          <span className="min-w-0 truncate">{attachment.name}</span>
+                                        </a>
+                                      ))}
+                                    </div>
+                                  )}
 
-                              {msg.attachment_ids?.length > 0 && (
-                                <div className="mt-2.5 flex flex-wrap gap-2 border-t border-[#111b21]/10 pt-2.5 dark:border-white/10">
-                                  {msg.attachment_ids.map(attId => {
-                                    const attachment = attachments.find(item => item.id === attId)
-                                    if (!attachment) return null
-                                    const url = `/api/tickets/attachments?id=${attachment.id}`
-                                    const isImage = isTicketChatPreviewImage(attachment.mimetype)
-                                    const previewUrl = url + '&preview=1'
-                                    return isImage ? (
+                                  <div className="mt-2 flex justify-end">
+                                    <time dateTime={msg.date} title={formattedDay}
+                                      className="text-[10px] tabular-nums text-[#667781] dark:text-[#a1adb5]">
+                                      {formattedTime}
+                                    </time>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Smaller images: no green/white message bubble behind them. */}
+                              {imageAttachments.length > 0 && (
+                                <div
+                                  className={cn(
+                                    'flex max-w-full flex-wrap gap-1.5',
+                                    isMine ? 'justify-end' : 'justify-start'
+                                  )}
+                                >
+                                  {imageAttachments.map(attachment => {
+                                    const previewUrl = '/api/tickets/attachments?id=' + attachment.id + '&preview=1'
+                                    return (
                                       <button
                                         key={attachment.id}
                                         type="button"
                                         onClick={() => setActiveImage({ src: previewUrl, name: attachment.name })}
                                         aria-label={(chatLang === 'ar' ? 'معاينة الصورة: ' : 'Preview image: ') + attachment.name}
-                                        className="group relative block overflow-hidden rounded-xl border border-[#111b21]/10 bg-white text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:border-white/10 dark:bg-[#111b21]"
+                                        className="group inline-flex max-w-full overflow-hidden rounded-lg border border-black/10 bg-transparent p-0 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00a884] dark:border-white/15"
                                         title={attachment.name}
                                       >
                                         <img
                                           src={previewUrl}
                                           alt={attachment.name}
                                           loading="lazy"
-                                          className="max-h-[155px] max-w-[215px] object-cover transition-transform group-hover:scale-105"
+                                          className="block h-auto max-h-[112px] max-w-[150px] object-cover sm:max-h-[120px] sm:max-w-[165px]"
                                         />
                                       </button>
-                                    ) : (
-                                      <a
-                                        key={attachment.id}
-                                        href={url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex max-w-[210px] items-center gap-2 rounded-xl border border-[#d1d7db] bg-[#f0f2f5]/90 px-3 py-2 text-[11px] font-medium text-[#111b21] hover:bg-[#dfe5e7] dark:border-[#3b4a54] dark:bg-[#2a3942] dark:text-[#e9edef] dark:hover:bg-[#374952]"
-                                      >
-                                        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                        <span className="min-w-0 truncate">{attachment.name}</span>
-                                      </a>
                                     )
                                   })}
                                 </div>
                               )}
 
-                              <div className="mt-2 flex justify-end">
-                                <time
-                                  dateTime={msg.date}
-                                  className="text-[10px] tabular-nums text-[#667781] dark:text-[#a1adb5]"
-                                  title={formattedDay}
-                                >
-                                  {formattedTime}
-                                </time>
-                              </div>
+                              {/* For picture-only messages, show time without a chat bubble. */}
+                              {imageAttachments.length > 0 && !showBubble && (
+                                <div className="flex items-center gap-2 text-[10px] text-[#54656f] dark:text-[#a1adb5]">
+                                  <span>{isMine ? tLocal.customerLabel : tLocal.agentLabel}</span>
+                                  <time dateTime={msg.date} title={formattedDay}>{formattedTime}</time>
+                                </div>
+                              )}
                             </div>
 
                             {isMine && (
