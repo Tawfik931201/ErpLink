@@ -23,3 +23,5 @@ Actual Supabase gateway-log count in equal 20-minute samples:
 
 ## Boundaries
 Supabase billing Logs Ingest bytes, egress bytes and order capacity require metered evidence; REST call counts are not billing byte counts. Historical 31 dead letters are intentionally preserved. Telegram message delivery cannot be confirmed with zero linked bot chats. Postgres connection/disconnection logging comes from managed Supabase configuration and is unchanged.
+
+Migration applied in Supabase: `20261124084219_idle_queue_scan_claim` (RLS and RPC grants verified).
