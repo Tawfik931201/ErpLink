@@ -1,7 +1,6 @@
 import axios from 'axios'
 
 import { decrypt, encrypt } from '@/lib/crypto'
-
 import { getSallaWebhookCredential } from '@/lib/salla/webhook-auth'
 import { supabase } from '@/lib/supabase'
 

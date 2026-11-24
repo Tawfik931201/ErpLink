@@ -1,5 +1,5 @@
-import type { OdooClient } from '@/lib/odoo-client'
 import { reconcileInclusiveDraftInvoice } from '@/lib/odoo/order-invoice-integrity'
+import type { OdooClient } from '@/lib/odoo-client'
 
 function makeClient(options: {
   version?: number

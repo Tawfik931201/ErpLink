@@ -3,7 +3,6 @@
  * Invoked by the queue maintenance cycle only when archive credentials are set.
  * No source rows are deleted, and an archive failure never advances the cursor.
  */
-import { supabaseAdmin } from '@/lib/sync-runtime'
 import {
   archiveDatetime,
   isOdooArchiveEnabled,
@@ -11,6 +10,7 @@ import {
   upsertArchive,
   updateArchiveBySource,
 } from '@/lib/central-odoo-archive'
+import { supabaseAdmin } from '@/lib/sync-runtime'
 
 const SOURCE = 'erp-link:sync-logs:v1'
 const LIMIT = 30

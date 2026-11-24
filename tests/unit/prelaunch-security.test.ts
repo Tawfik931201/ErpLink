@@ -2,10 +2,10 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 
-import { POST as clerkWebhook } from '@/app/api/webhooks/clerk/route'
 import { POST as impersonate } from '@/app/api/admin/impersonate/route'
-import { getAppBaseUrl } from '@/lib/app-url'
 import { GET as releaseHealth } from '@/app/api/health/live/route'
+import { POST as clerkWebhook } from '@/app/api/webhooks/clerk/route'
+import { getAppBaseUrl } from '@/lib/app-url'
 
 // These only exercise safe early-rejection branches; never call Clerk or DB.
 const fakeRequest = (body: string, headers: Record<string, string> = {}) =>

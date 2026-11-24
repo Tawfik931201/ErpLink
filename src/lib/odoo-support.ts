@@ -1,8 +1,12 @@
 import 'server-only'
 
 import { randomUUID } from 'node:crypto'
+
 import { auth, currentUser } from '@clerk/nextjs/server'
 
+import {
+  checkImpersonationWriteBlock, getActiveUserId, getActiveWorkspaceId, isAdmin,
+} from '@/lib/auth'
 import { centralSupportCall } from '@/lib/central-odoo-archive'
 import { normalizeOdooMessageId } from '@/lib/odoo-message-id'
 import { publishTicketLiveEvent } from '@/lib/ticket-live-events'
@@ -10,9 +14,6 @@ import {
   advanceTicketReadReceipt, countUnreadTicketMessages, isCustomerTicketMessage,
   type TicketMessageReadRecord, type TicketReadRecord,
 } from '@/lib/ticket-read-receipts'
-import {
-  checkImpersonationWriteBlock, getActiveUserId, getActiveWorkspaceId, isAdmin,
-} from '@/lib/auth'
 
 // Tickets, conversations, contacts and binary attachments use only the central
 // ERP Link Odoo Studio database. Supabase is NOT used for support data.
@@ -204,7 +205,7 @@ export async function listOdooTickets() {
       ticket_ref: 'SUP-' + row.id,
       stage_id: [0, stageNames[stage] || stage] as [number, string],
       create_date: row.create_date.includes('T') ? row.create_date : row.create_date.replace(' ', 'T') + 'Z',
-      description: row.x_description || (false as false),
+      description: row.x_description || (false as const),
       unread_count: unread.byTicket[row.id] || 0,
     }
   })

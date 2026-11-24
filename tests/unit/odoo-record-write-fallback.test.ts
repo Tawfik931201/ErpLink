@@ -1,5 +1,5 @@
-import type { OdooClient } from '../../src/lib/odoo-client'
 import { safeWriteOdooRecord } from '../../src/lib/odoo/records'
+import type { OdooClient } from '../../src/lib/odoo-client'
 
 describe('safeWriteOdooRecord Odoo compatibility fallback', () => {
   it('prunes a removed field reported as an Odoo 20 KeyError and retries the same record', async () => {

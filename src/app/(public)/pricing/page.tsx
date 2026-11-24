@@ -1,14 +1,15 @@
-import { publicPageMetadata } from '@/lib/public-seo'
 import {
   BarChart3,
   Shield,
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
+
 import { PricingPlans } from '@/components/pricing-plans'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { Button } from '@/components/ui/button'
+import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage, translations, type Language } from '@/lib/translations'
 
 export const generateMetadata = () => publicPageMetadata('/pricing')

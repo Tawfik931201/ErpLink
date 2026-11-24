@@ -1,7 +1,7 @@
-import { resolveStoreLines } from '../../src/lib/returns/engine'
-import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 import { resolveOrderRelatedRecord } from '../../src/lib/orders/related-matching'
+import { resolveStoreLines } from '../../src/lib/returns/engine'
 import { resolveOdooProductId } from '../../src/lib/returns/odoo'
+import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 
 jest.mock('../../src/lib/sync/settings', () => ({
   getCachedStandardMappingSettings: jest.fn(),

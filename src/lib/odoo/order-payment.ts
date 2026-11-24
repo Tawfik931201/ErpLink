@@ -261,11 +261,11 @@ export async function createOdooPayment(
   try {
     await client.execute('account.payment', 'action_post', [[paymentId]])
     console.info(`[OrderPayment] Posted inbound payment #${paymentId}`)
-  } catch (e1: any) {
+  } catch {
     try {
       await client.execute('account.payment', 'action_post', [paymentId])
       console.info(`[OrderPayment] Posted inbound payment #${paymentId} via [paymentId]`)
-    } catch (e2: any) {
+    } catch {
       try {
         await client.execute('account.payment', 'post', [paymentId])
         console.info(`[OrderPayment] Posted inbound payment #${paymentId} via post`)
@@ -351,7 +351,7 @@ export async function reconcilePaymentWithInvoice(
           await client.execute('account.move.line', 'reconcile', [[invLine.id, matchingPay.id]])
           console.info(`[OrderPayment] Reconciled invoice line #${invLine.id} with payment line #${matchingPay.id}`)
           reconciledAny = true
-        } catch (recErr: any) {
+        } catch {
           try {
             await client.execute('account.move.line', 'reconcile', [invLine.id, matchingPay.id])
             reconciledAny = true

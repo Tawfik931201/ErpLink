@@ -1,7 +1,7 @@
-import { findOriginalSaleOrder } from '../../src/lib/returns/odoo'
-import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 import { resolveEntityLinkId, upsertEntityLink } from '../../src/lib/entity-links'
 import { assertSaleOrderLinkOwnership } from '../../src/lib/orders/matching'
+import { findOriginalSaleOrder } from '../../src/lib/returns/odoo'
+import { getCachedStandardMappingSettings } from '../../src/lib/sync/settings'
 
 jest.mock('../../src/lib/sync/settings', () => ({
   getCachedStandardMappingSettings: jest.fn(),

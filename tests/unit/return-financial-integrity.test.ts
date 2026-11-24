@@ -1,3 +1,4 @@
+import { isReturnSignal } from '@/lib/returns/detect'
 import {
   createCreditNote,
   createNegativeSaleOrder,
@@ -7,7 +8,6 @@ import {
   type OriginalSaleOrder,
   type OdooReturnLine,
 } from '@/lib/returns/odoo'
-import { isReturnSignal } from '@/lib/returns/detect'
 
 const original: OriginalSaleOrder = {
   id: 62, name: 'S00062', state: 'sale', partnerId: 15,

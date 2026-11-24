@@ -1,6 +1,7 @@
 import { auth } from '@clerk/nextjs/server'
 import { type NextRequest, NextResponse } from 'next/server'
 
+import { shopifyTokenFields } from '@/lib/shopify/offline-token'
 import {
   SHOPIFY_API_VERSION,
   SHOPIFY_CORE_TOPICS,
@@ -8,7 +9,6 @@ import {
   registerShopifyWebhook,
   verifyShopifyCallbackHmac,
 } from '@/lib/shopify-client'
-import { shopifyTokenFields } from '@/lib/shopify/offline-token'
 import { supabase } from '@/lib/supabase'
 import { accessibleWorkspaceId } from '@/lib/workspace-access'
 

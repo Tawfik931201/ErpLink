@@ -3,6 +3,7 @@ import { archiveCategory, categoryCompanyClient } from '@/lib/categories/odoo-va
 import { validateCustomerMatchSettings } from '@/lib/customers/matching-settings'
 import { upsertEntityLink } from '@/lib/entity-links'
 import { getErpExecutionScope } from '@/lib/erp-execution-target'
+import { legacyFixedMappingTablesEnabled } from '@/lib/legacy-fixed-mappings'
 import { buildOrderLineItems, prepareSaleOrderForUpdate } from '@/lib/odoo/order-lines'
 import { ensureSaleOrderTaxes, maybeApplyOrderStatusAction, processFullDelivery, processPartialDelivery } from '@/lib/odoo/order-workflow'
 import { type SyncProductBom } from '@/lib/odoo/product-bom'
@@ -14,7 +15,7 @@ import { allPlatformIdFieldNames, platformIdFieldNames } from '@/lib/platform-fi
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
 import { isDynamicBundle } from '@/lib/products/bundle'
 import { assertProductWriteAllowed } from '@/lib/products/settings-values'
-import { extractSallaRefundedLines, isReturnSignal, isZidReturnStatus, type StoreReturnLine } from '@/lib/returns/detect'
+import { extractSallaRefundedLines, isReturnSignal, isZidReturnStatus } from '@/lib/returns/detect'
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
 import { getPlatformFromEvent } from '@/lib/sync/events'
@@ -70,7 +71,7 @@ export async function executeOdooOperation(
   let pendingOrderCustomer: PendingOrderCustomer | null = null
   const inlineSettings: Record<string, any> = (mapping.mappings as any)?.['__settings'] ?? {}
   let ms = inlineSettings
-  if (presetKey && mapping.workspace_id) {
+  if (presetKey && mapping.workspace_id && legacyFixedMappingTablesEnabled()) {
     const { data: dbRow } = await supabaseAdmin
       .from('fixed_mapping_settings')
       .select('settings')

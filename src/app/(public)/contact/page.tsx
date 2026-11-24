@@ -1,4 +1,3 @@
-import { publicPageMetadata } from '@/lib/public-seo'
 import {
   ArrowLeft,
   Clock,
@@ -11,9 +10,11 @@ import {
 } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
+
 import { ContactForm } from '@/components/contact-form'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
+import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 

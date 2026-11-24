@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+
 import { isAgentPublicPath, publicMarkdown } from '@/lib/public-agent-content'
 
 export const runtime = 'nodejs'

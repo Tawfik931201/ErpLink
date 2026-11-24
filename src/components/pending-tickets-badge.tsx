@@ -16,8 +16,7 @@ export function PendingTicketsBadge() {
   useEffect(() => {
     let active = true
     let queued: ReturnType<typeof setTimeout> | undefined
-    let dirtyWhileHidden = false
-
+ 
     async function refresh() {
       const seq = ++sequenceRef.current
       try {
@@ -29,7 +28,6 @@ export function PendingTicketsBadge() {
     }
     function schedule() {
       if (document.visibilityState === 'hidden') {
-        dirtyWhileHidden = true
         return
       }
       if (queued) clearTimeout(queued)
@@ -39,7 +37,6 @@ export function PendingTicketsBadge() {
     }
     function onVisibility() {
       if (document.visibilityState === 'visible') {
-        dirtyWhileHidden = false
         schedule()
       }
     }

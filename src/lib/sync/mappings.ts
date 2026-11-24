@@ -2,6 +2,7 @@ import { decrypt } from '@/lib/crypto'
 import { withErpExecutionContext } from '@/lib/erp-effect-context'
 import { getErpExecutionScope, resolveExecutionTarget, validateExecutionTarget, withErpTarget } from '@/lib/erp-execution-target'
 import { processErpNextMapping } from '@/lib/erpnext/mappings'
+import { legacyFixedMappingTablesEnabled } from '@/lib/legacy-fixed-mappings'
 import { fetchFieldMeta } from '@/lib/odoo/field-meta'
 import { createOdooOperations } from '@/lib/odoo/operations'
 import { OdooClient } from '@/lib/odoo-client'
@@ -128,13 +129,16 @@ async function processFixedMappingFallbackInternal(
     }
   }
 
-  // Merge field rows from DB
-  const { data: customRows } = await supabaseAdmin
-    .from('fixed_mappings')
-    .select('field_rows')
-    .eq('workspace_id', workspaceId)
-    .eq('preset_key', presetKey)
-    .eq('is_preset', false)
+  // Legacy tables do not exist in the current production schema.
+  // The default Standard Mapping fallback stays unchanged, without a 404 on every event.
+  const { data: customRows } = legacyFixedMappingTablesEnabled()
+    ? await supabaseAdmin
+        .from('fixed_mappings')
+        .select('field_rows')
+        .eq('workspace_id', workspaceId)
+        .eq('preset_key', presetKey)
+        .eq('is_preset', false)
+    : { data: null }
   const customFieldPairs: any[] = []
   if (customRows) {
     for (const cr of customRows) {
@@ -400,12 +404,24 @@ async function processFixedMappingFallbackInternal(
     return null
   }
 
-  const { data: odooConn } = await supabaseAdmin
-    .from('erp_connections')
-    .select('id, url, db_name, username, password, erp_type')
-    .eq('id', erpConnectionId)
-    .eq('workspace_id', workspaceId)
-    .single()
+  // The webhook entry validated the generation and workspace already. Reuse
+  // that exact event-scoped connection instead of another credential lookup.
+  // Legacy/manual callers still use the original scoped DB query.
+  const trustedConnection =
+    pinnedScope?.validatedConn?.id === erpConnectionId &&
+    pinnedScope.validatedConn.workspace_id === workspaceId &&
+    pinnedScope.platform === platform &&
+    pinnedScope.storeId === storeIdStr
+      ? pinnedScope.validatedConn
+      : null
+  const { data: odooConn } = trustedConnection
+    ? { data: trustedConnection }
+    : await supabaseAdmin
+        .from('erp_connections')
+        .select('id, url, db_name, username, password, erp_type')
+        .eq('id', erpConnectionId)
+        .eq('workspace_id', workspaceId)
+        .single()
 
   if (!odooConn) {
     console.warn(`[FixedMapping] ERP connection ${erpConnectionId} not found`)

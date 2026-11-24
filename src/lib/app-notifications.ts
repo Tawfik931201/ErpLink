@@ -1,6 +1,6 @@
-import { supabase } from '@/lib/supabase'
-import { pushConfigured, sendBrowserPush } from '@/lib/browser-push'
 import { publishAppNotification } from '@/lib/app-notification-events'
+import { pushConfigured, sendBrowserPush } from '@/lib/browser-push'
+import { supabase } from '@/lib/supabase'
 
 export type NotificationStatus = 'received' | 'success' | 'failed' | 'skipped'
 export function notificationCategory(event: string): string {

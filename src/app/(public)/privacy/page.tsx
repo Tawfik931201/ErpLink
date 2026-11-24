@@ -1,9 +1,10 @@
-import { publicPageMetadata } from '@/lib/public-seo'
 import { Lock, ArrowLeft } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
+
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
+import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
 

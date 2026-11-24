@@ -22,7 +22,7 @@ describe('Odoo-only ticket read receipts', () => {
   it('counts only support replies after the reader cursor and separates tickets', () => {
     const tickets = [
       { id: 9, x_partner_id: [9, 'Customer'] as [number, string], x_customer_read_receipts: '{"user_A":302}' },
-      { id: 8, x_partner_id: [9, 'Customer'] as [number, string], x_customer_read_receipts: false as false },
+      { id: 8, x_partner_id: [9, 'Customer'] as [number, string], x_customer_read_receipts: false as const },
     ]
     const messages = [
       { id: 301, res_id: 9, author_id: [9, 'Customer'] as [number, string] },

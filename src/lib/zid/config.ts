@@ -9,23 +9,22 @@ export interface ZidConfig {
   apiUrl: string
 }
 
-const REQUIRED_ENV = [
-  'ZID_CLIENT_ID',
-  'ZID_CLIENT_SECRET',
-  'ZID_REDIRECT_URI',
-  'ZID_AUTH_URL',
-  'ZID_TOKEN_URL',
-  'ZID_API_URL',
-] as const
+type RequiredZidEnv =
+  | 'ZID_CLIENT_ID'
+  | 'ZID_CLIENT_SECRET'
+  | 'ZID_REDIRECT_URI'
+  | 'ZID_AUTH_URL'
+  | 'ZID_TOKEN_URL'
+  | 'ZID_API_URL'
 
 /** أسماء بديلة مقبولة للتوافق مع المسار القديم /api/auth/zid/* */
-const ENV_FALLBACKS: Partial<Record<(typeof REQUIRED_ENV)[number], string[]>> = {
+const ENV_FALLBACKS: Partial<Record<RequiredZidEnv, string[]>> = {
   ZID_CLIENT_ID: ['NEXT_PUBLIC_ZID_CLIENT_ID'],
   ZID_REDIRECT_URI: ['ZID_OAUTH_REDIRECT_URI'],
 }
 
 function readRequiredEnv(
-  name: (typeof REQUIRED_ENV)[number],
+  name: RequiredZidEnv,
   options: { trimTrailingSlash?: boolean } = {}
 ): string {
   const fallbacks = ENV_FALLBACKS[name] ?? []

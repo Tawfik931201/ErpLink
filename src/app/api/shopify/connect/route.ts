@@ -1,7 +1,6 @@
 import crypto from 'crypto'
 
 import { auth } from '@clerk/nextjs/server'
-
 import { type NextRequest, NextResponse } from 'next/server'
 
 import { normalizeShopDomain, verifyShopifyCallbackHmac } from '@/lib/shopify-client'

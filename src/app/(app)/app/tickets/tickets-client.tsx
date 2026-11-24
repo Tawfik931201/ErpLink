@@ -26,11 +26,11 @@ import type { Ticket, OdooMessage, OdooAttachment} from '@/app/actions/tickets';
 import { getTicketMessages, sendTicketMessage, closeTicket, markTicketRead, getClientTickets } from '@/app/actions/tickets'
 import CreateTicketForm from '@/components/CreateTicketForm'
 import { useLanguage } from '@/components/language-provider'
+import { TicketChatImageLightbox, TicketChatSelectedFiles, type TicketChatImagePreview } from '@/components/tickets/ticket-chat-media'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { TicketChatImageLightbox, TicketChatSelectedFiles, type TicketChatImagePreview } from '@/components/tickets/ticket-chat-media'
 import { getPastedTicketImages, isTicketChatPreviewImage, mergeTicketChatFiles, type TicketChatFileError } from '@/lib/ticket-chat-media'
 import { cn } from '@/lib/utils'
 
