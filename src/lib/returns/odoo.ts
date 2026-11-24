@@ -681,7 +681,7 @@ export async function createNegativeSaleOrder(
 
   try {
     return await client.create('sale.order', values)
-  } catch (err: any) {
+  } catch {
     // If an optional header field failed on a stripped Odoo installation, retry with core fields
     const coreValues: Record<string, unknown> = {
       partner_id: values.partner_id,

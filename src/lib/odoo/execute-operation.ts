@@ -15,7 +15,7 @@ import { allPlatformIdFieldNames, platformIdFieldNames } from '@/lib/platform-fi
 import { assertBomCapability, needsProductBom } from '@/lib/products/bom-capability'
 import { isDynamicBundle } from '@/lib/products/bundle'
 import { assertProductWriteAllowed } from '@/lib/products/settings-values'
-import { extractSallaRefundedLines, isReturnSignal, isZidReturnStatus, type StoreReturnLine } from '@/lib/returns/detect'
+import { extractSallaRefundedLines, isReturnSignal, isZidReturnStatus } from '@/lib/returns/detect'
 import { processReturnEvent } from '@/lib/returns/engine'
 import { normalizeReturnSettings } from '@/lib/returns/settings'
 import { getPlatformFromEvent } from '@/lib/sync/events'

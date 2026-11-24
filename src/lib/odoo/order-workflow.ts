@@ -259,7 +259,7 @@ async function applyOrderPickingAction(
         try {
           await client.execute('sale.order', 'action_confirm', [orderId])
           console.info(`[SyncEngine] Confirmed sale.order #${orderId} to generate picking (status "${zidStatus}")`)
-        } catch (e: any) {
+        } catch {
           try {
             await client.execute('sale.order', 'action_confirm', [[orderId]])
             console.info(`[SyncEngine] Confirmed sale.order #${orderId} via [[orderId]] fallback (status "${zidStatus}")`)
@@ -502,7 +502,7 @@ async function applyOrderInvoiceAction(
         try {
           await client.execute('sale.order', 'action_confirm', [orderId])
           console.info(`[SyncEngine] Confirmed sale.order #${orderId} for invoice creation (status "${zidStatus}")`)
-        } catch (e: any) {
+        } catch {
           try {
             await client.execute('sale.order', 'action_confirm', [[orderId]])
             console.info(`[SyncEngine] Confirmed sale.order #${orderId} via [[orderId]] fallback before invoice (status "${zidStatus}")`)
@@ -568,10 +568,10 @@ async function applyOrderInvoiceAction(
             try {
               await client.execute('account.move', 'action_post', [inv.id])
               console.info(`[SyncEngine] Posted invoice #${inv.id} for sale.order #${orderId}`)
-            } catch (postErr: any) {
+            } catch {
               try {
                 await client.execute('account.move', 'action_post', [[inv.id]])
-              } catch (pErr2: any) {
+              } catch {
                 try {
                   await client.execute('account.move', 'post', [inv.id])
                   console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
@@ -618,10 +618,10 @@ async function applyOrderInvoiceAction(
           try {
             await client.execute('account.move', 'action_post', [inv.id])
             console.info(`[SyncEngine] Posted draft invoice #${inv.id} for sale.order #${orderId}`)
-          } catch (postErr: any) {
+          } catch {
             try {
               await client.execute('account.move', 'action_post', [[inv.id]])
-            } catch (pErr2: any) {
+            } catch {
               try {
                 await client.execute('account.move', 'post', [inv.id])
                 console.info(`[SyncEngine] Posted invoice #${inv.id} via post fallback for sale.order #${orderId}`)
@@ -659,7 +659,7 @@ async function applyOrderInvoiceAction(
           try {
             await client.execute('account.move', 'button_cancel', [inv.id])
             console.info(`[SyncEngine] Cancelled invoice #${inv.id} for sale.order #${orderId}`)
-          } catch (cancelErr: any) {
+          } catch {
             try {
               await client.execute('account.move', 'action_cancel', [inv.id])
             } catch {

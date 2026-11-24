@@ -9,7 +9,7 @@ export interface AccessTokenResponse {
   scope?: string
 }
 
-export interface RefreshTokenResponse extends AccessTokenResponse {}
+export type RefreshTokenResponse = AccessTokenResponse
 
 export interface StoredZidTokens {
   accessToken: string

@@ -164,7 +164,7 @@ export async function registerZidWebhook(
       new URL('managers/webhooks', `${config.apiUrl}/`).toString(),
       { method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store' }
     )
-    const payload = await response.json().catch(() => null)
+    await response.json().catch(() => null)
 
     // Provider may echo the registration Basic password. Never log its body.
     console.info('[Zid Webhook] Register', {

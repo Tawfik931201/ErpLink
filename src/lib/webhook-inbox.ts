@@ -74,7 +74,7 @@ export async function recordWebhookReceipt(receipt: WebhookReceipt): Promise<Rec
           status: 'received',
           payload: receipt.payload,
         })
-      } catch (notificationError) {
+      } catch {
         console.warn('[Webhook Inbox] Notification enqueue unavailable')
       }
     }
