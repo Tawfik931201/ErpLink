@@ -76,6 +76,13 @@ export async function GET(req: NextRequest) {
       await new Promise((r) => setTimeout(r, 200))
     }
 
+    // Web Push is independent of Odoo processing; failures must not fail the sync cron.
+    const push = await import('@/lib/browser-push-worker')
+      .then(({ runBrowserPushOnce }) => runBrowserPushOnce())
+      .catch((err) => {
+        console.error('[Cron] Web Push delivery error:', err)
+        return { checked: 0, sent: 0, errors: 1 }
+      })
     const metrics = getSyncQueueMetrics()
 
     // 3) مؤشرات تُقرأ من cPanel/مراقبة الخادم: أرقام تكشف الاختناقات مبكراً.
@@ -91,6 +98,7 @@ export async function GET(req: NextRequest) {
       durationMs: Date.now() - cronStart,
       orphanInbox,
       metrics,
+      push,
     })
   } catch (error: any) {
     return NextResponse.json(

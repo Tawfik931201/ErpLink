@@ -5,6 +5,7 @@ import { ThemeProvider, useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
 
 import { LanguageProvider } from '@/components/language-provider'
+import BrowserNotifications from '@/components/browser-notifications'
 import { Toaster } from '@/components/ui/toaster'
 import { writePreferenceCookie } from '@/lib/preference-cookie'
 import type { Language } from '@/lib/translations'
@@ -50,6 +51,7 @@ export default function AppProviders({
           <ThemeCookieSync />
           {children}
           <Toaster />
+          <BrowserNotifications />
         </ThemeProvider>
       </QueryClientProvider>
     </LanguageProvider>
