@@ -1,6 +1,6 @@
 import { decrypt, encrypt } from '../../src/lib/crypto'
-import { publicZidStore } from '../../src/lib/zid/credentials'
 import { withSyncRequestContext } from '../../src/lib/sync/request-context'
+import { publicZidStore } from '../../src/lib/zid/credentials'
 import { SupabaseZidTokenStore, getAccessToken, refreshAccessToken } from '../../src/lib/zid/token'
 import { supabase } from '../mocks/supabase'
 
