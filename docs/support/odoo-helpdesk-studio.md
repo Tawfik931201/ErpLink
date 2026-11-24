@@ -55,7 +55,7 @@ The Odoo actions, menus and views were created and read back through Odoo JSON-R
 
 ## New in-Odoo customer-message notifications
 
-- **Odoo automation 4** (`on_message_received`) executes **server action 242**. For each actual customer-visible customer-authored comment:
+- **Odoo automation 4** (`on_message_received`) executes **server action 242** for customer-authored, customer-visible messages on any active ERP Link support ticket (including app and contact tickets); its rule domain requires a customer partner:
   - Determines the customer via the ticket's `x_partner_id` and the latest `mail.message` author.
   - Creates an Odoo **To-Do activity** (`mail.activity` model `x_erplink_support_ticket`, type ID 4) assigned to the ticket's `x_assigned_user_id`, or internal Odoo user ID 2 when unassigned.
   - Adds the ticket reference `SUP-<ticket id>` **and source message ID** to the activity. Activities appear in the assignee's Odoo Activities/systray and link directly to the ticket.
