@@ -470,10 +470,10 @@ export const translations = {
     // Terms & Privacy
     'terms.pageTitle': 'الشروط والأحكام',
     'terms.badge': 'الشروط والأحكام',
-    'terms.lastUpdated': 'آخر تحديث: 15 يوليو 2026',
+    'terms.lastUpdated': 'آخر تحديث: 24 نوفمبر 2026',
     'privacy.pageTitle': 'سياسة الخصوصية',
     'privacy.badge': 'سياسة الخصوصية',
-    'privacy.lastUpdated': 'آخر تحديث: 15 يوليو 2026',
+    'privacy.lastUpdated': 'آخر تحديث: 24 نوفمبر 2026',
 
     // Sync Logs
     'log.title': 'سجل المزامنة',
@@ -1132,10 +1132,10 @@ export const translations = {
     // Terms & Privacy
     'terms.pageTitle': 'Terms of Service',
     'terms.badge': 'Terms of Service',
-    'terms.lastUpdated': 'Last updated: July 15, 2026',
+    'terms.lastUpdated': 'Last updated: November 24, 2026',
     'privacy.pageTitle': 'Privacy Policy',
     'privacy.badge': 'Privacy Policy',
-    'privacy.lastUpdated': 'Last updated: July 15, 2026',
+    'privacy.lastUpdated': 'Last updated: November 24, 2026',
 
     // Sync Logs
     'log.title': 'Sync Logs',
