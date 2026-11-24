@@ -1,9 +1,12 @@
-import { Shield, ArrowLeft } from 'lucide-react'
+import { Shield, ArrowLeft, ArrowUpRight, Mail, MessageSquareText } from 'lucide-react'
 import { cookies } from 'next/headers'
 import Link from 'next/link'
 
+import { LegalTableOfContents } from '@/components/legal/legal-toc'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
+import { termsSections, TERMS_LAST_UPDATED } from '@/lib/legal-content'
+import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 import { publicPageMetadata } from '@/lib/public-seo'
 import { resolveLanguage, translations, type Language } from '@/lib/translations'
 import { cn } from '@/lib/utils'
@@ -18,215 +21,31 @@ function t(lang: Language, key: string): string {
   return key
 }
 
-const sections = [
-  {
-    key: 'introduction',
-    ar: {
-      title: 'المقدمة والقبول',
-      body: `باستخدامك لخدمة ERP Link ("الخدمة")، فإنك توافق على الالتزام بهذه الشروط والأحكام ("الشروط"). إذا كنت لا توافق على أي جزء من هذه الشروط، يجب عليك عدم استخدام الخدمة.
-
-نحن نحتفظ بالحق في تعديل هذه الشروط في أي وقت. سيتم إخطارك بالتغييرات الجوهرية عبر البريد الإلكتروني أو من خلال لوحة التحكم. استمرارك في استخدام الخدمة بعد التعديلات يعتبر قبولاً منها.`,
-    },
-    en: {
-      title: 'Introduction & Acceptance',
-      body: `By using ERP Link ("the Service"), you agree to be bound by these Terms and Conditions ("Terms"). If you do not agree to any part of these Terms, you must not use the Service.
-
-We reserve the right to modify these Terms at any time. Material changes will be notified via email or through the dashboard. Your continued use of the Service after modifications constitutes acceptance.`,
-    },
-  },
-  {
-    key: 'service',
-    ar: {
-      title: 'وصف الخدمة',
-      body: `ERP Link هي منصة ربط (Integration Platform as a Service) تتيح مزامنة البيانات بين المتاجر الإلكترونية (مثل زد، سلة، وشوبيفاي) وأنظمة تخطيط الموارد (ERP) مثل أودو.
-
-الخدمة تشمل:
-- مزامنة فورية للطلبات، المنتجات، المخزون، والعملاء
-- مركز ربط الحقول لتخصيص تدفق البيانات
-- نقل البيانات الأولي (Historical Transfer)
-- إشعارات تيليجرام فورية
-- سجل عمليات وتدقيق`,
-    },
-    en: {
-      title: 'Service Description',
-      body: `ERP Link is an Integration Platform as a Service (iPaaS) that enables data synchronization between e-commerce stores (such as Zid, Salla, and Shopify) and ERP systems like Odoo.
-
-The Service includes:
-- Real-time sync of orders, products, inventory, and customers
-- Field Mapping Center to customize data flow
-- Historical data transfer
-- Instant Telegram notifications
-- Audit logs`,
-    },
-  },
-  {
-    key: 'accounts',
-    ar: {
-      title: 'الحسابات والتسجيل',
-      body: `- يجب أن تكون على الأقل ١٨ عاماً لاستخدام الخدمة
-- أنت مسؤول عن الحفاظ على سرية بيانات حسابك
-- أنت مسؤول عن جميع الأنشطة التي تحدث تحت حسابك
-- يجب عليك إعلامنا فوراً بأي استخدام غير مصرح به لحسابك
-- نحتفظ بالحق في تعليق أو إنهاء حسابك في حالة انتهاك هذه الشروط`,
-    },
-    en: {
-      title: 'Accounts & Registration',
-      body: `- You must be at least 18 years old to use the Service
-- You are responsible for maintaining the confidentiality of your account credentials
-- You are responsible for all activities that occur under your account
-- You must notify us immediately of any unauthorized use of your account
-- We reserve the right to suspend or terminate your account for breach of these Terms`,
-    },
-  },
-  {
-    key: 'subscription',
-    ar: {
-      title: 'الاشتراك والفوترة',
-      body: `- الخطط والأسعار موضحة في صفحة الأسعار وقد تتغير من وقت لآخر
-- يتم الدفع مقدماً على أساس شهري أو سنوي حسب الخطة المختارة
-- الإلغاء: يمكنك إلغاء اشتراكك في أي وقت. يستمر الوصول حتى نهاية فترة الفوترة الحالية
-- المبالغ المدفوعة غير قابلة للاسترداد ما لم ينص القانون على خلاف ذلك
-- نحن لا نخزن معلومات الدفع الخاصة بك — جميع المدفوعات تتم عبر معالج دفع خارجي آمن`,
-    },
-    en: {
-      title: 'Subscription & Billing',
-      body: `- Plans and pricing are listed on the pricing page and may change from time to time
-- Payment is due in advance on a monthly or yearly basis depending on the chosen plan
-- Cancellation: you may cancel your subscription at any time. Access continues until the end of the current billing period
-- Paid amounts are non-refundable unless otherwise required by law
-- We do not store your payment information — all payments are processed through a secure third-party payment processor`,
-    },
-  },
-  {
-    key: 'usage',
-    ar: {
-      title: 'قواعد الاستخدام',
-      body: `أنت توافق على عدم:
-
-- استخدام الخدمة لأي غرض غير قانوني
-- محاولة الوصول غير المصرح به إلى أنظمتنا أو حسابات المستخدمين الآخرين
-- استخدام الخدمة لإرسال برامج ضارة أو فيروسات
-- انتهاك حقوق الملكية الفكرية للغير
-- تجاوز حدود الاستخدام المحددة في خطتك
-- استخدام الخدمة بطريقة قد تعطل أو تثقل كاهل البنية التحتية للمنصة`,
-    },
-    en: {
-      title: 'Acceptable Use',
-      body: `You agree not to:
-
-- Use the Service for any unlawful purpose
-- Attempt unauthorized access to our systems or other users' accounts
-- Use the Service to distribute malware or viruses
-- Infringe upon the intellectual property rights of others
-- Exceed the usage limits specified in your plan
-- Use the Service in any manner that could disrupt or overburden the platform infrastructure`,
-    },
-  },
-  {
-    key: 'data',
-    ar: {
-      title: 'البيانات والملكية الفكرية',
-      body: `- نحن لا نملك بيانات متجرك أو نظام ERP الخاص بك
-- أنت تحتفظ بجميع حقوق الملكية الفكرية لبياناتك
-- نحن نملك المنصة والبنية التحتية والبرمجيات
-- تمنحنا ترخيصاً لمعالجة بياناتك لغرض تقديم الخدمة فقط
-- نحن نحمي بياناتك وفقاً لسياسة الخصوصية`,
-    },
-    en: {
-      title: 'Data & Intellectual Property',
-      body: `- We do not own your store or ERP data
-- You retain all intellectual property rights to your data
-- We own the platform, infrastructure, and software
-- You grant us a license to process your data solely for the purpose of providing the Service
-- We protect your data in accordance with the Privacy Policy`,
-    },
-  },
-  {
-    key: 'limitation',
-    ar: {
-      title: 'حدود المسؤولية',
-      body: `- الخدمة مقدمة "كما هي" بدون ضمانات من أي نوع
-- نحن لسنا مسؤولين عن أي أضرار غير مباشرة أو تبعية أو خاصة ناتجة عن استخدام الخدمة
-- مسؤوليتنا الإجمالية تقتصر على المبلغ المدفوع للخدمة خلال الـ ١٢ شهراً السابقة للمطالبة
-- لا نتحمل مسؤولية انقطاع الخدمة الناتج عن مزودي الطرف الثالث (زد، سلة، شوبيفاي، أودو)
-- لا نضمن أن الخدمة ستكون خالية من الأخطاء أو متاحة بشكل متواصل`,
-    },
-    en: {
-      title: 'Limitation of Liability',
-      body: `- The Service is provided "as is" without warranties of any kind
-- We shall not be liable for any indirect, incidental, special, or consequential damages arising from the use of the Service
-- Our total liability is limited to the amount paid for the Service in the 12 months preceding the claim
-- We are not responsible for service interruptions caused by third-party providers (Zid, Salla, Shopify, Odoo)
-- We do not guarantee that the Service will be error-free or continuously available`,
-    },
-  },
-  {
-    key: 'termination',
-    ar: {
-      title: 'الإنهاء',
-      body: `- يمكنك إنهاء حسابك في أي وقت من خلال لوحة التحكم
-- نحن نحتفظ بالحق في تعليق أو إنهاء الوصول للخدمة في حالة انتهاك هذه الشروط
-- بعد الإنهاء، ستتوقف المزامنة وستحتفظ ببياناتك لمدة ٣٠ يوماً للتصدير
-- المواد المتعلقة بهذه الشروط المتعلقة بالملكية الفكرية وحدود المسؤولية والسرية ستبقى سارية بعد الإنهاء`,
-    },
-    en: {
-      title: 'Termination',
-      body: `- You may terminate your account at any time through the dashboard
-- We reserve the right to suspend or terminate access to the Service for violation of these Terms
-- Upon termination, sync will stop and we will retain your data for 30 days for export
-- Provisions related to intellectual property, limitation of liability, and confidentiality will survive termination`,
-    },
-  },
-  {
-    key: 'governing',
-    ar: {
-      title: 'القانون المطبق',
-      body: `تخضع هذه الشروط وتُفسر وفقاً لقوانين المملكة العربية السعودية. أي نزاعات تنشأ عن هذه الشروط ستتم تسويتها في محاكم المملكة العربية السعودية.`,
-    },
-    en: {
-      title: 'Governing Law',
-      body: `These Terms shall be governed by and construed in accordance with the laws of the Kingdom of Saudi Arabia. Any disputes arising from these Terms shall be resolved in the courts of the Kingdom of Saudi Arabia.`,
-    },
-  },
-  {
-    key: 'contact',
-    ar: {
-      title: 'اتصل بنا',
-      body: `للاستفسارات المتعلقة بهذه الشروط، يرجى التواصل معنا:
-
-- عبر نموذج الاتصال: erplinks.com/contact
-- عبر البريد الإلكتروني: support@erplinks.com`,
-    },
-    en: {
-      title: 'Contact Us',
-      body: `For inquiries regarding these Terms, please contact us:
-
-- Through the contact form: erplinks.com/contact
-- By email: support@erplinks.com`,
-    },
-  },
-]
-
 export default async function TermsPage() {
   const cookieStore = await cookies()
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
-  const dir = lang === 'ar' ? 'rtl' : 'ltr'
+  const isAr = lang === 'ar'
+  const dir = isAr ? 'rtl' : 'ltr'
+
+  const tocItems = termsSections.map((section) => ({
+    id: section.id,
+    number: section.number,
+    title: isAr ? section.ar.title : section.en.title,
+  }))
 
   return (
-    <div
-      className="flex min-h-screen flex-col overflow-x-clip bg-background text-foreground font-sans"
-      dir={dir}
-    >
+    <div className="flex min-h-screen flex-col overflow-x-clip bg-background text-foreground font-sans" dir={dir}>
       <PublicSiteHeader lang={lang} />
 
       <main className="flex-1">
-        <section className="pt-20 pb-16 px-6 md:px-12 relative overflow-hidden bg-secondary/20">
-          <div className="absolute top-[-80px] right-[-80px] w-[400px] h-[400px] rounded-full bg-foreground/[0.03] blur-3xl pointer-events-none" />
+        {/* Hero Section */}
+        <section className="pt-20 pb-12 px-6 md:px-12 relative overflow-hidden bg-secondary/20 border-b border-border/50">
+          <div className="absolute top-[-80px] right-[-80px] w-[400px] h-[400px] rounded-full bg-primary/[0.04] blur-3xl pointer-events-none" />
           <div className="absolute bottom-[-80px] left-[-80px] w-[350px] h-[350px] rounded-full bg-foreground/[0.02] blur-3xl pointer-events-none" />
 
-          <div className="max-w-3xl mx-auto flex flex-col items-center text-center gap-6 relative">
+          <div className="max-w-4xl mx-auto flex flex-col items-center text-center gap-6 relative">
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-semibold">
-              <Shield className="h-3.5 w-3.5" />
+              <Shield className="h-4 w-4" />
               <span>{t(lang, 'terms.badge')}</span>
             </div>
 
@@ -234,41 +53,134 @@ export default async function TermsPage() {
               {t(lang, 'terms.pageTitle')}
             </h1>
 
-            <p className="text-sm text-muted-foreground">
-              {t(lang, 'privacy.lastUpdated')}
+            <p className="text-sm font-medium text-muted-foreground">
+              {isAr ? `آخر تحديث رسمي: ${TERMS_LAST_UPDATED.ar}` : `Last officially updated: ${TERMS_LAST_UPDATED.en}`}
             </p>
+
+            {/* Executive Summary Card */}
+            <div className="w-full text-start bg-card/80 backdrop-blur-sm border border-border/80 rounded-2xl p-5 md:p-6 shadow-sm mt-2">
+              <div className="flex items-center gap-2 mb-2 text-primary font-bold text-xs uppercase tracking-wider">
+                <span className="h-2 w-2 rounded-full bg-primary" />
+                <span>{isAr ? 'ملخص تمهيدي للشروط' : 'Executive Terms Summary'}</span>
+              </div>
+              <p className="text-sm md:text-base text-muted-foreground leading-relaxed">
+                {isAr
+                  ? 'تحدد هذه الاتفاقية الإطار القانوني والتشغيلي المنظم لاستخدامك منصة ERP Link لربط المتاجر الإلكترونية مع أنظمة ERP. نؤكد أنك تحتفظ بكامل ملكية بياناتك التجارية، وتخضع عمليات المزامنة لإعداداتك وخياراتك، مع إتاحة فترة تجربة مجانية لمدة 7 أيام ودعم وسائل الدفع اليدوية بالفواتير المعتمدة دون تخزين بيانات بنكية حساسة.'
+                  : 'This agreement governs your legal rights and operational responsibilities when using ERP Link to integrate e-commerce stores with ERP software. You retain exclusive ownership of your business data, synchronization logic mirrors your configured mappings, and services include a 7-day free trial with transparent manual bank billing and zero storage of sensitive payment instruments.'}
+              </p>
+            </div>
+
+            {/* Quick Cross-Link Banner */}
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs md:text-sm text-muted-foreground pt-1">
+              <span>
+                {isAr ? 'هل تبحث عن سياسة الخصوصية وحماية البيانات؟' : 'Looking for our Privacy & Data Protection Policy?'}
+              </span>
+              <Link
+                href="/privacy"
+                className="inline-flex items-center gap-1 font-semibold text-primary hover:underline underline-offset-4"
+              >
+                <span>{isAr ? 'الانتقال إلى سياسة الخصوصية' : 'Go to Privacy Policy'}</span>
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
 
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors pt-2"
             >
-              <ArrowLeft className={cn('h-3.5 w-3.5', lang === 'ar' ? 'rotate-180' : '')} />
-              <span>{lang === 'ar' ? 'العودة إلى الرئيسية' : 'Back to Home'}</span>
+              <ArrowLeft className={cn('h-3.5 w-3.5', isAr ? 'rotate-180' : '')} />
+              <span>{isAr ? 'العودة إلى الصفحة الرئيسية' : 'Back to Home'}</span>
             </Link>
           </div>
         </section>
 
-        <section className="py-16 px-6 md:px-12">
-          <div className="max-w-3xl mx-auto space-y-6">
-            {sections.map((section) => {
-              const content = lang === 'ar' ? section.ar : section.en
-              return (
-                <div
-                  key={section.key}
-                  className="bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm"
-                >
-                  <div className="flex items-start gap-4 mb-4">
-                    <span className="flex h-6 w-1 rounded-full bg-foreground shrink-0 mt-1.5" />
-                    <h2 className="text-xl md:text-2xl font-bold tracking-tight">
-                      {content.title}
-                    </h2>
-                  </div>
-                  <div className="text-sm md:text-base text-muted-foreground leading-[1.8] whitespace-pre-line">
-                    {content.body}
-                  </div>
+        {/* Content Section with TOC Sidebar */}
+        <section className="py-12 md:py-16 px-6 md:px-12">
+          <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-8 lg:gap-12 items-start">
+            {/* Sidebar Table of Contents */}
+            <aside className="w-full lg:w-72 shrink-0">
+              <LegalTableOfContents items={tocItems} lang={lang} />
+            </aside>
+
+            {/* Main Legal Sections */}
+            <article className="flex-1 w-full max-w-3xl space-y-8">
+              {termsSections.map((section) => {
+                const content = isAr ? section.ar : section.en
+                return (
+                  <section
+                    key={section.id}
+                    id={section.id}
+                    className="scroll-mt-28 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm transition-all hover:border-border/80"
+                  >
+                    <header className="flex items-start gap-3.5 mb-4 border-b border-border/40 pb-4">
+                      <span className="flex h-7 px-2.5 items-center justify-center rounded-lg bg-primary/10 text-primary font-mono text-xs font-bold shrink-0 mt-0.5">
+                        {String(section.number).padStart(2, '0')}
+                      </span>
+                      <div>
+                        <h2 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+                          {content.title}
+                        </h2>
+                        {content.summary && (
+                          <p className="text-xs md:text-sm text-muted-foreground/80 mt-1">
+                            {content.summary}
+                          </p>
+                        )}
+                      </div>
+                    </header>
+
+                    <div className="space-y-4 text-sm md:text-base text-muted-foreground leading-[1.85]">
+                      {content.paragraphs.map((paragraph, idx) => (
+                        <p key={idx} className="whitespace-pre-line">
+                          {paragraph}
+                        </p>
+                      ))}
+
+                      {content.bullets && content.bullets.length > 0 && (
+                        <ul className="space-y-2.5 pt-1">
+                          {content.bullets.map((bullet, idx) => (
+                            <li key={idx} className="flex items-start gap-2.5">
+                              <span className="flex h-1.5 w-1.5 rounded-full bg-primary shrink-0 mt-2.5" />
+                              <span className="flex-1">{bullet}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </section>
+                )
+              })}
+
+              {/* Bottom Official Support Card */}
+              <div className="bg-secondary/30 border border-border rounded-2xl p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="space-y-1.5 text-center md:text-start">
+                  <h3 className="text-base md:text-lg font-bold text-foreground">
+                    {isAr ? 'هل لديك أي استفسار قانوني أو تعاقدي؟' : 'Have legal or contractual questions?'}
+                  </h3>
+                  <p className="text-xs md:text-sm text-muted-foreground leading-relaxed">
+                    {isAr
+                      ? `فريق الدعم الفني والقانوني متاح للإجابة على استفساراتك عبر البريد: ${PUBLIC_CONTACT_EMAIL}`
+                      : `Our technical and legal support team is ready to answer inquiries at: ${PUBLIC_CONTACT_EMAIL}`}
+                  </p>
                 </div>
-              )
-            })}
+
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  <a
+                    href={`mailto:${PUBLIC_CONTACT_EMAIL}`}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs md:text-sm hover:opacity-90 transition-opacity shadow-sm"
+                  >
+                    <Mail className="h-4 w-4" />
+                    <span>{isAr ? 'راسلنا مباشرة' : 'Email Us'}</span>
+                  </a>
+                  <Link
+                    href="/contact"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-card border border-border text-foreground font-semibold text-xs md:text-sm hover:bg-muted/60 transition-colors shadow-sm"
+                  >
+                    <MessageSquareText className="h-4 w-4" />
+                    <span>{isAr ? 'نموذج التواصل' : 'Contact Form'}</span>
+                  </Link>
+                </div>
+              </div>
+            </article>
           </div>
         </section>
       </main>
