@@ -7,7 +7,7 @@
  * HOST_BASE_URL defaults to the canonical ERP Link production origin.
  */
 const baseUrl = (process.env.HOST_BASE_URL || 'https://erplink.bizsahla.com').replace(/\/$/, '')
-const marker = 'erplink-supabase-capacity-20261124-r2'
+const marker = 'erplink-supabase-capacity-20261124-r3'
 
 async function request(path, method = 'GET', headers = {}, body) {
   const response = await fetch(baseUrl + path, {

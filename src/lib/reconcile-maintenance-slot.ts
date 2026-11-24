@@ -1,17 +1,7 @@
 /**
- * Cross-process, durable reconciliation throttle.
- *
- * Hostinger may run several independent Node workers and an external cron.
- * A process-local setInterval guard does not prevent every worker from calling
- * the Zid API and reading the same Supabase configuration simultaneously.
- *
- * The RPC uses an atomic INSERT ... ON CONFLICT DO UPDATE WHERE to allow only
- * one claiming worker per slot per interval across the whole deployment.
- *
- * Backward-compatible: if the additive DB migration is not installed yet,
- * keep the pre-existing reconciliation behavior rather than silently skipping
- * recovery of missing webhooks. Once installed it is fail-open on transport
- * errors too; ordinary webhook retry and idempotency remain authoritative.
+ * Cross-process maintenance coalescing. The slot RPC is an atomic
+ * INSERT...ON CONFLICT update with a time cutoff, restricted to service_role.
+ * Invalid/unavailable responses fail *open*, preserving recovery and retries.
  */
 import { supabase } from './supabase'
 
@@ -24,24 +14,37 @@ export function maintenanceIntervalSeconds(milliseconds: number): number {
     Number.isFinite(milliseconds) ? Math.ceil(milliseconds / 1000) : 600))
 }
 
-export async function claimZidMaintenanceSlot(kind: ZidMaintenanceKind, intervalMs = 600_000): Promise<boolean> {
+async function claimMaintenanceSlot(name: string, intervalMs: number): Promise<boolean> {
   try {
     const { data, error } = await supabase.rpc('claim_erp_maintenance_slot', {
-      p_name: kind === 'orders' ? 'zid_orders_reconcile_v1' : 'zid_category_delete_audit_v1',
+      p_name: name,
       p_interval_seconds: maintenanceIntervalSeconds(intervalMs),
     })
-    if (!error) return data === true
+    if (!error && typeof data === 'boolean') return data
     if (!warned) {
       warned = true
-      // Never serialize provider credentials or response payloads.
-      console.warn('[Reconciliation] Distributed maintenance lease unavailable; falling back to prior schedule:', error.code)
+      console.warn('[Maintenance] Distributed lease unavailable; preserving previous recovery schedule:', error?.code || 'invalid_result')
     }
     return true
   } catch {
     if (!warned) {
       warned = true
-      console.warn('[Reconciliation] Lease RPC transport unavailable; retaining the prior recovery schedule')
+      console.warn('[Maintenance] Lease RPC transport unavailable; retaining prior recovery schedule')
     }
     return true
   }
+}
+
+export function claimZidMaintenanceSlot(kind: ZidMaintenanceKind, intervalMs = 600_000): Promise<boolean> {
+  return claimMaintenanceSlot(kind === 'orders'
+    ? 'zid_orders_reconcile_v1' : 'zid_category_delete_audit_v1', intervalMs)
+}
+
+/**
+ * Coalesce ONLY scheduled idle queue scans. Never use this for the
+ * event-driven wake path, startup recovery, active backlog or manual cron.
+ * A worker crash can delay an idle rescue by no more than a lease interval.
+ */
+export function claimIdleQueueDrainSlot(intervalMs = 120_000): Promise<boolean> {
+  return claimMaintenanceSlot('queue_idle_drain_v1', intervalMs)
 }

@@ -262,15 +262,28 @@ export function startSyncQueueRunner(): void {
   // Adapt polling to activity: queue receives a prompt direct drain on webhook
   // ingress, while an idle server avoids ~5 Supabase REST calls every 10 seconds.
   // A timeout is re-armed only after completion so cycles never pile up.
-  const scheduleDrain = (delay: number) => {
+  const scheduleDrain = (delay: number, idleScheduled: boolean) => {
     g.__syncQueueRunnerInterval = setTimeout(async () => {
       if (!g.__syncQueueRunnerStarted) return
-      const busy = await runDrainCycle()
-      if (g.__syncQueueRunnerStarted) scheduleDrain(busy ? POLL_INTERVAL_MS : IDLE_INTERVAL_MS)
+      let shouldPoll = true
+      if (idleScheduled && IDLE_INTERVAL_MS >= 60_000) {
+        // Only the scheduled *idle* safety-net scan is coalesced across Node
+        // workers. Boot recovery, direct webhook enqueue, manual cron, and
+        // retry wake-up must NEVER wait for this lease.
+        try {
+          const { claimIdleQueueDrainSlot } = await import('./reconcile-maintenance-slot')
+          shouldPoll = await claimIdleQueueDrainSlot(IDLE_INTERVAL_MS)
+        } catch {
+          // A broken lease RPC must not interrupt recovery of queued receipts.
+          shouldPoll = true
+        }
+      }
+      const busy = shouldPoll ? await runDrainCycle() : false
+      if (g.__syncQueueRunnerStarted) scheduleDrain(busy ? POLL_INTERVAL_MS : IDLE_INTERVAL_MS, !busy)
     }, delay)
     unref(g.__syncQueueRunnerInterval)
   }
-  scheduleDrain(POLL_INTERVAL_MS)
+  scheduleDrain(POLL_INTERVAL_MS, false)
 
   g.__syncQueueReconcileInterval = setInterval(() => {
     void runReconcileCycle()

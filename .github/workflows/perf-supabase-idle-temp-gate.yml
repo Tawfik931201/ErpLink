@@ -1,0 +1,33 @@
+name: Temporary Phase3 Supabase idle safety release gate
+on:
+  push:
+    branches:
+      - perf/supabase-idle-coalescing-20261124
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+      SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+      ENCRYPTION_KEY: '1111111111111111111111111111111111111111111111111111111111111111'
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jb20k
+      CLERK_SECRET_KEY: sk_test_placeholder_for_offline_build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm test -- --runInBand
+      - run: npm run build

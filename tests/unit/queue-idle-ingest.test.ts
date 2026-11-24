@@ -22,7 +22,11 @@ describe('idle Supabase API ingest budget', () => {
   it('uses an adaptive idle queue poll, rather than polling every ten seconds forever', () => {
     const code = read('sync-queue-runner.ts')
     expect(code).toContain("envInterval('SYNC_QUEUE_IDLE_INTERVAL_MS', 120_000, 30_000)")
-    expect(code).toContain('scheduleDrain(busy ? POLL_INTERVAL_MS : IDLE_INTERVAL_MS)')
+    expect(code).toContain('scheduleDrain(busy ? POLL_INTERVAL_MS : IDLE_INTERVAL_MS, !busy)')
+    expect(code).toContain('if (idleScheduled && IDLE_INTERVAL_MS >= 60_000)')
+    expect(code).toContain('claimIdleQueueDrainSlot(IDLE_INTERVAL_MS)')
+    expect(code).toContain('shouldPoll ? await runDrainCycle() : false')
+    expect(code).toContain('scheduleDrain(POLL_INTERVAL_MS, false)')
     expect(code).toContain('export function wakeQueueRunnerAt(')
     expect(code).not.toContain('g.__syncQueueRunnerInterval = setInterval(')
     expect(code).toContain('Math.min(2_147_483_647, Math.max(0, dueAt - Date.now()))')
