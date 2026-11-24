@@ -780,7 +780,8 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                                   )}
                                 >
                                   {imageAttachments.map(attachment => {
-                                    const previewUrl = '/api/tickets/attachments?id=' + attachment.id + '&preview=1'
+                                    const url = '/api/tickets/attachments?id=' + attachment.id
+                                    const previewUrl = url + '&preview=1'
                                     return (
                                       <button
                                         key={attachment.id}
