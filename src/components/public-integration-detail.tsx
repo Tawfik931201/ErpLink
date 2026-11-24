@@ -14,7 +14,6 @@ export async function PublicIntegrationDetail({ platform }: { platform: Integrat
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const isAr = lang === 'ar'
   const details = integrations[platform]
-  const here = `/integrations/${platform}-odoo`
   const linkClass = 'inline-flex rounded-lg border border-border px-5 py-3 text-sm font-bold transition-colors hover:border-primary hover:text-primary'
 
   const structuredData = integrationPageStructuredData(platform, lang)
