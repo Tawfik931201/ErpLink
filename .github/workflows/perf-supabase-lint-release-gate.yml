@@ -41,12 +41,22 @@ jobs:
           fi
           git diff --check
           git diff --stat
+      - name: Fix only existing test-file lint errors
+        shell: bash
+        run: |
+          ./node_modules/.bin/eslint tests --ext .ts --format json > /tmp/erplink-tests-lint.json || true
+          mapfile -t files < <(node -e 'for (const item of require("/tmp/erplink-tests-lint.json")) if (item.errorCount > 0) console.log(item.filePath)')
+          echo "Test files with blocking ESLint errors: ${#files[@]}"
+          if [ "${#files[@]}" -gt 0 ]; then
+            ./node_modules/.bin/eslint "${files[@]}" --fix || true
+          fi
+          git diff --check
       - name: Commit scoped formatting to the feature branch
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- src/
+          git add -- src/ tests/
           if ! git diff --cached --quiet; then
             git commit -m "style: repair remaining existing import order lint errors"
             git push origin HEAD:refs/heads/perf/supabase-free-tier-optimization-20261124
@@ -56,8 +66,16 @@ jobs:
         run: |
           ./node_modules/.bin/eslint src --ext .ts,.tsx --format json > /tmp/erplink-lint-after.json || true
           node -e 'const path=require("path");for(const f of require("/tmp/erplink-lint-after.json")) for(const m of f.messages) if(m.severity===2) console.log(path.relative(process.cwd(),f.filePath)+":"+m.line+":"+m.column+" "+m.ruleId+" "+m.message)'
+          ./node_modules/.bin/eslint tests --ext .ts --format json > /tmp/erplink-test-after.json || true
+          node -e 'const path=require("path");for(const f of require("/tmp/erplink-test-after.json")) for(const m of f.messages) if(m.severity===2) console.log(path.relative(process.cwd(),f.filePath)+":"+m.line+":"+m.column+" "+m.ruleId+" "+m.message)'
       - name: Full repository lint
-        run: npm run lint
+        shell: bash
+        run: |
+          npm run lint > /tmp/erplink-full-lint.log 2>&1 || {
+            grep -E 'Error:|error ' /tmp/erplink-full-lint.log | head -100 || true
+            exit 1
+          }
+          echo "Full repository lint passed."
       - name: TypeScript
         run: npm run type-check
       - name: Full Jest regression suite
