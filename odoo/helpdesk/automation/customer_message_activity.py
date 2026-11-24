@@ -1,6 +1,6 @@
 # Odoo Studio server action 242, automation 4 (on_message_received)
 # Creates an Odoo Activities systray entry per customer reply. No emails.
-if record and record.x_channel == 'app' and record.x_ticket_stage not in ('closed', 'resolved') and record.x_partner_id:
+if record and record.x_ticket_stage not in ('closed', 'resolved') and record.x_partner_id:
     msg = env['mail.message'].sudo().search([
         ('model', '=', 'x_erplink_support_ticket'),
         ('res_id', '=', record.id),
