@@ -1,7 +1,6 @@
 import { withErpTarget } from '../../src/lib/erp-execution-target'
 import { legacyFixedMappingTablesEnabled } from '../../src/lib/legacy-fixed-mappings'
 import { processFixedMappingFallback } from '../../src/lib/sync/mappings'
-
 import { supabase } from '../mocks/supabase'
 
 describe('legacy fixed mapping Supabase table access', () => {
