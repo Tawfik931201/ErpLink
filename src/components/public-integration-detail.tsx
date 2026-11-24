@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { PublicSiteFooter } from '@/components/public-site-footer'
 import { PublicSiteHeader } from '@/components/public-site-header'
 import { integrations, type IntegrationPlatform } from '@/lib/integration-content'
+import { getRelatedGuidesForPlatform } from '@/lib/knowledge-center'
 import { integrationPageStructuredData } from '@/lib/public-structured-data'
 import { resolveLanguage } from '@/lib/translations'
 
@@ -14,6 +15,7 @@ export async function PublicIntegrationDetail({ platform }: { platform: Integrat
   const lang = resolveLanguage(cookieStore.get('lang')?.value)
   const isAr = lang === 'ar'
   const details = integrations[platform]
+  const relatedGuides = getRelatedGuidesForPlatform(platform)
   const linkClass = 'inline-flex rounded-lg border border-border px-5 py-3 text-sm font-bold transition-colors hover:border-primary hover:text-primary'
 
   const structuredData = integrationPageStructuredData(platform, lang)
@@ -93,6 +95,60 @@ export async function PublicIntegrationDetail({ platform }: { platform: Integrat
             </p>
           </div>
         </section>
+        {relatedGuides.length > 0 && (
+          <section className="border-t border-border bg-card/40 px-6 py-14 md:px-12">
+            <div className="mx-auto max-w-5xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-black text-foreground md:text-2xl">
+                    {isAr ? 'أدلة ذات صلة بهذا التكامل' : 'Related Integration Guides'}
+                  </h2>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {isAr
+                      ? `شروحات إجرائية وخطوات تفصيلية لربط واختبار ${details.platformName} مع أودوو`
+                      : `Step-by-step practical guides for testing and managing ${details.platformName} with Odoo`}
+                  </p>
+                </div>
+                <Link
+                  href="/guides"
+                  className="hidden sm:inline-flex text-xs font-bold text-primary hover:underline"
+                >
+                  {isAr ? 'جميع الأدلة' : 'All Guides'} →
+                </Link>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {relatedGuides.map((guide) => (
+                  <article
+                    key={guide.meta.slug}
+                    className="flex flex-col justify-between rounded-xl border border-border bg-background p-5 transition-colors hover:border-primary/50"
+                  >
+                    <div>
+                      <span className="text-[10px] font-mono font-semibold text-muted-foreground uppercase">
+                        {guide.meta.readingTimeMinutes} {isAr ? 'دقائق قراءة' : 'min read'}
+                      </span>
+                      <h3 className="mt-2 text-sm font-bold text-foreground">
+                        <Link href={`/guides/${guide.meta.slug}`} className="hover:text-primary transition-colors">
+                          {guide.meta.title[lang]}
+                        </Link>
+                      </h3>
+                      <p className="mt-2 text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                        {guide.meta.description[lang]}
+                      </p>
+                    </div>
+                    <Link
+                      href={`/guides/${guide.meta.slug}`}
+                      className="mt-4 inline-flex items-center text-xs font-bold text-primary hover:underline"
+                    >
+                      {isAr ? 'اقرأ الدليل' : 'Read Guide'} →
+                    </Link>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
         <section className="border-t border-border px-6 py-12 md:px-12">
           <div className="mx-auto max-w-5xl">
             <h2 className="mb-4 text-xl font-bold">{isAr ? 'استكشف ربط منصة أخرى' : 'Explore another integration'}</h2>

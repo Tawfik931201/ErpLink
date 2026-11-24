@@ -101,6 +101,16 @@
     <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/integrations/shopify-odoo" />
   </url>
   <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides" />
+  </url>
+  <url>
     <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist</loc>
     <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist" />
     <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist" />
@@ -109,5 +119,335 @@
     <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist</loc>
     <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-checklist" />
     <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-checklist" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-setup</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-setup" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-setup" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-setup</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-setup" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-setup" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-stock-sync</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-stock-sync" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-stock-sync" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-stock-sync</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-stock-sync" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-stock-sync" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-vat-15</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-vat-15" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-vat-15" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-vat-15</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-vat-15" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-vat-15" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-returns</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-returns" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-returns" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/zid-odoo-returns</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/zid-odoo-returns" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/zid-odoo-returns" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/salla-odoo-order-mapping</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/salla-odoo-order-mapping" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/salla-odoo-order-mapping" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/salla-odoo-order-mapping</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/salla-odoo-order-mapping" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/salla-odoo-order-mapping" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/guides/shopify-odoo-webhooks</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/shopify-odoo-webhooks" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/shopify-odoo-webhooks" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/guides/shopify-odoo-webhooks</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/guides/shopify-odoo-webhooks" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/guides/shopify-odoo-webhooks" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/getting-started</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/getting-started" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/getting-started" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/getting-started</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/getting-started" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/getting-started" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/create-account</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/create-account" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/create-account" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/create-account</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/create-account" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/create-account" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/workspaces</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/workspaces" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/workspaces" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/workspaces</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/workspaces" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/workspaces" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/connect/zid</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/zid" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/zid" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/connect/zid</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/zid" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/zid" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/connect/salla</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/salla" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/salla" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/connect/salla</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/salla" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/salla" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/connect/shopify</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/shopify" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/shopify" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/connect/shopify</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/shopify" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/shopify" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/connect/odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/connect/odoo</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/connect/odoo" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/connect/odoo" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/overview</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/overview" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/overview" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/overview</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/overview" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/overview" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/orders</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/orders" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/orders" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/orders</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/orders" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/orders" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/products</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/products" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/products" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/products</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/products" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/products" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/customers</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/customers" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/customers" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/customers</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/customers" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/customers" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/categories</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/categories" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/categories" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/categories</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/categories" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/categories" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/mapping/custom-fields</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/custom-fields" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/custom-fields" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/mapping/custom-fields</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/mapping/custom-fields" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/mapping/custom-fields" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/orders</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/orders" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/orders" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/orders</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/orders" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/orders" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/inventory</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/inventory" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/inventory" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/inventory</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/inventory" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/inventory" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/taxes</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/taxes" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/taxes" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/taxes</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/taxes" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/taxes" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/returns</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/returns" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/returns" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/returns</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/returns" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/returns" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/logs</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/logs" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/logs" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/logs</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/logs" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/logs" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/queue</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/queue" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/queue" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/queue</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/queue" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/queue" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/initial-transfer</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/initial-transfer" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/initial-transfer" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/initial-transfer</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/initial-transfer" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/initial-transfer" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/notifications</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/notifications" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/notifications" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/notifications</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/notifications" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/notifications" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/team</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/team" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/team" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/team</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/team" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/team" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/billing</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/billing" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/billing" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/billing</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/billing" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/billing" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/support</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/support" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/support" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/support</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/support" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/support" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/troubleshooting</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/troubleshooting" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/troubleshooting" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/troubleshooting</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/troubleshooting" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/troubleshooting" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/ar-sa/docs/faq</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/faq" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/faq" />
+  </url>
+  <url>
+    <loc>https://erplink.bizsahla.com/en-us/docs/faq</loc>
+    <xhtml:link rel="alternate" hreflang="ar-SA" href="https://erplink.bizsahla.com/ar-sa/docs/faq" />
+    <xhtml:link rel="alternate" hreflang="en-US" href="https://erplink.bizsahla.com/en-us/docs/faq" />
   </url>
 </urlset>

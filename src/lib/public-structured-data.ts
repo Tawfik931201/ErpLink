@@ -1,4 +1,5 @@
 import { integrations, type IntegrationPlatform, type SiteLanguage } from '@/lib/integration-content'
+import { allGuides, type GuideContent } from '@/lib/knowledge-center'
 
 const SITE = 'https://erplink.bizsahla.com'
 const ORGANIZATION = `${SITE}/#organization`
@@ -123,6 +124,97 @@ export function zidOdooGuideStructuredData(lang: SiteLanguage) {
         '@id': `${url}#webpage`,
         url,
         name: headline,
+        inLanguage: languageOf(lang),
+        isPartOf: { '@id': WEBSITE },
+        mainEntity: { '@id': `${url}#article` },
+        breadcrumb: { '@id': `${url}#breadcrumb` },
+      },
+    ],
+  } as const
+}
+
+export function knowledgeCenterStructuredData(lang: SiteLanguage) {
+  const url = canonical(lang, '/guides')
+  const headline = lang === 'ar' ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge Center'
+  const description = lang === 'ar'
+    ? 'أدلة عملية وتطبيقية لفهم ربط المتاجر الإلكترونية بأنظمة ERP، ومزامنة الطلبات والمخزون والضرائب والمرتجعات.'
+    : 'Practical, in-depth guides to connecting e-commerce stores with ERP systems: orders, inventory, taxes, and returns.'
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'BreadcrumbList',
+        '@id': `${url}#breadcrumb`,
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: lang === 'ar' ? 'الرئيسية' : 'Home', item: canonical(lang, '') },
+          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center', item: url },
+        ],
+      },
+      {
+        '@type': 'CollectionPage',
+        '@id': `${url}#webpage`,
+        url,
+        name: headline,
+        description,
+        inLanguage: languageOf(lang),
+        isPartOf: { '@id': WEBSITE },
+        mainEntity: { '@id': `${url}#guides` },
+        breadcrumb: { '@id': `${url}#breadcrumb` },
+      },
+      {
+        '@type': 'ItemList',
+        '@id': `${url}#guides`,
+        itemListElement: allGuides.map((guide, index) => ({
+          '@type': 'ListItem',
+          position: index + 1,
+          name: guide.meta.title[lang],
+          url: canonical(lang, `/guides/${guide.meta.slug}`),
+        })),
+      },
+    ],
+  } as const
+}
+
+export function guideArticleStructuredData(guide: GuideContent, lang: SiteLanguage) {
+  const url = canonical(lang, `/guides/${guide.meta.slug}`)
+  const headline = guide.meta.h1Title[lang]
+  const description = guide.meta.description[lang]
+
+  return {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'BreadcrumbList',
+        '@id': `${url}#breadcrumb`,
+        itemListElement: [
+          { '@type': 'ListItem', position: 1, name: lang === 'ar' ? 'الرئيسية' : 'Home', item: canonical(lang, '') },
+          { '@type': 'ListItem', position: 2, name: lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center', item: canonical(lang, '/guides') },
+          { '@type': 'ListItem', position: 3, name: guide.meta.title[lang], item: url },
+        ],
+      },
+      {
+        '@type': 'TechArticle',
+        '@id': `${url}#article`,
+        headline,
+        description,
+        url,
+        inLanguage: languageOf(lang),
+        datePublished: guide.meta.publishedAt,
+        dateModified: guide.meta.updatedAt,
+        author: { '@id': ORGANIZATION },
+        publisher: { '@id': ORGANIZATION },
+        mainEntityOfPage: { '@id': `${url}#webpage` },
+        ...(guide.meta.relatedIntegrationPath
+          ? { about: { '@id': `${canonical(lang, guide.meta.relatedIntegrationPath)}#integration-service` } }
+          : {}),
+      },
+      {
+        '@type': 'WebPage',
+        '@id': `${url}#webpage`,
+        url,
+        name: headline,
+        description,
         inLanguage: languageOf(lang),
         isPartOf: { '@id': WEBSITE },
         mainEntity: { '@id': `${url}#article` },

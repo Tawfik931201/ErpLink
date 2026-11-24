@@ -3,7 +3,53 @@ import { readFileSync } from 'node:fs'
 
 const read = (path) => readFileSync(path, 'utf8')
 const base = 'https://erplink.bizsahla.com'
-const paths = ['', 'about', 'pricing', 'contact', 'privacy', 'terms', 'integrations', 'integrations/zid-odoo', 'integrations/salla-odoo', 'integrations/shopify-odoo', 'guides/zid-odoo-checklist']
+const paths = [
+  '',
+  'about',
+  'pricing',
+  'contact',
+  'privacy',
+  'terms',
+  'integrations',
+  'integrations/zid-odoo',
+  'integrations/salla-odoo',
+  'integrations/shopify-odoo',
+  'guides',
+  'guides/zid-odoo-checklist',
+  'guides/zid-odoo-setup',
+  'guides/zid-odoo-stock-sync',
+  'guides/zid-odoo-vat-15',
+  'guides/zid-odoo-returns',
+  'guides/salla-odoo-order-mapping',
+  'guides/shopify-odoo-webhooks',
+  'docs',
+  'docs/getting-started',
+  'docs/create-account',
+  'docs/workspaces',
+  'docs/connect/zid',
+  'docs/connect/salla',
+  'docs/connect/shopify',
+  'docs/connect/odoo',
+  'docs/mapping/overview',
+  'docs/mapping/orders',
+  'docs/mapping/products',
+  'docs/mapping/customers',
+  'docs/mapping/categories',
+  'docs/mapping/custom-fields',
+  'docs/orders',
+  'docs/inventory',
+  'docs/taxes',
+  'docs/returns',
+  'docs/logs',
+  'docs/queue',
+  'docs/initial-transfer',
+  'docs/notifications',
+  'docs/team',
+  'docs/billing',
+  'docs/support',
+  'docs/troubleshooting',
+  'docs/faq',
+]
 const locales = ['ar-sa', 'en-us']
 const sitemap = read('public/sitemap.xml')
 const robots = read('public/robots.txt')
@@ -29,6 +75,7 @@ for (const area of ['app', 'admin', 'api', 'sign-in', 'sign-up']) {
   assert.ok(robots.includes(`Disallow: /${area}`))
 }
 assert.match(llms, /Private dashboards, support tickets, customer records/)
+assert.match(llms, /Official Documentation Center/)
 for (const [route, path] of [
   ['/', 'src/app/(public)/page.tsx'],
   ['/about', 'src/app/(public)/about/page.tsx'],
@@ -40,12 +87,16 @@ for (const [route, path] of [
   ['/integrations/zid-odoo', 'src/app/(public)/integrations/zid-odoo/page.tsx'],
   ['/integrations/salla-odoo', 'src/app/(public)/integrations/salla-odoo/page.tsx'],
   ['/integrations/shopify-odoo', 'src/app/(public)/integrations/shopify-odoo/page.tsx'],
+  ['/guides', 'src/app/(public)/guides/page.tsx'],
   ['/guides/zid-odoo-checklist', 'src/app/(public)/guides/zid-odoo-checklist/page.tsx'],
 ]) {
   assert.ok(read(path).includes(`publicPageMetadata('${route}')`), `missing public metadata: ${route}`)
 }
+assert.ok(read('src/app/(public)/guides/[slug]/page.tsx').includes('publicPageMetadata(path)'))
 assert.ok(read('src/app/(public)/page.tsx').includes('application/ld+json'))
 assert.ok(read('src/components/public-site-footer.tsx').includes('href="/about"'))
+assert.ok(read('src/components/public-site-footer.tsx').includes('href="/guides"'))
+assert.ok(read('src/components/public-site-footer.tsx').includes('href="/docs"'))
 assert.equal(read('src/lib/public-contact.ts').includes("export const PUBLIC_CONTACT_EMAIL = 'info@bizsahla.com'"), true)
 assert.ok(read('src/components/public-site-footer.tsx').includes('mailto:${PUBLIC_CONTACT_EMAIL}'))
 assert.ok(read('src/lib/public-seo.ts').includes('email: PUBLIC_CONTACT_EMAIL'))
@@ -56,24 +107,31 @@ for (const platform of ['zid', 'salla', 'shopify']) {
   assert.ok(read('src/components/public-site-footer.tsx').includes(`href="/integrations/${platform}-odoo"`))
 }
 assert.ok(read('src/components/public-site-header.tsx').includes('href="/integrations"'))
+assert.ok(read('src/components/public-site-header.tsx').includes('href="/docs"'))
+assert.ok(read('src/components/public-site-header.tsx').includes('href="/guides"'))
+assert.ok(read('src/app/(public)/page.tsx').includes('href="/guides"'))
 assert.ok(read('src/app/(public)/guides/zid-odoo-checklist/page.tsx').includes('scenarios.map'))
 
 const semanticSchema = read('src/lib/public-structured-data.ts')
 const integrationRender = read('src/components/public-integration-detail.tsx')
 const hubRender = read('src/app/(public)/integrations/page.tsx')
 const guideRender = read('src/app/(public)/guides/zid-odoo-checklist/page.tsx')
+const guidesIndexRender = read('src/app/(public)/guides/page.tsx')
+const guideDetailRender = read('src/app/(public)/guides/[slug]/page.tsx')
 assert.ok(integrationRender.includes('integrationPageStructuredData(platform, lang)'))
 assert.ok(hubRender.includes('integrationsIndexStructuredData(lang)'))
 assert.ok(guideRender.includes('zidOdooGuideStructuredData(lang)'))
-for (const route of [integrationRender, hubRender, guideRender]) {
+assert.ok(guidesIndexRender.includes('knowledgeCenterStructuredData(lang)'))
+assert.ok(guideDetailRender.includes('guideArticleStructuredData(guide, lang)'))
+for (const route of [integrationRender, hubRender, guideRender, guidesIndexRender, guideDetailRender]) {
   assert.ok(route.includes('application/ld+json'), 'Missing structured data render')
   assert.ok(route.includes('JSON.stringify(structuredData)'), 'Structured data render must be derived from public content')
 }
-for (const type of ['BreadcrumbList', 'Service', 'CollectionPage', 'ItemList', 'Article', 'WebPage']) {
+for (const type of ['BreadcrumbList', 'Service', 'CollectionPage', 'ItemList', 'Article', 'TechArticle', 'WebPage']) {
   assert.ok(semanticSchema.includes(`'@type': '${type}'`), `Missing supported public schema type: ${type}`)
 }
 assert.ok(semanticSchema.includes("provider: { '@id': ORGANIZATION }"))
 assert.ok(semanticSchema.includes("author: { '@id': ORGANIZATION }"))
 assert.doesNotMatch(semanticSchema, /customerId|webhookSecret|SUPABASE_SERVICE_ROLE_KEY|order_id/)
 
-console.log('Public SEO checks passed: 22 localized URLs, private-route exclusions, intent pages, metadata and structured data.')
+console.log(`Public SEO checks passed: ${paths.length * locales.length} localized URLs, private-route exclusions, intent pages, metadata and structured data.`)

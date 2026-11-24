@@ -1,25 +1,45 @@
+import { DOCS_SECTIONS } from '@/lib/documentation/docs-navigation'
+import { getDocArticleBySlug } from '@/lib/documentation/docs-registry'
 import { integrations, type IntegrationPlatform } from '@/lib/integration-content'
+import { allGuides, getGuideBySlug, type GuideSlug } from '@/lib/knowledge-center'
 import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 
 export const PUBLIC_AGENT_PATHS = [
   '/', '/about', '/contact', '/integrations',
   '/integrations/zid-odoo', '/integrations/salla-odoo',
-  '/integrations/shopify-odoo', '/guides/zid-odoo-checklist',
+  '/integrations/shopify-odoo', '/guides',
+  '/guides/zid-odoo-checklist',
+  '/guides/zid-odoo-setup',
+  '/guides/zid-odoo-stock-sync',
+  '/guides/zid-odoo-vat-15',
+  '/guides/zid-odoo-returns',
+  '/guides/salla-odoo-order-mapping',
+  '/guides/shopify-odoo-webhooks',
+  '/docs',
 ] as const
 
-export type AgentPublicPath = typeof PUBLIC_AGENT_PATHS[number]
+export type AgentPublicPath = typeof PUBLIC_AGENT_PATHS[number] | string
 export type AgentLanguage = 'ar' | 'en'
 
-export function isAgentPublicPath(value: string): value is AgentPublicPath {
-  return (PUBLIC_AGENT_PATHS as readonly string[]).includes(value)
+export function isAgentPublicPath(value: string): boolean {
+  if ((PUBLIC_AGENT_PATHS as readonly string[]).includes(value)) return true
+  if (value.startsWith('/guides/')) {
+    const slug = value.replace('/guides/', '')
+    return allGuides.some((g) => g.meta.slug === slug)
+  }
+  if (value.startsWith('/docs/')) {
+    const slug = value.replace('/docs/', '')
+    return !!getDocArticleBySlug(slug)
+  }
+  return false
 }
 
-export function agentPageUrl(path: AgentPublicPath, lang: AgentLanguage): string {
+export function agentPageUrl(path: string, lang: AgentLanguage): string {
   const prefix = lang === 'ar' ? 'ar-sa' : 'en-us'
   return `https://erplink.bizsahla.com/${prefix}${path === '/' ? '' : path}`
 }
 
-const platformPaths: Record<IntegrationPlatform, AgentPublicPath> = {
+const platformPaths: Record<IntegrationPlatform, string> = {
   zid: '/integrations/zid-odoo',
   salla: '/integrations/salla-odoo',
   shopify: '/integrations/shopify-odoo',
@@ -34,19 +54,64 @@ export function agentIntegrationList(lang: AgentLanguage) {
   }))
 }
 
+export function agentGuideList(lang: AgentLanguage) {
+  return allGuides.map((g) => ({
+    slug: g.meta.slug,
+    title: g.meta.h1Title[lang],
+    summary: g.meta.summary[lang],
+    category: g.meta.category,
+    readingTimeMinutes: g.meta.readingTimeMinutes,
+    url: agentPageUrl(`/guides/${g.meta.slug}`, lang),
+  }))
+}
+
+export function agentDocsList(lang: AgentLanguage) {
+  return DOCS_SECTIONS.map((sec) => ({
+    category: sec.category,
+    categoryTitle: sec.title[lang],
+    articles: sec.items.map((item) => ({
+      title: item.title[lang],
+      url: agentPageUrl(item.href, lang),
+    })),
+  }))
+}
+
 /**
- * Curated public-only representation of marketing and integration copy.
+ * Curated public-only representation of marketing, documentation, guides and integration copy.
  * Deliberately excludes pricing figures, legal terms, private dashboards,
  * auth tokens, tickets, orders, invoices, webhooks, and connected accounts.
  */
-export function publicMarkdown(path: AgentPublicPath, lang: AgentLanguage): string {
+export function publicMarkdown(path: string, lang: AgentLanguage): string {
   const isAr = lang === 'ar'
   const url = agentPageUrl(path, lang)
   const links = agentIntegrationList(lang)
   const contact = isAr
     ? `للتواصل مع فريق ERP Link: ${PUBLIC_CONTACT_EMAIL} أو صفحة التواصل.`
     : `Contact ERP Link at ${PUBLIC_CONTACT_EMAIL} or through the contact page.`
-  const footer = `\n\n---\n\n[ERP Link](${agentPageUrl('/', lang)}) · [${isAr ? 'التكاملات' : 'Integrations'}](${agentPageUrl('/integrations', lang)}) · [${isAr ? 'تواصل' : 'Contact'}](${agentPageUrl('/contact', lang)})\nSource: ${url}\n`
+  const footer = `\n\n---\n\n[ERP Link](${agentPageUrl('/', lang)}) · [${isAr ? 'التكاملات' : 'Integrations'}](${agentPageUrl('/integrations', lang)}) · [${isAr ? 'التوثيق' : 'Docs'}](${agentPageUrl('/docs', lang)}) · [${isAr ? 'مركز المعرفة' : 'Knowledge Center'}](${agentPageUrl('/guides', lang)}) · [${isAr ? 'تواصل' : 'Contact'}](${agentPageUrl('/contact', lang)})\nSource: ${url}\n`
+
+  // 1. Documentation individual article
+  if (path.startsWith('/docs/')) {
+    const slug = path.replace('/docs/', '')
+    const doc = getDocArticleBySlug(slug)
+    if (doc) {
+      return `# ${doc.title[lang]}\n\n${doc.description[lang]}\n\n${doc.content[lang]}\n\n${contact}${footer}`
+    }
+  }
+
+  // 2. Documentation index
+  if (path === '/docs') {
+    const sectionsText = DOCS_SECTIONS.map((sec) => {
+      const itemsList = sec.items.map((item) => `- [${item.title[lang]}](${agentPageUrl(item.href, lang)})`).join('\n')
+      return `## ${sec.title[lang]}\n\n${itemsList}`
+    }).join('\n\n')
+
+    return `# ${isAr ? 'مركز التوثيق الرسمي — ERP Link' : 'Official ERP Link Documentation & User Guide'}\n\n${
+      isAr
+        ? 'أدلة الاستخدام والتشغيل الكاملة لربط متاجر زد وسلة وشوبيفاي بنظام أودوو Odoo ERP.'
+        : 'Official user guides and documentation for connecting Zid, Salla, and Shopify with Odoo ERP.'
+    }\n\n${sectionsText}\n\n${contact}${footer}`
+  }
 
   const integrationPath = (Object.keys(platformPaths) as IntegrationPlatform[])
     .find((platform) => platformPaths[platform] === path)
@@ -69,25 +134,64 @@ export function publicMarkdown(path: AgentPublicPath, lang: AgentLanguage): stri
     return `# ${isAr ? 'ربط المتاجر الإلكترونية بأودوو' : 'E-commerce and Odoo integrations'}\n\n${isAr ? 'دليل ربط متاجر زد وسلة وشوبيفاي مع أودوو، مع شرح إعداد الطلبات والمخزون والعملاء.' : 'Practical guides to connect Zid, Salla and Shopify stores with Odoo: orders, inventory and customers.'}\n\n${items}\n\n${contact}${footer}`
   }
 
-  if (path === '/guides/zid-odoo-checklist') {
-    const checklist = isAr ? [
-      'تحديد مصدر الطلبات والكمية والمخزن قبل الربط.',
-      'مطابقة SKU والمتغيرات والعملاء.',
-      'مراجعة الضريبة والشحن والخصومات وحالات الطلب.',
-      'اختبار طلب جديد وإكماله ومقارنة أمر البيع بالفاتورة.',
-      'اختبار المرتجع الجزئي والكامل وكميات المخزون.',
-      'التأكد من عدم إنشاء طلبات أو فواتير مكررة عند إعادة إرسال الحدث.',
-      'فحص نجاح السجلات والفشل والتخطي والطابور قبل التشغيل.',
-    ] : [
-      'Decide the source for orders, stock and warehouses before connection.',
-      'Match SKUs, variants and customers.',
-      'Review VAT, shipping, discounts and order status mappings.',
-      'Test a new order and completion, reconciling sales orders with invoices.',
-      'Test partial/full returns and inventory quantities.',
-      'Ensure retried events never create duplicate orders or invoices.',
-      'Review successful, failed and skipped logs and queue entries before launch.',
-    ]
-    return `# ${isAr ? 'دليل تجهيز واختبار ربط زد بأودوو' : 'Zid–Odoo setup and testing checklist'}\n\n${checklist.map((item,i)=>`${i+1}. ${item}`).join('\n')}\n\n[Zid + Odoo](${agentPageUrl('/integrations/zid-odoo',lang)})${footer}`
+  if (path === '/guides') {
+    const guideLinks = allGuides
+      .map((g) => `- [${g.meta.h1Title[lang]}](${agentPageUrl(`/guides/${g.meta.slug}`, lang)}) — ${g.meta.summary[lang]}`)
+      .join('\n')
+    return `# ${isAr ? 'مركز معرفة ERP Link' : 'ERP Link Knowledge Center'}\n\n${
+      isAr
+        ? 'أدلة إرشادية وتطبيقية متقدمة لربط المتاجر الإلكترونية (زد، سلة، شوبيفاي) بنظام أودوو Odoo ERP، مع شروحات عملية للمخزون والضرائب والمرتجعات.'
+        : 'In-depth practical guides for connecting Zid, Salla, and Shopify stores with Odoo ERP: inventory sync, VAT compliance, and returns.'
+    }\n\n${guideLinks}\n\n${contact}${footer}`
+  }
+
+  if (path.startsWith('/guides/')) {
+    const slug = path.replace('/guides/', '') as GuideSlug
+    const guide = getGuideBySlug(slug)
+    if (guide) {
+      const sections = guide.sections
+        .map((s) => {
+          let text = `## ${s.title[lang]}`
+          if (s.subsections?.length) {
+            text += `\n\n${s.subsections
+              .map((sub) => {
+                let subText = `### ${sub.title[lang]}`
+                if (sub.paragraphs?.length) {
+                  subText += `\n\n${sub.paragraphs.map((p) => p[lang]).join('\n\n')}`
+                }
+                if (sub.steps?.length) {
+                  subText += `\n\n${sub.steps.map((st, i) => `${i + 1}. **${st.title[lang]}:** ${st.text[lang]}`).join('\n')}`
+                }
+                if (sub.bullets?.length) {
+                  subText += `\n\n${sub.bullets.map((b) => `- ${b[lang]}`).join('\n')}`
+                }
+                if (sub.table) {
+                  const th = `| ${sub.table.headers.map((h) => h[lang]).join(' | ')} |`
+                  const sep = `| ${sub.table.headers.map(() => '---').join(' | ')} |`
+                  const rows = sub.table.rows.map((r) => `| ${r.map((c) => c[lang]).join(' | ')} |`).join('\n')
+                  subText += `\n\n${th}\n${sep}\n${rows}`
+                }
+                if (sub.callout) {
+                  subText += `\n\n> **${sub.callout.title[lang]}:** ${sub.callout.text[lang]}`
+                }
+                return subText
+              })
+              .join('\n\n')}`
+          }
+          return text
+        })
+        .join('\n\n')
+
+      const takeaways = guide.summaryKeyTakeaways
+        ? `\n\n## ${isAr ? 'أهم النقاط المستفادة' : 'Key Practical Takeaways'}\n\n${guide.summaryKeyTakeaways[lang].map((item) => `- ${item}`).join('\n')}`
+        : ''
+
+      const faqs = guide.faqs.length
+        ? `\n\n## ${isAr ? 'الأسئلة الشائعة' : 'Frequently Asked Questions'}\n\n${guide.faqs.map((f) => `### ${f.question[lang]}\n\n${f.answer[lang]}`).join('\n\n')}`
+        : ''
+
+      return `# ${guide.meta.h1Title[lang]}\n\n${guide.meta.summary[lang]}\n\n${sections}${takeaways}${faqs}\n\n${contact}${footer}`
+    }
   }
 
   const basic: Record<'/' | '/about' | '/contact', { ar: [string,string]; en: [string,string] }> = {
@@ -104,6 +208,9 @@ export function publicMarkdown(path: AgentPublicPath, lang: AgentLanguage): stri
       en: ['Contact ERP Link', 'Contact the team about store integration, products, synchronization or subscriptions.'],
     },
   }
-  const entry=basic[path as '/'|'/about'|'/contact']
-  return `# ${entry[lang][0]}\n\n${entry[lang][1]}\n\n${links.map(item=>`- [${item.title}](${item.url})`).join('\n')}\n\n${contact}${footer}`
+  const entry = basic[path as '/' | '/about' | '/contact']
+  if (entry) {
+    return `# ${entry[lang][0]}\n\n${entry[lang][1]}\n\n${links.map((item) => `- [${item.title}](${item.url})`).join('\n')}\n\n${contact}${footer}`
+  }
+  return `# ERP Link\n\n${contact}${footer}`
 }

@@ -1,9 +1,9 @@
 import { readFileSync } from 'fs'
 import path from 'path'
 
+import { publicMarkdown } from '@/lib/public-agent-content'
 import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
 import { homepageStructuredData } from '@/lib/public-seo'
-import { publicMarkdown } from '@/lib/public-agent-content'
 
 const read = (...segments: string[]) => readFileSync(path.join(process.cwd(), ...segments), 'utf8')
 

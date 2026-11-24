@@ -645,6 +645,72 @@ export default async function HomePage() {
           </div>
         </section>
 
+        {/* ── Learn How to Connect to ERP (Knowledge Center) ──── */}
+        <section className="border-t border-border bg-secondary/15 px-6 py-16 md:px-12 md:py-20" aria-labelledby="knowledge-center-home-heading">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className={EYEBROW}>erp-link / knowledge-center</p>
+                <h2 id="knowledge-center-home-heading" className="mt-3 text-2xl font-black md:text-4xl">
+                  {isAr ? 'تعلّم كيف تربط متجرك بأنظمة ERP' : 'Learn How to Connect Your Store to ERP'}
+                </h2>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
+                  {isAr
+                    ? 'أدلة إرشادية وتطبيقية تغطي مزامنة الطلبات والمخزون وحسابات الضريبة وتفادي الأخطاء الشائعة.'
+                    : 'Practical, step-by-step guides covering order workflows, stock synchronization, tax rules, and troubleshooting.'}
+                </p>
+              </div>
+              <Link href="/guides" className="text-sm font-bold text-primary underline">
+                {isAr ? 'استكشف مركز المعرفة' : 'Explore Knowledge Center'}
+              </Link>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {[
+                {
+                  href: '/guides/zid-odoo-setup',
+                  category: isAr ? 'ربط زد بأودوو' : 'Zid + Odoo',
+                  title: isAr ? 'كيفية ربط زد بأودوو خطوة بخطوة' : 'Connecting Zid to Odoo Step by Step',
+                  description: isAr ? 'دليل شامل من إعداد الصلاحيات والـ SKU إلى إنشاء أول طلب وفحص السجلات.' : 'Complete setup guide from API permissions and SKU matching to testing your first order.',
+                  readTime: isAr ? '١١ دقائق قراءة' : '11 min read',
+                },
+                {
+                  href: '/guides/zid-odoo-stock-sync',
+                  category: isAr ? 'المنتجات والمخزون' : 'Products & Stock',
+                  title: isAr ? 'مزامنة المخزون بين زد وأودوو' : 'Inventory Sync Between Zid and Odoo',
+                  description: isAr ? 'الفرق بين المخزون الفعلي والمتاح للبيع، وإدارة المستودعات ومنع البيع الزائد.' : 'On-hand vs. forecasted available stock, multi-warehouse routing, and preventing overselling.',
+                  readTime: isAr ? '١٢ دقيقة قراءة' : '12 min read',
+                },
+                {
+                  href: '/guides/zid-odoo-vat-15',
+                  category: isAr ? 'الضرائب والفواتير' : 'Taxes & Invoicing',
+                  title: isAr ? 'حل اختلاف ضريبة 15% بين زد وأودوو' : 'Resolving 15% VAT Differences in Odoo',
+                  description: isAr ? 'معالجة فوارق الهللات، الأسعار الشاملة للضريبة، وتوزيع ضريبة الشحن وأكواد الخصم.' : 'Solving fractional halala rounding variances, tax-inclusive prices, shipping, and coupon taxes.',
+                  readTime: isAr ? '١٣ دقيقة قراءة' : '13 min read',
+                },
+              ].map((item) => (
+                <article key={item.href} className="flex flex-col justify-between rounded-2xl border border-border bg-card p-6 transition-colors hover:border-primary/50">
+                  <div>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="font-semibold text-primary">{item.category}</span>
+                      <span>{item.readTime}</span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-bold text-foreground">
+                      <Link href={item.href} className="hover:text-primary transition-colors">
+                        {item.title}
+                      </Link>
+                    </h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{item.description}</p>
+                  </div>
+                  <Link href={item.href} className="mt-5 inline-flex text-sm font-bold text-primary underline">
+                    {isAr ? 'اقرأ الدليل' : 'Read Guide'}
+                  </Link>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
         {/* ── FAQ ─────────────────────────────────────────────── */}
         <section className="border-t border-border px-6 py-20 md:px-12 md:py-28">
           <div className="mx-auto max-w-4xl">

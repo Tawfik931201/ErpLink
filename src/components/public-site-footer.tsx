@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 import { Logo } from '@/components/ui/logo'
-import type { Language } from '@/lib/translations'
 import { PUBLIC_CONTACT_EMAIL } from '@/lib/public-contact'
+import type { Language } from '@/lib/translations'
 
 const dict: Record<Language, Record<string, string>> = {
   ar: {
@@ -50,7 +50,9 @@ export function PublicSiteFooter({ lang }: { lang: Language }) {
                 {lang === 'ar' ? 'الصفحات' : 'Pages'}
               </h4>
               <ul className="space-y-1.5">
+                <li><Link href="/docs" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'التوثيق ودليل الاستخدام' : 'Documentation'}</Link></li>
                 <li><Link href="/integrations" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط المتاجر بأودوو' : 'Odoo Integrations'}</Link></li>
+                <li><Link href="/guides" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center'}</Link></li>
                 <li><Link href="/integrations/zid-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط زد بأودوو' : 'Zid + Odoo'}</Link></li>
                 <li><Link href="/integrations/salla-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط سلة بأودوو' : 'Salla + Odoo'}</Link></li>
                 <li><Link href="/integrations/shopify-odoo" className="text-[11px] text-foreground/60 hover:text-foreground transition-colors">{lang === 'ar' ? 'ربط شوبيفاي بأودوو' : 'Shopify + Odoo'}</Link></li>

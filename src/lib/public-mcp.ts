@@ -1,4 +1,10 @@
-import { agentIntegrationList, isAgentPublicPath, publicMarkdown } from '@/lib/public-agent-content'
+import {
+  agentIntegrationList,
+  agentGuideList,
+  agentDocsList,
+  isAgentPublicPath,
+  publicMarkdown,
+} from '@/lib/public-agent-content'
 
 /**
  * Intentionally public, stateless, read-only. No request is forwarded to the
@@ -28,16 +34,37 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: 'list_public_guides',
+    title: 'List ERP Link knowledge guides',
+    description: 'List ERP Link public integration and setup guides for Zid, Salla, Shopify and Odoo.',
+    inputSchema: {
+      type: 'object',
+      properties: { language: { type: 'string', enum: ['ar', 'en'], description: 'Guide language.' } },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: 'list_public_docs',
+    title: 'List ERP Link documentation',
+    description: 'List official ERP Link documentation guides and sections for Zid, Salla, Shopify, and Odoo.',
+    inputSchema: {
+      type: 'object',
+      properties: { language: { type: 'string', enum: ['ar', 'en'], description: 'Documentation language.' } },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: 'read_public_page',
     title: 'Read ERP Link public information',
-    description: 'Read curated public marketing, integration and testing content. No private account information.',
+    description: 'Read curated public marketing, integration, documentation, and testing content. No private account information.',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'One of the explicitly published marketing paths.',
-          enum: ['/', '/about', '/contact', '/integrations', '/integrations/zid-odoo', '/integrations/salla-odoo', '/integrations/shopify-odoo', '/guides/zid-odoo-checklist'],
+          description: 'One of the explicitly published marketing, guide, or documentation paths.',
         },
         language: { type: 'string', enum: ['ar', 'en'], description: 'Content language.' },
       },
@@ -87,6 +114,14 @@ export function handlePublicMcp(input: unknown): RpcResponse | null {
     if (params.name === 'list_public_integrations') {
       if (Object.keys(args).some((key) => key !== 'language')) return failure(id, -32602, 'Unknown argument')
       return success(id, { content: [{ type: 'text', text: JSON.stringify(agentIntegrationList(language)) }], isError: false })
+    }
+    if (params.name === 'list_public_guides') {
+      if (Object.keys(args).some((key) => key !== 'language')) return failure(id, -32602, 'Unknown argument')
+      return success(id, { content: [{ type: 'text', text: JSON.stringify(agentGuideList(language)) }], isError: false })
+    }
+    if (params.name === 'list_public_docs') {
+      if (Object.keys(args).some((key) => key !== 'language')) return failure(id, -32602, 'Unknown argument')
+      return success(id, { content: [{ type: 'text', text: JSON.stringify(agentDocsList(language)) }], isError: false })
     }
     if (params.name === 'read_public_page') {
       const path = args.path

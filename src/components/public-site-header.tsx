@@ -28,6 +28,12 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
           <Link href="/integrations" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'التكاملات' : 'Integrations'}
           </Link>
+          <Link href="/docs" className="transition-colors hover:text-foreground">
+            {lang === 'ar' ? 'التوثيق' : 'Docs'}
+          </Link>
+          <Link href="/guides" className="transition-colors hover:text-foreground">
+            {lang === 'ar' ? 'مركز المعرفة' : 'Knowledge Center'}
+          </Link>
           <Link href="/pricing" className="transition-colors hover:text-foreground">
             {lang === 'ar' ? 'الأسعار' : 'Pricing'}
           </Link>

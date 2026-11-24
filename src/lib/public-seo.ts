@@ -9,7 +9,25 @@ import { resolveLanguage } from '@/lib/translations'
 // SEO is intentionally limited to publicly accessible marketing pages.
 // Never generate indexable metadata for app, admin, OAuth or API routes.
 export const PUBLIC_SITE_URL = 'https://erplink.bizsahla.com'
-export type PublicPagePath = '/' | '/about' | '/pricing' | '/contact' | '/privacy' | '/terms' | '/integrations' | '/integrations/zid-odoo' | '/integrations/salla-odoo' | '/integrations/shopify-odoo' | '/guides/zid-odoo-checklist'
+export type PublicPagePath =
+  | '/'
+  | '/about'
+  | '/pricing'
+  | '/contact'
+  | '/privacy'
+  | '/terms'
+  | '/integrations'
+  | '/integrations/zid-odoo'
+  | '/integrations/salla-odoo'
+  | '/integrations/shopify-odoo'
+  | '/guides'
+  | '/guides/zid-odoo-checklist'
+  | '/guides/zid-odoo-setup'
+  | '/guides/zid-odoo-stock-sync'
+  | '/guides/zid-odoo-vat-15'
+  | '/guides/zid-odoo-returns'
+  | '/guides/salla-odoo-order-mapping'
+  | '/guides/shopify-odoo-webhooks'
 
 const copy: Record<PublicPagePath, { ar: { title: string; description: string }; en: { title: string; description: string } }> = {
   '/': {
@@ -32,9 +50,37 @@ const copy: Record<PublicPagePath, { ar: { title: string; description: string };
     ar: { title: 'ربط شوبيفاي بأودوو Odoo | Shopify | ERP Link', description: 'دليل تكامل Shopify مع Odoo: Webhooks والمنتجات والطلبات والمخزون وحالات الدفع والشحن والمرتجعات.' },
     en: { title: 'Shopify Odoo Integration | Orders & Stock | ERP Link', description: 'Plan Shopify Odoo integration including webhooks, variants, orders, inventory, payment and fulfillment workflows.' },
   },
+  '/guides': {
+    ar: { title: 'مركز المعرفة | أدلة ربط المتاجر بأنظمة ERP | ERP Link', description: 'مركز معرفة ERP Link: أدلة عملية وشروحات تطبيقية لربط متاجر زد وسلة وشوبيفاي بنظام أودوو ومزامنة الطلبات والمخزون والضرائب.' },
+    en: { title: 'Knowledge Center | E-Commerce & ERP Integration Guides | ERP Link', description: 'ERP Link Knowledge Center: in-depth technical guides for connecting Zid, Salla, and Shopify stores with Odoo ERP, stock sync, and VAT.' },
+  },
   '/guides/zid-odoo-checklist': {
     ar: { title: 'كيفية ربط زد بأودوو: دليل الاختبار | ERP Link', description: 'قائمة عملية لتجهيز وربط زد مع أودوو: خريطة البيانات والضرائب والشحن والطلبات والمرتجعات والتأكد من عدم التكرار.' },
     en: { title: 'Zid Odoo Setup & Testing Checklist | ERP Link', description: 'A practical Zid Odoo integration checklist for product matching, taxes, shipping, returns, order events and test scenarios.' },
+  },
+  '/guides/zid-odoo-setup': {
+    ar: { title: 'كيفية ربط زد بأودوو خطوة بخطوة | ERP Link', description: 'دليل شامل يوضح خطوات ربط متجر زد بنظام أودوو Odoo من الصلاحيات ومطابقة SKU والعملاء إلى إنشاء أول طلب وتتبع السجلات.' },
+    en: { title: 'Connect Zid to Odoo Step by Step | ERP Link Guide', description: 'A complete step-by-step walkthrough to connect Zid store with Odoo ERP: credentials, SKU & customer matching, and first order test.' },
+  },
+  '/guides/zid-odoo-stock-sync': {
+    ar: { title: 'مزامنة المخزون بين زد وأودوو: المستودعات وSKU | ERP Link', description: 'تعلم كيفية إعداد مزامنة المخزون بين متجر زد ونظام أودوو بدقة: الكمية المتاحة للبيع، تعدد المستودعات، ومنع البيع الزائد.' },
+    en: { title: 'Zid Odoo Stock Sync: Warehouses & SKUs | ERP Link', description: 'Learn how to synchronize inventory between Zid and Odoo: on-hand vs. available stock, warehouse routing, and overselling prevention.' },
+  },
+  '/guides/zid-odoo-vat-15': {
+    ar: { title: 'حل اختلاف ضريبة 15% بين زد وأودوو: الفواتير والأسعار | ERP Link', description: 'دليل محاسبي لحل فوارق الهللات وضريبة 15% بين زد وأودوو: الأسعار الشاملة، معالجة ضريبة الشحن والخصومات، ومطابقة الفواتير.' },
+    en: { title: 'Resolving 15% VAT Differences in Zid & Odoo | ERP Link', description: 'Practical guide to resolving fractional halala rounding variances and 15% VAT differences between Zid checkouts and Odoo invoices.' },
+  },
+  '/guides/zid-odoo-returns': {
+    ar: { title: 'إدارة مرتجعات زد في أودوو: المرتجع الجزئي والكامل | ERP Link', description: 'دليل إدارة مرتجعات متجر زد في أودوو: الفرق بين الإلغاء والمرتجع، إنشاء الإشعارات الدائنة، وإرجاع المخزون السليم دون تكرار.' },
+    en: { title: 'Managing Zid Returns in Odoo: Partial & Full | ERP Link', description: 'Manage Zid store returns in Odoo: order cancellation vs. sales returns, automated credit notes, stock replenishment, and idempotency.' },
+  },
+  '/guides/salla-odoo-order-mapping': {
+    ar: { title: 'ربط سلة بأودوو: خرائط الطلبات والعملاء والمنتجات | ERP Link', description: 'دليل تطبيقي لإعداد خرائط البيانات بين متجر سلة ونظام أودوو: مطابقة المنتجات والـ SKU، مزامنة جهات الاتصال، ومراحل الطلبات.' },
+    en: { title: 'Connect Salla to Odoo: Order & Product Mapping | ERP Link', description: 'Practical guide to configuring field mappings between Salla and Odoo: SKU alignment, customer deduplication, and order lifecycles.' },
+  },
+  '/guides/shopify-odoo-webhooks': {
+    ar: { title: 'حل مشاكل Shopify Webhooks عند الربط بأودوو | ERP Link', description: 'دليل تشخيصي لحل مشاكل إشعارات الويب Webhooks في Shopify عند الربط بأودوو: التحقق من التوقيع، منع مهلة الـ 5 ثوانٍ، وتفادي التكرار.' },
+    en: { title: 'Troubleshooting Shopify Webhooks with Odoo | ERP Link', description: 'Diagnostic guide to fixing Shopify webhook sync issues with Odoo: HMAC signature checks, beating 5s timeouts, and duplicate prevention.' },
   },
   '/about': {
     ar: { title: 'عن ERP Link | منصة ربط المتاجر بأنظمة ERP', description: 'تعرف على ERP Link، منصة تكامل المتاجر الإلكترونية مع أنظمة إدارة الأعمال ومزامنة العمليات والبيانات.' },

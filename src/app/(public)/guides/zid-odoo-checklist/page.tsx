@@ -64,8 +64,9 @@ export default async function ZidOdooChecklistPage() {
         <article>
           <header className="border-b border-border bg-secondary/20 px-6 py-16 md:px-12">
             <div className="mx-auto max-w-4xl">
-              <nav aria-label={isAr ? 'مسار الصفحة' : 'Breadcrumb'} className="mb-7 flex gap-2 text-xs text-muted-foreground">
+              <nav aria-label={isAr ? 'مسار الصفحة' : 'Breadcrumb'} className="mb-7 flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <Link href="/">{isAr ? 'الرئيسية' : 'Home'}</Link><span>/</span>
+                <Link href="/guides">{isAr ? 'مركز المعرفة' : 'Knowledge Center'}</Link><span>/</span>
                 <Link href="/integrations/zid-odoo">Zid + Odoo</Link><span>/</span>
                 <span>{isAr ? 'دليل الاختبار' : 'Testing guide'}</span>
               </nav>
@@ -128,8 +129,10 @@ export default async function ZidOdooChecklistPage() {
               </p>
               <a href="https://help.zid.sa/ar/apps/private-apps" rel="noopener noreferrer" target="_blank" className="mt-4 inline-flex text-sm font-bold text-primary underline">{isAr ? 'وثائق زد الرسمية لربط الأنظمة' : 'Official Zid integration guidance'}</a>
               <div className="mt-12 flex flex-wrap gap-3">
+                <Link href="/guides/zid-odoo-setup" className="rounded-lg bg-primary px-5 py-3 text-sm font-bold text-primary-foreground">{isAr ? 'دليل إعداد ربط زد خطوة بخطوة' : 'Zid Setup Step-by-Step Guide'}</Link>
+                <Link href="/guides" className="rounded-lg border border-border px-5 py-3 text-sm font-bold hover:text-primary">{isAr ? 'مركز المعرفة' : 'Knowledge Center'}</Link>
                 <Link href="/integrations/zid-odoo" className="rounded-lg border border-border px-5 py-3 text-sm font-bold hover:text-primary">{isAr ? 'تفاصيل ربط زد بأودوو' : 'Zid–Odoo integration'}</Link>
-                <Link href="/contact" className="rounded-lg bg-primary px-5 py-3 text-sm font-bold text-primary-foreground">{isAr ? 'استفسر عن حالتك' : 'Ask about your case'}</Link>
+                <Link href="/contact" className="rounded-lg border border-border px-5 py-3 text-sm font-bold hover:text-primary">{isAr ? 'استفسر عن حالتك' : 'Ask about your case'}</Link>
               </div>
             </div>
           </section>
