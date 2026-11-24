@@ -12,7 +12,7 @@ import { supabase } from '@/lib/supabase'
 import { ttlCache } from '@/lib/ttl-cache'
 import { getOrCreateDbUser } from '@/lib/users'
 
-export interface SallaLocation extends SallaBranch {}
+export type SallaLocation = SallaBranch
 
 const LOCATIONS_TTL_MS = 5 * 60 * 1000 // 5 minutes
 

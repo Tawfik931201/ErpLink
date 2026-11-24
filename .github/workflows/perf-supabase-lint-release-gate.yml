@@ -1,0 +1,83 @@
+name: Temporary Supabase performance lint repair and release gate
+on:
+  push:
+    branches:
+      - perf/supabase-free-tier-optimization-20261124
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: offline-anon-test-only
+      SUPABASE_SERVICE_ROLE_KEY: offline-service-role-test-only
+      ENCRYPTION_KEY: '1111111111111111111111111111111111111111111111111111111111111111'
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jb20k
+      CLERK_SECRET_KEY: sk_test_placeholder_for_offline_build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: ESLint auto-fix only the 25 pre-existing blocker files
+        shell: bash
+        run: |
+          files=(
+          'src/app/(app)/app/mapping-center/field-mapping-form.tsx'
+          'src/app/(app)/app/tickets/tickets-client.tsx'
+          'src/app/(public)/about/page.tsx'
+          'src/app/(public)/contact/page.tsx'
+          'src/app/(public)/guides/zid-odoo-checklist/page.tsx'
+          'src/app/(public)/integrations/page.tsx'
+          'src/app/(public)/layout.tsx'
+          'src/app/(public)/page.tsx'
+          'src/app/(public)/pricing/page.tsx'
+          'src/app/(public)/privacy/page.tsx'
+          'src/app/(public)/terms/page.tsx'
+          'src/app/actions/odoo.ts'
+          'src/app/actions/salla.ts'
+          'src/app/actions/sync-logs.ts'
+          'src/app/actions/tickets.ts'
+          'src/app/api/cron/sync-queue/route.ts'
+          'src/app/api/notifications/route.ts'
+          'src/app/api/notifications/stream/route.ts'
+          'src/app/api/public-markdown/route.ts'
+          'src/app/api/shopify/callback/route.ts'
+          'src/app/api/shopify/connect/route.ts'
+          'src/app/api/tickets/live/stream/route.ts'
+          'src/components/notification-center.tsx'
+          'src/components/pending-tickets-badge.tsx'
+          'src/components/public-integration-detail.tsx'
+          )
+          ./node_modules/.bin/eslint "${files[@]}" --fix
+          git diff --stat
+          git diff --check
+      - name: Full repository lint
+        run: npm run lint
+      - name: TypeScript
+        run: npm run type-check
+      - name: Full Jest regression suite
+        run: npm test -- --runInBand
+      - name: Production build (offline test-only credentials)
+        run: npm run build
+      - name: Commit tested formatting changes to the feature branch only
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- src/
+          if ! git diff --cached --quiet; then
+            git commit -m "style: resolve existing lint blockers without behavior changes"
+            git push origin HEAD:refs/heads/perf/supabase-free-tier-optimization-20261124
+          fi

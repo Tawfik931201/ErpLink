@@ -397,7 +397,7 @@ export default function FieldMappingForm({
       if (saved) {
         try {
           return JSON.parse(saved)
-        } catch (e) {
+        } catch {
           // ignore
         }
       }
