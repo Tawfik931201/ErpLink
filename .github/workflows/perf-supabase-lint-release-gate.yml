@@ -51,6 +51,11 @@ jobs:
             git commit -m "style: repair remaining existing import order lint errors"
             git push origin HEAD:refs/heads/perf/supabase-free-tier-optimization-20261124
           fi
+      - name: Print remaining ESLint blockers in a compact format
+        shell: bash
+        run: |
+          ./node_modules/.bin/eslint src --ext .ts,.tsx --format json > /tmp/erplink-lint-after.json || true
+          node -e 'const path=require("path");for(const f of require("/tmp/erplink-lint-after.json")) for(const m of f.messages) if(m.severity===2) console.log(path.relative(process.cwd(),f.filePath)+":"+m.line+":"+m.column+" "+m.ruleId+" "+m.message)'
       - name: Full repository lint
         run: npm run lint
       - name: TypeScript
