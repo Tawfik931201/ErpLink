@@ -16,7 +16,7 @@
 - Tests cover concurrent token contexts, retry after lease recovery failure, slot separation and fallback.
 
 ## Required release order
-1. Run the **additive** migration `20261124075500_maintenance_reconcile_claim.sql` in Supabase before deploying code. No destructive operations.
+1. Run the **additive** migration `20261124075735_maintenance_reconcile_claim.sql` in Supabase before deploying code. No destructive operations.
 2. Verify RPC is only executable with `service_role`, RLS is enabled, and a single slot claim excludes a second claim inside the same interval. A failed claim never changes Odoo.
 3. Run TypeScript/Jest/lint/build/security on the feature branch. Do a staged Zid→Odoo integration smoke if test stores are available.
 4. Squash merge **once** into main, verify Hostinger `/api/health/live` returns `erplink-supabase-capacity-20261124-r2`, and check both live queue and Supabase logs.
