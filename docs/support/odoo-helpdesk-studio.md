@@ -46,3 +46,34 @@ Odoo menu/view permissions for the new support app should be configured independ
 ## Verification
 
 The Odoo actions, menus and views were created and read back through Odoo JSON-RPC; Odoo validated the view XML. A non-internal native Chatter reply was posted and checked on the QA-only ticket **#10**, verifying it stays on the original ticket and does not create a copy. The separate browser-based interaction in Odoo and real Hostinger deployment remain to be verified if no browser-control tool is available.
+
+## Ticket reference and higher-contrast Odoo stages (2026-11-24)
+
+- Ticket ID is displayed in **Helpdesk list view 650**, **Kanban 651**, and **form view 652**. Existing numbers are the source of truth; no duplicate reference column or schema migration.
+- Kanban and form show `SUP-<id>`, e.g. `SUP-9`. Clicking the card/list row opens the original Odoo support ticket record.
+- The stage badges now apply status-specific Odoo badge decorations: Open (info), In Progress (warning), Waiting Customer (danger), Resolved (success), Closed (primary) with stronger font weight. Only Helpdesk-specific views changed, not the underlying storage screens.
+
+## New in-Odoo customer-message notifications
+
+- **Odoo automation 4** (`on_message_received`) executes **server action 242** for customer-authored, customer-visible messages on any active ERP Link support ticket (including app and contact tickets); its rule domain requires a customer partner:
+  - Determines the customer via the ticket's `x_partner_id` and the latest `mail.message` author.
+  - Creates an Odoo **To-Do activity** (`mail.activity` model `x_erplink_support_ticket`, type ID 4) assigned to the ticket's `x_assigned_user_id`, or internal Odoo user ID 2 when unassigned.
+  - Adds the ticket reference `SUP-<ticket id>` **and source message ID** to the activity. Activities appear in the assignee's Odoo Activities/systray and link directly to the ticket.
+  - Deduplicates by `res_model_id`, `res_id`, and exact summary; **does not** send a duplicate email or add repeated chatter content.
+  - Updates the last real customer-message timestamp. If the case was `waiting_customer`, reopens it to `open`.
+- **Odoo automation 5** (`on_message_sent`), **server action 243**, records `x_last_agent_reply` from the latest actual internal-user-authored, customer-visible chatter comment. Agent messages must not create customer alerts.
+- The original new-ticket email automation 1 and realtime webhook automation 3 remain active; the duplicate customer-reply-email automation 2 remains inactive.
+
+**QA:** posted distinct customer comments to QA ticket SUP-10 and verified the creation of two different activities assigned to Odoo user ID 2. Posted an internal-staff public chatter reply and confirmed that it recorded `x_last_agent_reply` without generating another customer activity. Posted a subsequent customer reply and confirmed `x_last_customer_reply > x_last_agent_reply` (so auto-close must not proceed). Completed both QA activities and restored the QA ticket to its original closed state and unset metadata.
+
+## Five-day no-customer-response auto-close — Odoo only
+
+- **Server action 244**, **scheduled action / `ir.cron` ID 23**; active, hourly, Odoo staff user ID 2. Created with first planned run `2026-11-24 12:00:00 UTC`.
+- In the server action, `cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=5)`. Queue search uses `x_last_agent_reply <= cutoff`, `x_channel == 'app'`, and a stage of `open`, `in_progress`, or `waiting_customer`. Maximum 500 candidates per execution.
+- **Safety checks before write**: last customer-reply timestamp must be strictly older than the last agent reply; the latest customer-visible Chatter comment is fetched again and must be authored by an internal Odoo staff partner and be at least five complete days old. If there is a newer customer response, an unknown sender, a recently posted reply, an unresolved timestamp, or an already-closed/resolved ticket, it remains open.
+- Successful closure writes both `x_ticket_stage = 'closed'` and `x_status = 'closed'` on the **existing original Odoo ticket**. No outbound email or extra chatter is generated.
+- Old tickets with no recorded `x_last_agent_reply` are **not** force-closed just because they are old; a genuine recorded support reply is necessary.
+- Existing ERP Link browser/chat storage, authentication, and Supabase are unchanged. The customer-facing Tickets list, ticket creation, and active conversation display the five-day rule in Arabic and English.
+- Source copies of the deployed Odoo Studio server-action code are kept in `odoo/helpdesk/automation/` for review and future restoration. They run in Odoo, **not** in ERP Link/Hostinger.
+
+**Verification boundary:** Odoo accepted the cron and its active schedule, the QA customer/agent event automations ran successfully, and Odoo views validated. Actual timed execution of the cron on a five-day-eligible ticket was **not exercised** during this session (the qualifying five-day waiting period had not elapsed).

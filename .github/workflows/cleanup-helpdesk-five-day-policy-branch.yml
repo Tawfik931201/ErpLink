@@ -1,0 +1,27 @@
+name: Cleanup merged Odoo helpdesk five-day policy feature branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-helpdesk-feature-branch:
+    if: >-
+      ${{ github.event.pull_request.merged == true &&
+          github.event.pull_request.number == 81 &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'feat/support-odoo-inbox-five-day-policy-20261124' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove only this merged Odoo helpdesk policy branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${REPOSITORY}/git/refs/heads/feat/support-odoo-inbox-five-day-policy-20261124" ||
+            echo 'Helpdesk temporary branch already removed'
