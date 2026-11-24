@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   return NextResponse.json(
-    { ok: true, release: 'erplink-supabase-capacity-20261124-r2' },
+    { ok: true, release: 'erplink-supabase-capacity-20261124-r3' },
     { headers: { 'Cache-Control': 'no-store, max-age=0', 'X-Content-Type-Options': 'nosniff' } },
   )
 }
