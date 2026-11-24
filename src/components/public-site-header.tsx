@@ -2,6 +2,7 @@ import { auth } from '@clerk/nextjs/server'
 import Link from 'next/link'
 
 import LanguageSwitcher from '@/components/language-switcher'
+import { PublicSiteMobileNav } from '@/components/public-site-mobile-nav'
 import ThemeSwitcher from '@/components/theme-switcher'
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/ui/logo'
@@ -19,7 +20,7 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
     // Verified 2026-10-25: with `overflow-x-hidden` the header sat at
     // `top: -900` after 900px of scrolling.
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/65">
-      <div className="flex h-14 items-center justify-between px-6 md:px-12 max-w-7xl mx-auto">
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6 md:px-12 max-w-7xl mx-auto">
         <Link href="/" className="flex items-center select-none" aria-label="ErpLink Home">
           <Logo variant="horizontal" size="md" priority />
         </Link>
@@ -58,6 +59,7 @@ export async function PublicSiteHeader({ lang }: { lang: Language }) {
               </Button>
             </>
           )}
+          <PublicSiteMobileNav lang={lang} isSignedIn={isSignedIn} />
         </div>
       </div>
     </header>

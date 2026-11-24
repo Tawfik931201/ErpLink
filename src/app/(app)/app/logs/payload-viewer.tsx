@@ -290,8 +290,8 @@ function ObjectsTable({
 
       {/* Table Content */}
       {isExpanded && (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs text-foreground rtl:text-right">
+        <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+          <table className="w-full min-w-[500px] border-collapse text-left text-xs text-foreground rtl:text-right">
             <thead>
               <tr className="border-b border-border bg-muted/30">
                 <th className="w-10 px-3 py-2 text-center text-[10px] font-bold text-muted-foreground">#</th>
@@ -483,7 +483,7 @@ function UniversalSectionNode({
         {/* Scalar Fields Grid — 4 columns like the top basic record data header */}
         {Object.keys(scalars).length > 0 && (
           <div className="border border-border bg-card p-4">
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
               {Object.entries(scalars).map(([k, v]) => (
                 <FieldItem key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
               ))}
@@ -575,7 +575,7 @@ function UniversalSectionNode({
           {/* Scalar fields inside this section — 4 columns like top header */}
           {Object.keys(scalars).length > 0 && (
             <div className="border border-border/70 bg-card p-4">
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                 {Object.entries(scalars).map(([k, v]) => (
                   <FieldItem key={k} keyName={k} value={v} lang={lang} onCopy={onCopy} />
                 ))}
@@ -705,7 +705,7 @@ export function PayloadViewer({ payload, platform }: PayloadViewerProps) {
     <div className="overflow-hidden rounded-sm border border-border bg-card">
       {/* ── Top Bar with Tabs & Controls ──────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted px-3 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Platform Label */}
           <span className="text-[10px] font-bold text-muted-foreground">
             {ar ? `بيانات المزامنة (${platformBadge})` : `Payload Data (${platformBadge})`}
@@ -744,7 +744,7 @@ export function PayloadViewer({ payload, platform }: PayloadViewerProps) {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
           {activeTab === 'visual' && !isEmpty && (
             <>
               {/* Expand / Collapse All Toggle */}
@@ -769,14 +769,14 @@ export function PayloadViewer({ payload, platform }: PayloadViewerProps) {
               </Button>
 
               {/* Search Filter */}
-              <div className="relative flex items-center">
+              <div className="relative flex-1 sm:flex-initial flex items-center">
                 <Search className="absolute right-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none rtl:right-2.5 rtl:left-auto ltr:left-2.5 ltr:right-auto" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={ar ? 'بحث في الحقول والجداول...' : 'Filter fields & tables...'}
-                  className="h-7 w-40 rounded-sm border border-border bg-card pr-8 pl-6 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary rtl:pr-8 rtl:pl-6 ltr:pl-8 ltr:pr-6 md:w-56"
+                  className="h-7 w-full sm:w-40 md:w-56 rounded-sm border border-border bg-card pr-8 pl-6 text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary rtl:pr-8 rtl:pl-6 ltr:pl-8 ltr:pr-6"
                 />
                 {searchQuery && (
                   <button

@@ -250,7 +250,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
       </div>
 
       {/* Search bar */}
-      <div className="relative max-w-md">
+      <div className="relative w-full sm:max-w-md">
         <Search className={cn('absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground', isAr ? 'right-3' : 'left-3')} />
         <input
           type="text"
@@ -447,7 +447,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
       {modal?.type === 'register' && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <div
-            className="bg-card border border-border max-w-2xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+            className="bg-card border border-border max-w-2xl w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">
@@ -562,7 +562,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
                   </label>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="text-[11px] font-medium text-muted-foreground">
                       {isAr ? 'تاريخ البدء (يوم التحويل)' : 'Start date (transfer day)'}
@@ -677,7 +677,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
       {modal?.type === 'extend' && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <div
-            className="bg-card border border-border max-w-md w-full p-5 space-y-4"
+            className="bg-card border border-border max-w-md w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">
@@ -777,7 +777,7 @@ export default function AdminSubscriptionsClient({ rows, error, lang }: Props) {
       {modal?.type === 'cancel' && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <div
-            className="bg-card border border-border max-w-md w-full p-5 space-y-4"
+            className="bg-card border border-border max-w-md w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">

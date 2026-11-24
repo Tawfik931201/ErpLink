@@ -1812,7 +1812,7 @@ export default function FieldMappingForm({
                     </span>
                   </div>
 
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
                     <table className="w-full min-w-[720px] table-fixed text-xs">
                       <thead>
                         <tr className="border-b border-border/60 text-[10px] uppercase tracking-wide text-foreground/60">

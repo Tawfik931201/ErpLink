@@ -102,7 +102,7 @@ export default function AdminClientsClient({ rows, lang }: Props) {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <div className="border border-border bg-card p-4 space-y-1.5">
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{isAr ? 'إجمالي العملاء' : 'Total clients'}</p>
           <p className="text-xl font-bold font-mono tracking-tight text-foreground">{rows.length}</p>
@@ -123,13 +123,13 @@ export default function AdminClientsClient({ rows, lang }: Props) {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1 p-1 bg-muted/40 rounded border border-border/50 w-fit">
+        <div className="flex gap-1 p-1 bg-muted/40 rounded border border-border/50 w-full sm:w-fit overflow-x-auto no-scrollbar">
           {filters.map((f) => (
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
               className={cn(
-                'px-3 py-1.5 rounded text-[11px] font-medium transition-colors',
+                'px-3 py-1.5 rounded text-[11px] font-medium transition-colors shrink-0 whitespace-nowrap',
                 filter === f.key ? 'bg-card text-foreground border border-border' : 'text-muted-foreground',
               )}
             >
@@ -137,7 +137,7 @@ export default function AdminClientsClient({ rows, lang }: Props) {
             </button>
           ))}
         </div>
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
+        <div className="relative flex-1 min-w-[200px] w-full sm:w-auto max-w-full sm:max-w-sm">
           <Search className={cn('absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground', isAr ? 'right-3' : 'left-3')} />
           <input
             type="text"

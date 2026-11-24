@@ -140,7 +140,7 @@ export default async function AdminClientStatementPage(
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         {kpis.map((kpi) => {
           return (
             <div key={kpi.label} className="border border-border bg-card p-4 space-y-1.5">

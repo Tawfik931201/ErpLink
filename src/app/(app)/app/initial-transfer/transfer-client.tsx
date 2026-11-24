@@ -778,8 +778,8 @@ export default function TransferClient({
         </div>
 
         {/* Mappings Table */}
-        <div className="border border-border rounded-lg overflow-visible bg-card">
-          <table className="w-full text-start border-collapse">
+        <div className="border border-border rounded-lg overflow-x-auto bg-card">
+          <table className="w-full text-start border-collapse min-w-[500px] sm:min-w-0">
             <thead>
               <tr className="bg-muted/50 text-[10px] uppercase font-bold text-muted-foreground border-b border-border">
                 <th className="py-2.5 px-4 font-bold text-start">{lang === 'ar' ? 'حقل أودو ERP' : 'Odoo ERP Field'}</th>

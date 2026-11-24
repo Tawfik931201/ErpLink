@@ -475,15 +475,15 @@ export default function LogsClient() {
           )
         })}
 
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          <div className="relative">
+        <div className="ms-auto flex flex-wrap items-center gap-1.5 w-full sm:w-auto mt-1 sm:mt-0">
+          <div className="relative flex-1 sm:flex-initial sm:w-56">
             <Search className="pointer-events-none absolute inset-y-0 start-2 my-auto h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
               placeholder={t('log.searchPlaceholder')}
               aria-label={t('log.search')}
-              className="h-7 w-56 border-border/70 bg-muted/60 ps-7 pe-7 text-xs"
+              className="h-7 w-full sm:w-56 border-border/70 bg-muted/60 ps-7 pe-7 text-xs"
             />
             {searchInput && (
               <button
@@ -505,7 +505,7 @@ export default function LogsClient() {
               fetchAt(offset)
             }}
             disabled={isLoading}
-            className="h-7 rounded-none px-3 text-[10px] font-bold"
+            className="h-7 shrink-0 rounded-none px-3 text-[10px] font-bold"
           >
             {/* No spin: the table greys out while loading, the icon stays still. */}
             <RefreshCw className="h-3 w-3 me-1" />
@@ -632,8 +632,8 @@ export default function LogsClient() {
       </div>
 
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px]">
+      <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+        <table className="w-full min-w-[640px] border-collapse text-[11px]">
           <thead>
             <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
               {activeColumns.map(col => (

@@ -85,7 +85,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       {/* Settings Container */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
         {/* Inner Settings Sidebar */}
-        <aside className="w-full md:w-44 shrink-0 flex md:flex-col gap-1 p-1 bg-secondary/10 rounded-xl border border-border/40 overflow-x-auto md:overflow-x-visible">
+        <aside className="w-full md:w-44 shrink-0 flex md:flex-col gap-1 p-1 bg-secondary/10 rounded-xl border border-border/40 overflow-x-auto md:overflow-x-visible scrollbar-none">
           {settingsNavItems.map((item) => {
             const Icon = item.icon
             const isActive = item.exact 
@@ -97,7 +97,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "group relative flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all duration-300 outline-none select-none flex-1 md:flex-initial",
+                  "group relative flex items-center gap-2.5 rounded-lg px-3 py-2 md:py-1.5 text-xs font-bold transition-all duration-300 outline-none select-none shrink-0 md:shrink md:flex-initial whitespace-nowrap",
                   isActive
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -128,7 +128,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </aside>
 
         {/* Nested Content Panel */}
-        <div className="flex-1 w-full bg-card rounded-xl border border-border shadow-card p-6 md:p-8 min-h-[400px]">
+        <div className="flex-1 w-full bg-card rounded-xl border border-border shadow-card p-4 sm:p-6 md:p-8 min-h-[400px]">
           {children}
         </div>
       </div>

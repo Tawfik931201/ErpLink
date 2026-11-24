@@ -556,7 +556,7 @@ export default function ClientStatementClient({
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <form
             onSubmit={handleRegister}
-            className="bg-card border border-border max-w-2xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+            className="bg-card border border-border max-w-2xl w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">
@@ -604,7 +604,7 @@ export default function ClientStatementClient({
               </span>
             </label>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'تاريخ البدء (يوم التحويل)' : 'Start date (transfer day)'}</label>
                 <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required className={inputCls} />
@@ -694,7 +694,7 @@ export default function ClientStatementClient({
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <form
             onSubmit={handleExtend}
-            className="bg-card border border-border max-w-md w-full p-5 space-y-4"
+            className="bg-card border border-border max-w-md w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">{isAr ? 'تمديد الاشتراك' : 'Extend Subscription'}</h3>
@@ -780,7 +780,7 @@ export default function ClientStatementClient({
       {/* ── Cancel modal ─────────────────────────────────────── */}
       {modal?.type === 'cancel' && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
-          <div className="bg-card border border-border max-w-md w-full p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-card border border-border max-w-md w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold text-foreground">{isAr ? 'إلغاء الاشتراك' : 'Cancel Subscription'}</h3>
             <p className="text-[11px] text-muted-foreground">
               {isAr
@@ -820,7 +820,7 @@ export default function ClientStatementClient({
           onClick={() => setModal(null)}
         >
           <div
-            className="bg-card border border-border max-w-3xl w-full p-5 space-y-4 max-h-[90vh] overflow-y-auto"
+            className="bg-card border border-border max-w-3xl w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
@@ -838,7 +838,7 @@ export default function ClientStatementClient({
               </span>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 border border-border bg-muted/20 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 border border-border bg-muted/20 p-3">
               <div>
                 <p className="text-[10px] text-muted-foreground font-medium">{isAr ? 'البداية' : 'Start'}</p>
                 <p className="text-[11px] font-semibold text-foreground mt-0.5">{formatDate(detailSub.start_date)}</p>
@@ -973,7 +973,7 @@ export default function ClientStatementClient({
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setModal(null)}>
           <form
             onSubmit={handleAddPayment}
-            className="bg-card border border-border max-w-md w-full p-5 space-y-4"
+            className="bg-card border border-border max-w-md w-full p-4 sm:p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-foreground">{isAr ? 'تسجيل دفعة جديدة' : 'Record New Payment'}</h3>
@@ -988,7 +988,7 @@ export default function ClientStatementClient({
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <label className="text-[11px] font-medium text-muted-foreground">{isAr ? 'تاريخ الدفعة' : 'Payment date'}</label>
                 <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} required className={inputCls} />

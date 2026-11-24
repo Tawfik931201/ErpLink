@@ -349,7 +349,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
 
           {/* Basic record data */}
           <div className="border border-border bg-card p-4">
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3.5 sm:gap-4 md:grid-cols-4">
               <InfoField label={lang === 'ar' ? 'نوع النظام' : 'System Type'}>
                 {getErpTypeName(connection.erp_type)}
               </InfoField>
@@ -538,7 +538,7 @@ export default function OdooConnectionForm({ initialConnection }: OdooConnection
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Form Box */}
-            <div className="lg:col-span-2 border border-border bg-card p-5">
+            <div className="lg:col-span-2 border border-border bg-card p-4 sm:p-5">
               <form onSubmit={handleTestAndSave} className="space-y-6">
                 <div className="rounded border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
                   <span className="font-semibold text-foreground">{finalConnectionName}</span>

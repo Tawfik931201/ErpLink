@@ -72,10 +72,10 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
     <Card className="shadow-lg border border-border bg-card/60 backdrop-blur-md overflow-hidden relative">
       <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-primary/70 via-primary to-primary" />
       
-      <CardHeader className="pb-4 flex flex-row items-start justify-between">
+      <CardHeader className="p-4 sm:p-6 pb-4 flex flex-row items-start justify-between gap-2">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2 text-xl font-extrabold tracking-tight">
-            <Send className="h-5 w-5 text-primary animate-pulse" />
+            <Send className="h-5 w-5 text-primary animate-pulse shrink-0" />
             Create Support Ticket
           </CardTitle>
           <CardDescription>
@@ -87,7 +87,7 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
             type="button" 
             variant="ghost" 
             size="icon" 
-            className="h-8 w-8 rounded-full"
+            className="h-8 w-8 rounded-full shrink-0"
             onClick={onCancel}
             disabled={loading}
           >
@@ -96,7 +96,7 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
         )}
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="p-4 sm:p-6 pt-0">
         <form onSubmit={handleSubmit} className="space-y-5">
           {error && (
             <div className="flex items-start gap-2.5 p-3 rounded-xl bg-destructive/10 text-destructive text-sm border border-destructive/20 animate-in fade-in duration-300">
@@ -203,12 +203,12 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col-reverse sm:flex-row items-center gap-3">
             {onCancel && (
               <Button
                 type="button"
                 variant="outline"
-                className="flex-1 font-bold"
+                className="w-full sm:flex-1 font-bold"
                 onClick={onCancel}
                 disabled={loading}
               >
@@ -217,7 +217,7 @@ export default function CreateTicketForm({ onSuccess, onCancel }: CreateTicketFo
             )}
             <Button
               type="submit"
-              className="flex-1 font-bold transition-all duration-200"
+              className="w-full sm:flex-1 font-bold transition-all duration-200"
               variant="brand"
               disabled={loading}
             >

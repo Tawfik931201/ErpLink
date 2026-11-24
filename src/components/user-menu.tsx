@@ -267,7 +267,7 @@ export default function UserMenu({
         )}
 
         {/* Name & Details */}
-        <div className="flex-1 min-w-0 flex flex-col justify-center">
+        <div className={cn("flex-1 min-w-0 flex flex-col justify-center", placement === 'header' && "hidden sm:flex")}>
           <span className="text-[11px] font-semibold text-foreground truncate leading-snug">
             {mounted && user?.fullName ? user.fullName : displayName}
           </span>
@@ -277,7 +277,7 @@ export default function UserMenu({
         </div>
 
         {/* Chevron status */}
-        <div className="text-muted-foreground/60 transition-transform duration-200 shrink-0">
+        <div className={cn("text-muted-foreground/60 transition-transform duration-200 shrink-0", placement === 'header' && "hidden sm:block")}>
           {dir === 'rtl' ? (
             <ChevronUp className={cn("h-3 w-3 rotate-90 transition-transform duration-200", isOpen && "rotate-[270deg]")} />
           ) : (

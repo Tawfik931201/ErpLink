@@ -219,7 +219,7 @@ export default function MessageDetailClient({ row, ar }: { row: ContactMessageRo
 
       {/* Basic record data */}
       <div className="border border-border bg-card p-4">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <InfoField label={ar ? 'الشركة' : 'Company'}>
             <span className="inline-flex items-center gap-1">
               <Building2 className="h-3 w-3 text-muted-foreground" />

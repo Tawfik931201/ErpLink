@@ -93,8 +93,8 @@ export default async function ContactPage() {
         <section className="relative overflow-hidden border-b border-border">
           <div className="blueprint-grid pointer-events-none absolute inset-0 opacity-70" aria-hidden />
 
-          <div className="relative mx-auto max-w-7xl px-6 pb-16 pt-14 md:px-12 md:pb-20 md:pt-20">
-            <div className="rise-in mb-7 flex flex-wrap items-center gap-3">
+          <div className="relative mx-auto max-w-7xl px-4 sm:px-6 pb-12 pt-10 sm:pb-16 sm:pt-14 md:px-12 md:pb-20 md:pt-20">
+            <div className="rise-in mb-6 sm:mb-7 flex flex-wrap items-center gap-2.5 sm:gap-3">
               <span className="inline-flex h-6 items-center gap-1.5 rounded-full border border-primary/25 bg-primary/10 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-primary">
                 <Headset className="h-3 w-3" />
                 {isAr ? 'فريق الدعم' : 'Support team'}
@@ -102,16 +102,16 @@ export default async function ContactPage() {
               <span className={EYEBROW}>erp-link / contact</span>
             </div>
 
-            <div className="grid items-end gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:gap-12">
+            <div className="grid items-end gap-5 sm:gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:gap-12">
               <h1
-                className="rise-in text-4xl font-black leading-[1.08] tracking-tight md:text-6xl md:leading-[1.02]"
+                className="rise-in text-3xl sm:text-4xl md:text-6xl font-black leading-[1.08] tracking-tight md:leading-[1.02]"
                 style={{ animationDelay: '70ms' }}
               >
                 {isAr ? 'تواصل معنا' : 'Talk to us'}
               </h1>
 
               <p
-                className="rise-in max-w-md text-sm leading-relaxed text-muted-foreground md:text-base"
+                className="rise-in max-w-md text-xs sm:text-sm leading-relaxed text-muted-foreground md:text-base"
                 style={{ animationDelay: '140ms' }}
               >
                 {isAr
@@ -120,7 +120,7 @@ export default async function ContactPage() {
               </p>
               <a
                 href={`mailto:${PUBLIC_CONTACT_EMAIL}`}
-                className="mt-4 inline-flex text-sm font-semibold text-primary underline underline-offset-4"
+                className="mt-3 sm:mt-4 inline-flex text-xs sm:text-sm font-semibold text-primary underline underline-offset-4"
               >
                 {PUBLIC_CONTACT_EMAIL}
               </a>
@@ -129,11 +129,11 @@ export default async function ContactPage() {
         </section>
 
         {/* ── Form + aside ─────────────────────────────────────── */}
-        <section className="px-6 py-16 md:px-12 md:py-24">
-          <div className="mx-auto grid max-w-7xl grid-cols-1 items-start gap-10 lg:grid-cols-[1.1fr_0.8fr] lg:gap-14">
+        <section className="px-4 sm:px-6 py-12 sm:py-16 md:px-12 md:py-24">
+          <div className="mx-auto grid max-w-7xl grid-cols-1 items-start gap-8 sm:gap-10 lg:grid-cols-[1.1fr_0.8fr] lg:gap-14">
             {/* Form card */}
             <div className="reveal overflow-hidden rounded-2xl border border-border bg-card shadow-[0_30px_80px_-70px_hsl(var(--foreground)/0.5)]">
-              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 sm:px-5 py-3 sm:py-3.5">
                 <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                   {isAr ? 'نموذج التواصل' : 'contact.form'}
                 </span>
@@ -141,7 +141,7 @@ export default async function ContactPage() {
                   {isAr ? 'كل الحقول مطلوبة' : 'all fields required'}
                 </span>
               </div>
-              <div className="p-5 md:p-7">
+              <div className="p-4 sm:p-5 md:p-7">
                 <ContactForm lang={lang} />
               </div>
             </div>
@@ -149,12 +149,12 @@ export default async function ContactPage() {
             {/* Aside */}
             <aside className="space-y-6">
               <div className="reveal" style={{ animationDelay: '100ms' }}>
-                <div className={cn(EYEBROW, 'mb-5')}>
+                <div className={cn(EYEBROW, 'mb-4 sm:mb-5')}>
                   {isAr ? 'ماذا يحدث بعد الإرسال' : 'what happens next'}
                 </div>
-                <ol className="space-y-5">
+                <ol className="space-y-4 sm:space-y-5">
                   {steps.map((step, idx) => (
-                    <li key={step.title} className="flex gap-3.5">
+                    <li key={step.title} className="flex gap-3 sm:gap-3.5">
                       <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-secondary/60 font-mono text-[10px] font-bold text-primary">
                         {String(idx + 1).padStart(2, '0')}
                       </span>
@@ -168,7 +168,7 @@ export default async function ContactPage() {
               </div>
 
               <div
-                className="reveal rounded-2xl border border-border bg-secondary/20 p-5"
+                className="reveal rounded-2xl border border-border bg-secondary/20 p-4 sm:p-5"
                 style={{ animationDelay: '180ms' }}
               >
                 <div className={cn(EYEBROW, 'mb-3')}>{isAr ? 'روابط سريعة' : 'quick links'}</div>
@@ -177,7 +177,7 @@ export default async function ContactPage() {
                     <li key={link.href}>
                       <Link
                         href={link.href}
-                        className="group flex items-center justify-between gap-3 py-2.5 text-sm font-semibold text-foreground/85 transition-colors hover:text-primary"
+                        className="group flex items-center justify-between gap-3 py-2.5 text-xs sm:text-sm font-semibold text-foreground/85 transition-colors hover:text-primary"
                       >
                         {link.label}
                         <ArrowLeft
@@ -208,15 +208,15 @@ export default async function ContactPage() {
         </section>
 
         {/* ── What to include ──────────────────────────────────── */}
-        <section className="border-t border-border bg-secondary/20 px-6 py-16 md:px-12 md:py-20">
+        <section className="border-t border-border bg-secondary/20 px-4 sm:px-6 py-12 sm:py-16 md:px-12 md:py-20">
           <div className="mx-auto max-w-7xl">
-            <div className="reveal mb-9 grid items-start gap-4 md:grid-cols-[180px_1fr] md:gap-10">
+            <div className="reveal mb-7 sm:mb-9 grid items-start gap-3 sm:gap-4 md:grid-cols-[180px_1fr] md:gap-10">
               <div className={cn(EYEBROW, 'md:pt-2')}>{isAr ? 'قبل أن ترسل' : 'before you send'}</div>
-              <div className="space-y-3">
-                <h2 className="text-2xl font-black tracking-tight md:text-4xl">
+              <div className="space-y-2.5 sm:space-y-3">
+                <h2 className="text-xl sm:text-2xl md:text-4xl font-black tracking-tight">
                   {isAr ? 'سطران إضافيان يوفّران جولة كاملة.' : 'Two extra details save a whole round-trip.'}
                 </h2>
-                <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
+                <p className="max-w-xl text-xs sm:text-sm leading-relaxed text-muted-foreground">
                   {isAr
                     ? 'كلما كانت الرسالة محددة، كان التشخيص أسرع — هذه أكثر ثلاث حالات تصلنا.'
                     : 'The more specific the message, the faster the diagnosis — these are the three cases we get most.'}
@@ -224,14 +224,14 @@ export default async function ContactPage() {
               </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-3.5 sm:gap-4 md:grid-cols-3">
               {includes.map(({ icon: Icon, title, desc }, idx) => (
                 <div
                   key={title}
-                  className="reveal group rounded-xl border border-border bg-card p-5 transition-shadow duration-300 hover:shadow-card-hover"
+                  className="reveal group rounded-xl border border-border bg-card p-4 sm:p-5 transition-shadow duration-300 hover:shadow-card-hover"
                   style={{ animationDelay: `${idx * 90}ms` }}
                 >
-                  <div className="mb-3 flex items-center gap-2.5">
+                  <div className="mb-2.5 sm:mb-3 flex items-center gap-2.5">
                     <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-secondary text-primary transition-transform duration-300 group-hover:scale-110">
                       <Icon className="h-4 w-4" />
                     </span>
@@ -245,7 +245,7 @@ export default async function ContactPage() {
         </section>
 
         {/* ── Closing note ─────────────────────────────────────── */}
-        <section className="px-6 py-14 md:px-12 md:py-16">
+        <section className="px-4 sm:px-6 py-10 sm:py-14 md:px-12 md:py-16">
           <div className="reveal mx-auto flex max-w-3xl flex-col items-center gap-3 text-center">
             <span className={cn(EYEBROW, 'inline-flex items-center gap-2')}>
               <Clock className="h-3.5 w-3.5 text-primary" />

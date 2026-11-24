@@ -106,10 +106,10 @@ function CustomCheckbox({ checked, onChange }: { checked: boolean; onChange: (va
   return (
     <button type="button" onClick={() => onChange(!checked)}
       className={cn(
-        "inline-flex items-center justify-center h-4 w-4 rounded border transition-colors",
+        "inline-flex items-center justify-center h-5 w-5 sm:h-4 sm:w-4 rounded border transition-colors active:scale-95",
         checked ? "bg-primary border-primary text-primary-foreground" : "bg-background border-border hover:border-primary/50"
       )}>
-      <Check className={cn("h-3 w-3 stroke-[3]", checked ? "opacity-100" : "opacity-0")} />
+      <Check className={cn("h-3.5 w-3.5 sm:h-3 sm:w-3 stroke-[3]", checked ? "opacity-100" : "opacity-0")} />
     </button>
   )
 }

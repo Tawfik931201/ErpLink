@@ -149,7 +149,7 @@ function RowActions({
           event.stopPropagation()
           setOpen((prev) => !prev)
         }}
-        className="inline-flex h-6 w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex h-7 w-7 sm:h-6 sm:w-6 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground active:scale-95"
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
@@ -811,7 +811,7 @@ export default function StoreSelector({
             <h2 className="text-[11px] font-bold text-foreground uppercase tracking-wide border-b border-border pb-2 mb-4">
               {ar ? 'معلومات المتجر الأساسية' : 'Basic Store Information'}
             </h2>
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3.5 sm:gap-4 md:grid-cols-4">
               {detail.platform === 'zid' && (
                 <>
                   <InfoField label={ar ? 'معرف التاجر' : 'Merchant ID'} mono>

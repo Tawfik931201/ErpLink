@@ -165,7 +165,7 @@ export function ContactForm({ lang }: { lang: string }) {
             id="contact-message"
             name="message"
             required
-            rows={6}
+            rows={5}
             className={cn(FIELD_CLASS, 'h-auto resize-y py-2.5')}
             placeholder={
               isAr
@@ -201,7 +201,7 @@ export function ContactForm({ lang }: { lang: string }) {
           type="submit"
           variant="brand"
           disabled={status === 'loading'}
-          className="h-11 rounded-xl px-6 text-sm font-bold sm:min-w-[150px]"
+          className="h-11 w-full rounded-xl px-6 text-sm font-bold sm:w-auto sm:min-w-[150px]"
         >
           {status === 'loading' ? (
             <Loader2 className="h-4 w-4 animate-spin" />

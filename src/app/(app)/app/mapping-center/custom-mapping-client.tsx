@@ -314,7 +314,7 @@ export default function CustomMappingClient({
             </button>
           )}
         </p>
-        <div className="flex items-center gap-2 self-start sm:self-center">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
           <Button
             variant="outline"
             onClick={() => {
@@ -454,12 +454,12 @@ export default function CustomMappingClient({
               ))}
             </FilterSelect>
 
-            <form onSubmit={e => e.preventDefault()} className="flex items-center gap-1.5 ms-auto">
+            <form onSubmit={e => e.preventDefault()} className="flex items-center gap-1.5 w-full sm:w-auto sm:ms-auto">
               <Input
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 placeholder={lang === 'ar' ? 'بحث بالاسم أو النموذج…' : 'Search name or model…'}
-                className="h-7 w-52 text-xs border-border/70 bg-muted/60"
+                className="h-7 w-full sm:w-52 text-xs border-border/70 bg-muted/60"
               />
               {searchQuery && (
                 <Button
@@ -477,8 +477,8 @@ export default function CustomMappingClient({
           </div>
 
           {/* Odoo-style list: a header row and clean, clickable records. */}
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[11px]">
+          <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+            <table className="w-full min-w-[650px] border-collapse text-[11px]">
               <thead>
                 <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
                   <th className="px-2 py-2.5 text-start font-bold whitespace-nowrap">{lang === 'ar' ? 'الاسم' : 'Name'}</th>

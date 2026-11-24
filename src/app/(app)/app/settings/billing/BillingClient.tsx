@@ -117,7 +117,7 @@ export default function BillingClient({ lang, initialWorkspace, initialSubscript
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Active Subscription Status */}
-        <div className="md:col-span-2 rounded-2xl border border-border/80 bg-gradient-to-br from-card to-secondary/10 p-6 flex flex-col justify-between space-y-4 shadow-sm">
+        <div className="md:col-span-2 rounded-2xl border border-border/80 bg-gradient-to-br from-card to-secondary/10 p-4 sm:p-6 flex flex-col justify-between space-y-4 shadow-sm">
           <div className="flex items-start justify-between">
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-muted-foreground flex items-center gap-1.5">
@@ -135,7 +135,7 @@ export default function BillingClient({ lang, initialWorkspace, initialSubscript
           </div>
 
           {activeSub ? (
-            <div className="grid grid-cols-2 gap-4 pt-2 border-t border-border/40 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-2 border-t border-border/40 text-xs">
               <div className="space-y-1">
                 <p className="text-muted-foreground">{isAr ? 'تاريخ الدفع' : 'Payment Date'}</p>
                 <p className="font-bold flex items-center gap-1">
@@ -161,7 +161,7 @@ export default function BillingClient({ lang, initialWorkspace, initialSubscript
         </div>
 
         {/* Subscription Number Box */}
-        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6 flex flex-col justify-between space-y-4 shadow-sm relative overflow-hidden group">
+        <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 sm:p-6 flex flex-col justify-between space-y-4 shadow-sm relative overflow-hidden group">
           <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 opacity-5 pointer-events-none">
             <FileText className="w-32 h-32" />
           </div>
@@ -177,14 +177,14 @@ export default function BillingClient({ lang, initialWorkspace, initialSubscript
           </div>
 
           <div className="flex items-center gap-2 pt-2">
-            <div className="flex-1 bg-background border border-border rounded-xl px-4 py-3 font-mono text-center text-sm font-black text-foreground shadow-inner select-all">
+            <div className="flex-1 min-w-0 bg-background border border-border rounded-xl px-3 sm:px-4 py-3 font-mono text-center text-sm font-black text-foreground shadow-inner select-all truncate">
               {subNum}
             </div>
             <Button
               onClick={handleCopy}
               variant="outline"
               size="icon"
-              className="rounded-xl h-11 w-11 hover:bg-secondary/60 hover:text-foreground transition-all duration-300"
+              className="rounded-xl h-11 w-11 shrink-0 hover:bg-secondary/60 hover:text-foreground transition-all duration-300"
               title={isAr ? 'نسخ رقم الاشتراك' : 'Copy subscription number'}
             >
               {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
@@ -219,33 +219,33 @@ export default function BillingClient({ lang, initialWorkspace, initialSubscript
               <table className="w-full text-sm">
                 <thead className="text-xs uppercase text-muted-foreground bg-secondary/30">
                   <tr className="border-b border-border/40">
-                    <th className="px-6 py-3.5 text-start">{isAr ? 'تاريخ الفاتورة' : 'Invoice Date'}</th>
-                    <th className="px-6 py-3.5 text-start">{isAr ? 'المدة' : 'Period'}</th>
-                    <th className="px-6 py-3.5 text-start">{isAr ? 'الشهور' : 'Duration'}</th>
-                    <th className="px-6 py-3.5 text-start">{isAr ? 'المبلغ المدفوع' : 'Amount'}</th>
-                    <th className="px-6 py-3.5 text-start">{isAr ? 'الحالة' : 'Status'}</th>
-                    <th className="px-6 py-3.5 text-end">{isAr ? 'تحميل الفاتورة' : 'Invoice'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-start whitespace-nowrap">{isAr ? 'تاريخ الفاتورة' : 'Invoice Date'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-start whitespace-nowrap">{isAr ? 'المدة' : 'Period'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-start whitespace-nowrap">{isAr ? 'الشهور' : 'Duration'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-start whitespace-nowrap">{isAr ? 'المبلغ المدفوع' : 'Amount'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-start whitespace-nowrap">{isAr ? 'الحالة' : 'Status'}</th>
+                    <th className="px-4 sm:px-6 py-3.5 text-end whitespace-nowrap">{isAr ? 'تحميل الفاتورة' : 'Invoice'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
                   {initialSubscriptions.map((sub) => (
                     <tr key={sub.id} className="hover:bg-secondary/10 transition-colors">
-                      <td className="px-6 py-4 font-medium text-xs">
+                      <td className="px-4 sm:px-6 py-4 font-medium text-xs whitespace-nowrap">
                         {formatDate(sub.start_date)}
                       </td>
-                      <td className="px-6 py-4 text-xs text-muted-foreground">
+                      <td className="px-4 sm:px-6 py-4 text-xs text-muted-foreground whitespace-nowrap">
                         {formatDate(sub.start_date)} - {formatDate(sub.end_date)}
                       </td>
-                      <td className="px-6 py-4 text-xs">
+                      <td className="px-4 sm:px-6 py-4 text-xs whitespace-nowrap">
                         {sub.months_paid} {isAr ? 'شهر' : 'Mo'}
                       </td>
-                      <td className="px-6 py-4 text-xs font-semibold">
+                      <td className="px-4 sm:px-6 py-4 text-xs font-semibold whitespace-nowrap">
                         {formatAmount(sub.amount_paid)} {sub.currency}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4 whitespace-nowrap">
                         {statusBadge(sub)}
                       </td>
-                      <td className="px-6 py-4 text-end">
+                      <td className="px-4 sm:px-6 py-4 text-end whitespace-nowrap">
                         <Button
                           asChild
                           variant="ghost"

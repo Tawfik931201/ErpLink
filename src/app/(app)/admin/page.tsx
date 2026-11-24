@@ -87,7 +87,7 @@ export default async function AdminStatsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         {cards.map((c) => (
           <div key={c.labelEn} className="border border-border bg-card p-4 space-y-1.5">
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">

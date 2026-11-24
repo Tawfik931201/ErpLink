@@ -247,7 +247,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <MobileNav sections={navSections} dir={dir}>
             <NotificationCenter /><UserMenu displayName={displayName} adminLabel={t('user.adminAccount')} placement="header" />
           </MobileNav>
-          <div className="mx-auto w-full max-w-7xl p-3 sm:p-6 md:p-8">
+          <div className="mx-auto w-full max-w-7xl p-3 sm:p-4 md:p-6 lg:p-8">
             {workspaceClosed ? (
               <div className="flex items-center justify-center h-full min-h-[60vh]">
                 <div className="text-center max-w-md">

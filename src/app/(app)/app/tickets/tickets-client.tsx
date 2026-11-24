@@ -555,7 +555,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
     return (
       <div className="space-y-6 animate-in fade-in duration-300">
         {/* Header with Back button & Close button */}
-        <div className="flex items-center justify-between gap-4 w-full">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 w-full">
           <Button 
             onClick={() => {
               setSelectedTicket(null)
@@ -631,7 +631,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
 
           {/* Column 2: Chatter Discussion */}
           <div className="lg:col-span-7 space-y-6">
-            <Card className="flex h-[min(78dvh,700px)] min-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-[#f0f2f5] shadow-lg dark:border-[#2a3942] dark:bg-[#202c33] lg:h-[660px]">
+            <Card className="flex h-[min(80dvh,700px)] min-h-[400px] sm:min-h-[480px] flex-col overflow-hidden rounded-2xl border border-[#d1d7db] bg-[#f0f2f5] shadow-lg dark:border-[#2a3942] dark:bg-[#202c33] lg:h-[660px]">
               <CardHeader className="shrink-0 border-b border-[#d1d7db] bg-[#f0f2f5] px-4 py-3 dark:border-[#2a3942] dark:bg-[#202c33]">
                 <CardTitle className="flex items-center gap-3 text-sm font-bold">
                   <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#00a884] text-white">
@@ -890,7 +890,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                             id="ticket-chat-emoji-picker"
                             role="dialog"
                             aria-label={chatLang === 'ar' ? 'الرموز التعبيرية' : 'Emojis'}
-                            className="absolute bottom-full start-0 z-30 mb-3 w-[min(318px,78vw)] rounded-xl border border-[#d1d7db] bg-white p-3 shadow-2xl dark:border-[#3b4a54] dark:bg-[#202c33]"
+                            className="absolute bottom-full start-0 z-30 mb-3 w-[min(318px,calc(100vw-32px))] rounded-xl border border-[#d1d7db] bg-white p-3 shadow-2xl dark:border-[#3b4a54] dark:bg-[#202c33]"
                           >
                             <p className="mb-2 text-xs font-semibold text-[#54656f] dark:text-[#d1d7db]">
                               {chatLang === 'ar' ? 'اختر رمزًا تعبيريًا' : 'Choose an emoji'}
@@ -986,7 +986,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
         {/* Custom Confirmation Modal */}
         {showCloseConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-card border border-border w-full max-w-md rounded-xl p-6 space-y-4 animate-in zoom-in-95 duration-200" dir={dir}>
+            <div className="bg-card border border-border w-full max-w-md rounded-xl p-4 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200" dir={dir}>
               <div className="flex items-center gap-3 text-destructive">
                 <AlertCircle className="h-6 w-6 shrink-0" />
                 <h3 className="text-sm font-extrabold text-foreground">{tLocal.closeConfirmTitle}</h3>
@@ -1165,7 +1165,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                 >
                   <CardContent className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     {/* Left details */}
-                    <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-1 min-w-0">
                       <span className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground/80 bg-secondary/80 px-2.5 py-1 rounded-full shrink-0">
                         <Tag className="h-3 w-3" />
                         {refNo}
@@ -1189,7 +1189,7 @@ export default function TicketsClient({ initialTickets, success, error }: Ticket
                     </div>
 
                     {/* Right details */}
-                    <div className="flex items-center justify-between md:justify-end gap-6 shrink-0 border-t md:border-t-0 pt-2.5 md:pt-0 border-border/30">
+                    <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-6 shrink-0 border-t md:border-t-0 pt-2.5 md:pt-0 border-border/30 flex-wrap">
                       <Badge variant={stageVariant} className="capitalize text-[10px] py-0.5 px-2.5 font-bold">
                         {stageName}
                       </Badge>

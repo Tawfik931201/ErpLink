@@ -157,7 +157,7 @@ export default function WorkspacePage() {
 
       {/* Add Workspace Card/Form */}
       {isAddOpen && (
-        <div className="rounded-xl border bg-card p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
+        <div className="rounded-xl border bg-card p-4 sm:p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
           <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-foreground">
             <Plus className="h-5 w-5" /> {t('ws.createBtn')}
           </h3>
@@ -188,7 +188,7 @@ export default function WorkspacePage() {
 
       {/* Edit Workspace Card/Form */}
       {editingWorkspace && (
-        <div className="rounded-xl border bg-card p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
+        <div className="rounded-xl border bg-card p-4 sm:p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
           <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-foreground">
             <Edit3 className="h-5 w-5" /> {lang === 'ar' ? 'تعديل اسم بيئة العمل' : 'Edit Workspace Name'}
           </h3>
@@ -313,9 +313,9 @@ export default function WorkspacePage() {
                 <div className={cn("flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-2 border-t border-border/30", isActive && (lang === 'ar' ? 'pr-2' : 'pl-2'))}>
                   {/* ID & Creation Date */}
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground/85 font-medium flex-wrap">
-                    <span className="font-mono select-all">ID: {ws.id}</span>
-                    <span className="h-1 w-1 rounded-full bg-border" />
-                    <span>{lang === 'ar' ? 'أنشئت في ' : 'Created at '}{formatDate(ws.created_at)}</span>
+                    <span className="font-mono select-all break-all sm:break-normal">ID: {ws.id}</span>
+                    <span className="h-1 w-1 rounded-full bg-border shrink-0" />
+                    <span className="shrink-0">{lang === 'ar' ? 'أنشئت في ' : 'Created at '}{formatDate(ws.created_at)}</span>
                   </div>
 
                   {/* Integration Status Badges */}

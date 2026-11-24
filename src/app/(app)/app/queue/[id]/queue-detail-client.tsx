@@ -297,7 +297,7 @@ export default function QueueDetailClient({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -316,7 +316,7 @@ export default function QueueDetailClient({
 
       {/* Basic record data */}
       <div className="border border-border bg-card p-4">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           <InfoField label={ar ? 'الحدث' : 'Event'} mono>
             {item.event || '—'}
           </InfoField>

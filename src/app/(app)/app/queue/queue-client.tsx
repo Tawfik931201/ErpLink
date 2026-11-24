@@ -391,7 +391,7 @@ export default function QueueClient() {
           )
         })}
 
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
+        <div className="ms-auto flex flex-wrap items-center gap-1.5 w-full sm:w-auto sm:ms-auto justify-start sm:justify-end mt-1 sm:mt-0">
           {kind === 'dead' && total > 1 && (
             <Button
               size="sm"
@@ -540,8 +540,8 @@ export default function QueueClient() {
       )}
 
       {/* Odoo-style list: a header row and clean records, no cell borders. */}
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-[11px]">
+      <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+        <table className="w-full min-w-[720px] border-collapse text-[11px]">
           <thead>
             <tr className="border-y border-border bg-muted/60 text-[10px] uppercase tracking-wide text-foreground/70">
               <th className="w-8 px-2 py-2.5 text-start">

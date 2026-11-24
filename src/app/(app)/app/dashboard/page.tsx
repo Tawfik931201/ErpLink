@@ -213,7 +213,7 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-[11px] font-semibold text-muted-foreground">
             <Clock className="h-3.5 w-3.5" />
             {isAr ? 'آخر مزامنة: ' : 'Last sync: '}
@@ -233,7 +233,7 @@ export default async function DashboardPage() {
 
       {/* ── Setup checklist (only until everything is connected) ─ */}
       {!setupReady && (
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl border bg-card p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
               <ListChecks className="h-4 w-4 text-muted-foreground" />
@@ -274,7 +274,7 @@ export default async function DashboardPage() {
       <SubscriptionStatusCard />
 
       {/* ── Connection status strip ──────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         {[
           {
             icon: Store,
@@ -309,11 +309,11 @@ export default async function DashboardPage() {
             ok: (stats?.telegramBotsCount ?? 0) > 0,
           },
         ].map(({ icon: Icon, label, value, ok }) => (
-          <div key={label} className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
+          <div key={label} className="flex items-center gap-3 rounded-xl border bg-card px-3.5 sm:px-4 py-2.5 sm:py-3">
             <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', ok ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground')}>
               <Icon className="h-4 w-4" />
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</p>
               <p className={cn('truncate text-xs font-bold', ok ? 'text-foreground' : 'text-muted-foreground')}>{value}</p>
             </div>
@@ -325,7 +325,7 @@ export default async function DashboardPage() {
       {/* ── KPIs ─────────────────────────────────────────────── */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {kpis.map(({ label, value, sub, icon: Icon, tone }) => (
-          <div key={label} className="rounded-xl border bg-card p-5">
+          <div key={label} className="rounded-xl border bg-card p-4 sm:p-5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
                 {label}
@@ -342,7 +342,7 @@ export default async function DashboardPage() {
 
       {/* ── Activity + transfers ─────────────────────────────── */}
       <div className="grid gap-3 lg:grid-cols-3">
-        <div className="rounded-xl border bg-card p-5 lg:col-span-2">
+        <div className="rounded-xl border bg-card p-4 sm:p-5 lg:col-span-2 min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-sm font-bold">
               {isAr ? 'نشاط المزامنة — آخر ٧ أيام' : 'Sync activity — last 7 days'}
@@ -361,7 +361,7 @@ export default async function DashboardPage() {
           <SyncAreaChart data={activity} />
         </div>
 
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-xl border bg-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold">{isAr ? 'ترحيل البيانات' : 'Data transfer'}</h2>
             <Link
@@ -424,8 +424,8 @@ export default async function DashboardPage() {
 
       {/* ── Recent operations + attention ────────────────────── */}
       <div className="grid gap-3 lg:grid-cols-3">
-        <div className="rounded-xl border bg-card overflow-hidden lg:col-span-2">
-          <div className="flex items-center justify-between px-5 py-4 border-b">
+        <div className="rounded-xl border bg-card overflow-hidden lg:col-span-2 min-w-0">
+          <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b">
             <h2 className="text-sm font-bold">{isAr ? 'آخر العمليات' : 'Recent operations'}</h2>
             <Link
               href="/app/logs"
@@ -451,7 +451,7 @@ export default async function DashboardPage() {
           ) : (
             <ul className="divide-y">
               {recentLogs.map((log) => (
-                <li key={log.id} className="flex items-center gap-3 px-5 py-3">
+                <li key={log.id} className="flex items-center gap-3 px-4 sm:px-5 py-3">
                   <span
                     className={cn(
                       'h-2 w-2 shrink-0 rounded-full',
@@ -468,6 +468,7 @@ export default async function DashboardPage() {
                     <p className="truncate text-xs font-semibold">{friendlyEvent(log.event, isAr)}</p>
                     <p className="truncate text-[10px] text-muted-foreground">
                       {log.mapping_name || (isAr ? 'بدون قاعدة ربط' : 'No mapping rule')}
+                      <span className="sm:hidden"> · {timeAgo(log.created_at, isAr)}</span>
                     </p>
                   </div>
                   <Badge variant={statusTone(log.status)} className="text-[10px] px-1.5 py-0 shrink-0">
@@ -482,7 +483,7 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        <div className={cn('rounded-xl border p-5', failedLogs.length > 0 ? 'border-rose-500/30 bg-rose-500/[0.03]' : 'bg-card')}>
+        <div className={cn('rounded-xl border p-4 sm:p-5', failedLogs.length > 0 ? 'border-rose-500/30 bg-rose-500/[0.03]' : 'bg-card')}>
           <div className="flex items-center gap-2 mb-4">
             {failedLogs.length > 0 ? (
               <AlertTriangle className="h-4 w-4 text-rose-600" />

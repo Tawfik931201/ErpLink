@@ -495,7 +495,7 @@ export default function NotificationsSettingsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-base font-bold text-foreground flex items-center gap-2">
             <Bell className="h-4.5 w-4.5 text-foreground" />
@@ -509,7 +509,7 @@ export default function NotificationsSettingsPage() {
         </div>
         <Button
           onClick={() => setShowNewBot(!showNewBot)}
-          className="bg-foreground text-background font-bold"
+          className="bg-foreground text-background font-bold self-start sm:self-center"
         >
           <Plus className="h-4 w-4" />
           {lang === 'ar' ? 'بوت جديد' : 'New Bot'}
@@ -576,22 +576,22 @@ export default function NotificationsSettingsPage() {
             {/* Bot header */}
             <button
               onClick={() => toggleBot(bot.id)}
-              className="w-full flex items-center justify-between p-4 hover:bg-secondary/5 transition-colors text-start"
+              className="w-full flex items-center justify-between p-4 hover:bg-secondary/5 transition-colors text-start gap-2"
             >
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
                   <MessageCircle className="h-4 w-4 text-foreground" />
                 </div>
-                <div>
-                  <p className="text-sm font-bold text-foreground">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-foreground truncate">
                     {bot.label || bot.bot_username || `@${bot.bot_username}` || bot.id.slice(0, 8)}
                   </p>
                   {bot.bot_username && (
-                    <p className="text-[10px] text-muted-foreground">@{bot.bot_username}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">@{bot.bot_username}</p>
                   )}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <span className={cn(
                   'text-[10px] font-bold px-2 py-0.5 rounded-full border',
                     bot.status === 'linked'
@@ -602,7 +602,7 @@ export default function NotificationsSettingsPage() {
                     ? (lang === 'ar' ? 'مربوط' : 'Linked')
                     : (lang === 'ar' ? 'قيد الانتظار' : 'Pending')}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-[10px] text-muted-foreground hidden sm:inline">
                   {chatSubs.length} {lang === 'ar' ? 'محادثة' : 'chat'}
                   {chatSubs.length !== 1 ? 's' : ''}
                 </span>

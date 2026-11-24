@@ -2243,7 +2243,7 @@ export default function StandardMappingClient({
       <div className="sticky top-0 z-30 -mx-4 md:-mx-8 px-4 md:px-8 border-b border-border/70 bg-background/85 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70 shadow-xs">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 h-12">
           {/* Entity Tabs (Underline / Pill hybrid clean style) */}
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
+          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-1 -webkit-overflow-scrolling-touch">
             {[
               { key: 'categories', labelAr: 'التصنيفات (Categories)', labelEn: 'Categories', icon: <FolderTree className="h-4 w-4" /> },
               { key: 'products', labelAr: 'المنتجات (Products)', labelEn: 'Products', icon: <Package className="h-4 w-4" /> },
@@ -2298,7 +2298,7 @@ export default function StandardMappingClient({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-1 overflow-x-auto max-w-full">
+          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto max-w-full py-0.5 -webkit-overflow-scrolling-touch">
             {storeTabs.length > 0 ? (
               storeTabs.map((store) => {
                 const isActive = standardStoreTab === store.platform && standardStoreId === store.storeId

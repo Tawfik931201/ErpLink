@@ -39,31 +39,31 @@ export default async function TermsPage() {
 
       <main className="flex-1">
         {/* Hero Section */}
-        <section className="pt-20 pb-12 px-6 md:px-12 relative overflow-hidden bg-secondary/20 border-b border-border/50">
+        <section className="pt-12 pb-10 sm:pt-20 sm:pb-12 px-4 sm:px-6 md:px-12 relative overflow-hidden bg-secondary/20 border-b border-border/50">
           <div className="absolute top-[-80px] right-[-80px] w-[400px] h-[400px] rounded-full bg-primary/[0.04] blur-3xl pointer-events-none" />
           <div className="absolute bottom-[-80px] left-[-80px] w-[350px] h-[350px] rounded-full bg-foreground/[0.02] blur-3xl pointer-events-none" />
 
-          <div className="max-w-4xl mx-auto flex flex-col items-center text-center gap-6 relative">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-semibold">
+          <div className="max-w-4xl mx-auto flex flex-col items-center text-center gap-5 sm:gap-6 relative">
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs sm:text-sm font-semibold">
               <Shield className="h-4 w-4" />
               <span>{t(lang, 'terms.badge')}</span>
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-black text-foreground leading-[1.15] tracking-tight">
+            <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-foreground leading-[1.15] tracking-tight">
               {t(lang, 'terms.pageTitle')}
             </h1>
 
-            <p className="text-sm font-medium text-muted-foreground">
+            <p className="text-xs sm:text-sm font-medium text-muted-foreground">
               {isAr ? `آخر تحديث رسمي: ${TERMS_LAST_UPDATED.ar}` : `Last officially updated: ${TERMS_LAST_UPDATED.en}`}
             </p>
 
             {/* Executive Summary Card */}
-            <div className="w-full text-start bg-card/80 backdrop-blur-sm border border-border/80 rounded-2xl p-5 md:p-6 shadow-sm mt-2">
+            <div className="w-full text-start bg-card/80 backdrop-blur-sm border border-border/80 rounded-2xl p-4 sm:p-5 md:p-6 shadow-sm mt-2">
               <div className="flex items-center gap-2 mb-2 text-primary font-bold text-xs uppercase tracking-wider">
                 <span className="h-2 w-2 rounded-full bg-primary" />
                 <span>{isAr ? 'ملخص تمهيدي للشروط' : 'Executive Terms Summary'}</span>
               </div>
-              <p className="text-sm md:text-base text-muted-foreground leading-relaxed">
+              <p className="text-xs sm:text-sm md:text-base text-muted-foreground leading-relaxed">
                 {isAr
                   ? 'تحدد هذه الاتفاقية الإطار القانوني والتشغيلي المنظم لاستخدامك منصة ERP Link لربط المتاجر الإلكترونية مع أنظمة ERP. نؤكد أنك تحتفظ بكامل ملكية بياناتك التجارية، وتخضع عمليات المزامنة لإعداداتك وخياراتك، مع إتاحة فترة تجربة مجانية لمدة 7 أيام ودعم وسائل الدفع اليدوية بالفواتير المعتمدة دون تخزين بيانات بنكية حساسة.'
                   : 'This agreement governs your legal rights and operational responsibilities when using ERP Link to integrate e-commerce stores with ERP software. You retain exclusive ownership of your business data, synchronization logic mirrors your configured mappings, and services include a 7-day free trial with transparent manual bank billing and zero storage of sensitive payment instruments.'}
@@ -71,7 +71,7 @@ export default async function TermsPage() {
             </div>
 
             {/* Quick Cross-Link Banner */}
-            <div className="flex flex-wrap items-center justify-center gap-3 text-xs md:text-sm text-muted-foreground pt-1">
+            <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs md:text-sm text-muted-foreground pt-1">
               <span>
                 {isAr ? 'هل تبحث عن سياسة الخصوصية وحماية البيانات؟' : 'Looking for our Privacy & Data Protection Policy?'}
               </span>
@@ -86,7 +86,7 @@ export default async function TermsPage() {
 
             <Link
               href="/"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors pt-2"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors pt-1 sm:pt-2"
             >
               <ArrowLeft className={cn('h-3.5 w-3.5', isAr ? 'rotate-180' : '')} />
               <span>{isAr ? 'العودة إلى الصفحة الرئيسية' : 'Back to Home'}</span>
@@ -95,7 +95,7 @@ export default async function TermsPage() {
         </section>
 
         {/* Content Section with Sticky Sidebar TOC & Mobile Drawer */}
-        <section className="py-12 md:py-16 px-4 sm:px-6 md:px-12">
+        <section className="py-8 sm:py-12 md:py-16 px-4 sm:px-6 md:px-12">
           <div className="max-w-7xl mx-auto flex flex-col lg:flex-row gap-8 lg:gap-12 items-start relative">
             {/* Sidebar Table of Contents - Sticky alongside content on desktop, full-width accordion on mobile */}
             <aside className="w-full lg:w-72 shrink-0 self-start lg:sticky lg:top-20 z-30">

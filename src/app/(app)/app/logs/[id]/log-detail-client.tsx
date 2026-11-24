@@ -204,7 +204,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {canAct && (
             <Button
               size="sm"
@@ -238,7 +238,7 @@ export default function LogDetailClient({ log }: { log: SyncLogRow }) {
 
       {/* Basic record data */}
       <div className="border border-border bg-card p-4">
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
           <InfoField label={ar ? 'الحدث' : 'Event'} mono>
             {log.event || '—'}
           </InfoField>

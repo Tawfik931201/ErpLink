@@ -218,7 +218,8 @@ export function MappingFieldsCard({
                     {ar ? 'لا حقول لهذا النموذج.' : 'No fields for this model.'}
                   </div>
                 ) : (
-                  <table className="w-full table-fixed text-xs">
+                  <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+                    <table className="w-full min-w-[520px] table-fixed text-xs">
                     <thead>
                       <tr className="border-b border-border/60 text-[10px] uppercase tracking-wide text-foreground/60">
                         <th className="w-[34%] px-3 py-1.5 text-start font-bold">
@@ -289,6 +290,7 @@ export function MappingFieldsCard({
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             ))}

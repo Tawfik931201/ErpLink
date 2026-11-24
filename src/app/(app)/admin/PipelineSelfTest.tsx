@@ -84,7 +84,7 @@ export function PipelineSelfTest({ isAr }: { isAr: boolean }) {
         <select
           value={workspaceId}
           onChange={(e) => setWorkspaceId(e.target.value)}
-          className="border border-border bg-background px-2 py-1.5 text-[11px] text-foreground"
+          className="border border-border bg-background px-2 py-1.5 text-[11px] text-foreground w-full sm:w-auto max-w-full"
         >
           <option value="">{isAr ? '— اختر مساحة إدارية —' : '— pick an admin workspace —'}</option>
           {workspaces.map((w) => (
@@ -98,13 +98,13 @@ export function PipelineSelfTest({ isAr }: { isAr: boolean }) {
           onChange={(e) => setWorkspaceId(e.target.value)}
           placeholder="workspace id"
           dir="ltr"
-          className="border border-border bg-background px-2 py-1.5 text-[11px] font-mono text-foreground"
+          className="border border-border bg-background px-2 py-1.5 text-[11px] font-mono text-foreground w-full sm:w-auto max-w-full"
         />
         <button
           type="button"
           onClick={run}
           disabled={running || !workspaceId}
-          className="border border-border px-3 py-1.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50"
+          className="border border-border px-3 py-1.5 text-[11px] font-medium text-foreground hover:bg-accent disabled:opacity-50 w-full sm:w-auto"
         >
           {running ? (isAr ? 'جارٍ…' : 'Running…') : isAr ? 'شغّل الفحص' : 'Run the test'}
         </button>

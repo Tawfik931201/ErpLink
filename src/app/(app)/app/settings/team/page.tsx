@@ -249,7 +249,7 @@ export default function TeamPage() {
 
       {/* Invite Form */}
       {showInviteForm && isOwner && (
-        <div className="rounded-xl border bg-card p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
+        <div className="rounded-xl border bg-card p-4 sm:p-6 border-border animate-in fade-in-50 slide-in-from-top-4 duration-300">
           <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-foreground">
             <Mail className="h-5 w-5" />{' '}
             {lang === 'ar' ? 'دعوة عضو جديد' : 'Invite New Member'}
@@ -515,7 +515,7 @@ export default function TeamPage() {
       {/* Permissions Modal */}
       {editingPermissions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-card rounded-xl border border-border shadow-2xl p-6 w-full max-w-md animate-in fade-in-50 zoom-in-95 duration-200">
+          <div className="bg-card rounded-xl border border-border shadow-2xl p-4 sm:p-6 w-full max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-y-auto animate-in fade-in-50 zoom-in-95 duration-200">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-bold flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-foreground" />
