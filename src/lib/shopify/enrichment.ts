@@ -7,16 +7,21 @@ type ShopifyMetafieldNode = {
   type?: string | null
 }
 
-function numericId(value: unknown): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  return raw.split('/').pop() || ''
+type ShopifyResourceType = 'Product' | 'Customer' | 'Order' | 'Collection'
+
+function gid(type: ShopifyResourceType, value: unknown): string {
+  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value <= 0)) return ''
+  if (typeof value !== 'string' && typeof value !== 'number') return ''
+  const raw = String(value).trim()
+  const prefix = `gid://shopify/${type}/`
+  const id = raw.startsWith(prefix) ? raw.slice(prefix.length) : raw
+  return /^[1-9]\d*$/.test(id) ? prefix + id : ''
 }
 
-function gid(type: 'Product' | 'Customer' | 'Order' | 'Collection', value: unknown): string {
-  const raw = String(value ?? '').trim()
-  if (!raw) return ''
-  return raw.startsWith('gid://') ? raw : `gid://shopify/${type}/${numericId(raw)}`
+function resourceGid(type: ShopifyResourceType, payload: Record<string, unknown>): string {
+  // Prefer the exact GraphQL identifier over a JSON number that may already
+  // have lost precision during parsing. Never guess an unsafe numeric ID.
+  return gid(type, payload.admin_graphql_api_id) || gid(type, payload.id)
 }
 
 /**
@@ -60,7 +65,7 @@ function mergeMetafields(payload: Record<string, unknown>, resource: any): Recor
 }
 
 async function enrichProduct(shop: string, payload: Record<string, unknown>) {
-  const id = gid('Product', payload.id ?? payload.admin_graphql_api_id)
+  const id = resourceGid('Product', payload)
   if (!id) return payload
   const data = await callShopifyGraphQL(
     shop,
@@ -75,7 +80,7 @@ async function enrichProduct(shop: string, payload: Record<string, unknown>) {
 }
 
 async function enrichCustomer(shop: string, payload: Record<string, unknown>) {
-  const id = gid('Customer', payload.id ?? payload.admin_graphql_api_id)
+  const id = resourceGid('Customer', payload)
   if (!id) return payload
   const data = await callShopifyGraphQL(
     shop,
@@ -90,7 +95,7 @@ async function enrichCustomer(shop: string, payload: Record<string, unknown>) {
 }
 
 async function enrichOrder(shop: string, payload: Record<string, unknown>) {
-  const id = gid('Order', payload.id ?? payload.admin_graphql_api_id)
+  const id = resourceGid('Order', payload)
   if (!id) return payload
   const data = await callShopifyGraphQL(
     shop,
@@ -105,7 +110,7 @@ async function enrichOrder(shop: string, payload: Record<string, unknown>) {
 }
 
 async function enrichCollection(shop: string, payload: Record<string, unknown>) {
-  const id = gid('Collection', payload.id ?? payload.admin_graphql_api_id)
+  const id = resourceGid('Collection', payload)
   if (!id) return payload
   const data = await callShopifyGraphQL(
     shop,

@@ -11,7 +11,7 @@ export class ErpNextClient {
 
   async search(docType: string, filters: any[][]): Promise<string[]> {
     const filtersStr = JSON.stringify(filters)
-    const url = `${this.url}/api/resource/${docType}?filters=${encodeURIComponent(filtersStr)}&fields=["name"]&limit_page_length=1`
+    const url = `${this.url}/api/resource/${encodeURIComponent(docType)}?filters=${encodeURIComponent(filtersStr)}&fields=%5B%22name%22%5D&limit_page_length=1`
 
     const res = await fetch(url, {
       method: 'GET',
@@ -28,8 +28,11 @@ export class ErpNextClient {
     }
 
     const json = await res.json()
-    const data = json.data || []
-    return data.map((d: any) => d.name)
+    const data = json?.data
+    if (!Array.isArray(data) || data.some((row: any) => typeof row?.name !== 'string' || !row.name.trim())) {
+      throw new Error('ERPNext search returned an invalid record list')
+    }
+    return data.map((row: { name: string }) => row.name)
   }
 
   async create(docType: string, values: any): Promise<string> {
@@ -39,7 +42,7 @@ export class ErpNextClient {
   }
 
   private async createRequest(docType: string, values: any): Promise<string> {
-    const url = `${this.url}/api/resource/${docType}`
+    const url = `${this.url}/api/resource/${encodeURIComponent(docType)}`
 
     const res = await fetch(url, {
       method: 'POST',
@@ -61,11 +64,17 @@ export class ErpNextClient {
     }
 
     const json = await res.json()
-    return json.data?.name || ''
+    const name = json?.data?.name
+    if (typeof name !== 'string' || !name.trim()) {
+      // A successful HTTP response without a record identifier does not
+      // establish whether a create committed. Do not report success.
+      throw new Error('ERPNext create returned no record identifier')
+    }
+    return name
   }
 
   async update(docType: string, name: string, values: any): Promise<boolean> {
-    const url = `${this.url}/api/resource/${docType}/${encodeURIComponent(name)}`
+    const url = `${this.url}/api/resource/${encodeURIComponent(docType)}/${encodeURIComponent(name)}`
 
     const res = await fetch(url, {
       method: 'PUT',
@@ -87,7 +96,7 @@ export class ErpNextClient {
   }
 
   async delete(docType: string, name: string): Promise<boolean> {
-    const url = `${this.url}/api/resource/${docType}/${encodeURIComponent(name)}`
+    const url = `${this.url}/api/resource/${encodeURIComponent(docType)}/${encodeURIComponent(name)}`
 
     const res = await fetch(url, {
       method: 'DELETE',
