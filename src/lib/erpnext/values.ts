@@ -13,7 +13,7 @@ export async function fetchErpNextFieldMeta(
 ): Promise<Map<string, OdooFieldMeta>> {
   const map = new Map<string, OdooFieldMeta>()
   try {
-    const url = `${client['url']}/api/resource/DocType/${docType}`
+    const url = `${client['url']}/api/resource/DocType/${encodeURIComponent(docType)}`
     const res = await fetch(url, {
       method: 'GET',
       headers: {

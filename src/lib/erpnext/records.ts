@@ -77,12 +77,11 @@ async function findExistingErpNextRecord(
   }
 
   for (const filter of candidates) {
-    try {
-      const records = await client.search(model, [filter])
-      if (records.length > 0) return records[0]
-    } catch (err) {
-      console.warn(`[SyncEngine] Duplicate check failed for ERPNext ${model}:`, err)
-    }
+    // A failed lookup is not evidence that the record does not exist.
+    // Stop before a remote mutation instead of risking a duplicate or
+    // matching a less-specific record after the preferred search fails.
+    const records = await client.search(model, [filter])
+    if (records.length > 0) return records[0]
   }
 
   return null

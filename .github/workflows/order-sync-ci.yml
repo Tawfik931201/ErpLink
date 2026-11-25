@@ -6,6 +6,10 @@ on:
     paths:
       - 'src/lib/odoo/**'
       - 'src/lib/orders/**'
+      - 'src/lib/shopify/**'
+      - 'src/lib/erpnext/**'
+      - 'tests/unit/shopify-*.test.ts'
+      - 'tests/unit/erpnext-*.test.ts'
       - 'src/lib/returns/**'
       - 'src/lib/sync-queue.ts'
       - 'src/lib/sync-queue-runner.ts'
@@ -24,6 +28,10 @@ on:
     paths:
       - 'src/lib/odoo/**'
       - 'src/lib/orders/**'
+      - 'src/lib/shopify/**'
+      - 'src/lib/erpnext/**'
+      - 'tests/unit/shopify-*.test.ts'
+      - 'tests/unit/erpnext-*.test.ts'
       - 'src/lib/returns/**'
       - 'src/lib/sync-queue.ts'
       - 'src/lib/sync-queue-runner.ts'
